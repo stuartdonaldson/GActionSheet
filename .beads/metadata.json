@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "GTaskSheet",
+  "project_id": "43830491-8f81-4cb6-80ef-6fb91f07e992"
+}
