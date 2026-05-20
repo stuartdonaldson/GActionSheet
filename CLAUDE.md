@@ -1,4 +1,4 @@
-# CLAUDE.md — GTaskSheet
+# CLAUDE.md — GActionSheet
 
 **Tier:** Standard
 **Standards:** /doc-framework/doc-standard.md _(read-only — do not edit)_
@@ -65,7 +65,7 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full 
 ### Quick Reference
 
 ```bash
-bd ready              # Find available work
+bdls --ready          # Find available work (preferred — one call, richer output)
 bd show <id>          # View issue details
 bd update <id> --claim  # Claim work
 bd close <id>         # Complete work
