@@ -26,3 +26,14 @@ def sync_document(doc_id: str) -> None:
 
 def sync_all() -> None:
     _invoke("Sync")
+
+
+def setup_and_sync(scenario: str, doc_id: str | None = None) -> None:
+    """Set up a fixture and sync in a single GAS invocation.
+
+    Args:
+        scenario: Name of the fixture scenario to set up.
+        doc_id: Unused at helper level (GAS reads from TEST_DOC_ID script property).
+                Provided for explicitness when calling code.
+    """
+    _invoke("Test: Setup And Sync", scenario)

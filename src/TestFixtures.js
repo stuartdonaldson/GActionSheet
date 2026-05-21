@@ -418,6 +418,30 @@ function setupTestFixtures(scenario) {
   }
 }
 
+/**
+ * Combined fixture setup and sync in one invocation.
+ * Reads the scenario from TestControl!A1 and the doc ID from script properties.
+ *
+ * @param {string} [scenario] - Name of the fixture scenario to set up.
+ */
+function setupAndSync(scenario) {
+  try {
+    setupTestFixtures(scenario);
+    var props = PropertiesService.getScriptProperties();
+    var testDocId = props.getProperty('TEST_DOC_ID');
+    if (!testDocId) {
+      GasLogger.log('sync.error', {
+        msg: 'TEST_DOC_ID script property not set'
+      });
+      return;
+    }
+    syncDocument(testDocId);
+    GasLogger.log('sync.complete', { scenario: scenario });
+  } finally {
+    GasLogger.flush();
+  }
+}
+
 // syncDocument() is defined in SyncOrchestrator.js — the real implementation
 // replaced this stub.  Do not redefine it here.
 

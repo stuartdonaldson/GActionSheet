@@ -3,3 +3,14 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# Test infrastructure
+.auth/
+local.settings.json
+bdreport.md
+test-results/
+playwright-report/
+node_modules/
+.venv/
+__pycache__/
+*.pyc

@@ -1,0 +1,178 @@
+## 2026-05-20 00:19:54
+
+### Summary
+Initialised the GActionSheet project from scratch: requirements review and gap analysis, requirements completion, documentation scaffolding, bd initialisation, and TDD/BDD test infrastructure.
+
+### Details
+
+**Requirements review and gap analysis**
+- Reviewed requirements.md against GAS feasibility; identified 18 gaps (B1–B18)
+- Confirmed achievable as container-bound GAS on the Sheet with caveats (6-min limit, installable trigger for onEdit, slow DocumentApp)
+
+**Requirements completed (B1–B11, B17)**
+- B1: Added §12 Sync Invocation — `Action Sync` sheet menu, `initializeTriggers` (idempotent), 30-min timed scan
+- B2: Added §13 Document Discovery — `DOC_FOLDER_ID` script property, auto-defaults to spreadsheet parent folder, recursive folder scan, 7-day modified filter
+- B3: §11 clarified — sheet→doc propagation happens in same sync execution (timed or menu)
+- B4: Doc table columns aligned with sheet schema; same names, no Document column in doc
+- B5: `Document` column is a single hyperlink cell (title as text, URL as hyperlink)
+- B6: Heading styles scoped to `HEADING1`–`HEADING6`; author chooses level
+- B7: Assignee token accepts bare email, display-name form, and Docs mention chips; token preserved as-is on rewrite
+- B9: Missing tracked-actions section auto-created at end of doc with HEADING1; missing table inside section also auto-created
+- B10: Floating-action rewrite replaces full paragraph text, preserving paragraph style
+- B11: Added §16 Archive Behavior — `Status=Closed` + 30 days → moved to archive sheet; programmatic write guard; filter operations excluded from `Date Modified` updates
+- B17: Sheet timestamp cells stored as native Date values; doc table and floating-action text use ISO 8601 strings
+- Remaining open decision: whether to add a `Synced` column (B-NEW)
+
+**Documentation scaffolding (Standard tier, bd in use)**
+- Created folder structure: `docs/`, `knowledge-base/adr/`, `src/`, `doc-framework/` (copied from DevStandard)
+- README.md, CLAUDE.md, PLAN-bd.md, docs/README.md
+- docs/CONTEXT.md — fully populated: purpose, quality goals, stakeholders, constraints, 3 use cases, non-goals, glossary
+- docs/DESIGN.md — runtime architecture diagram, 7-component building block table, data model ERD, crosscutting concepts, dependency rules
+- docs/OPERATIONS.md — deployment model, config (DOC_FOLDER_ID), failure modes table, recovery procedures
+- knowledge-base/adr/0001 — container-bound GAS on Sheet (Accepted)
+- knowledge-base/adr/0002 — timestamp-based conflict resolution (Accepted)
+
+**bd initialised**
+- `bd init` run; embedded Dolt database created in `.beads/`
+- AGENTS.md generated; Claude hooks registered; `.claude/settings.json` created
+
+**TDD/BDD test infrastructure**
+- DESIGN.md §Test Model added: framework declaration, fixture scope architecture (Session/Suite/Workflow/Function), all 5 AC workflow sequences as Given/When/Then, atomic test categories, anti-patterns
+- `tests/helpers/download.py` — `download_xlsx` + `download_docx` via unauthenticated Google export URLs
+- `tests/helpers/sheet_inspect.py` — openpyxl helpers: `find_row` (hyperlink-aware), `assert_date_cell`
+- `tests/helpers/doc_inspect.py` — python-docx helpers: `floating_actions`, `tracked_actions_table`, `find_table_row`
+- `tests/helpers/gas_log.py` — Drive-mapped NDJSON log polling (`wait_for_log`, `clear_logs`)
+- `tests/conftest.py` — session-scoped pytest fixtures from `local.settings.json`
+- `tests/test_acceptance.py` — all 5 ACs as workflow test classes; marked `xfail` pending GAS fixture functions
+- `tests/playwright/playwright.config.js` — gas-editor-testing config (headless: false, 1 worker)
+- `tests/playwright/editor_helpers.js` — `runFunction(page, funcName)` helper
+- `tests/playwright/auth.setup.js` — one-time Google auth capture
+- `src/GasLogger.js` — server-side NDJSON logger with Drive flush and 25-entry buffer
+- `local.settings.example.json`, `pyproject.toml`, `.gitignore` additions
+
+### Key Learnings
+- WSL `/mnt/c/` filesystem invalidates the Edit tool's file-state cache after every write; workaround is to re-read before each Edit call (not add delays — it is a cache invalidation issue, not a timing issue)
+- GAS `onEdit` simple trigger cannot call external services; sheet-update trigger must be installable — sheet→doc propagation is therefore eventually consistent, not real-time
+- Export URLs (`/export?format=xlsx` and `/export?format=docx`) require the file to be shared "Anyone with link (viewer)" — no OAuth needed for test downloads
+- gas-editor-testing pattern (Playwright drives the Apps Script IDE) is the right trigger mechanism for a bound script with no `doGet` endpoint
+
+
+## 2026-05-20 12:45:00
+
+### Summary
+Full TDD code phase complete (13 GAS source files + 32 xfail tests). Clasp project created, code deployed, GAS functions bootstrapped. Playwright smoke test not yet passing — blocked on test invocation architecture decision.
+
+### GAS Project Bootstrap — Key Learnings
+
+**clasp project creation**
+- `clasp create --type sheets --title "Name" --rootDir src` creates both a Google Sheet and a bound Apps Script project in a single command. Outputs Sheet ID and Script ID.
+- clasp overwrites `appsscript.json` on create, removing any `oauthScopes` defined there. This is expected — GAS auto-detects required scopes from the code. Do not fight it.
+- `.clasp.json` is created at the project root. Commit it (it's project config). Add `local.settings.json` to `.gitignore` (it holds real IDs/paths).
+
+**Bootstrap function pattern (critical)**
+- Script properties (`TEST_DOC_ID`, `TEST_SHEET_ID`, `GAS_LOGGER_FOLDER_ID`) cannot be set via any API without complex GCP setup. Add a `bootstrap()` function to a GAS file that calls `PropertiesService.getScriptProperties().setProperties({...})` with all needed values hard-coded.
+- Run `bootstrap()` once from the Apps Script editor after first `clasp push`. Verify it worked by checking the Drive-synced log folder for a `.log` file.
+- File location matters: tell the user which `.gs` file contains the function before asking them to run it — the editor only shows functions for the currently-open file.
+- `bootstrap()`, `ensureSheetStructure()`, and `initializeTriggers()` must all be run once manually in this order before any tests can work.
+
+**clasp OAuth token scopes**
+- clasp's stored token at `~/.clasprc.json` (`tokens.default.access_token`) has `drive.file` scope — sufficient to create Google Docs and Sheets via the Drive REST API (file creation, not arbitrary Drive access).
+- To create a test Google Doc programmatically: `POST https://www.googleapis.com/drive/v3/files` with `mimeType: application/vnd.google-apps.document` using the clasp access token.
+- Docs API (`docs.googleapis.com`) requires a broader scope not in the clasp token — use Drive API instead.
+
+**GasLogger / Drive for Desktop**
+- GasLogger writes NDJSON `.log` files to a Drive folder identified by `GAS_LOGGER_FOLDER_ID` script property. The test harness polls these files locally.
+- This polling only works if Drive for Desktop is running and the folder is synced locally. Get both the Drive folder URL (for the script property) and the local filesystem path (for `local.settings.json gasLogDir`) from the user upfront — they are different things.
+- Local path on this machine: `/mnt/g/My Drive/GAS-Logger/GActionSheet`
+- Test log files appear as `{timestamp}-{uuid}.log` NDJSON files. Verified working.
+
+### Playwright Setup — Key Learnings
+
+**Version pinning is mandatory**
+- `npm install @playwright/test` pulls the latest version, which requires downloading new browser binaries. If another project already has Playwright working, check its version first (`package.json`) and pin to the same exact version.
+- On this machine: AudioTrackCombiner uses `1.59.1` with `chromium-1217`. Installing `^1.60.0` tried to download `chromium-1223` plus 20+ missing system libs.
+- Fix: pin to `"@playwright/test": "1.59.1"` (no caret) and run `npm install`.
+
+**auth.setup.js — do NOT put in globalSetup**
+- `auth.setup.js` is an interactive script that opens a browser and waits for `process.stdin`. If listed as `globalSetup` in `playwright.config.js`, it blocks every automated test run.
+- Remove it from `globalSetup`. Run it manually once: `node tests/playwright/auth.setup.js`. Session saved to `.auth/user.json`.
+
+**Editor URL format**
+- Correct: `https://script.google.com/d/{scriptId}/edit`
+- Wrong (used in config): `https://script.google.com/home/projects/{scriptId}/edit`
+- `page.goto('/')` in Playwright navigates to the domain root (`script.google.com/`), NOT the full baseURL path. Must use the explicit full URL in `goto()`.
+
+**Apps Script editor function picker — new editor is not automatable with standard locators**
+- The old locator `getByRole('listbox', { name: 'Select function to run' })` does NOT work in the 2024+ Apps Script editor.
+- The function picker is a plain `div.Q45Bi` with text "No functions" — no ARIA role, no stable label. Class names are obfuscated and will change.
+- Files that only export via IIFE (e.g., `var Foo = (function(){...})()`) show "No functions" in the picker. Only top-level `function` declarations appear.
+- Conclusion: **do not automate the Apps Script editor function picker**. It is not designed for automation.
+
+### Test Invocation Architecture — Decision Pending
+
+Three approaches evaluated for triggering GAS functions from pytest:
+
+| Approach | Browser needed | Fragility | Setup effort |
+|---|---|---|---|
+| Playwright → editor function picker | Yes | High (no stable selectors) | High |
+| Web app `doGet` endpoint | No | Low (plain HTTP) | Medium (one deploy step) |
+| Sheet menu + Playwright | Yes | Medium (stable text selectors) | Medium |
+
+**Recommendation on record:** Web app `doGet` is cleanest for automation. Sheet menu is viable if manual QA triggering from the sheet has value. Editor-picker approach is not viable.
+
+**Decision not yet made** — context clearing before implementation. Resume with this choice.
+
+### Continuation State (post-context-clear)
+
+- All 14 GAS source files pushed: `clasp push` verified 14 files
+- Script properties set: `bootstrap()` confirmed via log file (`bootstrap.complete` tag)
+- Sheet structure created: `ensureSheetStructure()` confirmed (`sheet.structure.ensured` tag, 0 rows)
+- Triggers installed: `initializeTriggers()` confirmed (`triggers.initialized`, onEditCount=1, timeBasedCount=1)
+- Auth captured: `.auth/user.json` present and valid
+- 32 xfail tests written, all collecting clean: `pytest tests/ → 32 xfailed`
+- bd issue `GActionSheet-93d` open: "Deploy GAS source and verify integration tests"
+- **Next action:** Choose web app vs sheet menu, implement test invocation, get first test passing
+
+
+## 2026-05-20 13:40:58
+
+### Summary
+Ran and fixed Playwright smoke test (step 5 of GActionSheet-93d); fixed test_infrastructure.py to pass 3 of 4 tests (step 6); pushed updated MenuHandler.js via clasp.
+
+### Changes
+- `tests/playwright/editor_helpers.js:82` — updated menu item selector from `[id*="menucell"]` to `getByRole('menuitem', { name, exact: true })` (stale selector, Google Sheets now uses `goog-menuitem` with `role=menuitem`)
+- `tests/helpers/download.py` — added `_authed_session()` that loads cookies from `.auth/user.json` (Playwright storage state) into a `requests.Session`; used for authenticated XLSX export
+- `tests/playwright/open_sheet.js` — new Node.js helper that navigates to the sheet and exits 0 when `Action Sync` menu is visible (confirms `onOpen()` ran)
+- `tests/test_infrastructure.py` — removed module-level `xfail` pytestmark; added per-test `xfail` on `test_initialize_triggers_is_idempotent` only; rewrote `test_menu_item_exists` to use Node.js UI check instead of log polling
+- `src/MenuHandler.js` — removed `GasLogger.log/flush` calls from `onOpen()` (simple triggers cannot access DriveApp)
+
+### Key Learnings (GAS-Practices)
+
+**GAS: Simple triggers cannot use authorized services**
+`onOpen()`, `onEdit()` (reserved names) run as simple triggers. They cannot call DriveApp, ScriptApp, GmailApp, or any service requiring OAuth scope. Attempting `DriveApp.getFolderById()` throws: *"Specified permissions are not sufficient."* Remove any logging/flush calls from simple trigger functions. Verify behavior via UI side-effects (menu appearance, sheet changes) — not log files.
+
+**GAS: Testing onOpen — use Playwright UI check, not log polling**
+Since `onOpen()` cannot write to Drive, the only reliable test signal is the UI: navigate to the sheet with a stored auth session, wait for the custom menu label to appear. Node.js Playwright (`open_sheet.js`) exits 0 on success; pytest asserts on exit code.
+
+**Playwright: Google Sheets custom menu selector (2026)**
+The `[id*="menucell"]` selector for GAS custom menu items is stale. Current Sheets DOM uses `class="goog-menuitem"` with `role="menuitem"`. Use `page.getByRole('menuitem', { name: itemName, exact: true })` for reliable clicks.
+
+**Playwright: Authenticated `requests` download from Google Docs**
+Playwright storage state (`.auth/user.json`) contains raw browser cookies. Extract them into a `requests.Session` to make authenticated Google Docs export requests without re-running OAuth. Works for `/spreadsheets/d/{id}/export?format=xlsx` and `/document/d/{id}/export?format=docx`.
+
+
+## 2026-05-20 18:48:24
+
+### Summary
+Reviewed AC.md (recently updated) against docs/CONTEXT.md use-case ACs and identified gaps. Rewrote docs/CONTEXT.md §Use Cases to align authority model, conflict resolution, and AC detail level with AC.md intent.
+
+### Changes
+- **docs/CONTEXT.md — §Use Cases Invariants (new):** stated once for all UCs — table is master within document (floating seeds table only on initialization); Modified-date precedence (blank = dirty, set to sync-start time and pushed; newer timestamp wins); sync is eventually consistent.
+- **docs/CONTEXT.md — UC-1..UC-4 ACs rewritten:** outcome + key-normalization level. Dropped exact-format assertions (`YYYY-MM-DD h:m`, partial-date expansion, verbose worked example). Kept: row existence after sync, ID assignment, blank-status → Open, blank-date → doc-modified.
+- **docs/CONTEXT.md — UC-5 added:** bare `AI-<n>` floating paragraph (author reference to existing record) expands from the table on sync.
+- **docs/CONTEXT.md — UC-6 added:** floating paragraph locally edited by author is reverted to match the tracked-actions table on next sync.
+- **docs/CONTEXT.md — §Constraints:** new "Format and Normalization Constraints" subsection holds date format, partial-date normalization, person-tile assignee, and blank-field defaults.
+- **docs/CONTEXT.md — §Core Capabilities:** added authority-rule bullet (table is authoritative; floating seeds only on initialization).
+
+### Key Learnings
+AC.md was a cleaner statement of the same system intent — specifically: (1) the asymmetric authority model (table master, floating slave except on init) was never made explicit in CONTEXT.md; (2) the bare-ID reference case (`AI-2` with no fields) and the floating-edit-revert scenario were entirely absent from the use cases.

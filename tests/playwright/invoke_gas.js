@@ -45,15 +45,18 @@ if (!menuItem) {
   await page.getByText('Action Sync', { exact: true }).waitFor({ timeout: 15000 });
 
   if (arg !== undefined) {
-    // Write arg to TestControl!A1 via the Name Box
-    const nameBox = page.locator('[aria-label="Name Box"]');
-    await nameBox.click();
-    await page.keyboard.press('Control+a');
-    await page.keyboard.type('TestControl!A1');
-    await page.keyboard.press('Enter');
-    // Brief pause for sheet navigation to settle
-    await page.waitForTimeout(600);
-    // Type the value — this starts inline cell editing
+    // Navigate to TestControl sheet tab and write arg to A1.
+    // Tab-click approach avoids dependency on the Name Box aria-label,
+    // which Google Sheets changes across versions.
+    const testControlTab = page.locator('.docs-sheet-tab-name').filter({ hasText: /^TestControl$/ });
+    await testControlTab.waitFor({ timeout: 10000 });
+    await testControlTab.click();
+    await page.waitForTimeout(500);
+
+    // Ctrl+Home lands on A1; type the value and confirm
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Control+Home');
+    await page.waitForTimeout(300);
     await page.keyboard.type(String(arg));
     await page.keyboard.press('Enter');
     await page.waitForTimeout(400);

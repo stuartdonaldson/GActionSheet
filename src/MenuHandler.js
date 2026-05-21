@@ -13,12 +13,27 @@
  */
 // Simple triggers cannot call DriveApp — GasLogger.flush() is not available here.
 function onOpen() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Auto-create required sheet tabs if missing (SpreadsheetApp only — safe in simple trigger).
+  // Full header setup and DOC_FOLDER_ID resolution require "Initialize Sheets" from the menu.
+  var requiredTabs = ['Actions', 'Archive', 'TestControl'];
+  for (var i = 0; i < requiredTabs.length; i++) {
+    if (!ss.getSheetByName(requiredTabs[i])) {
+      ss.insertSheet(requiredTabs[i]);
+    }
+  }
+
   SpreadsheetApp.getUi()
     .createMenu('Action Sync')
     .addItem('Sync', 'syncAll')
     .addSeparator()
+    .addItem('Initialize Sheets', 'ensureSheetStructure')
+    .addItem('Initialize Triggers', 'initializeTriggers')
+    .addSeparator()
     .addItem('Test: Setup Fixture', '_testSetupFixture')
     .addItem('Test: Sync Document', '_testSyncDocument')
+    .addItem('Test: Setup And Sync', '_testSetupAndSync')
     .addToUi();
 }
 
@@ -42,4 +57,11 @@ function _testSyncDocument() {
   } finally {
     GasLogger.flush();
   }
+}
+
+function _testSetupAndSync() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ctrl = ss.getSheetByName('TestControl');
+  var scenario = (ctrl ? ctrl.getRange('A1').getValue() : '') || 'default';
+  setupAndSync(scenario);
 }
