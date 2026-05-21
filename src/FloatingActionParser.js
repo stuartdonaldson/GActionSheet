@@ -20,7 +20,7 @@ var FloatingActionParser = (function () {
    * Group 1: the integer string (may be undefined/empty).
    * Remainder of the string after group 1 is the assignee + fields portion.
    */
-  var AI_PREFIX_RE = /^AI-(\d*)\s+/;
+  var AI_PREFIX_RE = /^AI-(\d*|#)\s+/;
 
   /** Matches a bare AI-<n> reference (just the ID, nothing else). Group 1: digits. */
   var BARE_REF_RE = /^AI-(\d+)\s*$/;
@@ -30,14 +30,14 @@ var FloatingActionParser = (function () {
    * Group 1: display name (trimmed)
    * Group 2: email address
    */
-  var DISPLAY_NAME_RE = /^@(.+?)\s+<([^>]+)>\s*/;
+  var DISPLAY_NAME_RE = /^@(.+?)\s+<([^>]+)>/;
 
   /**
-   * Regex for bare-email form: @user@example.com
-   * Group 1: email address (the part after @, which itself contains @)
-   * Bare email: the token starts with @ and the rest is a valid email.
+   * Regex for bare-email form: user@example.com or @user@example.com
+   * Group 1: email address (local-part + @ + domain, no whitespace/pipe/angle)
+   * The leading @ prefix is optional; excluded from the captured group.
    */
-  var BARE_EMAIL_RE = /^@([^\s|<>]+@[^\s|<>]+)\s*/;
+  var BARE_EMAIL_RE = /^@?([^\s|<>@]+@[^\s|<>]+)/;
 
   /**
    * Parses a date string. Returns a Date object, or null if blank/invalid.
@@ -106,8 +106,8 @@ var FloatingActionParser = (function () {
     var prefixMatch = AI_PREFIX_RE.exec(text);
     if (!prefixMatch) return null;
 
-    var idStr = prefixMatch[1];                      // '' or digit string
-    var id = (idStr && idStr.length > 0) ? parseInt(idStr, 10) : null;
+    var idStr = prefixMatch[1];                      // '', '#', or digit string
+    var id = (idStr && idStr.length > 0 && idStr !== '#') ? parseInt(idStr, 10) : null;
     var afterPrefix = text.slice(prefixMatch[0].length);
 
     // --- Attempt to find a mention chip before falling back to text parsing ---

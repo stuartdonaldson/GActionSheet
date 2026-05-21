@@ -416,6 +416,28 @@ var DocumentNormalizer = (function () {
       var colMap = _buildColMap(table, docId);
       var tableRecords = _readTableRows(table, colMap, docId);
 
+      // 4b. Collect table rows with no ID (UC-2: user added row to table directly).
+      var unassignedTableRows = [];
+      for (var ur = 1; ur < table.getNumRows(); ur++) {
+        var urRow = table.getRow(ur);
+        var urIdStr = urRow.getCell(colMap['ID']).getText().trim();
+        if (!urIdStr) {
+          var urAction = urRow.getCell(colMap['Action']).getText().trim();
+          if (urAction) {
+            unassignedTableRows.push({
+              id: null,
+              assigneeEmail: urRow.getCell(colMap['Assignee Email']).getText().trim(),
+              assigneeName: urRow.getCell(colMap['Assignee Name']).getText().trim(),
+              action: urAction,
+              status: urRow.getCell(colMap['Status']).getText().trim() || 'Open',
+              dateCreated: null,
+              dateModified: null,
+              _tableRowIndex: ur
+            });
+          }
+        }
+      }
+
       // 5. Determine next available ID.
       //    Max of: IDs in table + IDs in sheet + IDs from floating actions that already have IDs.
       var maxId = 0;
@@ -500,6 +522,18 @@ var DocumentNormalizer = (function () {
         var postPrefix = prefixMatch ? paraText.slice(prefixMatch[0].length) : paraText;
         var originalToken = _extractOriginalAssigneeToken(postPrefix);
         _rewriteParagraph(para, winner, originalToken);
+      }
+
+      // 6b. Assign IDs to unassigned table rows (UC-2: user added row to table directly).
+      for (var ui = 0; ui < unassignedTableRows.length; ui++) {
+        var utr = unassignedTableRows[ui];
+        maxId = _nextId(maxId);
+        utr.id = maxId;
+        utr.dateCreated = syncTime;
+        utr.dateModified = syncTime;
+        // Write the ID directly into the blank cell so _upsertTableRow can find it.
+        table.getRow(utr._tableRowIndex).getCell(colMap['ID']).setText(String(maxId));
+        normalizedById[maxId] = utr;
       }
 
       // 7. Also include any table-only records (not referenced by a floating action).

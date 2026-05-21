@@ -200,36 +200,45 @@ function setupTestFixtures(scenario) {
     // -- Step 2: seed per scenario ------------------------------------------
     switch (resolvedScenario) {
 
-      case 'ac1':
+      case 'uc1_new_floating':
       case 'default':
-        // New unnumbered floating action.
+        // New unnumbered floating action — sync assigns id=1.
         _tfInsertFloatingAction(
           body,
-          'AI- @test@example.com | Test action one | Todo | 2026-01-01 | 2026-01-01'
+          'AI- @test@example.com | Fix the bug | Open | 2026-01-01 | 2026-01-01'
+        );
+        break;
+
+      case 'ac1':
+        // Legacy: new unnumbered floating action (old naming).
+        _tfInsertFloatingAction(
+          body,
+          'AI- @test@example.com | Test action one | Open | 2026-01-01 | 2026-01-01'
         );
         break;
 
       case 'ac2':
-        // Existing ID preserved.
+        // Legacy: existing ID preserved.
         _tfInsertFloatingAction(
           body,
-          'AI-5 @test@example.com | Test action five | Todo | 2026-01-01 | 2026-01-01'
+          'AI-5 @test@example.com | Test action five | Open | 2026-01-01 | 2026-01-01'
         );
         break;
 
       case 'ac3':
+      case 'uc3_doc_wins':
         // Document wins: doc dateModified (2026-05-10) is 1 day newer than
         // the sheet row's dateModified (2026-05-09).
         _tfInsertFloatingAction(
           body,
-          'AI-1 @test@example.com | Action from doc | Todo | 2026-01-01 | 2026-05-10'
+          'AI-1 @test@example.com | Fix the bug | Done | 2026-01-01 | 2026-05-10'
         );
         _tfAppendSheetRow(ss, _tfSheetRow({
           id: 1,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
-          action: 'Action from sheet',
-          status: 'Todo',
+          action: 'Fix the bug',
+          status: 'Open',
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
           dateModified: new Date('2026-05-09')
@@ -237,18 +246,19 @@ function setupTestFixtures(scenario) {
         break;
 
       case 'ac4':
+      case 'uc3_sheet_wins':
         // Sheet wins: sheet dateModified (2026-05-10) is 1 day newer than
         // the floating action's dateModified (2026-05-09).
         _tfInsertFloatingAction(
           body,
-          'AI-1 @test@example.com | Action from doc | Todo | 2026-01-01 | 2026-05-09'
+          'AI-1 @test@example.com | Fix the bug | Open | 2026-01-01 | 2026-05-09'
         );
         _tfAppendSheetRow(ss, _tfSheetRow({
           id: 1,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
-          action: 'Action from sheet',
-          status: 'In Progress',
+          action: 'Fix the bug',
+          status: 'In Review',
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
           dateModified: new Date('2026-05-10')
@@ -256,15 +266,16 @@ function setupTestFixtures(scenario) {
         break;
 
       case 'ac5':
-        // Already synced: consistent state in floating paragraph, table row,
-        // and sheet row — all with the same values and dateModified.
+      case 'uc_idempotent':
+        // Already fully synced: consistent state in floating paragraph, table row,
+        // and sheet row — all with the same values and dateModified. Sync is a no-op.
         _tfInsertFloatingAction(
           body,
           'AI-1 @test@example.com | Completed action | Done | 2026-01-01 | 2026-04-01'
         );
         // Append table with matching data row.
-        var table5 = _tfAppendEmptyTable(body);
-        _tfAppendTableRow(table5, [
+        var tableAc5 = _tfAppendEmptyTable(body);
+        _tfAppendTableRow(tableAc5, [
           '1',
           'test@example.com',
           '',
@@ -286,56 +297,107 @@ function setupTestFixtures(scenario) {
         break;
 
       case 'uc2_new_table_row':
-        // User-added data row in table, no ID, no dates — sync should assign them.
+        // User-added data row in table, no ID, no dates — sync should assign id=2
+        // (id=1 is pre-existing in the sheet, so next available is 2).
+        _tfAppendSheetRow(ss, _tfSheetRow({
+          id: 1,
+          assigneeEmail: 'test@example.com',
+          assigneeName: '',
+          action: 'Fix the bug',
+          status: 'Open',
+          docFormula: docFormula,
+          dateCreated: new Date('2026-01-01'),
+          dateModified: new Date('2026-01-01')
+        }));
         var tableUc2 = _tfAppendEmptyTable(body);
         _tfAppendTableRow(tableUc2, [
           '',
           'test@example.com',
           '',
-          'Action added directly to table',
+          'Review the PR',
           '',
           '',
           ''
         ]);
         break;
 
-      case 'uc5_bare_reference':
-        // Bare reference floating action (just ID, no other fields).
-        var tableUc5 = _tfAppendEmptyTable(body);
-        _tfAppendTableRow(tableUc5, [
-          '7',
-          'owner@example.com',
-          'Owner Name',
-          'Canonical action text',
-          'Open',
-          '2026-01-01',
-          '2026-01-01'
-        ]);
-        _tfInsertFloatingAction(body, 'AI-7');
-        break;
-
-      case 'uc6_revert_local_edit':
-        // Floating paragraph diverges from table row (different action and status),
-        // same dateModified — table should win.
-        var tableUc6 = _tfAppendEmptyTable(body);
-        _tfAppendTableRow(tableUc6, [
-          '3',
+      case 'uc4_archive':
+        // Archive-eligible row (id=1, Closed, old dateModified, no floating action)
+        // plus an active row (id=2, Open, table row present).
+        var archiveDateUc4 = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000);
+        _tfAppendSheetRow(ss, _tfSheetRow({
+          id: 1,
+          assigneeEmail: 'test@example.com',
+          assigneeName: '',
+          action: 'Fix the bug',
+          status: 'Closed',
+          docFormula: docFormula,
+          dateCreated: new Date('2026-01-01'),
+          dateModified: archiveDateUc4
+        }));
+        _tfAppendSheetRow(ss, _tfSheetRow({
+          id: 2,
+          assigneeEmail: 'test@example.com',
+          assigneeName: '',
+          action: 'Review the PR',
+          status: 'Open',
+          docFormula: docFormula,
+          dateCreated: new Date('2026-01-01'),
+          dateModified: new Date('2026-01-01')
+        }));
+        var tableUc4 = _tfAppendEmptyTable(body);
+        _tfAppendTableRow(tableUc4, [
+          '2',
           'test@example.com',
           '',
-          'Original',
+          'Review the PR',
           'Open',
           '2026-01-01',
           '2026-01-01'
         ]);
         _tfInsertFloatingAction(
           body,
-          'AI-3 @test@example.com | Locally edited | Done | 2026-01-01 | 2026-01-01'
+          'AI-2 @test@example.com | Review the PR | Open | 2026-01-01 | 2026-01-01'
+        );
+        break;
+
+      case 'uc5_bare_reference':
+        // Bare reference floating action (just ID, no other fields).
+        var tableUc5 = _tfAppendEmptyTable(body);
+        _tfAppendTableRow(tableUc5, [
+          '5',
+          'test@example.com',
+          '',
+          'Deploy to staging',
+          'Open',
+          '2026-01-01',
+          '2026-01-01'
+        ]);
+        _tfInsertFloatingAction(body, 'AI-5');
+        break;
+
+      case 'uc6_revert_local_edit':
+        // Floating paragraph diverges from table row (different action and status),
+        // same dateModified — table wins and floating action is reverted.
+        var tableUc6 = _tfAppendEmptyTable(body);
+        _tfAppendTableRow(tableUc6, [
+          '3',
+          'test@example.com',
+          '',
+          'Write tests',
+          'Open',
+          '2026-01-01',
+          '2026-01-01'
+        ]);
+        _tfInsertFloatingAction(
+          body,
+          'AI-3 @test@example.com | Write tests (locally edited) | Done | 2026-01-01 | 2026-01-01'
         );
         _tfAppendSheetRow(ss, _tfSheetRow({
           id: 3,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
-          action: 'Original',
+          action: 'Write tests',
           status: 'Open',
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
@@ -453,14 +515,14 @@ function setupTestFixtures(scenario) {
         break;
 
       default:
-        // Unknown scenario — fall through to ac1 behaviour.
+        // Unknown scenario — fall through to default (uc1_new_floating) behaviour.
         GasLogger.log('fixture.warn', {
-          msg: 'Unknown scenario, falling back to ac1 behaviour',
+          msg: 'Unknown scenario, falling back to default behaviour',
           scenario: resolvedScenario
         });
         _tfInsertFloatingAction(
           body,
-          'AI- @test@example.com | Test action one | Todo | 2026-01-01 | 2026-01-01'
+          'AI- @test@example.com | Fix the bug | Open | 2026-01-01 | 2026-01-01'
         );
         break;
     }

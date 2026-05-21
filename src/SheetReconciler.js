@@ -80,11 +80,16 @@ var SheetReconciler = (function () {
     if (lastRow < 2) return { keySet: keySet, rowData: rowData };
 
     var numDataRows = lastRow - 1;
-    var values = sheet.getRange(2, 1, numDataRows, TOTAL_COLS).getValues();
+    var dataRange = sheet.getRange(2, 1, numDataRows, TOTAL_COLS);
+    var values   = dataRange.getValues();
+    // Also read formulas so =HYPERLINK("url","text") cells expose the URL.
+    var formulas = dataRange.getFormulas();
 
     for (var r = 0; r < numDataRows; r++) {
-      var rowId  = values[r][COL_ID - 1];
-      var docUrl = _extractUrl(values[r][COL_DOCUMENT - 1]);
+      var rowId = values[r][COL_ID - 1];
+      // Prefer the formula string (may be =HYPERLINK(...)) over the computed value.
+      var docCell = formulas[r][COL_DOCUMENT - 1] || values[r][COL_DOCUMENT - 1];
+      var docUrl  = _extractUrl(docCell);
 
       rowData.push(values[r]);
 
@@ -226,12 +231,13 @@ var SheetReconciler = (function () {
      *
      * @param {object[]} actions  Normalized action objects from DocumentNormalizer.
      * @param {string}   sheetId  Spreadsheet ID.
-     * @returns {{ written: number, sheetWins: object[] }}
+     * @returns {{ written: number, sheetWins: object[], docWins: number }}
      *   written    — count of new rows appended + existing rows updated from doc
      *   sheetWins  — actions updated with sheet values (caller rewrites the doc)
+     *   docWins    — count of existing rows updated because the doc had a newer timestamp
      */
     reconcile: function (actions, sheetId) {
-      if (!actions || actions.length === 0) return { written: 0, sheetWins: [] };
+      if (!actions || actions.length === 0) return { written: 0, sheetWins: [], docWins: 0 };
 
       var ss = SpreadsheetApp.openById(sheetId);
       var sheet = ss.getSheetByName('Actions');
@@ -244,6 +250,7 @@ var SheetReconciler = (function () {
       var rowData = data.rowData;
 
       var written   = 0;
+      var docWins   = 0;
       var sheetWins = [];
 
       for (var i = 0; i < actions.length; i++) {
@@ -271,6 +278,7 @@ var SheetReconciler = (function () {
             _applyDocWins(sheet, sheetRowNum, action);
             GasLogger.log('reconcile.doc.wins', { id: action.id, docId: action.docUrl });
             written++;
+            docWins++;
           } else {
             // Sheet wins: equal timestamps (§11.7), sheet newer, or either null.
             var updatedAction = _buildSheetWinsAction(action, sheetRowArr);
@@ -281,7 +289,7 @@ var SheetReconciler = (function () {
         }
       }
 
-      return { written: written, sheetWins: sheetWins };
+      return { written: written, sheetWins: sheetWins, docWins: docWins };
     }
   };
 })();

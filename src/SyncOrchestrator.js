@@ -143,7 +143,16 @@ function _syncOneDoc(docId, ss, sheet) {
   if (sheetWinsCount > 0) {
     GasLogger.log('sync.sheetWins.propagating', { docId: docId, count: sheetWinsCount });
     DocumentNormalizer.applySheetWins(doc, result.sheetWins);
+    GasLogger.log('sync.doc-updated', { docId: docId, count: sheetWinsCount });
   }
+
+  if (result.docWins > 0) {
+    GasLogger.log('sync.sheet-updated', { docId: docId, count: result.docWins });
+  }
+
+  // Explicitly save and close the document to ensure all changes are persisted
+  // before sync.complete is logged and the test can download the DOCX.
+  doc.saveAndClose();
 
   return { changes: result.written, sheetWinsCount: sheetWinsCount };
 }
@@ -263,6 +272,9 @@ function syncDocument(testDocId) {
     SheetReconciler.validateSheetHeaders(ss.getId());
 
     var syncResult = _syncOneDoc(docId, ss, sheet);
+
+    // Archive eligible rows (same step as syncAll to ensure test parity).
+    ArchiveManager.archive(ss);
 
     GasLogger.log('sync.complete', { docId: docId, changes: syncResult.changes });
   } catch (err) {
