@@ -119,7 +119,7 @@ Preconditions:
 - The document contains exactly one tracked-actions section (`=== Tracked Actions ===`)
 
 Primary Flow:
-1. Author types a floating action paragraph anywhere in the document, with an assignee expressed either as a plain email address or a Google Docs person tile, and with `status` and trailing dates optionally omitted: `AI- @assignee@example.com | Complete proposal draft`
+1. Author types a floating action paragraph anywhere in the document, with an assignee expressed either as a plain email address or a Google Docs person tile, and with `status` and trailing dates optionally omitted: `AI- @assignee@example.com | Complete proposal draft` or `AI- | @assignee@example.com | Complete proposal draft`
 2. On the next sync (timed or via menu), the system parses the floating action
 3. System assigns the next available sequential ID for that document
 4. System rewrites the floating action paragraph with the assigned ID and normalized values, filling in `Open` and the document's last modification timestamp captured at sync start when those fields were omitted; dates written back to the Google Doc use the format `YYYY-MM-DD h:m`
@@ -294,7 +294,7 @@ Acceptance Criteria:
 Sync fails with a clear error (logged to execution transcript and surfaced in the sheet menu) on the following conditions:
 
 - **Duplicate table IDs within a document** — two or more rows in the tracked-actions table share the same document-scoped ID; the sync for that document is aborted and the duplicate is reported.
-- **Invalid email token in a floating action** — a floating action's assignee token cannot be parsed as a bare email, a display-name-and-email form, or a mention chip; the affected action record is skipped and the error is reported.
+- **Invalid email token in a floating action** — a floating action's assignee token cannot be parsed as a bare email, a display-name-and-email form, or a mention chip; that paragraph is treated as non-action content, skipped, and logged for troubleshooting.
 - **Missing required headers on sheet or table** — the tracking sheet or a tracked-actions table is missing one or more expected column headers; sync for the affected document or sheet is aborted and the missing headers are reported.
 
 Partial failures (single document errors) do not abort the full sync run; other documents and sheet rows continue to be processed.

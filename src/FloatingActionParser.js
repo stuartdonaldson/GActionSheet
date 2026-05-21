@@ -85,14 +85,12 @@ var FloatingActionParser = (function () {
 
   /**
    * Parses one Paragraph element into an action object, or returns null if it
-   * is not a valid floating action.
-   *
-   * Throws a SyncError with kind 'invalid-email-token' if the paragraph starts
-   * with the AI- prefix but has no recognisable assignee token.
+   * is not a valid floating action. Paragraphs with AI- prefix but no
+   * recognisable assignee token are treated as non-action content and skipped.
    *
    * @param {Paragraph} para      A DocumentApp Paragraph element.
    * @param {number}    paraIndex Zero-based index of the paragraph in body.getParagraphs().
-   * @param {string}    docId     Drive document ID (for error payload).
+   * @param {string}    docId     Drive document ID (for skip log payload).
    * @returns {object|null}
    */
   function _parseParagraph(para, paraIndex, docId) {
@@ -141,12 +139,11 @@ var FloatingActionParser = (function () {
       // No mention chip — parse the assignee from the text portion.
       var parsed = _parseAssigneeFromText(afterPrefix);
       if (!parsed) {
-        // The paragraph has the AI- prefix but no valid assignee token.
-        // This is a data violation — throw so the caller can abort the document.
-        var err = new Error('Invalid email token in floating action: "' + text + '"');
-        err.syncErrorKind = 'invalid-email-token';
-        err.syncErrorData = { kind: 'invalid-email-token', docId: docId || '', paragraph: text };
-        throw err;
+        // No valid assignee token — treat as non-action content, skip silently.
+        if (typeof GasLogger !== 'undefined' && GasLogger && typeof GasLogger.log === 'function') {
+          GasLogger.log('sync.skip', { reason: 'invalid-email-token', docId: docId || '', paragraph: text });
+        }
+        return null;
       }
       assigneeEmail = parsed.assigneeEmail;
       assigneeName = parsed.assigneeName;
@@ -188,10 +185,7 @@ var FloatingActionParser = (function () {
   return {
     /**
      * Parses all floating actions from the document body.
-     *
-     * Throws a SyncError with kind 'invalid-email-token' if any AI- paragraph
-     * has an unrecognisable assignee token.  The caller must treat this as a
-     * fatal per-document error and abort without writing changes.
+     * AI- paragraphs with no recognisable assignee token are skipped (logged).
      *
      * @param {Document} doc  An open DocumentApp Document.
      * @returns {Array} Array of action objects:
