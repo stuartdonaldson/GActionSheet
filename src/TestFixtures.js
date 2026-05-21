@@ -116,7 +116,7 @@ function _tfInsertFloatingAction(body, text) {
  * Builds a sheet row array in SHEET_HEADERS order.
  *
  * SHEET_HEADERS = [ID, Assignee Email, Assignee Name, Action, Status,
- *                  Document, Date Created, Date Modified, Synced]
+ *                  Document, Date Created, Date Modified]
  *
  * @param {object} opts
  * @param {string|number} opts.id
@@ -127,7 +127,7 @@ function _tfInsertFloatingAction(body, text) {
  * @param {string}  opts.docFormula   Full =HYPERLINK(…) formula string.
  * @param {Date}    opts.dateCreated
  * @param {Date}    opts.dateModified
- * @returns {Array}  9-element array.
+ * @returns {Array}  8-element array.
  */
 function _tfSheetRow(opts) {
   return [
@@ -138,8 +138,7 @@ function _tfSheetRow(opts) {
     opts.status || '',
     opts.docFormula || '',
     opts.dateCreated || '',
-    opts.dateModified || '',
-    '' // Synced — leave empty
+    opts.dateModified || ''
   ];
 }
 
@@ -148,7 +147,7 @@ function _tfSheetRow(opts) {
  * Logs a warning and skips if the tab does not exist.
  *
  * @param {Spreadsheet} ss
- * @param {Array}       rowData  9-element row array.
+ * @param {Array}       rowData  8-element row array.
  */
 function _tfAppendSheetRow(ss, rowData) {
   var sheet = ss.getSheetByName('Actions');
@@ -371,8 +370,9 @@ function setupTestFixtures(scenario) {
         break;
 
       case 'onedit':
-        // Row with existing Synced datetime — onEdit on Status cell must clear it.
-        var oeRow = _tfSheetRow({
+        // Row with a known Date Modified — onEdit on a mutable field (Assignee)
+        // must stamp Date Modified with the current timestamp.
+        _tfAppendSheetRow(ss, _tfSheetRow({
           id: 1,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
@@ -381,14 +381,13 @@ function setupTestFixtures(scenario) {
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
           dateModified: new Date('2026-01-01')
-        });
-        oeRow[8] = new Date('2026-05-01'); // Synced — non-empty so onEdit can clear it
-        _tfAppendSheetRow(ss, oeRow);
+        }));
         break;
 
       case 'onedit_id':
-        // Row with existing Synced datetime — onEdit on ID column must NOT clear it.
-        var oeiRow = _tfSheetRow({
+        // Row with a known Date Modified — onEdit on the immutable ID column must
+        // NOT update Date Modified.
+        _tfAppendSheetRow(ss, _tfSheetRow({
           id: 1,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
@@ -397,9 +396,7 @@ function setupTestFixtures(scenario) {
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
           dateModified: new Date('2026-01-01')
-        });
-        oeiRow[8] = new Date('2026-05-01'); // Synced — must survive an ID-column edit
-        _tfAppendSheetRow(ss, oeiRow);
+        }));
         break;
 
       case 'discovery':

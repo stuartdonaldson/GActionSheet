@@ -2,11 +2,11 @@
  * SheetSetup.js
  *
  * Creates or validates the "Actions" and "Archive" sheet tabs with the
- * required 9-column header row, bold/frozen row 1, and a basic filter.
+ * required 8-column header row, bold/frozen row 1, and a basic filter.
  * Also resolves and persists the DOC_FOLDER_ID script property.
  */
 
-/** Canonical ordered header columns (9). */
+/** Canonical ordered header columns (8). */
 var SHEET_HEADERS = [
   'ID',
   'Assignee Email',
@@ -15,8 +15,7 @@ var SHEET_HEADERS = [
   'Status',
   'Document',
   'Date Created',
-  'Date Modified',
-  'Synced'
+  'Date Modified'
 ];
 
 /**
@@ -117,4 +116,36 @@ function ensureSheetStructure() {
   } finally {
     GasLogger.flush();
   }
+}
+
+/**
+ * One-time migration: removes the "Synced" column from "Actions" and "Archive"
+ * tabs if present.  Idempotent — safe to run more than once.
+ */
+function migrateRemoveSyncedColumn() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tabs = ['Actions', 'Archive'];
+  for (var t = 0; t < tabs.length; t++) {
+    var tabName = tabs[t];
+    var sheet = ss.getSheetByName(tabName);
+    if (!sheet) {
+      GasLogger.log('migrate.remove-synced', { data: { tab: tabName, status: 'not-found' } });
+      continue;
+    }
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var colIndex = -1;
+    for (var c = 0; c < headers.length; c++) {
+      if (headers[c] === 'Synced') {
+        colIndex = c + 1; // convert to 1-based
+        break;
+      }
+    }
+    if (colIndex > 0) {
+      sheet.deleteColumns(colIndex, 1);
+      GasLogger.log('migrate.remove-synced', { data: { tab: tabName, col: colIndex } });
+    } else {
+      GasLogger.log('migrate.remove-synced', { data: { tab: tabName, status: 'not-found' } });
+    }
+  }
+  GasLogger.flush();
 }

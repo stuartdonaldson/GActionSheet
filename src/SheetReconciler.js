@@ -11,7 +11,7 @@
  *
  * Column order follows SHEET_HEADERS (defined in SheetSetup.js):
  *   ID | Assignee Email | Assignee Name | Action | Status | Document |
- *   Date Created | Date Modified | Synced
+ *   Date Created | Date Modified
  *
  * Returns an IIFE exposing { reconcile }.
  *
@@ -33,8 +33,7 @@ var SheetReconciler = (function () {
   var COL_DOCUMENT      = 6;
   var COL_DATE_CREATED  = 7;
   var COL_DATE_MODIFIED = 8;
-  var COL_SYNCED        = 9;
-  var TOTAL_COLS        = 9;
+  var TOTAL_COLS        = 8;
 
   // ---------------------------------------------------------------------------
   // Private helpers
@@ -99,13 +98,12 @@ var SheetReconciler = (function () {
   }
 
   /**
-   * Builds the 9-element row array for a single action.
+   * Builds the 8-element row array for a single action.
    *
    * @param {object} action   Normalized action object.
-   * @param {Date}   syncTs   Sync execution timestamp.
    * @returns {Array}
    */
-  function _buildRow(action, syncTs) {
+  function _buildRow(action) {
     var hyperlinkFormula = '=HYPERLINK("' + action.docUrl + '","' + action.docTitle.replace(/"/g, '\\"') + '")';
     return [
       action.id,
@@ -115,27 +113,24 @@ var SheetReconciler = (function () {
       action.status         || '',
       hyperlinkFormula,
       action.dateCreated    || '',
-      action.dateModified   || '',
-      syncTs
+      action.dateModified   || ''
     ];
   }
 
   /**
    * Writes an updated row back to the sheet for the doc-wins case.
-   * Columns updated: Action, Status, Date Modified, Synced.
+   * Columns updated: Action, Status, Date Modified.
    * Wrapped in WriteGuard to suppress the onEdit trigger.
    *
    * @param {Sheet}  sheet
    * @param {number} sheetRow  1-based row number.
    * @param {object} action
-   * @param {Date}   syncTs
    */
-  function _applyDocWins(sheet, sheetRow, action, syncTs) {
+  function _applyDocWins(sheet, sheetRow, action) {
     WriteGuard.wrap(function () {
       sheet.getRange(sheetRow, COL_ACTION).setValue(action.action || '');
       sheet.getRange(sheetRow, COL_STATUS).setValue(action.status || '');
       sheet.getRange(sheetRow, COL_DATE_MODIFIED).setValue(action.dateModified || '');
-      sheet.getRange(sheetRow, COL_SYNCED).setValue(syncTs);
     });
   }
 
@@ -190,7 +185,6 @@ var SheetReconciler = (function () {
       var keySet  = data.keySet;
       var rowData = data.rowData;
 
-      var syncTs    = new Date();
       var written   = 0;
       var sheetWins = [];
 
@@ -200,7 +194,7 @@ var SheetReconciler = (function () {
 
         if (!(key in keySet)) {
           // ── New row ──────────────────────────────────────────────────────
-          var row = _buildRow(action, syncTs);
+          var row = _buildRow(action);
           WriteGuard.wrap(function () { sheet.appendRow(row); });
           keySet[key] = rowData.length;  // prevent duplicates within this call
           rowData.push(row);
@@ -216,17 +210,12 @@ var SheetReconciler = (function () {
 
           // Doc wins when it has a strictly later dateModified.
           if (docDate && sheetDate && docDate.getTime() > sheetDate.getTime()) {
-            _applyDocWins(sheet, sheetRowNum, action, syncTs);
+            _applyDocWins(sheet, sheetRowNum, action);
             GasLogger.log('reconcile.doc.wins', { id: action.id, docId: action.docUrl });
             written++;
           } else {
             // Sheet wins: equal timestamps (§11.7), sheet newer, or either null.
             var updatedAction = _buildSheetWinsAction(action, sheetRowArr);
-
-            // Still stamp the Synced column.
-            WriteGuard.wrap(function () {
-              sheet.getRange(sheetRowNum, COL_SYNCED).setValue(syncTs);
-            });
 
             GasLogger.log('reconcile.sheet.wins', { id: action.id, docId: action.docUrl });
             sheetWins.push(updatedAction);
