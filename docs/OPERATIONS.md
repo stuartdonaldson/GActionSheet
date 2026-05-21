@@ -100,6 +100,28 @@ Apps Script execution logs: Apps Script editor → Executions (left sidebar). Ea
 
 ---
 
+## Running Tests
+
+```bash
+# Always use -x (fail-fast): stop after the first test that fails.
+# Within a test, all assertions run to completion — multiple defects within one
+# test accumulate. The -x flag only prevents starting the *next* test while a
+# blocking failure exists.
+/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/ -x -v
+
+# Parser unit tests only (fast, no GAS/network):
+/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_floating_action_parser.py -x -v
+
+# UC scenario tests (requires live GAS — clasp push first):
+/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_uc_scenarios.py -x -v
+```
+
+Each UC scenario test has significant setup/teardown cost (GAS invocation, log polling up to 60 s).
+A root-cause failure in an early scenario cascades to all later ones — running to completion wastes
+minutes and obscures the real defect. Fix the first failure before proceeding.
+
+---
+
 ## Recovery Procedures
 
 ### Sync wrote stale values to the sheet (timestamp conflict resolved incorrectly)
