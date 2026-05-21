@@ -514,6 +514,14 @@ function setupTestFixtures(scenario) {
         GasLogger.log('fixture.discovery.subfolder.id', { subfolderDocId: subfolderDocId });
         break;
 
+      case 'uc_blank_status':
+        // Floating action with blank status — sync must default to Open.
+        _tfInsertFloatingAction(
+          body,
+          'AI- @test@example.com | Fix the bug |  | 2026-01-01 | 2026-01-01'
+        );
+        break;
+
       default:
         // Unknown scenario — fall through to default (uc1_new_floating) behaviour.
         GasLogger.log('fixture.warn', {

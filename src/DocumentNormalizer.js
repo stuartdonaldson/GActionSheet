@@ -292,6 +292,7 @@ var DocumentNormalizer = (function () {
       blank.push('');
     }
     var table = body.appendTable([TABLE_HEADERS, blank]);
+    table.removeRow(1);
     // Make the header row bold.
     var headerRow = table.getRow(0);
     for (var c = 0; c < TABLE_HEADERS.length; c++) {
@@ -552,10 +553,12 @@ var DocumentNormalizer = (function () {
       // 7. Also include any table-only records (not referenced by a floating action).
       // They are already in normalizedById from step 6 seeding.
 
-      // 8. Upsert all normalized records into the tracked-actions table.
+      // 8. Apply default status, then upsert all normalized records into the table.
       for (var nid in normalizedById) {
         if (normalizedById.hasOwnProperty(nid)) {
-          _upsertTableRow(table, colMap, normalizedById[parseInt(nid, 10)]);
+          var nr = normalizedById[parseInt(nid, 10)];
+          nr.status = nr.status || 'Open';
+          _upsertTableRow(table, colMap, nr);
         }
       }
 
@@ -612,6 +615,7 @@ var DocumentNormalizer = (function () {
 
       for (var a = 0; a < actions.length; a++) {
         var action = actions[a];
+        action.status = action.status || 'Open';
 
         // Rewrite the floating-action paragraph if present.
         if (paraByID[action.id]) {

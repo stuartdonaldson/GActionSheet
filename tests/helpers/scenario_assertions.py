@@ -1,6 +1,6 @@
 """Assertions for parametrized UC scenario matrix tests."""
 from tests.helpers.sheet_inspect import load_sheet, find_row, rows_as_dicts
-from tests.helpers.doc_inspect import load_doc, find_table_row, floating_actions
+from tests.helpers.doc_inspect import load_doc, find_table_row, floating_actions, tracked_actions_table
 
 
 def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes: bytes) -> None:
@@ -95,6 +95,13 @@ def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes
                     f"[{name}] sheet row ID={expected['id']} status mismatch: "
                     f"expected {expected['status']!r}, got {row['Status']!r}"
                 )
+
+    if "expected_table_row_count" in expectations:
+        table_rows = tracked_actions_table(doc) or []
+        assert len(table_rows) == expectations["expected_table_row_count"], (
+            f"[{name}] tracked-actions table row count mismatch: "
+            f"expected {expectations['expected_table_row_count']}, got {len(table_rows)}"
+        )
 
     if "expected_xlsx_active_rows" in expectations:
         active_rows = rows_as_dicts(ws)

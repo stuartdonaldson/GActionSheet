@@ -49,6 +49,7 @@ SCENARIO_MATRIX = [
                     "date_modified": "2026-01-01 0:00",
                 },
             ],
+            "expected_table_row_count": 1,
             "expected_sheet_rows": [
                 {"id": 1, "action": "Fix the bug", "status": "Open", "doc_url_contains": "docs.google.com"},
             ],
@@ -133,6 +134,19 @@ SCENARIO_MATRIX = [
         "uc_idempotent",
         {
             "expected_log_tag": "sync.complete",
+        },
+    ),
+    (
+        "uc_blank_status",
+        {
+            "expected_log_tag": "sync.complete",
+            "expected_floating_actions": [
+                {"id": 1, "action": "Fix the bug", "status": "Open"},
+            ],
+            "expected_table_rows": [
+                {"id": 1, "action": "Fix the bug", "status": "Open", "id_str": "AI-1"},
+            ],
+            "expected_table_row_count": 1,
         },
     ),
 ]
