@@ -82,7 +82,7 @@ var DocumentNormalizer = (function () {
     var tm = tableRec.dateModified;
 
     if (fm && tm) {
-      return fm.getTime() >= tm.getTime() ? floating : tableRec;
+      return fm.getTime() > tm.getTime() ? floating : tableRec;
     }
     if (fm && !tm) return floating;
     if (!fm && tm) return tableRec;
@@ -130,33 +130,51 @@ var DocumentNormalizer = (function () {
 
   /**
    * Builds a column-index map from the header row of a table.
-   * Throws if any required header is missing.
+   * Throws a SyncError with kind 'missing-header' if any required header is absent.
    *
-   * @param {Table} table
+   * @param {Table}  table
+   * @param {string} docId  Drive document ID for error payload.
    * @returns {Object} Map of header name → zero-based column index.
    */
-  function _buildColMap(table) {
+  function _buildColMap(table, docId) {
     var headerRow = table.getRow(0);
     var map = {};
     for (var c = 0; c < headerRow.getNumCells(); c++) {
       map[headerRow.getCell(c).getText().trim()] = c;
     }
+    var missing = [];
     for (var h = 0; h < TABLE_HEADERS.length; h++) {
       if (!(TABLE_HEADERS[h] in map)) {
-        throw new Error('Tracked-actions table is missing required header: ' + TABLE_HEADERS[h]);
+        missing.push(TABLE_HEADERS[h]);
       }
+    }
+    if (missing.length > 0) {
+      var err = new Error(
+        'Tracked-actions table is missing required header(s): ' + missing.join(', ')
+      );
+      err.syncErrorKind = 'missing-header';
+      err.syncErrorData = {
+        kind: 'missing-header',
+        where: 'tracked-actions-table',
+        docId: docId || '',
+        missing: missing
+      };
+      throw err;
     }
     return map;
   }
 
   /**
    * Reads all rows from the tracked-actions table (skipping the header row).
+   * Throws a SyncError with kind 'duplicate-table-id' if the same integer ID
+   * appears more than once.
    *
-   * @param {Table} table
+   * @param {Table}  table
    * @param {Object} colMap  Column-index map from _buildColMap.
+   * @param {string} docId   Drive document ID for error payload.
    * @returns {Object} Map of integer ID → action record object.
    */
-  function _readTableRows(table, colMap) {
+  function _readTableRows(table, colMap, docId) {
     var records = {};
     for (var r = 1; r < table.getNumRows(); r++) {
       var row = table.getRow(r);
@@ -178,7 +196,10 @@ var DocumentNormalizer = (function () {
       };
 
       if (id in records) {
-        throw new Error('Duplicate ID ' + id + ' in tracked-actions table.');
+        var err = new Error('Duplicate ID ' + id + ' in tracked-actions table.');
+        err.syncErrorKind = 'duplicate-table-id';
+        err.syncErrorData = { kind: 'duplicate-table-id', docId: docId || '', id: id };
+        throw err;
       }
       records[id] = rec;
     }
@@ -384,8 +405,8 @@ var DocumentNormalizer = (function () {
       }
 
       // 4. Build column map and read existing table records.
-      var colMap = _buildColMap(table);
-      var tableRecords = _readTableRows(table, colMap);
+      var colMap = _buildColMap(table, docId);
+      var tableRecords = _readTableRows(table, colMap, docId);
 
       // 5. Determine next available ID.
       //    Max of: IDs in table + IDs in sheet + IDs from floating actions that already have IDs.
@@ -530,7 +551,8 @@ var DocumentNormalizer = (function () {
 
         // Update the table row if the table exists.
         if (table) {
-          var colMap = _buildColMap(table);
+          var docIdForMap = doc.getId ? doc.getId() : '';
+          var colMap = _buildColMap(table, docIdForMap);
           _upsertTableRow(table, colMap, action);
         }
       }

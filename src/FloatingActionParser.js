@@ -84,11 +84,15 @@ var FloatingActionParser = (function () {
    * Parses one Paragraph element into an action object, or returns null if it
    * is not a valid floating action.
    *
-   * @param {Paragraph} para   A DocumentApp Paragraph element.
-   * @param {number} paraIndex Zero-based index of the paragraph in body.getParagraphs().
+   * Throws a SyncError with kind 'invalid-email-token' if the paragraph starts
+   * with the AI- prefix but has no recognisable assignee token.
+   *
+   * @param {Paragraph} para      A DocumentApp Paragraph element.
+   * @param {number}    paraIndex Zero-based index of the paragraph in body.getParagraphs().
+   * @param {string}    docId     Drive document ID (for error payload).
    * @returns {object|null}
    */
-  function _parseParagraph(para, paraIndex) {
+  function _parseParagraph(para, paraIndex, docId) {
     var text = para.getText();
 
     // Must start with AI-
@@ -127,7 +131,14 @@ var FloatingActionParser = (function () {
     if (!foundChip) {
       // No mention chip — parse the assignee from the text portion.
       var parsed = _parseAssigneeFromText(afterPrefix);
-      if (!parsed) return null;  // No recognisable assignee token — not a floating action.
+      if (!parsed) {
+        // The paragraph has the AI- prefix but no valid assignee token.
+        // This is a data violation — throw so the caller can abort the document.
+        var err = new Error('Invalid email token in floating action: "' + text + '"');
+        err.syncErrorKind = 'invalid-email-token';
+        err.syncErrorData = { kind: 'invalid-email-token', docId: docId || '', paragraph: text };
+        throw err;
+      }
       assigneeEmail = parsed.assigneeEmail;
       assigneeName = parsed.assigneeName;
       restAfterAssignee = parsed.rest;
@@ -169,18 +180,23 @@ var FloatingActionParser = (function () {
     /**
      * Parses all floating actions from the document body.
      *
+     * Throws a SyncError with kind 'invalid-email-token' if any AI- paragraph
+     * has an unrecognisable assignee token.  The caller must treat this as a
+     * fatal per-document error and abort without writing changes.
+     *
      * @param {Document} doc  An open DocumentApp Document.
      * @returns {Array} Array of action objects:
      *   { id, assigneeEmail, assigneeName, action, status,
      *     dateCreated, dateModified, paragraphIndex }
      */
     parse: function (doc) {
+      var docId = doc.getId ? doc.getId() : '';
       var body = doc.getBody();
       var paras = body.getParagraphs();
       var actions = [];
 
       for (var i = 0; i < paras.length; i++) {
-        var result = _parseParagraph(paras[i], i);
+        var result = _parseParagraph(paras[i], i, docId);
         if (result !== null) {
           actions.push(result);
         }

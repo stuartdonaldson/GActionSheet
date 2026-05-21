@@ -155,11 +155,69 @@ var SheetReconciler = (function () {
     };
   }
 
+  /**
+   * Validates that the "Actions" sheet has the required header columns.
+   * Throws a SyncError with kind 'missing-header' if any are absent.
+   * This must be called before any document processing begins so that a
+   * missing sheet header aborts the entire sync run without partial writes.
+   *
+   * @param {Sheet} sheet  The "Actions" sheet tab.
+   */
+  function _validateSheetHeaders(sheet) {
+    var lastCol = sheet.getLastColumn();
+    if (lastCol < 1) {
+      var err = new Error('Actions sheet has no headers.');
+      err.syncErrorKind = 'missing-header';
+      err.syncErrorData = { kind: 'missing-header', where: 'Actions-sheet', missing: SHEET_HEADERS };
+      throw err;
+    }
+    var headerValues = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    var headerMap = {};
+    for (var c = 0; c < headerValues.length; c++) {
+      if (headerValues[c] !== '') headerMap[String(headerValues[c]).trim()] = c;
+    }
+    var missing = [];
+    for (var h = 0; h < SHEET_HEADERS.length; h++) {
+      if (!(SHEET_HEADERS[h] in headerMap)) missing.push(SHEET_HEADERS[h]);
+    }
+    if (missing.length > 0) {
+      var err2 = new Error('Actions sheet is missing required header(s): ' + missing.join(', '));
+      err2.syncErrorKind = 'missing-header';
+      err2.syncErrorData = { kind: 'missing-header', where: 'Actions-sheet', missing: missing };
+      throw err2;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
 
   return {
+    /**
+     * Validates the "Actions" sheet headers before any document processing.
+     * Call this at the very start of a sync run (before normalize) so that a
+     * missing sheet header aborts the entire run without partial doc writes.
+     *
+     * Throws a SyncError with kind 'missing-header' if validation fails.
+     *
+     * @param {string} sheetId  Spreadsheet ID.
+     */
+    validateSheetHeaders: function (sheetId) {
+      var ss = SpreadsheetApp.openById(sheetId);
+      var sheet = ss.getSheetByName('Actions');
+      if (!sheet) {
+        var err = new Error('Actions sheet tab not found in spreadsheet ' + sheetId);
+        err.syncErrorKind = 'missing-header';
+        err.syncErrorData = {
+          kind: 'missing-header',
+          where: 'Actions-sheet',
+          missing: SHEET_HEADERS
+        };
+        throw err;
+      }
+      _validateSheetHeaders(sheet);
+    },
+
     /**
      * Reconciles normalized document actions against the "Actions" sheet tab.
      *

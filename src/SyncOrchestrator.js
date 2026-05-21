@@ -66,6 +66,56 @@ function _setLastSyncTs(props, docId, syncTs) {
 }
 
 // ---------------------------------------------------------------------------
+// Error handling helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Handles a structured sync error (one carrying a syncErrorKind property) or a
+ * plain Error by:
+ *   1. Logging a 'sync.error' entry with the documented schema.
+ *   2. Showing a UI alert when running interactively (SpreadsheetApp.getUi()
+ *      is only available during menu-triggered runs; it throws in background
+ *      triggers, so we guard with a try/catch).
+ *
+ * Does NOT re-throw — callers decide whether to propagate.
+ *
+ * @param {Error}  err         The error to handle.
+ * @param {string} [fallbackDocId]  docId to include when the error itself has none.
+ */
+function _handleSyncError(err, fallbackDocId) {
+  var data;
+  if (err.syncErrorData) {
+    // Structured sync violation — use the typed payload directly.
+    data = err.syncErrorData;
+    if (!data.docId && fallbackDocId) data.docId = fallbackDocId;
+  } else {
+    // Untyped error — wrap it in a generic payload.
+    data = {
+      kind: 'unexpected',
+      docId: fallbackDocId || '',
+      message: err.message,
+      stack: err.stack || ''
+    };
+  }
+
+  GasLogger.log('sync.error', data);
+
+  // Surface to the user when running from a menu item (interactive context).
+  try {
+    SpreadsheetApp.getUi().alert(
+      'Sync Error',
+      'Kind: ' + (data.kind || 'unexpected') + '\n' +
+      (data.docId ? 'Document: ' + data.docId + '\n' : '') +
+      err.message,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } catch (uiErr) {
+    // Not in an interactive context (background trigger, test harness, etc.) —
+    // alert is unavailable; the log entry above is sufficient.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Core single-document sync logic (shared by syncDocument and syncAll)
 // ---------------------------------------------------------------------------
 
@@ -124,10 +174,15 @@ function syncAll() {
   try {
     GasLogger.log('sync.all.start', { folderId: folderId });
 
-    var docs = DocumentDiscovery.findModifiedDocs(folderId);
-
     var ss    = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName('Actions') || ss.getSheets()[0];
+
+    // Validate sheet headers before touching any document.  A missing sheet
+    // header is fatal globally — abort the entire run without partial writes.
+    SheetReconciler.validateSheetHeaders(ss.getId());
+
+    var docs = DocumentDiscovery.findModifiedDocs(folderId);
+
     var processedDocIds = [];
 
     for (var i = 0; i < docs.length; i++) {
@@ -150,12 +205,11 @@ function syncAll() {
         processedDocIds.push(docId);
         GasLogger.log('sync.doc.complete', { docId: docId, changes: syncResult.changes });
       } catch (docErr) {
-        GasLogger.log('sync.error', {
-          docId:   docId,
-          message: docErr.message,
-          stack:   docErr.stack || ''
-        });
-        // Continue processing remaining docs even if one fails.
+        // Per-document violations (duplicate-table-id, invalid-email-token,
+        // missing table header) abort that document but allow remaining docs
+        // to continue processing.
+        _handleSyncError(docErr, docId);
+        // Continue processing remaining docs.
       }
     }
 
@@ -169,6 +223,8 @@ function syncAll() {
       archived:      archived
     });
   } catch (err) {
+    // Fatal errors (e.g. missing sheet header) surface here.
+    _handleSyncError(err, '');
     GasLogger.log('sync.all.error', { message: err.message, stack: err.stack || '' });
     throw err;
   } finally {
@@ -203,11 +259,14 @@ function syncDocument(testDocId) {
     var ss    = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName('Actions') || ss.getSheets()[0];
 
+    // Validate sheet headers before touching the document.
+    SheetReconciler.validateSheetHeaders(ss.getId());
+
     var syncResult = _syncOneDoc(docId, ss, sheet);
 
     GasLogger.log('sync.complete', { docId: docId, changes: syncResult.changes });
   } catch (err) {
-    GasLogger.log('sync.error', { docId: docId, message: err.message, stack: err.stack || '' });
+    _handleSyncError(err, docId);
     throw err;
   } finally {
     GasLogger.flush();
