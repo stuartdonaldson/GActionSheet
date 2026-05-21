@@ -22,6 +22,9 @@ var FloatingActionParser = (function () {
    */
   var AI_PREFIX_RE = /^AI-(\d*)\s+/;
 
+  /** Matches a bare AI-<n> reference (just the ID, nothing else). Group 1: digits. */
+  var BARE_REF_RE = /^AI-(\d+)\s*$/;
+
   /**
    * Regex for display-name form: @First Last <email@example.com>
    * Group 1: display name (trimmed)
@@ -94,6 +97,12 @@ var FloatingActionParser = (function () {
    */
   function _parseParagraph(para, paraIndex, docId) {
     var text = para.getText();
+
+    // Bare AI-<n> reference — just the ID, no assignee or fields (UC-5).
+    var bareMatch = BARE_REF_RE.exec(text);
+    if (bareMatch) {
+      return { id: parseInt(bareMatch[1], 10), referenceOnly: true, paragraphIndex: paraIndex };
+    }
 
     // Must start with AI-
     var prefixMatch = AI_PREFIX_RE.exec(text);

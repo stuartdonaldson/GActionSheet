@@ -66,6 +66,14 @@ var DocumentNormalizer = (function () {
     return d.toISOString();
   }
 
+  function _dateOrEmpty(d) {
+    if (!d) return '';
+    var y = d.getUTCFullYear();
+    var m = d.getUTCMonth() + 1;
+    var day = d.getUTCDate();
+    return y + '-' + (m < 10 ? '0' + m : m) + '-' + (day < 10 ? '0' + day : day);
+  }
+
   /**
    * Selects the winning action record between a floating action and a table
    * record, per requirements §10.4–10.6.
@@ -333,8 +341,8 @@ var DocumentNormalizer = (function () {
     var newText = 'AI-' + action.id + ' ' + originalAssigneeToken
       + ' | ' + (action.action || '')
       + ' | ' + (action.status || '')
-      + ' | ' + _isoOrEmpty(action.dateCreated)
-      + ' | ' + _isoOrEmpty(action.dateModified);
+      + ' | ' + _dateOrEmpty(action.dateCreated)
+      + ' | ' + _dateOrEmpty(action.dateModified);
     para.setText(newText);
   }
 
@@ -441,6 +449,26 @@ var DocumentNormalizer = (function () {
       var body_paras = body.getParagraphs();
       for (var fai = 0; fai < floatingActions.length; fai++) {
         var fa = floatingActions[fai];
+
+        // UC-5: bare AI-<n> reference — rewrite to mirror table row if found.
+        if (fa.referenceOnly) {
+          var tableMatch = tableRecords[fa.id] || null;
+          if (tableMatch) {
+            var refPara = body_paras[fa.paragraphIndex];
+            var refToken = tableMatch.assigneeName
+              ? '@' + tableMatch.assigneeEmail + ' ' + tableMatch.assigneeName
+              : '@' + tableMatch.assigneeEmail;
+            _rewriteParagraph(refPara, tableMatch, refToken);
+            continue;  // table record already tracked — nothing more to do
+          }
+          // No matching table row — treat as UC-1 new action with empty fields.
+          fa.assigneeEmail = '';
+          fa.assigneeName = '';
+          fa.action = '';
+          fa.status = '';
+          fa.dateCreated = null;
+          fa.dateModified = null;
+        }
 
         // Assign ID if missing.
         if (fa.id === null) {
