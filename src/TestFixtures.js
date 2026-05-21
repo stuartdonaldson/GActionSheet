@@ -286,6 +286,64 @@ function setupTestFixtures(scenario) {
         }));
         break;
 
+      case 'uc2_new_table_row':
+        // User-added data row in table, no ID, no dates — sync should assign them.
+        var tableUc2 = _tfAppendEmptyTable(body);
+        _tfAppendTableRow(tableUc2, [
+          '',
+          'test@example.com',
+          '',
+          'Action added directly to table',
+          '',
+          '',
+          ''
+        ]);
+        break;
+
+      case 'uc5_bare_reference':
+        // Bare reference floating action (just ID, no other fields).
+        var tableUc5 = _tfAppendEmptyTable(body);
+        _tfAppendTableRow(tableUc5, [
+          '7',
+          'owner@example.com',
+          'Owner Name',
+          'Canonical action text',
+          'Open',
+          '2026-01-01',
+          '2026-01-01'
+        ]);
+        _tfInsertFloatingAction(body, 'AI-7');
+        break;
+
+      case 'uc6_revert_local_edit':
+        // Floating paragraph diverges from table row (different action and status),
+        // same dateModified — table should win.
+        var tableUc6 = _tfAppendEmptyTable(body);
+        _tfAppendTableRow(tableUc6, [
+          '3',
+          'test@example.com',
+          '',
+          'Original',
+          'Open',
+          '2026-01-01',
+          '2026-01-01'
+        ]);
+        _tfInsertFloatingAction(
+          body,
+          'AI-3 @test@example.com | Locally edited | Done | 2026-01-01 | 2026-01-01'
+        );
+        _tfAppendSheetRow(ss, _tfSheetRow({
+          id: 3,
+          assigneeEmail: 'test@example.com',
+          assigneeName: '',
+          action: 'Original',
+          status: 'Open',
+          docFormula: docFormula,
+          dateCreated: new Date('2026-01-01'),
+          dateModified: new Date('2026-01-01')
+        }));
+        break;
+
       case 'archive':
         // Archive-eligible row: no floating action, sheet row Status=Closed,
         // Date Modified 35 days before today.
