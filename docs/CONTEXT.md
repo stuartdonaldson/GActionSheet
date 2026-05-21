@@ -36,13 +36,51 @@ GActionSheet synchronizes action items bidirectionally between a Google Sheet hu
 ### Format and Normalization Constraints
 - Dates written in Google Docs use the format `YYYY-MM-DD h:m`.
 - A partial date such as `5/20` is normalized using the supplied month and day, plus the year and time taken from the document's last-modified timestamp captured at sync start.
-- An assignee token in a document may be either a plain email address or a Google Docs person tile that embeds the display name and email address.
-- An omitted or empty `status` is interpreted as `Open`.
 - An omitted or empty date is interpreted as the document's last-modified timestamp captured at sync start.
+- The literal field separator between action-line tokens is ` | ` (space-pipe-space).
+- An assignee token in a document may take one of three forms: bare email (e.g. `user@example.com`), display-name-and-email (e.g. `'Name' <user@example.com>`), or a Google Docs mention chip that embeds the display name and email address.
+- An omitted or empty `status` is interpreted as `Open`.
 
 ### Organizational Constraints
 - No external service dependencies; the system runs entirely within Google Workspace
 - No server infrastructure; all logic executes within GAS
+
+---
+
+## Sheet Schema
+
+### Tracking Sheet Columns
+
+| Column | Notes |
+|--------|-------|
+| ID | Document-scoped sequential integer |
+| Assignee Email | Canonical email address extracted from the assignee token |
+| Assignee Name | Display name extracted from the assignee token; empty when the token is a bare email |
+| Action | Action item text |
+| Status | Current status; `Open` when omitted |
+| Document | Hyperlink cell — display text is the document title, target is the document URL |
+| Date Created | Timestamp when the row was first written to the sheet |
+| Date Modified | Last reconcile or edit time; empty means the row has never been synced (no separate Synced column exists). |
+
+Sheet filters are enabled on all columns.
+
+### Tracked-Actions Table Columns
+
+The tracked-actions table inside each Google Doc mirrors the tracking sheet schema minus the Document column:
+
+| Column | Notes |
+|--------|-------|
+| ID | Document-scoped sequential integer |
+| Assignee Email | Canonical email address |
+| Assignee Name | Display name; empty for bare-email tokens |
+| Action | Action item text |
+| Status | Current status |
+| Date Created | Timestamp when the row was first written |
+| Date Modified | Last reconcile or edit time |
+
+### Hyperlink-Cell Rule
+
+The Document column in the tracking sheet is always written as a hyperlink cell: display text = document title, target = document URL. Plain-text document names are not accepted.
 
 ---
 
@@ -66,6 +104,7 @@ GActionSheet synchronizes action items bidirectionally between a Google Sheet hu
 - **Authority within a document.** The tracked-actions table is the authoritative representation of every action record. Floating actions are rewritten to match the table on every sync. The single exception is initialization: when a floating action carries an `AI-` identifier (including the placeholder `AI-#`) that does not yet exist in the tracked-actions table, that floating action seeds a new row in the table.
 - **Modified-date precedence.** Each action record carries a `Date Modified` timestamp in both the table and the sheet. A blank `Date Modified` is treated as "just updated": the system sets it to the sync-start time and propagates the record outward. When the table row and the sheet row both have timestamps, the newer one wins and is propagated to the other.
 - **Sync is eventually consistent.** Authority and precedence are evaluated at sync time, not at edit time.
+- **Tie-break rule.** When `Date Modified` is equal on the sheet row and the table row but content differs, the sheet row wins.
 
 Individual use cases do not restate these invariants; their acceptance criteria assume them.
 
@@ -170,7 +209,7 @@ Constraints:
 Acceptance Criteria:
 - When the sheet row has the latest `Date Modified`, the next sync rewrites both the matching tracked-actions table row and the matching floating action paragraph to the sheet's values.
 - After sync, the tracked-actions table row and the floating action paragraph reflect the same values (the table is authoritative; the floating paragraph mirrors it).
-- A blank `Date Modified` on the sheet row is treated as a dirty edit and propagated outward.
+- A blank `Date Modified` on the sheet row is treated as a dirty edit and propagated outward; there is no separate Synced column — reconciliation state is recorded solely in `Date Modified`.
 - If the source document is unavailable during sync, the sheet row is not considered successfully applied until a later sync can update both document representations.
 
 ---
@@ -250,6 +289,18 @@ Acceptance Criteria:
 
 ---
 
+## Error Handling
+
+Sync fails with a clear error (logged to execution transcript and surfaced in the sheet menu) on the following conditions:
+
+- **Duplicate table IDs within a document** — two or more rows in the tracked-actions table share the same document-scoped ID; the sync for that document is aborted and the duplicate is reported.
+- **Invalid email token in a floating action** — a floating action's assignee token cannot be parsed as a bare email, a display-name-and-email form, or a mention chip; the affected action record is skipped and the error is reported.
+- **Missing required headers on sheet or table** — the tracking sheet or a tracked-actions table is missing one or more expected column headers; sync for the affected document or sheet is aborted and the missing headers are reported.
+
+Partial failures (single document errors) do not abort the full sync run; other documents and sheet rows continue to be processed.
+
+---
+
 ## Non-Goals
 - Real-time bidirectional sync (sync is eventually consistent via 30-minute cycle)
 - Cross-document ID uniqueness or global action identifiers
@@ -264,10 +315,11 @@ Acceptance Criteria:
 |------|------------|
 | Action record | One tracked task or action item, identified by `(Document, ID)` |
 | Archive sheet | The Sheet tab that holds `Closed` action records not modified in more than 30 days |
+| Date Modified | A timestamp column present in both the tracking sheet and every tracked-actions table. Records the last reconcile or edit time. An empty value means the record has never been synced. There is no separate Synced column; synchronization state is recorded entirely in this field. |
 | Document | A Google Doc in the registered folder tree; identified by its URL and title |
 | Floating action | An action item written as plain document text using the `AI-` prefix syntax, outside the tracked-actions table; the assignee may be a plain email address or a Google Docs person tile, `status` and trailing date fields may be omitted, an empty status is treated as `Open`, an empty date is treated as the last modification timestamp, and dates written in the Google Doc use the format `YYYY-MM-DD h:m` |
 | Sync | One execution that reads a document, normalizes its actions, and reconciles them bidirectionally with the tracking sheet |
-| Tracked-actions section | The document section delimited by a heading paragraph whose exact text is `=== Tracked Actions ===` |
+| Tracked-actions section | The document section delimited by a heading paragraph whose exact text is `=== Tracked Actions ===`. If the section is absent when a floating action first seeds a row, the system creates the section and an empty table at the end of the document before writing the row. |
 | Tracked-actions table | The table inside the tracked-actions section; the canonical representation of action records within a document |
 | Tracking sheet | The Sheet tab that stores active (non-archived) synchronized action records |
 | `DOC_FOLDER_ID` | A GAS script property containing the Drive folder ID (or URL) that roots document discovery |
