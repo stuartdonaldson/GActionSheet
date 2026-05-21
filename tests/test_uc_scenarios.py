@@ -34,10 +34,20 @@ SCENARIO_MATRIX = [
         {
             "expected_log_tag": "sync.complete",
             "expected_floating_actions": [
-                {"id": 1, "action": "Fix the bug", "status": "Open"},
+                {
+                    "id": 1, "action": "Fix the bug", "status": "Open",
+                    "assignee_email": "test@example.com",
+                    "date_created": "2026-01-01 0:00",
+                    "date_modified": "2026-01-01 0:00",
+                },
             ],
             "expected_table_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "Open"},
+                {
+                    "id": 1, "action": "Fix the bug", "status": "Open",
+                    "id_str": "AI-1",
+                    "date_created": "2026-01-01 0:00",
+                    "date_modified": "2026-01-01 0:00",
+                },
             ],
             "expected_sheet_rows": [
                 {"id": 1, "action": "Fix the bug", "status": "Open", "doc_url_contains": "docs.google.com"},
@@ -61,10 +71,13 @@ SCENARIO_MATRIX = [
         {
             "expected_log_tag": "sync.doc-updated",
             "expected_table_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "In Review"},
+                {"id": 1, "action": "Fix the bug", "status": "In Review", "id_str": "AI-1"},
             ],
             "expected_floating_actions": [
-                {"id": 1, "action": "Fix the bug", "status": "In Review"},
+                {
+                    "id": 1, "action": "Fix the bug", "status": "In Review",
+                    "assignee_email": "test@example.com",
+                },
             ],
         },
     ),

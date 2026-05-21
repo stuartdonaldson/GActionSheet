@@ -29,6 +29,21 @@ def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes
                     f"[{name}] floating action AI-{expected['id']} status mismatch: "
                     f"expected {expected['status']!r}, got {a['status']!r}"
                 )
+            if "assignee_email" in expected:
+                assert a["assignee_token"] == expected["assignee_email"], (
+                    f"[{name}] floating action AI-{expected['id']} assignee_email mismatch: "
+                    f"expected {expected['assignee_email']!r}, got {a['assignee_token']!r}"
+                )
+            if "date_created" in expected:
+                assert a["date_created"] == expected["date_created"], (
+                    f"[{name}] floating action AI-{expected['id']} date_created mismatch: "
+                    f"expected {expected['date_created']!r}, got {a['date_created']!r}"
+                )
+            if "date_modified" in expected:
+                assert a["date_modified"] == expected["date_modified"], (
+                    f"[{name}] floating action AI-{expected['id']} date_modified mismatch: "
+                    f"expected {expected['date_modified']!r}, got {a['date_modified']!r}"
+                )
 
     if "expected_table_rows" in expectations:
         for expected in expectations["expected_table_rows"]:
@@ -45,6 +60,21 @@ def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes
                 assert row["Status"] == expected["status"], (
                     f"[{name}] table row ID={expected['id']} status mismatch: "
                     f"expected {expected['status']!r}, got {row['Status']!r}"
+                )
+            if "id_str" in expected:
+                assert row["ID"] == expected["id_str"], (
+                    f"[{name}] table row ID cell mismatch: "
+                    f"expected {expected['id_str']!r}, got {row['ID']!r}"
+                )
+            if "date_created" in expected:
+                assert row["Date Created"] == expected["date_created"], (
+                    f"[{name}] table row ID={expected['id']} date_created mismatch: "
+                    f"expected {expected['date_created']!r}, got {row['Date Created']!r}"
+                )
+            if "date_modified" in expected:
+                assert row["Date Modified"] == expected["date_modified"], (
+                    f"[{name}] table row ID={expected['id']} date_modified mismatch: "
+                    f"expected {expected['date_modified']!r}, got {row['Date Modified']!r}"
                 )
 
     if "expected_sheet_rows" in expectations:

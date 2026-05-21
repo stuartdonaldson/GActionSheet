@@ -79,6 +79,7 @@ def find_table_row(document: docx.Document, action_id: int) -> dict | None:
     if rows is None:
         return None
     for row in rows:
-        if str(row.get("ID", "")) == str(action_id):
+        raw_id = re.sub(r'^AI-', '', str(row.get("ID", "")))
+        if raw_id == str(action_id):
             return row
     return None

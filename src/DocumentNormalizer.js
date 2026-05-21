@@ -69,9 +69,21 @@ var DocumentNormalizer = (function () {
   function _dateOrEmpty(d) {
     if (!d) return '';
     var y = d.getUTCFullYear();
-    var m = d.getUTCMonth() + 1;
+    var mo = d.getUTCMonth() + 1;
     var day = d.getUTCDate();
-    return y + '-' + (m < 10 ? '0' + m : m) + '-' + (day < 10 ? '0' + day : day);
+    var h = d.getUTCHours();
+    var min = d.getUTCMinutes();
+    return y + '-' + (mo < 10 ? '0' + mo : mo) + '-' + (day < 10 ? '0' + day : day)
+      + ' ' + h + ':' + (min < 10 ? '0' + min : min);
+  }
+
+  function _parseFlexDate(v) {
+    if (!v) return null;
+    var d = new Date(v);
+    if (!isNaN(d.getTime())) return d;
+    var m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d+):(\d{2})$/);
+    if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]));
+    return null;
   }
 
   /**
@@ -188,7 +200,7 @@ var DocumentNormalizer = (function () {
       var row = table.getRow(r);
       var idStr = row.getCell(colMap['ID']).getText().trim();
       if (!idStr) continue;
-      var id = parseInt(idStr, 10);
+      var id = parseInt(idStr.replace(/^AI-/i, ''), 10);
       if (isNaN(id)) continue;
 
       var dcStr = row.getCell(colMap['Date Created']).getText().trim();
@@ -199,8 +211,8 @@ var DocumentNormalizer = (function () {
         assigneeName: row.getCell(colMap['Assignee Name']).getText().trim(),
         action: row.getCell(colMap['Action']).getText().trim(),
         status: row.getCell(colMap['Status']).getText().trim(),
-        dateCreated: dcStr ? new Date(dcStr) : null,
-        dateModified: dmStr ? new Date(dmStr) : null
+        dateCreated: _parseFlexDate(dcStr),
+        dateModified: _parseFlexDate(dmStr)
       };
 
       if (id in records) {
@@ -298,11 +310,12 @@ var DocumentNormalizer = (function () {
    * @param {object} action  Normalized action record.
    */
   function _upsertTableRow(table, colMap, action) {
-    var idStr = String(action.id);
+    var idStr = 'AI-' + action.id;
     var targetRow = -1;
 
     for (var r = 1; r < table.getNumRows(); r++) {
-      if (table.getRow(r).getCell(colMap['ID']).getText().trim() === idStr) {
+      var cellId = table.getRow(r).getCell(colMap['ID']).getText().trim();
+      if (cellId === idStr || cellId === String(action.id)) {
         targetRow = r;
         break;
       }
@@ -325,8 +338,8 @@ var DocumentNormalizer = (function () {
     row.getCell(colMap['Assignee Name']).setText(action.assigneeName || '');
     row.getCell(colMap['Action']).setText(action.action || '');
     row.getCell(colMap['Status']).setText(action.status || '');
-    row.getCell(colMap['Date Created']).setText(_isoOrEmpty(action.dateCreated));
-    row.getCell(colMap['Date Modified']).setText(_isoOrEmpty(action.dateModified));
+    row.getCell(colMap['Date Created']).setText(_dateOrEmpty(action.dateCreated));
+    row.getCell(colMap['Date Modified']).setText(_dateOrEmpty(action.dateModified));
   }
 
   /**
@@ -338,7 +351,7 @@ var DocumentNormalizer = (function () {
    * @param {string} originalAssigneeToken  The original assignee token text.
    */
   function _rewriteParagraph(para, action, originalAssigneeToken) {
-    var newText = 'AI-' + action.id + ' ' + originalAssigneeToken
+    var newText = 'AI-' + action.id + ' ' + (action.assigneeEmail || originalAssigneeToken || '')
       + ' | ' + (action.action || '')
       + ' | ' + (action.status || '')
       + ' | ' + _dateOrEmpty(action.dateCreated)
