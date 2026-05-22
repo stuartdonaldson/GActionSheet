@@ -171,10 +171,15 @@ def test_uc_scenario(scenario, expectations, test_sheet_id, test_doc_id, gas_log
 def _run_standard(scenario, expectations, test_sheet_id, test_doc_id, gas_log_dir):
     clear_logs(gas_log_dir)
     setup_and_sync(scenario, test_doc_id)
-    wait_for_log(gas_log_dir, lambda e: e.get("tag") == expectations["expected_log_tag"])
+    def _log_matches(e):
+        if e.get("tag") != expectations["expected_log_tag"]:
+            return False
+        doc_id_in_entry = e.get("data", {}).get("docId")
+        return doc_id_in_entry is None or doc_id_in_entry == test_doc_id
+    wait_for_log(gas_log_dir, _log_matches)
     xlsx_bytes = download_xlsx(test_sheet_id)
     docx_bytes = download_docx(test_doc_id)
-    assert_scenario(scenario, expectations, xlsx_bytes, docx_bytes)
+    assert_scenario(scenario, expectations, xlsx_bytes, docx_bytes, test_doc_id=test_doc_id)
 
 
 def _run_idempotent(expectations, test_sheet_id, test_doc_id, gas_log_dir):

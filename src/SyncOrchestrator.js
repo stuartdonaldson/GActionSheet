@@ -143,16 +143,19 @@ function _syncOneDoc(docId, ss, sheet) {
   if (sheetWinsCount > 0) {
     GasLogger.log('sync.sheetWins.propagating', { docId: docId, count: sheetWinsCount });
     DocumentNormalizer.applySheetWins(doc, result.sheetWins);
+  }
+
+  // Save and close before logging completion so Drive export propagates before
+  // the test detects sync.doc-updated or sync.complete in the log file.
+  doc.saveAndClose();
+
+  if (sheetWinsCount > 0) {
     GasLogger.log('sync.doc-updated', { docId: docId, count: sheetWinsCount });
   }
 
   if (result.docWins > 0) {
     GasLogger.log('sync.sheet-updated', { docId: docId, count: result.docWins });
   }
-
-  // Explicitly save and close the document to ensure all changes are persisted
-  // before sync.complete is logged and the test can download the DOCX.
-  doc.saveAndClose();
 
   return { changes: result.written, sheetWinsCount: sheetWinsCount };
 }

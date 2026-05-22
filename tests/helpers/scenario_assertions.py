@@ -1,12 +1,14 @@
 """Assertions for parametrized UC scenario matrix tests."""
-from tests.helpers.sheet_inspect import load_sheet, find_row, rows_as_dicts
+from tests.helpers.sheet_inspect import load_sheet, find_row, rows_as_dicts, rows_for_doc
 from tests.helpers.doc_inspect import load_doc, find_table_row, floating_actions, tracked_actions_table
 
 
-def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes: bytes) -> None:
+def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes: bytes,
+                    test_doc_id: str = "") -> None:
     """Assert all expectations for a scenario against downloaded xlsx and docx bytes.
 
     All assertion failure messages are prefixed with f"[{name}] " for traceability.
+    test_doc_id is used to filter sheet rows to only those belonging to the test doc.
     """
     ws = load_sheet(xlsx_bytes, sheet_name="Actions")
     doc = load_doc(docx_bytes)
@@ -104,7 +106,7 @@ def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes
         )
 
     if "expected_xlsx_active_rows" in expectations:
-        active_rows = rows_as_dicts(ws)
+        active_rows = rows_for_doc(ws, test_doc_id) if test_doc_id else rows_as_dicts(ws)
         expected_count = len(expectations["expected_xlsx_active_rows"])
         assert len(active_rows) == expected_count, (
             f"[{name}] active sheet row count mismatch: "
@@ -113,7 +115,7 @@ def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes
 
     if "expected_xlsx_archive_rows" in expectations:
         ws_archive = load_sheet(xlsx_bytes, sheet_name="Archive")
-        archive_rows = rows_as_dicts(ws_archive)
+        archive_rows = rows_as_dicts(ws_archive)  # archive cleared before each run; no doc-id filter needed
         expected_count = len(expectations["expected_xlsx_archive_rows"])
         assert len(archive_rows) == expected_count, (
             f"[{name}] archive sheet row count mismatch: "

@@ -25,6 +25,29 @@ def rows_as_dicts(ws) -> list[dict]:
     return result
 
 
+def rows_for_doc(ws, doc_id: str) -> list[dict]:
+    """Return all data rows whose Document cell URL contains doc_id."""
+    import re as _re
+    _HYPERLINK_FORMULA_RE = _re.compile(r'^=HYPERLINK\("([^"]+)"', _re.IGNORECASE)
+    cols = headers(ws)
+    doc_col = cols.get("Document")
+    result = []
+    for row in ws.iter_rows(min_row=2, values_only=False):
+        if all(c.value is None for c in row):
+            continue
+        cell_doc = row[doc_col - 1]
+        if cell_doc.hyperlink:
+            url = cell_doc.hyperlink.target or ''
+        elif isinstance(cell_doc.value, str):
+            m = _HYPERLINK_FORMULA_RE.match(cell_doc.value)
+            url = m.group(1) if m else cell_doc.value
+        else:
+            url = ''
+        if doc_id in url:
+            result.append({name: row[idx - 1].value for name, idx in cols.items()})
+    return result
+
+
 def find_row(ws, doc_url: str, action_id: int) -> dict | None:
     """Find a sheet row by document URL (hyperlink match) and ID.
 

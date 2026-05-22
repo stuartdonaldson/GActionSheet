@@ -136,18 +136,48 @@ var FloatingActionParser = (function () {
     }
 
     if (!foundChip) {
-      // No mention chip — parse the assignee from the text portion.
-      var parsed = _parseAssigneeFromText(afterPrefix);
-      if (!parsed) {
-        // No valid assignee token — treat as non-action content, skip silently.
-        if (typeof GasLogger !== 'undefined' && GasLogger && typeof GasLogger.log === 'function') {
-          GasLogger.log('sync.skip', { reason: 'invalid-email-token', docId: docId || '', paragraph: text });
+      // Pipe-prefixed format: "AI-N | [email] | action | ..."
+      // The assignee field is separated by leading ' | ' rather than a space.
+      if (afterPrefix.charAt(0) === '|') {
+        var pipeParts = afterPrefix.slice(1).split(' | ');
+        assigneeEmail = pipeParts[0].trim().replace(/^@/, '');
+        assigneeName = '';
+        var piFields = ['', '', '', ''];
+        for (var pf = 0; pf < 4 && (pf + 1) < pipeParts.length; pf++) {
+          piFields[pf] = pipeParts[pf + 1].trim();
         }
-        return null;
+        return {
+          id: id,
+          assigneeEmail: assigneeEmail,
+          assigneeName: assigneeName,
+          action: piFields[0],
+          status: piFields[1],
+          dateCreated: _parseDate(piFields[2]),
+          dateModified: _parseDate(piFields[3]),
+          paragraphIndex: paraIndex
+        };
       }
-      assigneeEmail = parsed.assigneeEmail;
-      assigneeName = parsed.assigneeName;
-      restAfterAssignee = parsed.rest;
+
+      // AI-# placeholder: old unnumbered-action marker — treat as blank assignee.
+      if (/^AI-#(\s|$)/.test(afterPrefix)) {
+        var hashPipe = afterPrefix.indexOf(' | ');
+        assigneeEmail = '';
+        assigneeName = '';
+        restAfterAssignee = hashPipe >= 0 ? afterPrefix.slice(hashPipe) : '';
+      } else {
+        // No mention chip — parse the assignee from the text portion.
+        var parsed = _parseAssigneeFromText(afterPrefix);
+        if (!parsed) {
+          // No valid assignee token — treat as non-action content, skip silently.
+          if (typeof GasLogger !== 'undefined' && GasLogger && typeof GasLogger.log === 'function') {
+            GasLogger.log('sync.skip', { reason: 'invalid-email-token', docId: docId || '', paragraph: text });
+          }
+          return null;
+        }
+        assigneeEmail = parsed.assigneeEmail;
+        assigneeName = parsed.assigneeName;
+        restAfterAssignee = parsed.rest;
+      }
     }
 
     // Now split the remainder by ' | ' to extract the pipe-delimited fields.
@@ -199,6 +229,13 @@ var FloatingActionParser = (function () {
       var actions = [];
 
       for (var i = 0; i < paras.length; i++) {
+        // Skip paragraphs inside table cells — body.getParagraphs() returns
+        // all paragraphs including table cell contents, but floating actions
+        // only appear in the main body flow.
+        var parent = paras[i].getParent();
+        if (parent && parent.getType() === DocumentApp.ElementType.TABLE_CELL) {
+          continue;
+        }
         var result = _parseParagraph(paras[i], i, docId);
         if (result !== null) {
           actions.push(result);
