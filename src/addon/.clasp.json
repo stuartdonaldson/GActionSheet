@@ -1,0 +1,7 @@
+{
+  "scriptId": "FILL_IN_AFTER_CREATING_GAS_PROJECT",
+  "rootDir": ".",
+  "scriptExtensions": [".js", ".gs"],
+  "htmlExtensions": [".html"],
+  "jsonExtensions": [".json"]
+}

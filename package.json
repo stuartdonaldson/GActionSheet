@@ -2,6 +2,7 @@
   "name": "gtasksheet-tests",
   "private": true,
   "scripts": {
+    "push:addon": "cd src/addon && clasp push",
     "test:smoke": "npx playwright test tests/playwright/smoke.test.js --config tests/playwright/playwright.config.js"
   },
   "devDependencies": {
