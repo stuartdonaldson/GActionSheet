@@ -9,12 +9,14 @@
   "addOns": {
     "common": {
       "name": "GActionSheet",
-      "logoUrl": "https://www.gstatic.com/images/branding/product/2x/apps_script_48dp.png"
+      "logoUrl": "https://www.gstatic.com/images/branding/product/2x/drive_48dp.png",
+      "homepageTrigger": {
+        "runFunction": "buildHomepageCard"
+      }
     },
     "docs": {
       "homepageTrigger": {
-        "runFunction": "buildHomepageCard",
-        "enabled": true
+        "runFunction": "buildHomepageCard"
       }
     }
   }
