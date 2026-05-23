@@ -1,5 +1,7 @@
 function doGet(e) {
   var url = ScriptApp.getService().getUrl();
+  // Normalize org-specific URL to standard form so the whitelist entry matches
+  url = url.replace(/https:\/\/script\.google\.com\/a\/[^\/]+\/macros\//, 'https://script.google.com/macros/');
   PropertiesService.getScriptProperties().setProperty('WEBAPP_URL', url);
   return ContentService.createTextOutput('WEBAPP_URL registered: ' + url);
 }
