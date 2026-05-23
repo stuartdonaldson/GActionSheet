@@ -68,6 +68,7 @@ function relayPocToSheet(e) {
   UrlFetchApp.fetch(webAppUrl, {
     method: 'post',
     contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
     payload: JSON.stringify({
       email: Session.getActiveUser().getEmail(),
       message: e.formInput.poc_input || '(empty)'
