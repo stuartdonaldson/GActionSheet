@@ -1,13 +1,27 @@
 {
   "timeZone": "America/New_York",
-  "dependencies": {
-  },
+  "dependencies": {},
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
   "oauthScopes": [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/documents",
-    "https://www.googleapis.com/auth/script.scriptapp"
-  ]
+    "https://www.googleapis.com/auth/script.scriptapp",
+    "https://www.googleapis.com/auth/script.external_request"
+  ],
+  "addOns": {
+    "common": {
+      "name": "GActionSheet",
+      "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/logo-128.png",
+      "homepageTrigger": {
+        "runFunction": "buildHomepageCard"
+      }
+    },
+    "docs": {
+      "homepageTrigger": {
+        "runFunction": "buildHomepageCard"
+      }
+    }
+  }
 }

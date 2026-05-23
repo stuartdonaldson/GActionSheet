@@ -17,7 +17,25 @@ function buildHomepageCard() {
             .setText('Test Docs API')
             .setOnClickAction(CardService.newAction().setFunctionName('onSmokeDocsApi'))
         )
+        .addWidget(
+          CardService.newTextInput()
+            .setFieldName('poc_input')
+            .setTitle('POC: proxy write message')
+        )
+        .addWidget(
+          CardService.newTextButton()
+            .setText('Test Proxy Write')
+            .setOnClickAction(CardService.newAction().setFunctionName('relayPocToSheet'))
+        )
     )
+    .build();
+}
+
+function onPing() {
+  var ts = new Date().toISOString();
+  PropertiesService.getUserProperties().setProperty('lastPing', ts);
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
     .build();
 }
 
@@ -40,10 +58,22 @@ function onSmokeDocsApi() {
     .build();
 }
 
-function onPing() {
-  var ts = new Date().toISOString();
-  PropertiesService.getUserProperties().setProperty('lastPing', ts);
+function relayPocToSheet(e) {
+  var webAppUrl = PropertiesService.getScriptProperties().getProperty('WEBAPP_URL');
+  if (!webAppUrl) {
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('FAIL: set WEBAPP_URL in script properties first'))
+      .build();
+  }
+  UrlFetchApp.fetch(webAppUrl, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      email: Session.getActiveUser().getEmail(),
+      message: e.formInput.poc_input || '(empty)'
+    })
+  });
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+    .setNotification(CardService.newNotification().setText('Proxy write sent — check ActionSheet'))
     .build();
 }
