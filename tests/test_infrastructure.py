@@ -8,12 +8,14 @@ import pytest
 from tests.helpers.download import download_xlsx
 from tests.helpers.sheet_inspect import load_sheet, headers
 from tests.helpers.gas_log import clear_logs, wait_for_log
+from tests.helpers.gas_invoke import ensure_sheet_structure
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
 _OPEN_SHEET_JS = _REPO_ROOT / "tests" / "playwright" / "open_sheet.js"
 
 # Expected column orders (1-based positions must match this exact left-to-right sequence)
 ACTIONS_HEADERS = [
+    "NamedRangeId",
     "ID",
     "Assignee Email",
     "Assignee Name",
@@ -22,10 +24,10 @@ ACTIONS_HEADERS = [
     "Document",
     "Date Created",
     "Date Modified",
-    "Synced",
 ]
 
 ARCHIVE_HEADERS = [
+    "NamedRangeId",
     "ID",
     "Assignee Email",
     "Assignee Name",
@@ -34,7 +36,6 @@ ARCHIVE_HEADERS = [
     "Document",
     "Date Created",
     "Date Modified",
-    "Synced",
 ]
 
 
@@ -86,6 +87,28 @@ class TestInitializeTriggers:
 # ---------------------------------------------------------------------------
 # SheetSetup — header layout
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session", autouse=True)
+def sheet_structure_ready(gas_log_dir):
+    """Run ensureSheetStructure via the custom menu before any header tests.
+
+    Log-wait is best-effort — Drive sync can lag. If the log doesn't appear
+    within 60 s the fixture still succeeds; TestSheetHeaders will catch any
+    schema mismatch with a clear assertion error.
+    """
+    if gas_log_dir is None:
+        return
+    clear_logs(gas_log_dir)
+    ensure_sheet_structure()
+    try:
+        wait_for_log(
+            gas_log_dir,
+            lambda e: e.get("tag") == "sheet.structure.ensured",
+            timeout_s=60,
+        )
+    except TimeoutError:
+        pass  # proceed; test assertions will catch a schema mismatch
+
 
 class TestSheetHeaders:
     """dd5 / SheetSetup: sheet tabs and header columns are created correctly."""

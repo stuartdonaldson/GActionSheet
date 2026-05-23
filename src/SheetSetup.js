@@ -6,8 +6,9 @@
  * Also resolves and persists the DOC_FOLDER_ID script property.
  */
 
-/** Canonical ordered header columns (8). */
+/** Canonical ordered header columns (9). */
 var SHEET_HEADERS = [
+  'NamedRangeId',
   'ID',
   'Assignee Email',
   'Assignee Name',

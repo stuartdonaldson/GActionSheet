@@ -5,15 +5,26 @@ import subprocess
 _SCRIPT = pathlib.Path(__file__).parent.parent / "playwright" / "invoke_gas.js"
 
 
-def _invoke(menu_item: str, arg: str | None = None, timeout: int = 60) -> None:
+def _invoke(menu_item: str, arg: str | None = None, timeout: int = 60,
+            parent: str | None = None) -> None:
     cmd = ["node", str(_SCRIPT), menu_item]
     if arg is not None:
         cmd.append(arg)
+    if parent is not None:
+        cmd.append(f"--parent={parent}")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if result.returncode != 0:
         raise RuntimeError(
             f"invoke_gas failed for menu item {menu_item!r}:\n{result.stderr}"
         )
+
+
+def ensure_sheet_structure() -> None:
+    _invoke("Ensure Sheet Structure", parent="Setup")
+
+
+def initialize_triggers() -> None:
+    _invoke("Initialize Triggers", parent="Setup")
 
 
 def setup_fixture(scenario: str) -> None:

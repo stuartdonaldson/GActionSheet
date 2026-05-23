@@ -115,10 +115,11 @@ function _tfInsertFloatingAction(body, text) {
 /**
  * Builds a sheet row array in SHEET_HEADERS order.
  *
- * SHEET_HEADERS = [ID, Assignee Email, Assignee Name, Action, Status,
- *                  Document, Date Created, Date Modified]
+ * SHEET_HEADERS = [NamedRangeId, ID, Assignee Email, Assignee Name, Action,
+ *                  Status, Document, Date Created, Date Modified]
  *
  * @param {object} opts
+ * @param {string}  opts.namedRangeId  Named range anchor ID (empty until anchor written).
  * @param {string|number} opts.id
  * @param {string}  opts.assigneeEmail
  * @param {string}  opts.assigneeName
@@ -127,10 +128,11 @@ function _tfInsertFloatingAction(body, text) {
  * @param {string}  opts.docFormula   Full =HYPERLINK(…) formula string.
  * @param {Date}    opts.dateCreated
  * @param {Date}    opts.dateModified
- * @returns {Array}  8-element array.
+ * @returns {Array}  9-element array.
  */
 function _tfSheetRow(opts) {
   return [
+    opts.namedRangeId || '',
     opts.id,
     opts.assigneeEmail || '',
     opts.assigneeName || '',
@@ -567,8 +569,7 @@ function setupAndSync(scenario) {
   }
 }
 
-// syncDocument() is defined in SyncOrchestrator.js — the real implementation
-// replaced this stub.  Do not redefine it here.
+// syncDocument() is defined in SyncManager.js.
 
 /**
  * One-time bootstrap: sets all script properties needed for testing.
