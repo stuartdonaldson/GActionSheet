@@ -10,6 +10,9 @@
     "https://www.googleapis.com/auth/script.scriptapp",
     "https://www.googleapis.com/auth/script.external_request"
   ],
+  "urlFetchWhitelist": [
+    "https://script.google.com/macros/s/"
+  ],
   "addOns": {
     "common": {
       "name": "GActionSheet",
