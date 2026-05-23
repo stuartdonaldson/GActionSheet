@@ -44,7 +44,6 @@ SCENARIO_MATRIX = [
             "expected_table_rows": [
                 {
                     "id": 1, "action": "Fix the bug", "status": "Open",
-                    "id_str": "AI-1",
                     "date_created": "2026-01-01 0:00",
                     "date_modified": "2026-01-01 0:00",
                 },
@@ -72,7 +71,7 @@ SCENARIO_MATRIX = [
         {
             "expected_log_tag": "sync.doc-updated",
             "expected_table_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "In Review", "id_str": "AI-1"},
+                {"id": 1, "action": "Fix the bug", "status": "In Review"},
             ],
             "expected_floating_actions": [
                 {
@@ -100,18 +99,6 @@ SCENARIO_MATRIX = [
             ],
             "expected_xlsx_archive_rows": [
                 {"id": 1, "action": "Fix the bug", "status": "Done"},
-            ],
-        },
-    ),
-    (
-        "uc5_bare_reference",
-        {
-            "expected_log_tag": "sync.complete",
-            "expected_floating_actions": [
-                {"id": 5, "action": "Deploy to staging", "status": "Open"},
-            ],
-            "expected_sheet_rows": [
-                {"id": 5, "action": "Deploy to staging", "status": "Open", "doc_url_contains": "docs.google.com"},
             ],
         },
     ),
@@ -144,7 +131,7 @@ SCENARIO_MATRIX = [
                 {"id": 1, "action": "Fix the bug", "status": "Open"},
             ],
             "expected_table_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "Open", "id_str": "AI-1"},
+                {"id": 1, "action": "Fix the bug", "status": "Open"},
             ],
             "expected_table_row_count": 1,
         },

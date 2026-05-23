@@ -18,32 +18,32 @@ def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes
         for expected in expectations["expected_floating_actions"]:
             matching = [a for a in actions if a["id"] == expected["id"]]
             assert matching, (
-                f"[{name}] floating action AI-{expected['id']} not found. Got: {actions}"
+                f"[{name}] floating action id={expected['id']} not found. Got: {actions}"
             )
             a = matching[0]
             if "action" in expected:
                 assert a["action"] == expected["action"], (
-                    f"[{name}] floating action AI-{expected['id']} action mismatch: "
+                    f"[{name}] floating action id={expected['id']} action mismatch: "
                     f"expected {expected['action']!r}, got {a['action']!r}"
                 )
             if "status" in expected:
                 assert a["status"] == expected["status"], (
-                    f"[{name}] floating action AI-{expected['id']} status mismatch: "
+                    f"[{name}] floating action id={expected['id']} status mismatch: "
                     f"expected {expected['status']!r}, got {a['status']!r}"
                 )
             if "assignee_email" in expected:
                 assert a["assignee_token"] == expected["assignee_email"], (
-                    f"[{name}] floating action AI-{expected['id']} assignee_email mismatch: "
+                    f"[{name}] floating action id={expected['id']} assignee_email mismatch: "
                     f"expected {expected['assignee_email']!r}, got {a['assignee_token']!r}"
                 )
             if "date_created" in expected:
                 assert a["date_created"] == expected["date_created"], (
-                    f"[{name}] floating action AI-{expected['id']} date_created mismatch: "
+                    f"[{name}] floating action id={expected['id']} date_created mismatch: "
                     f"expected {expected['date_created']!r}, got {a['date_created']!r}"
                 )
             if "date_modified" in expected:
                 assert a["date_modified"] == expected["date_modified"], (
-                    f"[{name}] floating action AI-{expected['id']} date_modified mismatch: "
+                    f"[{name}] floating action id={expected['id']} date_modified mismatch: "
                     f"expected {expected['date_modified']!r}, got {a['date_modified']!r}"
                 )
 
