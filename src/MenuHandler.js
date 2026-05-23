@@ -14,11 +14,13 @@ function onOpen() {
       SpreadsheetApp.getUi().createMenu('Setup')
         .addItem('Ensure Sheet Structure', 'menuEnsureSheetStructure')
         .addItem('Initialize Triggers', 'menuInitializeTriggers')
+        .addItem('Bootstrap Test Properties', 'menuBootstrap')
     )
     .addSeparator()
     .addItem('Test: Setup Fixture', 'menuSetupFixture')
     .addItem('Test: Sync Document', 'menuSyncDocument')
     .addItem('Test: Setup And Sync', 'menuSetupAndSync')
+    .addItem('Test: Debug Doc Body', 'menuDebugDocBody')
     .addToUi();
 }
 
@@ -28,6 +30,10 @@ function menuEnsureSheetStructure() {
 
 function menuInitializeTriggers() {
   initializeTriggers();
+}
+
+function menuBootstrap() {
+  bootstrap();
 }
 
 function menuSync() {
@@ -47,6 +53,10 @@ function menuSyncDocument() {
 function menuSetupAndSync() {
   var scenario = _readTestControlArg();
   setupAndSync(scenario);
+}
+
+function menuDebugDocBody() {
+  debugDocBody();
 }
 
 function _readTestControlArg() {

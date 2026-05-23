@@ -71,7 +71,11 @@ function onActionSheetEdit(e) {
 // ---------------------------------------------------------------------------
 
 /**
- * Walks the doc body and returns one entry per chip-led paragraph.
+ * Walks the doc body and returns one entry per chip-led paragraph or list item.
+ *
+ * Both PARAGRAPH and LIST_ITEM elements are scanned — users create chip-led
+ * actions in both plain paragraphs and bullet/checklist list items (GAS represents
+ * bulleted/checked lists as LIST_ITEM, not PARAGRAPH).
  *
  * @param {GoogleAppsScript.Document.Document} doc
  * @returns {Array<{bodyChildIndex, paragraph, assigneeEmail, assigneeName, actionText, status}>}
@@ -82,10 +86,13 @@ function _scanChipLedActions(doc) {
   var actions = [];
 
   for (var i = 0; i < n; i++) {
-    var child = body.getChild(i);
-    if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
+    var child     = body.getChild(i);
+    var childType = child.getType();
+    var isPara     = childType === DocumentApp.ElementType.PARAGRAPH;
+    var isListItem = childType === DocumentApp.ElementType.LIST_ITEM;
+    if (!isPara && !isListItem) continue;
 
-    var para = child.asParagraph();
+    var para = isPara ? child.asParagraph() : child.asListItem();
     if (para.getNumChildren() === 0) continue;
 
     var firstChild = para.getChild(0);
@@ -153,10 +160,14 @@ function _buildAnchoredIndexMap(doc) {
 
     if (el.getType() === DocumentApp.ElementType.PARAGRAPH) {
       para = el.asParagraph();
+    } else if (el.getType() === DocumentApp.ElementType.LIST_ITEM) {
+      para = el.asListItem();
     } else if (el.getType() === DocumentApp.ElementType.TEXT) {
       var parent = el.getParent();
       if (parent && parent.getType() === DocumentApp.ElementType.PARAGRAPH) {
         para = parent.asParagraph();
+      } else if (parent && parent.getType() === DocumentApp.ElementType.LIST_ITEM) {
+        para = parent.asListItem();
       }
     }
 
@@ -260,10 +271,14 @@ function _upsertActionRows(anchorResults, docUrl, docTitle) {
     });
   }
 
+  // Include the caller's OAuth token so the Web App (access: ANYONE) accepts
+  // the request without redirecting to a Google login page.
+  var oauthToken = ScriptApp.getOAuthToken();
   var resp = UrlFetchApp.fetch(webAppUrl, {
     method:          'post',
     contentType:     'application/json',
     muteHttpExceptions: true,
+    headers:         { 'Authorization': 'Bearer ' + oauthToken },
     payload:         JSON.stringify({
       secret:   secret || '',
       action:   'upsert_action_rows',

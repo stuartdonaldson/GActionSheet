@@ -19,6 +19,10 @@ def _invoke(menu_item: str, arg: str | None = None, timeout: int = 60,
         )
 
 
+def bootstrap() -> None:
+    _invoke("Bootstrap Test Properties", parent="Setup")
+
+
 def ensure_sheet_structure() -> None:
     _invoke("Ensure Sheet Structure", parent="Setup")
 
@@ -37,6 +41,10 @@ def sync_document(doc_id: str) -> None:
 
 def sync_all() -> None:
     _invoke("Sync")
+
+
+def debug_doc_body() -> None:
+    _invoke("Test: Debug Doc Body")
 
 
 def setup_and_sync(scenario: str, doc_id: str | None = None) -> None:

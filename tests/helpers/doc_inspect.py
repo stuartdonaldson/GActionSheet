@@ -46,7 +46,8 @@ def floating_actions(document: docx.Document) -> list[dict]:
 
     result = []
     for para in document.paragraphs:
-        if para._element.find(qn('w:numPr')) is None:
+        # w:numPr is nested inside w:pPr, not a direct child of w:p.
+        if para._element.find('.//' + qn('w:numPr')) is None:
             continue  # not a list paragraph
 
         full_text = para.text.strip()

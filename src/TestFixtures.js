@@ -113,6 +113,122 @@ function _tfInsertFloatingAction(body, text) {
 }
 
 /**
+ * Inserts a chip-led bulleted list item at the start of the document via the
+ * Docs REST API batchUpdate.  Must be called AFTER doc.saveAndClose() so the
+ * DocumentApp changes are flushed and the REST API sees the current state.
+ *
+ * The person chip (@mention) is created with insertPerson; the list format is
+ * applied with createParagraphBullets.  Both happen in one atomic batchUpdate.
+ *
+ * @param {string} token     OAuth2 access token from ScriptApp.getOAuthToken()
+ * @param {string} docId     Document ID
+ * @param {string} email     Assignee email — must be in the user's contacts or
+ *                           Google Workspace directory, otherwise insertPerson
+ *                           will fail with a 400.
+ * @param {string} actionText Text to append after the chip on the same line
+ */
+function _tfInsertPersonChipListItem(token, docId, email, actionText) {
+  var baseUrl    = 'https://docs.googleapis.com/v1/documents/';
+  var authHeader = { 'Authorization': 'Bearer ' + token };
+
+  // GET the document body to determine the current content layout.
+  var getResp = UrlFetchApp.fetch(
+    baseUrl + docId + '?fields=body.content',
+    { headers: authHeader, muteHttpExceptions: true }
+  );
+  if (getResp.getResponseCode() !== 200) {
+    throw new Error('Docs GET failed (' + getResp.getResponseCode() + '): ' +
+                    getResp.getContentText());
+  }
+  var docData = JSON.parse(getResp.getContentText());
+  var content = (docData.body && docData.body.content) || [];
+
+  // Find the last paragraph element to determine what needs to be cleared.
+  // The Docs API never allows deleting the last paragraph; we clear its content.
+  var lastParaStartIndex = null;
+  var lastParaEndIndex   = null;
+  for (var ci = content.length - 1; ci >= 0; ci--) {
+    if (content[ci].paragraph) {
+      lastParaStartIndex = content[ci].startIndex;
+      lastParaEndIndex   = content[ci].endIndex;
+      break;
+    }
+  }
+  if (lastParaStartIndex === null) {
+    throw new Error('_tfInsertPersonChipListItem: no paragraph found in doc body');
+  }
+
+  var requests = [];
+
+  // Clear the doc body to a single empty paragraph.
+  //
+  // The Docs API never allows deleting the last paragraph in the body — it is the
+  // mandatory section-end marker. We must KEEP it but delete its content.
+  //
+  // Two cases:
+  //  A) Multiple paragraphs — delete everything before the last paragraph, which
+  //     shifts the last (empty) paragraph to index 1.  If the last paragraph also
+  //     has content, delete that content too.
+  //  B) Single paragraph (e.g. the chip from a previous fixture run) — delete its
+  //     content (indices 1..endIndex-2 inclusive) leaving only the trailing \n.
+  //     We cannot use lastParaStartIndex == 1 as a "nothing to delete" guard here.
+  if (lastParaStartIndex > 1) {
+    // Case A: remove all paragraphs before the last one.
+    requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: lastParaStartIndex } } });
+    // After this deletion, the last paragraph sits at index 1.  It should normally
+    // be empty, but delete any residual content just in case.
+    var lastParaContentLen = lastParaEndIndex - lastParaStartIndex - 1;
+    if (lastParaContentLen > 0) {
+      requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: 1 + lastParaContentLen } } });
+    }
+  } else if (lastParaEndIndex > 2) {
+    // Case B: single paragraph with content — delete content, preserve trailing \n.
+    // endIndex is exclusive, so delete [1, endIndex-1) to keep only the \n at endIndex-1.
+    requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: lastParaEndIndex - 1 } } });
+  }
+  // After clearing: one empty paragraph at index 1-2 (just the \n).
+
+  // batchUpdate requests (applied in order; indices shift after each):
+  //  1. createParagraphBullets — marks the paragraph as a bulleted list item.
+  //     floating_actions() in the Python test detects this via w:numPr in .docx.
+  //  2. insertPerson           — inserts the @mention chip at index 1.
+  //     The chip occupies exactly 1 index in the Docs character stream.
+  //  3. insertText             — appends " <actionText>" after the chip (now at index 2).
+  requests.push({
+    createParagraphBullets: {
+      range: { startIndex: 1, endIndex: 2 },
+      bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE'
+    }
+  });
+  requests.push({
+    insertPerson: {
+      personProperties: { email: email },
+      location: { index: 1 }
+    }
+  });
+  requests.push({
+    insertText: {
+      location: { index: 2 },
+      text: ' ' + actionText
+    }
+  });
+
+  var batchResp = UrlFetchApp.fetch(
+    baseUrl + docId + ':batchUpdate',
+    {
+      method: 'post',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeader),
+      payload: JSON.stringify({ requests: requests }),
+      muteHttpExceptions: true
+    }
+  );
+  if (batchResp.getResponseCode() !== 200) {
+    throw new Error('Docs batchUpdate failed (' + batchResp.getResponseCode() + '): ' +
+                    batchResp.getContentText());
+  }
+}
+
+/**
  * Builds a sheet row array in SHEET_HEADERS order.
  *
  * SHEET_HEADERS = [NamedRangeId, ID, Assignee Email, Assignee Name, Action,
@@ -194,30 +310,58 @@ function setupTestFixtures(scenario) {
     var docUrl     = doc.getUrl();
     var docFormula = '=HYPERLINK("' + docUrl + '","Test Doc")';
 
-    // -- Step 1: clear both sheets; reset doc body only for non-preserving scenarios ----
-    // Scenarios in PRESERVE_DOC_BODY keep the existing doc content (e.g. real person chips)
-    // and only clear the ActionSheet + named ranges.
-    var PRESERVE_DOC_BODY = ['uc_a_clear'];
+    // -- Step 1: clear both sheets -----------------------------------------
     _tfClearSheetTab(ss, 'Actions');
     _tfClearSheetTab(ss, 'Archive');
-    if (PRESERVE_DOC_BODY.indexOf(resolvedScenario) === -1) {
+
+    // -- Step 2: clear doc body -------------------------------------------
+    // UC-A clears via the Docs REST API deleteContentRange inside
+    // _tfInsertPersonChipListItem (called later, after saveAndClose).
+    // All other scenarios use DocumentApp to reset to the standard heading.
+    if (resolvedScenario !== 'uc_a_clear') {
       _tfResetDocBody(body);
     }
 
-    // -- Step 2: seed per scenario ------------------------------------------
+    // -- Step 3: seed per scenario; track whether doc was already closed ----
+    var docAlreadyClosed = false;
     switch (resolvedScenario) {
 
       case 'uc_a_clear':
-        // UC-A fixture: clear ActionSheet and all named ranges in the test doc.
-        // The doc body is NOT cleared (PRESERVE_DOC_BODY) so existing chip-led
-        // checklist items remain as "new" unanchored actions for the sync to discover.
+        // Remove all named ranges (unanchors existing actions).
         var namedRanges = doc.getNamedRanges();
         for (var nri = 0; nri < namedRanges.length; nri++) {
           namedRanges[nri].remove();
         }
-        GasLogger.log('fixture.uc_a_clear', {
-          namedRangesRemoved: namedRanges.length
-        });
+        // Flush DocumentApp writes before using the Docs REST API —
+        // the REST API must see the cleared body before inserting the chip.
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        // Insert a chip-led list item via the Docs REST API batchUpdate.
+        // The chip is the assignee; the action text follows it on the same line.
+        var ucaToken = ScriptApp.getOAuthToken();
+        var ucaEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                    || Session.getActiveUser().getEmail();
+        try {
+          _tfInsertPersonChipListItem(ucaToken, testDocId, ucaEmail,
+                                      'Review the budget report');
+          GasLogger.log('fixture.uc_a_clear', {
+            namedRangesRemoved: namedRanges.length,
+            assigneeEmail: ucaEmail
+          });
+        } catch (chipErr) {
+          GasLogger.log('fixture.error', {
+            msg: chipErr.message,
+            scenario: 'uc_a_clear',
+            step: 'insertPersonChip'
+          });
+          // Re-log with the uc_a_clear tag so the test fails with a clear message
+          // rather than timing out waiting for a log entry that never arrives.
+          GasLogger.log('fixture.uc_a_clear', {
+            namedRangesRemoved: namedRanges.length,
+            assigneeEmail: ucaEmail,
+            error: chipErr.message
+          });
+        }
         break;
 
       case 'uc1_new_floating':
@@ -555,9 +699,16 @@ function setupTestFixtures(scenario) {
         break;
     }
 
-    doc.saveAndClose();
+    if (!docAlreadyClosed) {
+      doc.saveAndClose();
+    }
 
     GasLogger.log('fixture.setup', { scenario: resolvedScenario });
+  } catch (outerErr) {
+    // Catch errors that escape the per-scenario try blocks so the test always
+    // receives a log entry instead of timing out on an empty flush.
+    GasLogger.log('fixture.error', { msg: outerErr.message, scenario: resolvedScenario });
+    GasLogger.log('fixture.' + resolvedScenario, { error: outerErr.message });
   } finally {
     GasLogger.flush();
   }
@@ -590,25 +741,70 @@ function setupAndSync(scenario) {
 // syncDocument() is defined in SyncManager.js.
 
 /**
+ * Diagnostic: logs the body element types of the test doc to GasLogger.
+ * Run via "Test: Debug Doc Body" menu item to verify fixture state.
+ */
+function debugDocBody() {
+  var props   = PropertiesService.getScriptProperties();
+  var testDocId = props.getProperty('TEST_DOC_ID');
+  GasLogger.log('debug.props', {
+    webAppUrl:    props.getProperty('WEBAPP_URL'),
+    hasSecret:    !!props.getProperty('WEBAPP_SECRET'),
+    testSheetId:  props.getProperty('TEST_SHEET_ID'),
+    testDocId:    testDocId
+  });
+  var doc  = DocumentApp.openById(testDocId);
+  var body = doc.getBody();
+  var n    = body.getNumChildren();
+  var items = [];
+  for (var i = 0; i < n; i++) {
+    var child = body.getChild(i);
+    var type  = child.getType().toString();
+    var item  = { index: i, type: type };
+    var isPara = child.getType() === DocumentApp.ElementType.PARAGRAPH;
+    var isList = child.getType() === DocumentApp.ElementType.LIST_ITEM;
+    if (isPara || isList) {
+      var para = isPara ? child.asParagraph() : child.asListItem();
+      item.numChildren = para.getNumChildren();
+      if (para.getNumChildren() > 0) {
+        item.firstChildType = para.getChild(0).getType().toString();
+        if (para.getChild(0).getType() === DocumentApp.ElementType.PERSON) {
+          item.personEmail = para.getChild(0).asPerson().getEmail();
+        }
+      }
+      item.text = para.getText().substring(0, 40);
+    }
+    items.push(item);
+  }
+  GasLogger.log('debug.docBody', { docId: testDocId, numChildren: n, items: items });
+  GasLogger.flush();
+}
+
+/**
  * One-time bootstrap: sets all script properties needed for testing.
- * Run once from the Apps Script editor function picker, then never again.
+ * Run once from the Apps Script editor function picker after each fresh deploy.
  *
  * Properties set:
  *   TEST_SHEET_ID        — the bound spreadsheet used for testing
  *   TEST_DOC_ID          — the Google Doc used for testing
  *   GAS_LOGGER_FOLDER_ID — the Drive folder GasLogger writes .log files to
+ *   TEST_ASSIGNEE_EMAIL  — email used for the chip-led list item in UC-A fixtures
+ *   TEST_ASSIGNEE_NAME   — display name for the chip (optional; email used as fallback)
  */
 function bootstrap() {
   var props = PropertiesService.getScriptProperties();
   props.setProperties({
     'TEST_SHEET_ID':        '10UCsEHPL2RjA1IduUSFDSaA2lpkoCuZY79sIjratH_s',
     'TEST_DOC_ID':          '11jA0FMowlJbyxyJoK6bePVvcO63niVrKcXA0eMJW1F4',
-    'GAS_LOGGER_FOLDER_ID': '1lg2CWtOmDGglMVasSjEk3jTaW9SXcO6s'
+    'GAS_LOGGER_FOLDER_ID': '1lg2CWtOmDGglMVasSjEk3jTaW9SXcO6s',
+    'TEST_ASSIGNEE_EMAIL':  'stuart.donaldson@gmail.com',
+    'TEST_ASSIGNEE_NAME':   'Stuart Donaldson'
   });
   GasLogger.log('bootstrap.complete', {
     testSheetId:     '10UCsEHPL2RjA1IduUSFDSaA2lpkoCuZY79sIjratH_s',
     testDocId:       '11jA0FMowlJbyxyJoK6bePVvcO63niVrKcXA0eMJW1F4',
-    logFolderId:     '1lg2CWtOmDGglMVasSjEk3jTaW9SXcO6s'
+    logFolderId:     '1lg2CWtOmDGglMVasSjEk3jTaW9SXcO6s',
+    assigneeEmail:   'stuart.donaldson@gmail.com'
   });
   GasLogger.flush();
 }
