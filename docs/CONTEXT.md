@@ -26,8 +26,8 @@ GActionSheet captures and tracks action items inside Google Docs and aggregates 
 ## Constraints
 
 ### Technical Constraints
-- The sidebar is a Google Workspace Add-on for Docs (standalone script with an add-on manifest); the cross-doc automation is a separate container-bound script on the ActionSheet
-- The two Apps Script projects share no code and never call each other — they communicate only through ActionSheet rows
+- GActionSheet is a single GAS project (`scriptId: 12EKX7dQiO1Wf7rvv94Adgpbh3nac0OetsZMTD_1lme3y2o1KLYdKcTXi`), container-bound to the ActionSheet spreadsheet. It is deployed simultaneously as a Workspace Add-on (sidebar card in Docs) and a Web App (proxy endpoint for sheet writes). `appsscript.json` declares both `addOns` and `webapp` sections
+- Web App access must be **"Anyone"** (not "Anyone within org") — the org SSO policy enforces authentication on `UrlFetchApp` requests regardless of headers if set to org-restricted; `executeAs` must be `USER_DEPLOYING` for sheet-write authority
 - The GCP project linked to the add-on must have the **Google Docs REST API** enabled (used for `createNamedRange`, `deleteNamedRange`, and tracker-table `batchUpdate` operations); the add-on requires the `https://www.googleapis.com/auth/script.external_request` scope to call the REST API
 - DocumentApp is used for read-side traversal because it exposes PERSON chips ergonomically; the REST API is used for write-side anchoring and table mutation
 - GAS execution time limit: 6 minutes per run. The timed sweep batches docs to stay within the limit
@@ -85,6 +85,8 @@ The tracker table is itself anchored by a named range so refresh can replace its
 ---
 
 ## Core Capabilities
+- **Web App proxy endpoint** — the same GAS script is deployed as a Web App; the add-on uses `UrlFetchApp` to call `doPost`, which runs as the deployer identity with sheet-write authority over the ActionSheet
+- **Proxy-write pattern** — bridges the cross-identity boundary: add-on runs as the active user (read-only doc access); Web App runs as the deployer (`executeAs: USER_DEPLOYING`); no service account required
 - Detect actions in the **active doc** (the doc the sidebar is attached to) as checklist items beginning with a PERSON chip
 - Anchor each action with a named range; the `namedRangeId` is the stable identity recorded in the ActionSheet
 - Maintain a trailing `(Status)` token on each action paragraph; default `(Open)`, recognize `(Closed)` for archiving, preserve any other value as a free-form custom status
@@ -224,3 +226,9 @@ Errors are surfaced in the sidebar (for add-on operations) or logged to the auto
 | Sweep | The time-based reconcile run on the ActionSheet that iterates rows grouped by document and pulls updates from docs no one opened recently. |
 | Sync | One on-demand round in the sidebar that scans the active doc and reconciles ActionSheet rows for that doc in one shot. |
 | Tracker table | The in-doc summary table written by **Insert / refresh tracker**, preceded by an instructional paragraph summarizing the sync rules. |
+| Proxy-write | The pattern where the add-on calls the Web App to perform writes under the deployer identity, bridging the add-on's active-user identity to the deployer's sheet-write authority. |
+| BUILD_INFO | Version/timestamp object stamped into `src/Version.js` by `update-revision.js` before each deployment. |
+| WEBAPP_URL | Script property storing the canonical Web App URL; set automatically by `doGet` (which also normalizes org-specific URL format variants). |
+| WEBAPP_SECRET | Shared secret script property used to authenticate `doPost` requests from the add-on. Bearer tokens are not propagated by the Apps Script runtime. |
+| TEST-WEB-APP | Anchor string in a deployment description used by `manage-deployments.js` to discover the test Web App deployment ID. |
+| PROD-WEB-APP | Anchor string in a deployment description used by `manage-deployments.js` to discover the prod Web App deployment ID. |

@@ -1,12 +1,106 @@
 # DESIGN — GActionSheet
 
 ## Solution Strategy
-GActionSheet is split into two independently deployed Apps Script projects that share no code and never call each other; their only contract is the row schema of the **ActionSheet** spreadsheet.
+GActionSheet is a single GAS project, container-bound to the ActionSheet spreadsheet, deployed simultaneously as a Workspace Add-on and a Web App. All action-sync logic lives in one codebase; the two deployment modes serve different runtime roles.
 
-- The **Add-on project** is a standalone Apps Script with a Google Workspace Add-on manifest for Docs. It provides the sidebar UI shown in the active document, scans the doc for chip-led checklist items, anchors each action with a named range (via the Docs REST API `batchUpdate`), and reconciles the doc's actions with rows in the ActionSheet on demand.
-- The **Automation project** is a container-bound Apps Script on the ActionSheet. It owns the installable `onEdit` trigger (stamping `Last Modified` on user edits), the time-based sweep trigger (reconciles docs no one opened recently), and the archive job (Closed + 30d → archive sheet).
+- The **Workspace Add-on deployment** provides the sidebar UI in the active document. It scans the doc for chip-led checklist items, anchors each action with a named range (via the Docs REST API `batchUpdate`), and reconciles the doc's actions with rows in the ActionSheet via a `doPost` proxy call to the Web App deployment.
+- The **Web App deployment** acts as a proxy endpoint. Because the add-on runs as the active user (who may not have edit access to the ActionSheet), all sheet writes are routed through `doPost`, which runs as the deployer (`executeAs: USER_DEPLOYING`) and has sheet-write authority.
+- The **Automation feature set** (timed sweep trigger, `onEdit` timestamp stamper, archive job) is implemented within the same script and activated by installable triggers on the ActionSheet container.
 
 Stable action identity comes from a named range whose `namedRangeId` is recorded on the ActionSheet row. DocumentApp is used for read-side traversal because it exposes PERSON chips ergonomically; the Docs REST API is used for write-side anchoring and tracker-table mutation because it supports named ranges and atomic batch updates.
+
+---
+
+## Deployment Architecture
+
+### Single-script dual-deployment
+
+One GAS project (`scriptId: 12EKX7dQiO1Wf7rvv94Adgpbh3nac0OetsZMTD_1lme3y2o1KLYdKcTXi`) is container-bound to the ActionSheet spreadsheet. It is deployed simultaneously as:
+
+- A **Workspace Add-on** (sidebar card in Docs/Sheets)
+- A **Web App** (HTTP endpoint for proxy writes)
+
+Both modes share the same source files. The `rootDir` in `.clasp.json` is `src/`; `appsscript.json` declares both `addOns` and `webapp` sections. Stable deployment IDs are maintained via `clasp deploy -i <id>` so URLs never change across pushes.
+
+### Identity boundary and proxy-write pattern
+
+Workspace Add-ons run as the active user. The ActionSheet is a restricted resource — end users should not have direct edit access. The Web App runs as the deployer (`executeAs: USER_DEPLOYING`), which has sheet-write authority.
+
+```
+[Add-on sidebar]
+      |
+      | UrlFetchApp.fetch(WEBAPP_URL, { method: 'post', payload: JSON })
+      v
+[doPost — runs as deployer]
+      |
+      | sheet.appendRow(...)
+      v
+[ActionSheet]
+```
+
+Authentication between add-on and Web App uses a shared secret (`WEBAPP_SECRET` script property). Apps Script Web Apps do not propagate Google identity via Bearer tokens.
+
+### URL stability and org normalization
+
+On northlakeuu.org, `ScriptApp.getService().getUrl()` returns:
+`https://script.google.com/a/northlakeuu.org/macros/s/<id>/exec`
+
+This is normalized in `doGet` to the canonical form:
+`https://script.google.com/macros/s/<id>/exec`
+
+and stored in the `WEBAPP_URL` script property so a single `urlFetchWhitelist` entry matches. `WEBAPP_URL` is updated automatically on each Web App visit; no manual copy-paste after redeployment.
+
+### Module Map
+
+| File | Role |
+|------|------|
+| `src/Addon.js` | Card builder, button handlers, UrlFetchApp proxy call |
+| `src/WebApp.js` | `doGet` (self-register URL), `doPost` (verify secret, write to sheet) |
+| `src/Version.js` | `BUILD_INFO` — stamped by `update-revision.js` before each deploy |
+| `src/appsscript.json` | Manifest — addOns, webapp, oauthScopes, urlFetchWhitelist |
+
+### Deployment Pipeline
+
+```
+npm run deploy:test
+  └─ update-revision.js        → stamps src/Version.js with version + timestamp
+  └─ manage-deployments.js     → finds TEST-WEB-APP deployment by anchor string
+                                  clasp push (--force if needed)
+                                  clasp deploy -i <id> -d "<description>"
+                                  writes .deploy-metadata.json
+```
+
+Release pipeline (`npm run release:patch`) additionally runs `commit-deploy-stamp.js`, which reads `.deploy-metadata.json` and commits `src/Version.js` with deployment metadata.
+
+### Script Properties
+
+| Property | Set by | Purpose |
+|----------|--------|---------|
+| `WEBAPP_URL` | `doGet` (auto) | Normalized Web App URL for UrlFetchApp calls |
+| `WEBAPP_SECRET` | Manual (script editor) | Shared secret for doPost authentication |
+| `GAS_LOGGER_FOLDER_ID` | Manual | Drive folder for GasLogger output (TDD phase) |
+| `TEST_DOC_ID` | Manual / `bootstrap()` | Test Google Doc ID for smoke tests |
+| `TEST_SHEET_ID` | Manual / `bootstrap()` | Test Sheet ID for smoke tests |
+
+### urlFetchWhitelist
+
+Required in `appsscript.json` for any Workspace Add-on that calls `UrlFetchApp`. Three entries cover all URL format variants produced by northlakeuu.org:
+
+```json
+"urlFetchWhitelist": [
+  "https://script.google.com/a/macros/northlakeuu.org/s/",
+  "https://script.google.com/a/northlakeuu.org/macros/s/",
+  "https://script.google.com/macros/s/"
+]
+```
+
+Omitting `urlFetchWhitelist` produces a hard error at call time, not a manifest validation error.
+
+### Deployment Constraints
+
+- Web App access must be **"Anyone"** (not "Anyone within org") — org SSO enforces authentication on `UrlFetchApp` requests regardless of headers when set to org-restricted
+- Web App `executeAs` must be **"USER_DEPLOYING"** to have sheet-write authority
+- `urlFetchWhitelist` is mandatory for any UrlFetchApp call from a Workspace Add-on
 
 ---
 

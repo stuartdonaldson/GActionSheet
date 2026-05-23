@@ -324,12 +324,114 @@ ffmpeg -i logo.png -vf scale=32:32  logo-32.png  -y
 
 ---
 
+---
+
+## Web App Proxy Pattern (Add-on + Web App, Single Script)
+
+A single GAS project can simultaneously serve as a Workspace Add-on and a Web App endpoint. This pattern is useful when the add-on needs to write to a resource the active user may not have permission to access directly.
+
+### Architecture
+
+```
+[Add-on sidebar (runs as active user)]
+      |
+      | UrlFetchApp.fetch(WEBAPP_URL, { method: 'post', payload: JSON })
+      v
+[doPost — runs as deployer (executeAs: USER_DEPLOYING)]
+      |
+      | sheet.appendRow(...)
+      v
+[Target resource (ActionSheet / restricted Sheet)]
+```
+
+### Manifest requirements
+
+Both `addOns` and `webapp` sections must coexist in `appsscript.json`:
+
+```json
+{
+  "webapp": {
+    "access": "ANYONE",
+    "executeAs": "USER_DEPLOYING"
+  },
+  "addOns": {
+    "common": { },
+    "docs": { }
+  },
+  "urlFetchWhitelist": [
+    "https://script.google.com/macros/s/"
+  ]
+}
+```
+
+**`urlFetchWhitelist` is mandatory** for any Workspace Add-on that calls `UrlFetchApp`. Omitting it produces a hard error at call time, not a manifest validation error.
+
+### Authentication
+
+Bearer token forwarding does not work for Apps Script Web App endpoints — Google does not propagate the caller's identity. Use a **shared secret** instead:
+
+```javascript
+// doPost
+var expected = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
+if (!expected || payload.secret !== expected) {
+  return ContentService.createTextOutput('unauthorized');
+}
+```
+
+### Org policy requirement
+
+Web App access must be set to **"Anyone"** — not "Anyone within org". When set to org-restricted, Google enforces SSO on all incoming requests including those from `UrlFetchApp`, returning HTTP 401 regardless of any auth header sent.
+
+This is an **org admin setting**, not a script setting. The deploying admin must change it in the deployment configuration.
+
+### URL self-registration and normalization
+
+On Google Workspace org accounts, `ScriptApp.getService().getUrl()` may return an org-specific URL format (`/a/<org>/macros/`) that differs from the standard form. Normalize in `doGet` and store in script properties:
+
+```javascript
+function doGet(e) {
+  var url = ScriptApp.getService().getUrl();
+  url = url.replace(/https:\/\/script\.google\.com\/a\/[^\/]+\/macros\//, 'https://script.google.com/macros/');
+  PropertiesService.getScriptProperties().setProperty('WEBAPP_URL', url);
+  return ContentService.createTextOutput('WEBAPP_URL registered: ' + url);
+}
+```
+
+This eliminates manual URL copy-paste after each redeployment.
+
+### urlFetchWhitelist — org URL variants
+
+If the whitelist must cover org-specific URL forms (e.g., before normalization is in place), add all variants:
+
+```json
+"urlFetchWhitelist": [
+  "https://script.google.com/a/macros/<orgdomain>/s/",
+  "https://script.google.com/a/<orgdomain>/macros/s/",
+  "https://script.google.com/macros/s/"
+]
+```
+
+### Stable deployment URLs
+
+Use `clasp deploy -i <deploymentId>` to redeploy in-place. The URL never changes across pushes; only the internal version number increments. Discover deployment IDs programmatically by matching an anchor string in the deployment description (e.g., `TEST-WEB-APP`).
+
+---
+
 ## Minimum `npm` Scripts
 
 ```json
 "scripts": {
-  "push:addon": "cd src/addon && clasp push",
-  "push:addon:force": "cd src/addon && clasp push --force",
-  "deploy:addon": "cd src/addon && clasp deploy --description \"v$(date +%Y%m%d)\""
+  "push": "clasp push",
+  "push:force": "clasp push --force",
+  "update-revision": "node update-revision.js",
+  "deploy:test": "npm run update-revision && node manage-deployments.js --deploy-test",
+  "deploy:prod": "npm run update-revision && node manage-deployments.js --deploy-prod",
+  "release:patch": "npm version patch && npm run deploy:prod && node commit-deploy-stamp.js && git push --follow-tags"
 }
 ```
+
+**Notes:**
+- `clasp push --force` needed only when clasp 3.x hash cache skips unchanged files
+- `manage-deployments.js` discovers deployment IDs by anchor string in description; no hardcoded IDs in scripts
+- `commit-deploy-stamp.js` reads `.deploy-metadata.json` written by `manage-deployments.js` and commits `src/Version.js` with deployment metadata
+- Add `.deploy-metadata.json` to `.gitignore`
