@@ -12,7 +12,8 @@
     "https://www.googleapis.com/auth/userinfo.email"
   ],
   "urlFetchWhitelist": [
-    "https://script.google.com/a/macros/northlakeuu.org/s/"
+    "https://script.google.com/a/macros/northlakeuu.org/s/",
+    "https://script.google.com/macros/s/"
   ],
   "addOns": {
     "common": {
