@@ -65,11 +65,12 @@ function relayPocToSheet(e) {
       .setNotification(CardService.newNotification().setText('FAIL: set WEBAPP_URL in script properties first'))
       .build();
   }
+  var secret = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
   UrlFetchApp.fetch(webAppUrl, {
     method: 'post',
     contentType: 'application/json',
-    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
     payload: JSON.stringify({
+      secret: secret,
       email: Session.getActiveUser().getEmail(),
       message: e.formInput.poc_input || '(empty)'
     })
