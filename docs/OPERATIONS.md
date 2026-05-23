@@ -29,6 +29,21 @@ clasp clone <scriptId>
 clasp status
 ```
 
+### Static Assets (GitHub Pages)
+
+Logo and other static assets are served from GitHub Pages. The repository must be public and
+Pages must be enabled once:
+
+1. GitHub repo → Settings → Pages
+2. Source: Deploy from a branch
+3. Branch: master, folder: / (root)
+4. Save — the site publishes at `https://stuartdonaldson.github.io/GActionSheet/`
+
+Asset URL pattern: `https://stuartdonaldson.github.io/GActionSheet/assets/<filename>`
+
+The `.nojekyll` file at the repo root suppresses Jekyll processing so PNG files are served
+without path rewriting.
+
 ### Installation
 ```bash
 clasp push          # push source to Apps Script
