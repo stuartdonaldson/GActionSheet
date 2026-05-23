@@ -12,7 +12,31 @@ function buildHomepageCard() {
             .setText('Ping')
             .setOnClickAction(CardService.newAction().setFunctionName('onPing'))
         )
+        .addWidget(
+          CardService.newTextButton()
+            .setText('Test Docs API')
+            .setOnClickAction(CardService.newAction().setFunctionName('onSmokeDocsApi'))
+        )
     )
+    .build();
+}
+
+function smokeDocsApi() {
+  var docId = DocumentApp.getActiveDocument().getId();
+  var url = 'https://docs.googleapis.com/v1/documents/' + docId;
+  var resp = UrlFetchApp.fetch(url, {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+  var code = resp.getResponseCode();
+  if (code !== 200) throw new Error('Expected 200, got ' + code + ': ' + resp.getContentText());
+  return code;
+}
+
+function onSmokeDocsApi() {
+  var code = smokeDocsApi();
+  return CardService.newActionResponseBuilder()
+    .setNotification(CardService.newNotification().setText('Docs API: HTTP ' + code))
     .build();
 }
 
