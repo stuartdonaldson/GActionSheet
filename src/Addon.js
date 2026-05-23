@@ -1,82 +1,68 @@
+/**
+ * Addon.js
+ *
+ * Workspace Add-on card builder and button handlers.
+ * Entry point: buildHomepageCard() — registered as homepageTrigger in appsscript.json.
+ */
+
 function buildHomepageCard() {
-  var lastPing = PropertiesService.getUserProperties().getProperty('lastPing');
-  var statusText = lastPing ? 'Last ping: ' + lastPing : 'GActionSheet sidebar — alive';
+  var section = CardService.newCardSection();
+
+  var doc = DocumentApp.getActiveDocument();
+  if (!doc) {
+    section.addWidget(
+      CardService.newTextParagraph().setText('Open a Google Doc to use Action Sync.')
+    );
+  } else {
+    section
+      .addWidget(CardService.newTextParagraph().setText(doc.getName()))
+      .addWidget(
+        CardService.newTextButton()
+          .setText('Sync now')
+          .setOnClickAction(CardService.newAction().setFunctionName('onSyncNow'))
+      );
+  }
+
+  section.addWidget(CardService.newTextParagraph().setText(BUILD_INFO.version));
 
   return CardService.newCardBuilder()
-    .setHeader(CardService.newCardHeader().setTitle('GActionSheet'))
-    .addSection(
-      CardService.newCardSection()
-        .addWidget(CardService.newTextParagraph().setText(statusText))
-        .addWidget(
-          CardService.newTextButton()
-            .setText('Ping')
-            .setOnClickAction(CardService.newAction().setFunctionName('onPing'))
-        )
-        .addWidget(
-          CardService.newTextButton()
-            .setText('Test Docs API')
-            .setOnClickAction(CardService.newAction().setFunctionName('onSmokeDocsApi'))
-        )
-        .addWidget(
-          CardService.newTextInput()
-            .setFieldName('poc_input')
-            .setTitle('POC: proxy write message')
-        )
-        .addWidget(
-          CardService.newTextButton()
-            .setText('Test Proxy Write')
-            .setOnClickAction(CardService.newAction().setFunctionName('relayPocToSheet'))
-        )
-        .addWidget(CardService.newTextParagraph().setText(BUILD_INFO.version))
-    )
+    .setHeader(CardService.newCardHeader().setTitle('Action Sync'))
+    .addSection(section)
     .build();
 }
 
-function onPing() {
-  var ts = new Date().toISOString();
-  PropertiesService.getUserProperties().setProperty('lastPing', ts);
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
-    .build();
+function onSyncNow() {
+  var doc = DocumentApp.getActiveDocument();
+  if (!doc) {
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('No active document'))
+      .build();
+  }
+  try {
+    syncDocument(doc.getId());
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('Sync complete'))
+      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+      .build();
+  } catch (e) {
+    GasLogger.log('addon.sync.error', { msg: e.message });
+    GasLogger.flush();
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('Sync failed: ' + e.message))
+      .build();
+  }
 }
+
+// Smoke-test helpers (retained for diagnostics)
 
 function smokeDocsApi() {
   var docId = DocumentApp.getActiveDocument().getId();
-  var url = 'https://docs.googleapis.com/v1/documents/' + docId;
-  var resp = UrlFetchApp.fetch(url, {
+  var url   = 'https://docs.googleapis.com/v1/documents/' + docId;
+  var resp  = UrlFetchApp.fetch(url, {
     headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
     muteHttpExceptions: true
   });
   var code = resp.getResponseCode();
   if (code !== 200) throw new Error('Expected 200, got ' + code + ': ' + resp.getContentText());
   return code;
-}
-
-function onSmokeDocsApi() {
-  var code = smokeDocsApi();
-  return CardService.newActionResponseBuilder()
-    .setNotification(CardService.newNotification().setText('Docs API: HTTP ' + code))
-    .build();
-}
-
-function relayPocToSheet(e) {
-  var webAppUrl = PropertiesService.getScriptProperties().getProperty('WEBAPP_URL');
-  if (!webAppUrl) {
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('FAIL: set WEBAPP_URL in script properties first'))
-      .build();
-  }
-  var secret = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
-  UrlFetchApp.fetch(webAppUrl, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({
-      secret: secret,
-      email: Session.getActiveUser().getEmail(),
-      message: e.formInput.poc_input || '(empty)'
-    })
-  });
-  return CardService.newActionResponseBuilder()
-    .setNotification(CardService.newNotification().setText('Proxy write sent — check ActionSheet'))
-    .build();
 }

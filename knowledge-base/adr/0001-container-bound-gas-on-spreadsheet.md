@@ -1,6 +1,6 @@
 # ADR-0001: Container-Bound GAS on the Spreadsheet
 
-Status: Accepted
+Status: Superseded by ADR-0005
 Date: 2026-05-19
 
 ## Context

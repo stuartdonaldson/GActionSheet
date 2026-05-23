@@ -194,17 +194,35 @@ function setupTestFixtures(scenario) {
     var docUrl     = doc.getUrl();
     var docFormula = '=HYPERLINK("' + docUrl + '","Test Doc")';
 
-    // -- Step 1: clear both sheets and reset the doc body -------------------
+    // -- Step 1: clear both sheets; reset doc body only for non-preserving scenarios ----
+    // Scenarios in PRESERVE_DOC_BODY keep the existing doc content (e.g. real person chips)
+    // and only clear the ActionSheet + named ranges.
+    var PRESERVE_DOC_BODY = ['uc_a_clear'];
     _tfClearSheetTab(ss, 'Actions');
     _tfClearSheetTab(ss, 'Archive');
-    _tfResetDocBody(body);
+    if (PRESERVE_DOC_BODY.indexOf(resolvedScenario) === -1) {
+      _tfResetDocBody(body);
+    }
 
     // -- Step 2: seed per scenario ------------------------------------------
     switch (resolvedScenario) {
 
+      case 'uc_a_clear':
+        // UC-A fixture: clear ActionSheet and all named ranges in the test doc.
+        // The doc body is NOT cleared (PRESERVE_DOC_BODY) so existing chip-led
+        // checklist items remain as "new" unanchored actions for the sync to discover.
+        var namedRanges = doc.getNamedRanges();
+        for (var nri = 0; nri < namedRanges.length; nri++) {
+          namedRanges[nri].remove();
+        }
+        GasLogger.log('fixture.uc_a_clear', {
+          namedRangesRemoved: namedRanges.length
+        });
+        break;
+
       case 'uc1_new_floating':
       case 'default':
-        // New unnumbered floating action — sync assigns id=1.
+        // Legacy: AI-prefix floating action — sync assigns id=1.
         _tfInsertFloatingAction(
           body,
           'AI- @test@example.com | Fix the bug | Open | 2026-01-01 | 2026-01-01'

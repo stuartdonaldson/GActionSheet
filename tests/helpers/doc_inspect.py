@@ -2,8 +2,11 @@
 import io
 import re
 import docx
+from docx.oxml.ns import qn
 
 _SECTION_HEADING = "=== Tracked Actions ==="
+_STATUS_RE = re.compile(r'\(([^)]*)\)\s*$')
+_EMAIL_RE  = re.compile(r'[\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+', re.IGNORECASE)
 
 
 def load_doc(docx_bytes: bytes) -> docx.Document:
@@ -13,10 +16,90 @@ def load_doc(docx_bytes: bytes) -> docx.Document:
 def floating_actions(document: docx.Document) -> list[dict]:
     """Return all floating-action checklist items as parsed dicts.
 
-    Detection: checklist paragraphs with a person chip assigned.
-    Not yet implemented — returns empty list pending new parser.
+    Detection: list/checklist paragraphs (w:numPr present) where the first
+    meaningful content resolves to an assignee.
+
+    When Google Docs exports a PERSON chip to .docx it becomes either:
+      (a) a hyperlink whose display text is the person's name — the relationship
+          target may be a Google profile URL, not mailto:; OR
+      (b) a plain-text run with the person's display name or email address.
+
+    Strategy:
+      1. Collect all relationship targets (URLs) from the document part for
+         hyperlinks that contain an email address (mailto: or ?email= params).
+      2. For each list paragraph, extract the full text and any hyperlink URLs.
+      3. Try to find an email: first from hyperlink rel targets, then from a
+         regex match on the raw text (covers the case where the chip renders as
+         the email address itself).
+      4. Parse the trailing (Status) token; default status is 'Open'.
+
+    Returns list of dicts with keys: assignee_email, assignee_name, action, status.
     """
-    return []
+    # Build a map: rId -> target URL for all hyperlink relationships
+    hyperlink_urls: dict[str, str] = {}
+    try:
+        for rel in document.part.rels.values():
+            if 'hyperlink' in rel.reltype:
+                hyperlink_urls[rel.rId] = rel.target_ref or ''
+    except Exception:
+        pass
+
+    result = []
+    for para in document.paragraphs:
+        if para._element.find(qn('w:numPr')) is None:
+            continue  # not a list paragraph
+
+        full_text = para.text.strip()
+        if not full_text:
+            continue
+
+        # Collect hyperlink URLs referenced from this paragraph's XML
+        para_emails: list[str] = []
+        for hl in para._element.findall(f'.//{qn("w:hyperlink")}'):
+            r_id = hl.get(f'{{{hl.nsmap.get("r", "http://schemas.openxmlformats.org/officeDocument/2006/relationships")}}}id', '')
+            url = hyperlink_urls.get(r_id, '')
+            # mailto: link
+            m = re.match(r'mailto:([^\?&]+)', url, re.IGNORECASE)
+            if m:
+                para_emails.append(m.group(1).strip())
+                continue
+            # email= query param (Google profile links)
+            m = re.search(r'[?&]email=([^&]+)', url, re.IGNORECASE)
+            if m:
+                import urllib.parse
+                para_emails.append(urllib.parse.unquote(m.group(1)).strip())
+
+        # Parse trailing (Status) token
+        status = 'Open'
+        action_text = full_text
+        sm = _STATUS_RE.search(full_text)
+        if sm:
+            status = sm.group(1).strip() or 'Open'
+            action_text = full_text[:sm.start()].strip()
+
+        # Determine assignee email
+        assignee_email = ''
+        assignee_name  = ''
+        if para_emails:
+            assignee_email = para_emails[0]
+        else:
+            # Try to find email pattern in the raw text (chip rendered as email address)
+            em = _EMAIL_RE.match(action_text)
+            if em:
+                assignee_email = em.group(0)
+                action_text = action_text[len(assignee_email):].strip()
+
+        if not assignee_email and not assignee_name:
+            continue  # can't identify assignee — not a trackable floating action
+
+        result.append({
+            'assignee_email': assignee_email,
+            'assignee_name':  assignee_name,
+            'action':         action_text,
+            'status':         status,
+        })
+
+    return result
 
 
 def tracked_actions_table(document: docx.Document) -> list[dict] | None:

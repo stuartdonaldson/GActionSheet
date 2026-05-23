@@ -28,32 +28,12 @@ from tests.helpers.scenario_assertions import assert_scenario
 # Each entry: (scenario_name, expectations_dict)
 # ---------------------------------------------------------------------------
 
+
+# UC-A scenarios (uc1_new_floating, uc_blank_status) have been superseded by
+# the chip-led architecture tests in tests/test_uc_a.py.  The AI-prefix
+# fixture format is legacy; do not add new AI-prefix scenarios here.
+
 SCENARIO_MATRIX = [
-    (
-        "uc1_new_floating",
-        {
-            "expected_log_tag": "sync.complete",
-            "expected_floating_actions": [
-                {
-                    "id": 1, "action": "Fix the bug", "status": "Open",
-                    "assignee_email": "test@example.com",
-                    "date_created": "2026-01-01 0:00",
-                    "date_modified": "2026-01-01 0:00",
-                },
-            ],
-            "expected_table_rows": [
-                {
-                    "id": 1, "action": "Fix the bug", "status": "Open",
-                    "date_created": "2026-01-01 0:00",
-                    "date_modified": "2026-01-01 0:00",
-                },
-            ],
-            "expected_table_row_count": 1,
-            "expected_sheet_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "Open", "doc_url_contains": "docs.google.com"},
-            ],
-        },
-    ),
     (
         "uc2_new_table_row",
         {
@@ -121,19 +101,6 @@ SCENARIO_MATRIX = [
         "uc_idempotent",
         {
             "expected_log_tag": "sync.complete",
-        },
-    ),
-    (
-        "uc_blank_status",
-        {
-            "expected_log_tag": "sync.complete",
-            "expected_floating_actions": [
-                {"id": 1, "action": "Fix the bug", "status": "Open"},
-            ],
-            "expected_table_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "Open"},
-            ],
-            "expected_table_row_count": 1,
         },
     ),
 ]
