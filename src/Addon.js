@@ -27,6 +27,7 @@ function buildHomepageCard() {
             .setText('Test Proxy Write')
             .setOnClickAction(CardService.newAction().setFunctionName('relayPocToSheet'))
         )
+        .addWidget(CardService.newTextParagraph().setText(BUILD_INFO.version))
     )
     .build();
 }
