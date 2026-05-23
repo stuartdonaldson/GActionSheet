@@ -3,309 +3,209 @@
 ## Introduction & Goals
 
 ### Purpose
-GActionSheet synchronizes action items bidirectionally between a Google Sheet hub and multiple Google Docs. Document authors capture actions inline using a lightweight `AI-` prefix syntax; the system normalizes, assigns identifiers, and reconciles records across all registered documents on a 30-minute cycle or on-demand from a sheet menu.
+GActionSheet captures and tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Authors create actions natively — a checklist item that begins with a Google Docs person chip is an action assigned to that person. Each action is anchored with a named range so its identity survives edits. The sidebar (a Workspace Add-on) is the user-facing surface for the active document; the ActionSheet is the cross-doc store.
 
 ### Quality Goals
 | Priority | Quality Goal | Scenario |
 |----------|-------------|----------|
-| 1 | Idempotence | Running sync twice in succession produces no additional changes to any document or sheet row |
-| 2 | Data integrity | No action record is silently overwritten; timestamp precedence determines the winner on every conflict |
-| 3 | Operability | A document author can capture an action item by typing a single line in a Doc, with no sheet interaction required |
-| 4 | Recoverability | A sync that errors mid-run leaves documents and the sheet in a consistent, non-corrupt state |
+| 1 | Idempotence | Clicking **Sync now** twice in succession with no edits produces no further writes to the doc or the ActionSheet |
+| 2 | Data integrity | No action record is silently overwritten; `Last Modified` precedence determines the winner on every conflict |
+| 3 | Operability | A document author can capture an action by adding a checklist item that begins with a person chip — no typed prefix, no separate sheet interaction |
+| 4 | Stable identity | An action's anchor (named range) survives edits elsewhere in the doc; no duplicate ActionSheet rows are produced |
 
 ### Stakeholders
 | Stakeholder | Expectation |
 |-------------|-------------|
-| Administrator | One-time setup via `initializeTriggers`; clear error messages when configuration is missing |
-| Document author | Capture action items inline in any registered Doc without opening the sheet |
-| Action owner | Update status and assignee directly in the sheet; changes propagate to the source Doc on next sync |
-| Reviewer / manager | Filter and search all open action items across all documents from a single sheet |
+| Administrator | One-time deploy of the add-on (private or admin-deployed) and the container-bound automation; clear errors when configuration is missing |
+| Document author | Capture and update actions in a Doc without leaving the document; the sidebar reflects the doc's current state |
+| Action owner | Edit status, action text, or assignee in the ActionSheet; changes propagate to the doc on the next Sync |
+| Reviewer / manager | Filter and search all open actions across all docs from the ActionSheet |
 
 ---
 
 ## Constraints
 
 ### Technical Constraints
-- Runs as a container-bound Google Apps Script attached to the tracking Spreadsheet
-- GAS execution time limit: 6 minutes per run; sync of large document sets may require batching
-- DocumentApp quota limits apply; large documents with many paragraphs increase execution time
-- All source documents must reside within a single Drive folder tree identified by `DOC_FOLDER_ID`
-- The executing user must have edit access to both the Spreadsheet and all source documents in scope
-- Simple `onEdit` triggers cannot call external services; the sheet-update trigger is an installable trigger
+- The sidebar is a Google Workspace Add-on for Docs (standalone script with an add-on manifest); the cross-doc automation is a separate container-bound script on the ActionSheet
+- The two Apps Script projects share no code and never call each other — they communicate only through ActionSheet rows
+- The GCP project linked to the add-on must have the **Google Docs REST API** enabled (used for `createNamedRange`, `deleteNamedRange`, and tracker-table `batchUpdate` operations); the add-on requires the `https://www.googleapis.com/auth/script.external_request` scope to call the REST API
+- DocumentApp is used for read-side traversal because it exposes PERSON chips ergonomically; the REST API is used for write-side anchoring and table mutation
+- GAS execution time limit: 6 minutes per run. The timed sweep batches docs to stay within the limit
+- The executing user (sidebar) must have edit access to the active doc; the automation script's owner must have access to all docs referenced by ActionSheet rows
+- Simple `onEdit` triggers cannot call external services; the ActionSheet timestamp stamper is an installable trigger
+- The visual checked state of a checklist item is **not** readable through any Google API; the source of truth for status is the trailing `(Status)` token
 
-### Format and Normalization Constraints
-- Dates written in Google Docs use the format `YYYY-MM-DD h:m`.
-- A partial date such as `5/20` is normalized using the supplied month and day, plus the year and time taken from the document's last-modified timestamp captured at sync start.
-- An omitted or empty date is interpreted as the document's last-modified timestamp captured at sync start.
-- The literal field separator between action-line tokens is ` | ` (space-pipe-space).
-- An assignee token in a document may take one of three forms: bare email (e.g. `user@example.com`), display-name-and-email (e.g. `'Name' <user@example.com>`), or a Google Docs mention chip that embeds the display name and email address.
-- An omitted or empty `status` is interpreted as `Open`.
+### Action Format
+- An **action** is a checklist item (Google Docs checklist; visually a checkbox) whose first inline child is a Google Docs PERSON chip
+- The assignee email and display name come from the chip
+- Action text is everything after the chip on the same paragraph, with any trailing `(Status)` token stripped
+- Status lives in a trailing parenthesized token at the end of the paragraph; `(Open)` is the default written when missing; `(Closed)` is recognized for archiving; any other value is preserved verbatim as a free-form status
+- Each action is anchored by a named range whose `namedRangeId` is the durable identity stored in the ActionSheet
+- Dates are stored in the ActionSheet as native sheet date values; in the in-doc tracker table they are written using the sheet's locale-formatted date
 
 ### Organizational Constraints
-- No external service dependencies; the system runs entirely within Google Workspace
-- No server infrastructure; all logic executes within GAS
+- No external service dependencies; both projects run entirely within Google Workspace
+- No server infrastructure
 
 ---
 
-## Sheet Schema
+## ActionSheet Schema
 
-### Tracking Sheet Columns
+### ActionSheet Columns
 
 | Column | Notes |
 |--------|-------|
-| ID | Document-scoped sequential integer |
-| Assignee Email | Canonical email address extracted from the assignee token |
-| Assignee Name | Display name extracted from the assignee token; empty when the token is a bare email |
-| Action | Action item text |
-| Status | Current status; `Open` when omitted |
+| NamedRangeId | The durable identity of the action; matches the `namedRangeId` of the anchor named range in the source doc |
+| ID | Document-scoped sequential integer for human reference (e.g. shown in the tracker table) |
+| Assignee Email | Canonical email address from the person chip |
+| Assignee Name | Display name from the person chip |
+| Action | Action item text (chip stripped, trailing `(Status)` stripped) |
+| Status | Current status; `Open` by default, `Closed` recognized for archiving, otherwise free-form |
 | Document | Hyperlink cell — display text is the document title, target is the document URL |
-| Date Created | Timestamp when the row was first written to the sheet |
-| Date Modified | Last reconcile or edit time; empty means the row has never been synced (no separate Synced column exists). |
+| Assigned Date | Date the action was first written to the ActionSheet |
+| Last Modified | Most recent reconcile or user edit time; empty means the row has never been synced (no separate Synced column) |
 
-Sheet filters are enabled on all columns.
+Sheet filters are enabled on all columns. The Document column is always written as a hyperlink cell; plain-text document names are not accepted.
 
-### Tracked-Actions Table Columns
+### In-Doc Action Tracker Table
 
-The tracked-actions table inside each Google Doc mirrors the tracking sheet schema minus the Document column:
+The in-doc tracker is a table inserted by the **Insert / refresh tracker** button, preceded by a short instructional paragraph summarizing the sync rules:
 
 | Column | Notes |
 |--------|-------|
 | ID | Document-scoped sequential integer |
-| Assignee Email | Canonical email address |
-| Assignee Name | Display name; empty for bare-email tokens |
-| Action | Action item text |
+| Assignee | Display name (or email if name is empty) |
+| Action | Action text |
 | Status | Current status |
-| Date Created | Timestamp when the row was first written |
-| Date Modified | Last reconcile or edit time |
+| Assigned Date | Date first synced |
+| Last Modified | Most recent reconcile or edit time |
 
-### Hyperlink-Cell Rule
-
-The Document column in the tracking sheet is always written as a hyperlink cell: display text = document title, target = document URL. Plain-text document names are not accepted.
+The tracker table is itself anchored by a named range so refresh can replace its contents in place without disturbing surrounding doc content.
 
 ---
 
 ## Core Capabilities
-- Within a document, the tracked-actions table is the authoritative record of every action; floating action paragraphs are rewritten to match it on every sync. A floating action whose `AI-` identifier is not yet present in the table seeds a new row.
-- Detect and parse floating action paragraphs (`AI-<id> @assignee | action | status | dates`) in any Google Doc. The `assignee` token may be either a plain email address or a Google Docs person tile that embeds the display name and email address. The `status` and trailing `dates` fields are optional when detected. The `action` field may contain any text, including spaces, and extends either to the end of the paragraph or to the next `|` delimiter when a `status` field follows. An omitted or empty `status` is interpreted as `Open`. An omitted or empty date is interpreted as the action record's last modification timestamp. Dates written in Google Docs use the format `YYYY-MM-DD h:m`.
-- Assign sequential numeric IDs to unnumbered floating actions, persisting them back to the document in the same sync
-- Normalize floating actions into a tracked-actions table within the same document
-- Reconcile document action records with sheet rows using last-modified-timestamp conflict resolution
-- Propagate sheet edits back to source documents on the next timed or on-demand sync
-- Discover source documents automatically from a configured Drive folder tree, scanning only documents modified in the last 7 days
-- Archive action records with `Status = Closed` that have not been modified in more than 30 days
-- Run bidirectional sync on a 30-minute time-based trigger or on-demand via an `Action Sync` sheet menu
+- Detect actions in the **active doc** (the doc the sidebar is attached to) as checklist items beginning with a PERSON chip
+- Anchor each action with a named range; the `namedRangeId` is the stable identity recorded in the ActionSheet
+- Maintain a trailing `(Status)` token on each action paragraph; default `(Open)`, recognize `(Closed)` for archiving, preserve any other value as a free-form custom status
+- Sync the active doc to the ActionSheet on demand from the sidebar — a single **Sync now** action that scans the doc and reconciles ActionSheet rows in one round (push/pull resolved by `Last Modified`)
+- Insert or refresh the in-doc tracker table on demand, prefixed with concise instructional text summarizing the sync rules
+- Periodic timed sweep (owned by the ActionSheet automation script) reconciles all docs referenced by ActionSheet rows, catching docs no one opened recently
+- Archive ActionSheet rows with `Status = Closed` and `Last Modified > 30 days` to the archive sheet
 
 ---
 
 ## Use Cases
 
-### Invariants (apply to every use case below)
+### Invariants (apply to every use case)
 
-- **Authority within a document.** The tracked-actions table is the authoritative representation of every action record. Floating actions are rewritten to match the table on every sync. The single exception is initialization: when a floating action carries an `AI-` identifier (including the placeholder `AI-#`) that does not yet exist in the tracked-actions table, that floating action seeds a new row in the table.
-- **Modified-date precedence.** Each action record carries a `Date Modified` timestamp in both the table and the sheet. A blank `Date Modified` is treated as "just updated": the system sets it to the sync-start time and propagates the record outward. When the table row and the sheet row both have timestamps, the newer one wins and is propagated to the other.
-- **Sync is eventually consistent.** Authority and precedence are evaluated at sync time, not at edit time.
-- **Tie-break rule.** When `Date Modified` is equal on the sheet row and the table row but content differs, the sheet row wins.
-
-Individual use cases do not restate these invariants; their acceptance criteria assume them.
+- **Identity is the named range.** The `namedRangeId` of the action's anchor is the durable key. ActionSheet rows are keyed on `NamedRangeId`. The doc-scoped `ID` is for human reference only.
+- **Status is the trailing parenthesized token.** The visual checkbox state is decorative; the parenthesized status string is the truth.
+- **Modified-date precedence.** Each row carries a `Last Modified` timestamp on both sides. Later wins. On tie, the ActionSheet row wins. A blank `Last Modified` means "just edited" — it is stamped to sync-start time and propagated.
+- **Sync is eventually consistent.** Per-doc Sync is on-demand from the sidebar; cross-doc consistency is provided by the timed sweep.
 
 ---
 
-### UC-1: Capture a New Floating Action
+### UC-A: Capture and track a new action
 
 Actor: Document author
 
 Preconditions:
-- The document resides in the folder tree identified by `DOC_FOLDER_ID`
-- The document contains exactly one tracked-actions section (`=== Tracked Actions ===`)
+- The add-on is installed and the user has the doc open
 
 Primary Flow:
-1. Author types a floating action paragraph anywhere in the document, with an assignee expressed either as a plain email address or a Google Docs person tile, and with `status` and trailing dates optionally omitted: `AI- @assignee@example.com | Complete proposal draft` or `AI- | @assignee@example.com | Complete proposal draft`
-2. On the next sync (timed or via menu), the system parses the floating action
-3. System assigns the next available sequential ID for that document
-4. System rewrites the floating action paragraph with the assigned ID and normalized values, filling in `Open` and the document's last modification timestamp captured at sync start when those fields were omitted; dates written back to the Google Doc use the format `YYYY-MM-DD h:m`
-5. System adds a corresponding row to the tracked-actions table
-6. System creates a matching row in the tracking sheet with the document as a hyperlink cell
+1. Author writes a checklist item that begins with a person chip and optional action text.
+2. Author opens the sidebar and clicks **Sync now**.
+3. The add-on scans the doc, recognizes the new chip-led checklist item as an action, creates a named range anchoring it, and writes a row to the ActionSheet with `Status = Open`.
+4. The sidebar refreshes and shows the new action.
 
 Postconditions:
-- The action record exists in the tracked-actions table with a permanent ID
-- The sheet contains a matching row keyed on `(Document, ID)`
-- The floating action paragraph reflects the assigned ID and normalized status/timestamps using the Google Doc date format `YYYY-MM-DD h:m`
-
-Constraints:
-- ID uniqueness is scoped to the document; the same integer may appear in different documents
-- The assignee token may be represented in the source document as a plain email address or a Google Docs person tile that embeds the display name and email address
-- An omitted or empty status in the source paragraph is interpreted as `Open`
-- An omitted or empty date in the source paragraph is interpreted as the action record's last modification timestamp captured from the document at sync start
-- A partial date such as `5/20` is normalized to `YYYY-MM-DD h:m` using the supplied month and day, and the year and time from the document's last modification timestamp captured at sync start
+- The action has a `namedRangeId`-anchored row in the ActionSheet.
+- The action's paragraph ends with `(Open)` (added by the add-on if absent).
 
 Acceptance Criteria:
-- After sync, every floating action paragraph has a matching row in the tracked-actions table, keyed on the document-scoped ID.
-- After sync, every floating action paragraph has a matching tracking-sheet row keyed on `(Document, ID)`.
-- A floating action paragraph without a numeric ID receives the next available document-scoped ID during sync; existing explicit IDs are preserved.
-- A floating action paragraph with no `status` is normalized to `Open`.
-- A floating action paragraph with no date is normalized to the document's last-modified timestamp captured at sync start.
+- After clicking Sync, a newly typed chip-led checklist item appears in the sidebar and in the ActionSheet, with the assignee email resolved from the chip and `Status = Open`.
+- The action's anchor survives an unrelated edit elsewhere in the doc — a second Sync does not produce a duplicate row.
+- A second Sync with no further edits produces no writes to the doc or the ActionSheet.
 
 ---
 
-### UC-2: Capture a New Action in the Tracked-Actions Table
+### UC-B: Update an action from either side and converge
+
+Actor: Action owner (ActionSheet side) **or** Document author (floating action side)
+
+Preconditions:
+- The action already exists with a row on the ActionSheet and a chip-led checklist paragraph in the doc, sharing a `namedRangeId`
+
+Authoritative edit surfaces:
+- The **floating action paragraph** (chip + action text + trailing `(Status)`) is the doc-side authority.
+- The **ActionSheet row** is the cross-doc authority.
+- The **in-doc tracker table is view-only**. Edits made directly inside its cells are not propagated and are overwritten on the next **Insert / refresh tracker** click. (See UC-C.)
+
+Primary Flow:
+1. Either the action owner edits `Status`, `Action`, or `Assignee` in the ActionSheet row, or the author edits the floating action paragraph in the doc (changing the trailing `(Status)`, the action text, or replacing the person chip with a different person).
+2. The next Sync (sidebar click or timed sweep) detects the difference and applies the later-modified side's values to the other.
+
+Postconditions:
+- Both authoritative sides match.
+- `Last Modified` on both sides reflects the time of the original user edit.
+
+Acceptance Criteria:
+- A sheet edit to `Status`, `Action`, or `Assignee` reaches the floating action paragraph after Sync, regardless of which side was edited last; later `Last Modified` wins.
+- A doc edit to the floating action propagates to the ActionSheet after Sync for all three mutation types: trailing `(Status)` change (free-form value preserved verbatim), action text change, and chip-replaced assignee change.
+- The action's named-range anchor survives every edit type above, and no duplicate ActionSheet rows are created.
+- Edits typed directly into the in-doc tracker table cells are **not** reflected on the ActionSheet by any Sync; the next tracker refresh restores the rendered values from the floating actions (covered by UC-C).
+
+---
+
+### UC-C: Insert / refresh the in-doc tracker table
 
 Actor: Document author
 
 Preconditions:
-- The document resides in the folder tree identified by `DOC_FOLDER_ID`
-- The document contains exactly one tracked-actions section (`=== Tracked Actions ===`)
-- The tracked-actions table is writable by the executing user
+- The doc contains at least one action
 
 Primary Flow:
-1. Author adds a new row to the tracked-actions table in the document, providing an assignee and action text, with `status` and date fields optionally omitted
-2. On the next sync (timed or via menu), the system parses the new tracked-actions table row
-3. System assigns the next available sequential ID for that document if the row does not already contain an explicit ID
-4. System normalizes the row values, filling in `Open` and the document's last modification timestamp captured at sync start when those fields were omitted; dates written in the Google Doc use the format `YYYY-MM-DD h:m`
-5. System creates or updates the corresponding floating action paragraph for the same action record in the document
-6. System creates a matching row in the tracking sheet with the document as a hyperlink cell
+1. Author clicks **Insert / refresh tracker** in the sidebar.
+2. The add-on inserts (or refreshes) the tracker table at its anchor, prefixed with the instructional paragraph, with one row per current action in document order.
 
 Postconditions:
-- The action record exists in the tracked-actions table with a permanent document-scoped ID
-- The document contains a matching floating action paragraph for the same action record
-- The sheet contains a matching row keyed on `(Document, ID)`
-
-Constraints:
-- ID uniqueness is scoped to the document; the same integer may appear in different documents
-- The assignee token may be represented in the source document as a plain email address or a Google Docs person tile that embeds the display name and email address
-- An omitted or empty status in the source row is interpreted as `Open`
-- An omitted or empty date in the source row is interpreted as the action record's last modification timestamp captured from the document at sync start
+- The tracker table reflects the current set of actions in document order.
 
 Acceptance Criteria:
-- After sync, every tracked-actions table row has a matching floating action paragraph in the same document.
-- After sync, every tracked-actions table row has a matching tracking-sheet row keyed on `(Document, ID)`.
-- A new tracked-actions row without an explicit ID receives the next available document-scoped ID during sync.
-- A new tracked-actions row with no `status` is normalized to `Open`.
-- A new tracked-actions row with no date is normalized to the document's last-modified timestamp captured at sync start.
+- First click on a doc with N actions produces the instructional paragraph plus a table with N rows in document order, anchored so subsequent refreshes update in place.
+- A subsequent click after the user closes one action and adds another produces a table that reflects both changes, in the same location, without leaving stale rows.
+- The tracker table is **view-only**: any edit a user types directly into its cells is discarded on the next refresh and replaced by the rendered values from the floating actions and ActionSheet. The instructional paragraph above the table states this explicitly.
 
 ---
 
-### UC-3: Propagate Sheet Updates to the Table and Floating Actions
+### UC-D: Archive closed actions
 
-Actor: Action owner
-
-Preconditions:
-- The action record exists in the tracking sheet
-- The source document is accessible by the executing user
-
-Primary Flow:
-1. Action owner edits one or more mutable fields for an existing action record in the tracking sheet
-2. The installable `onEdit` trigger fires and updates `Date Modified` for that row
-3. On the next sync, the sheet row has a later `Date Modified` than the document record
-4. System updates the tracked-actions table row in the source document
-5. System rewrites the matching floating action paragraph to reflect the new values, filling any previously omitted status or date fields with the normalized values; dates written back to the Google Doc use the format `YYYY-MM-DD h:m`
-
-Postconditions:
-- The tracked-actions table and any floating action paragraph reflect the sheet's current values
-- `Date Modified` in both sheet and document reflects the time of the original sheet edit, and the floating action paragraph uses the Google Doc date format `YYYY-MM-DD h:m`
-
-Constraints:
-- Sheet-to-document propagation is eventually consistent; changes appear in the document on the next sync, not in real time
+Actor: System (timed sweep on the ActionSheet)
 
 Acceptance Criteria:
-- When the sheet row has the latest `Date Modified`, the next sync rewrites both the matching tracked-actions table row and the matching floating action paragraph to the sheet's values.
-- After sync, the tracked-actions table row and the floating action paragraph reflect the same values (the table is authoritative; the floating paragraph mirrors it).
-- A blank `Date Modified` on the sheet row is treated as a dirty edit and propagated outward; there is no separate Synced column — reconciliation state is recorded solely in `Date Modified`.
-- If the source document is unavailable during sync, the sheet row is not considered successfully applied until a later sync can update both document representations.
-
----
-
-### UC-4: Archive Closed Actions
-
-Actor: System (timed sync)
-
-Preconditions:
-- The tracking sheet contains rows with `Status = Closed`
-- Those rows have not been modified in more than 30 days
-
-Primary Flow:
-1. During sync, the system identifies eligible rows in the tracking sheet
-2. System appends each eligible row to the archive sheet
-3. System removes the row from the tracking sheet
-4. `Date Modified` is not changed during the move
-
-Postconditions:
-- Archived rows are visible in the archive sheet
-- The tracking sheet no longer contains closed rows older than 30 days
-- No document content is altered by archiving
-
-Constraints:
-- Moving a row to the archive sheet does not suppress future syncs for that action record if it reappears in a document
-
-Acceptance Criteria:
-- A tracking-sheet row with `Status = Closed` whose `Date Modified` is older than 30 days is moved from the tracking sheet to the archive sheet on the next eligible sync, and removed from the tracking sheet in the same sync.
-- An archived row preserves its `Date Modified`.
+- An ActionSheet row with `Status = Closed` and `Last Modified > 30 days` is moved from the ActionSheet to the archive sheet on the next sweep, preserving `Last Modified`.
 - Archiving does not alter any document content.
-- If a previously archived action record reappears in a document, a later sync may create or restore an active tracking-sheet row for that record.
-
----
-
-### UC-5: Reference an Existing Action by ID in a Floating Paragraph
-
-Actor: Document author
-
-Preconditions:
-- The document resides in the folder tree identified by `DOC_FOLDER_ID`
-- The document contains exactly one tracked-actions section (`=== Tracked Actions ===`)
-- The tracked-actions table already contains a row for the referenced ID
-
-Primary Flow:
-1. Author writes a bare `AI-<n>` floating paragraph in the document, with no other fields, referencing an action record that already exists in the tracked-actions table.
-2. On the next sync, the system recognises the bare reference and expands the floating paragraph to mirror the canonical row from the tracked-actions table (assignee, action text, status, date).
-
-Postconditions:
-- The floating paragraph reflects the full canonical content of the tracked-actions row for that ID.
-- The tracked-actions row is unchanged.
-
-Acceptance Criteria:
-- A bare `AI-<n>` floating paragraph whose ID matches an existing tracked-actions table row is rewritten on sync to mirror that row.
-- A bare `AI-<n>` whose ID does not match any tracked-actions table row is treated as a new floating action under UC-1 and seeds a new row.
-
----
-
-### UC-6: Revert a Locally Edited Floating Action to the Table
-
-Actor: Document author
-
-Preconditions:
-- A floating action paragraph and its matching tracked-actions table row already exist for the same `(Document, ID)`
-- Neither the tracked-actions row nor the corresponding sheet row has a newer `Date Modified` than the existing record
-
-Primary Flow:
-1. Author edits the floating action paragraph in place (changes assignee, action text, status, or date) without touching the tracked-actions table or the tracking sheet.
-2. On the next sync, because the tracked-actions table is authoritative within the document, the floating paragraph is rewritten back to match the table row.
-
-Postconditions:
-- The floating action paragraph matches the tracked-actions table row.
-- The tracked-actions table row and the sheet row are unchanged.
-
-Acceptance Criteria:
-- If a floating action paragraph diverges from its tracked-actions table row, and neither the table row nor the sheet row carries a newer `Date Modified`, the next sync rewrites the floating paragraph to match the table.
-- The table row and the sheet row are not modified by this case.
+- If a previously archived action reappears (its named range still exists in the doc), a later Sync may restore an active ActionSheet row for it.
 
 ---
 
 ## Error Handling
 
-Sync fails with a clear error (logged to execution transcript and surfaced in the sheet menu) on the following conditions:
+Errors are surfaced in the sidebar (for add-on operations) or logged to the automation script's execution transcript (for sweep/archive). The full sync run is never aborted by a single-doc failure; other docs continue.
 
-- **Duplicate table IDs within a document** — two or more rows in the tracked-actions table share the same document-scoped ID; the sync for that document is aborted and the duplicate is reported.
-- **Invalid email token in a floating action** — a floating action's assignee token cannot be parsed as a bare email, a display-name-and-email form, or a mention chip; that paragraph is treated as non-action content, skipped, and logged for troubleshooting.
-- **Missing required headers on sheet or table** — the tracking sheet or a tracked-actions table is missing one or more expected column headers; sync for the affected document or sheet is aborted and the missing headers are reported.
-
-Partial failures (single document errors) do not abort the full sync run; other documents and sheet rows continue to be processed.
+- **Checklist item missing a person chip** — surfaced as a warning row in the sidebar (`⚠ no assignee chip — fix in doc`); the row is not written to the ActionSheet.
+- **Named range lost or deleted** — the scanner attempts to re-anchor if the action text and assignee still match a chip-led checklist item; otherwise the orphaned ActionSheet row is flagged in the sidebar for human resolution.
+- **Doc inaccessible during sweep** — that doc is skipped with a logged error; other docs continue.
+- **Docs REST API quota / scope error** — surfaced in the sidebar with the underlying message; no doc or sheet writes are made for that Sync.
 
 ---
 
 ## Non-Goals
-- Real-time bidirectional sync (sync is eventually consistent via 30-minute cycle)
-- Cross-document ID uniqueness or global action identifiers
-- Automatic deletion of action records from documents or the sheet
-- Preservation of rich text formatting (bold, italic, colour) when rewriting floating action paragraphs
+- Real-time bidirectional sync (Sync is on-demand or on the sweep cadence)
+- Reading the visual checked state of a checklist item (not exposed by any API)
+- Cross-document `ID` uniqueness (`ID` is doc-scoped; the cross-doc key is `NamedRangeId`)
+- Preservation of rich text formatting (bold, italic, colour) on the action paragraph when rewriting the trailing `(Status)` token
 - Multi-tenant or cross-organisation support
 
 ---
@@ -313,13 +213,14 @@ Partial failures (single document errors) do not abort the full sync run; other 
 ## Glossary
 | Term | Definition |
 |------|------------|
-| Action record | One tracked task or action item, identified by `(Document, ID)` |
-| Archive sheet | The Sheet tab that holds `Closed` action records not modified in more than 30 days |
-| Date Modified | A timestamp column present in both the tracking sheet and every tracked-actions table. Records the last reconcile or edit time. An empty value means the record has never been synced. There is no separate Synced column; synchronization state is recorded entirely in this field. |
-| Document | A Google Doc in the registered folder tree; identified by its URL and title |
-| Floating action | An action item written as plain document text using the `AI-` prefix syntax, outside the tracked-actions table; the assignee may be a plain email address or a Google Docs person tile, `status` and trailing date fields may be omitted, an empty status is treated as `Open`, an empty date is treated as the last modification timestamp, and dates written in the Google Doc use the format `YYYY-MM-DD h:m` |
-| Sync | One execution that reads a document, normalizes its actions, and reconciles them bidirectionally with the tracking sheet |
-| Tracked-actions section | The document section delimited by a heading paragraph whose exact text is `=== Tracked Actions ===`. If the section is absent when a floating action first seeds a row, the system creates the section and an empty table at the end of the document before writing the row. |
-| Tracked-actions table | The table inside the tracked-actions section; the canonical representation of action records within a document |
-| Tracking sheet | The Sheet tab that stores active (non-archived) synchronized action records |
-| `DOC_FOLDER_ID` | A GAS script property containing the Drive folder ID (or URL) that roots document discovery |
+| Action item (action) | A checklist item in a Google Doc whose first inline child is a PERSON chip. The chip is the assignee. The trailing parenthesized token is the status. |
+| ActionSheet | The central Google Spreadsheet that aggregates actions across docs. The cross-doc store. |
+| Add-on | The Google Workspace Add-on (Docs) that provides the sidebar UI. |
+| Anchor (named range anchor) | The named range covering an action's checklist paragraph; its `namedRangeId` is the action's durable identity. |
+| Automation script | The container-bound Apps Script on the ActionSheet that owns the `onEdit` timestamp stamper, the timed sweep trigger, and the archive job. |
+| Last Modified | A timestamp column on each ActionSheet row and (implicitly) each anchored action. Records the most recent reconcile or user edit time. Empty means never synced. |
+| Sidebar | The HTML UI shown by the add-on in the active doc. |
+| Status | The recognized values are `Open` (default) and `Closed` (eligible for archive); any other parenthesized value is preserved as a free-form custom status. |
+| Sweep | The time-based reconcile run on the ActionSheet that iterates rows grouped by document and pulls updates from docs no one opened recently. |
+| Sync | One on-demand round in the sidebar that scans the active doc and reconciles ActionSheet rows for that doc in one shot. |
+| Tracker table | The in-doc summary table written by **Insert / refresh tracker**, preceded by an instructional paragraph summarizing the sync rules. |

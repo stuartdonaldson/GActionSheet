@@ -176,3 +176,30 @@ Reviewed AC.md (recently updated) against docs/CONTEXT.md use-case ACs and ident
 
 ### Key Learnings
 AC.md was a cleaner statement of the same system intent — specifically: (1) the asymmetric authority model (table master, floating slave except on init) was never made explicit in CONTEXT.md; (2) the bare-ID reference case (`AI-2` with no fields) and the floating-edit-revert scenario were entirely absent from the use cases.
+
+## 2026-05-22 16:45:48
+
+### Summary
+Implemented j02 walking-skeleton Workspace Add-on (src/addon/): manifest, Code.js with buildHomepageCard + onPing + GasLogger copy, .clasp.json, push:addon npm script. Worked through extensive GCP/deployment troubleshooting to get the add-on showing in Google Docs Extensions menu. Blocked by managed Workspace domain restrictions on test deployments; pivoted to Option B (External OAuth + personal Gmail) for lifecycle verification next session. Created reusable Workspace Add-on setup guide at ~/.claude/docs/workspace-addon-setup.md.
+
+### Details
+- Created src/addon/ with appsscript.json (Workspace Add-on manifest, addOns.docs.homepageTrigger), Code.js, and .clasp.json
+- Resolved clasp create blocking on parent .clasp.json by temporarily moving root .clasp.json
+- Restored manifest after clasp create overwrote appsscript.json with bare default
+- Enabled Workspace Add-ons API and Google Workspace Marketplace SDK in GCP project 640030365693
+- Configured OAuth consent screen (Internal, northlakeuu.org)
+- Discovered test deployments silently fail on managed Workspace domains — trigger never fires, nothing in Executions log
+- Confirmed buildHomepageCard executes correctly when run directly from Apps Script editor
+- Created versioned deployments (v1, v2, v3) after GCP project was linked to avoid "Project Key not associated" error
+- Attempted Marketplace SDK publishing path; blocked by required store listing assets (screenshots, banner, 5 icon sizes, ToS/privacy URLs)
+- Generated logo-32.png and logo-128.png from NUUC-ActionTrackLogo.png using ffmpeg
+- Captured all learnings in reusable guide: ~/.claude/docs/workspace-addon-setup.md + knowledge-base/references/workspace-addon-setup.md
+- Session ends with Option B prompt ready for next session
+
+### Key Learnings
+- Workspace Add-ons API must be enabled in GCP — silent failure if missing
+- clasp create overwrites appsscript.json; always restore custom manifest immediately after
+- oauthScopes required in manifest for versioned deployments (clasp deploy), not enforced for HEAD
+- Create versioned deployments AFTER linking GCP project to avoid Project Key association errors
+- Test deployments on managed Google Workspace domains do not show in Extensions menu regardless of configuration
+- Option B (External OAuth + personal Gmail test user) is the reliable path for walking-skeleton lifecycle verification

@@ -1,0 +1,23 @@
+{
+  "timeZone": "America/New_York",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/drive"
+  ],
+  "addOns": {
+    "common": {
+      "name": "GActionSheet",
+      "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/logo-128.png",
+      "homepageTrigger": {
+        "runFunction": "buildHomepageCard"
+      }
+    },
+    "docs": {
+      "homepageTrigger": {
+        "runFunction": "buildHomepageCard"
+      }
+    }
+  }
+}
