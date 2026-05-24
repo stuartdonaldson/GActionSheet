@@ -387,7 +387,7 @@ function setupTestFixtures(scenario) {
     // UC-A clears via the Docs REST API deleteContentRange inside
     // _tfInsertPersonChipListItem (called later, after saveAndClose).
     // All other scenarios use DocumentApp to reset to the standard heading.
-    if (resolvedScenario !== 'uc_a_clear') {
+    if (resolvedScenario !== 'uc_a_clear' && resolvedScenario !== 'uc_a_permutations') {
       _tfResetDocBody(body);
     }
 
