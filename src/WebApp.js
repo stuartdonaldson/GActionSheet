@@ -136,7 +136,8 @@ function _findMaxId(existingMap) {
 }
 
 function _escapeQuotes(s) {
-  return String(s).replace(/"/g, '\\"');
+  // Google Sheets formula strings use "" to escape a literal double-quote, not \".
+  return String(s).replace(/"/g, '""');
 }
 
 function _jsonResponse(obj) {

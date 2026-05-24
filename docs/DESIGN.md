@@ -114,12 +114,14 @@ graph LR
         NRM["Named Range Manager<br/>(REST batchUpdate)"]
         Tracker["Tracker Table Renderer<br/>(REST batchUpdate)"]
         DocSync["ActionSheet Sync<br/>(per-doc push/pull)"]
+        WebApp["Web App<br/>(doPost proxy — runs as deployer)"]
 
         Sidebar --> Scanner
         Sidebar --> Tracker
         Sidebar --> DocSync
         Scanner --> NRM
         DocSync --> Scanner
+        DocSync --> WebApp
     end
 
     subgraph Automation["Automation project (container-bound to ActionSheet)"]
@@ -141,7 +143,7 @@ graph LR
     Scanner --> Doc
     NRM --> Doc
     Tracker --> Doc
-    DocSync --> ActionSheet
+    WebApp --> ActionSheet
     Sweep --> ActionSheet
     Sweep --> OtherDocs
     Archive --> ActionSheet
@@ -199,21 +201,21 @@ erDiagram
         string  assigneeName
         string  actionText
         string  status
-        string  documentCell
+        string  documentTitle
+        string  documentUrl
         string  assignedDate
         string  lastModified
     }
     DocChecklistItem {
         string  namedRangeId
         int     paragraphIndex
-        string  assigneeEmail
-        string  assigneeName
+        string  assigneeChip
         string  actionText
         string  status
     }
     TrackerTableRow {
         int     id
-        string  assignee
+        string  assigneeChip
         string  actionText
         string  status
         string  assignedDate
@@ -226,6 +228,10 @@ erDiagram
 ```
 
 The cross-doc key is `namedRangeId`. The doc-scoped `id` is a human-facing integer recomputed at sync time from document order; it is not a stable identifier.
+
+**Field notes:**
+- `assigneeChip` — compound value extracted from the PERSON chip, canonical form `name <email>`. The ActionSheet stores this in two separate columns (`Assignee Name`, `Assignee Email`); `DocChecklistItem` and `TrackerTableRow` hold it as a single parsed unit.
+- `documentTitle` / `documentUrl` — the ActionSheet renders these as a single hyperlink cell (display text = `documentTitle`, URL = `documentUrl`). Modelled separately here to mirror `Action` and make the hyperlink structure explicit.
 
 ---
 
