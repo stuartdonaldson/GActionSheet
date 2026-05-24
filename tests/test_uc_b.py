@@ -142,7 +142,7 @@ def _assert_negative_absent(rows: list, context: str) -> None:
 # Test 1 — doc wins (variants 1–3 mutated on doc side)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="UC-B bidirectional sync not implemented (GTaskSheet-mol-dyu)")
+
 def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     """
     AC1 + AC3 + AC4: Doc-side mutations to variants 1–3 propagate to ActionSheet
@@ -226,7 +226,7 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
 # Test 2 — sheet wins (variants 4–6 mutated on sheet side)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="UC-B bidirectional sync not implemented (GTaskSheet-mol-dyu)")
+
 def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     """
     AC2 + AC3 + AC4: Sheet-side mutations to variants 4–6 propagate to the
@@ -314,7 +314,7 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
 # Test 3 — conflict resolution (doc wins for var 1, sheet wins for var 4)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="UC-B bidirectional sync not implemented (GTaskSheet-mol-dyu)")
+
 def test_uc_b_conflict_resolution(test_sheet_id, test_doc_id, gas_log_dir, settings):
     """
     AC1 + AC2 + AC3: When both sides diverge, the later Last Modified wins.

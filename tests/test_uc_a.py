@@ -71,13 +71,21 @@ _PERM_UNDERSCORE_ACTION   = "Review the Q2 report"
 
 
 def _run_setup_and_sync(scenario: str, error_tag: str, gas_log_dir: str,
+                        test_doc_id: str | None = None,
                         timeout_s: float = 180.0) -> None:
     """Run a named fixture scenario + sync; raise if GAS reports a fixture error."""
     import os, json
     _clear_logs_stable(gas_log_dir)
     setup_and_sync(scenario)
-    wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.complete",
-                 timeout_s=timeout_s)
+    # Filter on docId to avoid matching stale sync.complete{scenario} entries
+    # that arrive late from Drive after the previous test's setupAndSync flush.
+    def _match(e: dict) -> bool:
+        if e.get("tag") != "sync.complete":
+            return False
+        if test_doc_id is None:
+            return True
+        return e.get("data", {}).get("docId") == test_doc_id
+    wait_for_log(gas_log_dir, _match, timeout_s=timeout_s)
     for fname in sorted(os.listdir(gas_log_dir)):
         if not fname.endswith(".log"):
             continue
@@ -96,9 +104,9 @@ def _run_setup_and_sync(scenario: str, error_tag: str, gas_log_dir: str,
                     )
 
 
-def _first_sync(gas_log_dir: str) -> None:
+def _first_sync(gas_log_dir: str, test_doc_id: str | None = None) -> None:
     """Run uc_a_clear fixture + first sync in one GAS/browser invocation."""
-    _run_setup_and_sync("uc_a_clear", "fixture.uc_a_clear", gas_log_dir)
+    _run_setup_and_sync("uc_a_clear", "fixture.uc_a_clear", gas_log_dir, test_doc_id=test_doc_id)
 
 
 def _second_sync(test_doc_id: str, gas_log_dir: str) -> None:
@@ -114,7 +122,7 @@ def _second_sync(test_doc_id: str, gas_log_dir: str) -> None:
 
 def test_uc_a_ac1_multi_format_detection(test_sheet_id, test_doc_id, gas_log_dir, settings):
     """AC1: After Sync, chip-led and email-led items both appear in ActionSheet."""
-    _first_sync(gas_log_dir)
+    _first_sync(gas_log_dir, test_doc_id)
 
     xlsx_bytes = download_xlsx(test_sheet_id)
     ws = load_sheet(xlsx_bytes, sheet_name="Actions")
@@ -175,7 +183,7 @@ def test_uc_a_ac1_multi_format_detection(test_sheet_id, test_doc_id, gas_log_dir
 
 def test_uc_a_ac2_idempotent_second_sync(test_sheet_id, test_doc_id, gas_log_dir):
     """AC2: Second Sync produces no duplicate rows, preserves anchors, leaves content unchanged."""
-    _first_sync(gas_log_dir)
+    _first_sync(gas_log_dir, test_doc_id)
 
     xlsx1  = download_xlsx(test_sheet_id)
     docx1  = download_docx(test_doc_id)
@@ -231,7 +239,7 @@ def test_uc_a_ac2_idempotent_second_sync(test_sheet_id, test_doc_id, gas_log_dir
 
 def test_uc_a_ac1_permutation_coverage(test_sheet_id, test_doc_id, gas_log_dir, settings):
     """AC1 permutations: chip+status-token, email+no-status, underscore-email, plain-text negative."""
-    _run_setup_and_sync("uc_a_permutations", "fixture.uc_a_permutations", gas_log_dir)
+    _run_setup_and_sync("uc_a_permutations", "fixture.uc_a_permutations", gas_log_dir, test_doc_id=test_doc_id)
 
     xlsx_bytes = download_xlsx(test_sheet_id)
     ws   = load_sheet(xlsx_bytes, sheet_name="Actions")

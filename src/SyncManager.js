@@ -26,29 +26,44 @@ function syncDocument(docId) {
       return;
     }
 
-    var doc = DocumentApp.openById(docId);
+    var props        = PropertiesService.getScriptProperties();
+    var lastSyncStr  = props.getProperty('LAST_SYNC_TIME_' + docId);
+    var lastSyncTime = lastSyncStr ? new Date(lastSyncStr) : new Date(0);
+
+    var doc            = DocumentApp.openById(docId);
     var floatingActions = _scanFloatingActions(doc);
 
     GasLogger.log('sync.scanned', { docId: docId, count: floatingActions.length });
 
     if (floatingActions.length === 0) {
-      GasLogger.log('sync.complete', { docId: docId, anchored: 0, upserted: 0 });
+      doc.saveAndClose();
+      props.setProperty('LAST_SYNC_TIME_' + docId, new Date().toISOString());
+      GasLogger.log('sync.complete', { docId: docId, anchored: 0, upserted: 0, updated: 0 });
       return;
     }
 
-    var anchoredMap = _buildAnchoredIndexMap(doc);
+    var anchoredMap  = _buildAnchoredIndexMap(doc);
     var anchorResults = _anchorNewActions(doc, floatingActions, anchoredMap);
 
     var docUrl   = doc.getUrl();
     var docTitle = doc.getName();
-    doc.saveAndClose();
 
-    var upsertResult = _upsertActionRows(anchorResults, docUrl, docTitle);
+    // Keep doc open until sheetWins updates are applied.
+    var syncResult = _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTime.toISOString());
+
+    var sheetWins = syncResult.sheetWins || [];
+    for (var i = 0; i < sheetWins.length; i++) {
+      _applySheetWinToDoc(doc, sheetWins[i].namedRangeId, sheetWins[i].action, sheetWins[i].status);
+    }
+
+    doc.saveAndClose();
+    props.setProperty('LAST_SYNC_TIME_' + docId, new Date().toISOString());
 
     GasLogger.log('sync.complete', {
-      docId: docId,
+      docId:    docId,
       anchored: _countNew(anchorResults),
-      upserted: upsertResult.upserted || 0
+      upserted: syncResult.upserted || 0,
+      updated:  syncResult.updated  || 0
     });
   } finally {
     GasLogger.flush();
@@ -65,7 +80,16 @@ function syncAll() {
 
 function onActionSheetEdit(e) {
   if (WriteGuard.isActive()) return;
-  // UC-B: timestamp stamping — implementation pending.
+  var range = e.range;
+  var row   = range.getRow();
+  if (row < 2) return;
+  var col = range.getColumn();
+  if ([3, 4, 5, 6].indexOf(col) === -1) return; // Assignee Email, Name, Action, Status
+  var sheet = range.getSheet();
+  if (sheet.getName() !== 'Actions') return;
+  WriteGuard.wrap(function () {
+    sheet.getRange(row, 9).setValue(new Date()); // Date Modified
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -266,31 +290,33 @@ function _countNew(anchorResults) {
 }
 
 // ---------------------------------------------------------------------------
-// ActionSheet proxy write
+// ActionSheet proxy — bidirectional sync
 // ---------------------------------------------------------------------------
 
 /**
- * Sends the anchored actions to the Web App doPost endpoint for sheet writes.
+ * POSTs the doc state to the Web App for conflict resolution and sheet writes.
+ * Returns { upserted, updated, sheetWins: [{ namedRangeId, action, status }] }.
  *
- * @param {Array}  anchorResults  Output of _anchorNewActions.
+ * @param {Array}  anchorResults    Output of _anchorNewActions.
  * @param {string} docUrl
  * @param {string} docTitle
- * @returns {{upserted: number}}
+ * @param {string} lastSyncTimeIso  ISO timestamp of previous sync (or epoch).
+ * @returns {{upserted: number, updated: number, sheetWins: Array}}
  */
-function _upsertActionRows(anchorResults, docUrl, docTitle) {
-  var props      = PropertiesService.getScriptProperties();
-  var webAppUrl  = props.getProperty('WEBAPP_URL');
-  var secret     = props.getProperty('WEBAPP_SECRET');
+function _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTimeIso) {
+  var props     = PropertiesService.getScriptProperties();
+  var webAppUrl = props.getProperty('WEBAPP_URL');
+  var secret    = props.getProperty('WEBAPP_SECRET');
 
   if (!webAppUrl) {
     GasLogger.log('sync.error', { msg: 'WEBAPP_URL script property not set' });
-    return { upserted: 0 };
+    return { upserted: 0, updated: 0, sheetWins: [] };
   }
 
-  var rows = [];
+  var docState = [];
   for (var i = 0; i < anchorResults.length; i++) {
     var a = anchorResults[i];
-    rows.push({
+    docState.push({
       namedRangeId:  a.namedRangeId,
       assigneeEmail: a.assigneeEmail,
       assigneeName:  a.assigneeName,
@@ -299,36 +325,106 @@ function _upsertActionRows(anchorResults, docUrl, docTitle) {
     });
   }
 
-  // Include the caller's OAuth token so the Web App (access: ANYONE) accepts
-  // the request without redirecting to a Google login page.
   var oauthToken = ScriptApp.getOAuthToken();
   var resp = UrlFetchApp.fetch(webAppUrl, {
-    method:          'post',
-    contentType:     'application/json',
+    method:             'post',
+    contentType:        'application/json',
     muteHttpExceptions: true,
-    headers:         { 'Authorization': 'Bearer ' + oauthToken },
-    payload:         JSON.stringify({
-      secret:   secret || '',
-      action:   'upsert_action_rows',
-      docUrl:   docUrl,
-      docTitle: docTitle,
-      rows:     rows
+    headers:            { 'Authorization': 'Bearer ' + oauthToken },
+    payload:            JSON.stringify({
+      secret:       secret || '',
+      action:       'sync_action_rows',
+      docUrl:       docUrl,
+      docTitle:     docTitle,
+      lastSyncTime: lastSyncTimeIso,
+      docState:     docState
     })
   });
 
   var code = resp.getResponseCode();
   if (code !== 200) {
     GasLogger.log('sync.error', {
-      msg:  'doPost upsert failed: HTTP ' + code,
+      msg:  'sync_action_rows failed: HTTP ' + code,
       body: resp.getContentText().substring(0, 200)
     });
-    return { upserted: 0 };
+    return { upserted: 0, updated: 0, sheetWins: [] };
   }
 
   try {
     return JSON.parse(resp.getContentText());
   } catch (e) {
-    GasLogger.log('sync.warn', { msg: 'Non-JSON doPost response', body: resp.getContentText().substring(0, 100) });
-    return { upserted: 0 };
+    GasLogger.log('sync.warn', { msg: 'Non-JSON sync_action_rows response', body: resp.getContentText().substring(0, 100) });
+    return { upserted: 0, updated: 0, sheetWins: [] };
+  }
+}
+
+/**
+ * Applies a sheet-wins update to the floating action paragraph in the doc.
+ * Finds the paragraph via its named range ID and updates the TEXT child element,
+ * preserving any leading email prefix or chip separator space.
+ *
+ * @param {GoogleAppsScript.Document.Document} doc
+ * @param {string} namedRangeId
+ * @param {string} newAction
+ * @param {string} newStatus
+ */
+function _applySheetWinToDoc(doc, namedRangeId, newAction, newStatus) {
+  var namedRanges = doc.getNamedRanges();
+  for (var i = 0; i < namedRanges.length; i++) {
+    if (namedRanges[i].getId() !== namedRangeId) continue;
+    var elements = namedRanges[i].getRange().getRangeElements();
+    if (elements.length === 0) break;
+    var el   = elements[0].getElement();
+    var type = el.getType();
+    var para = null;
+    if (type === DocumentApp.ElementType.LIST_ITEM) {
+      para = el.asListItem();
+    } else if (type === DocumentApp.ElementType.PARAGRAPH) {
+      para = el.asParagraph();
+    } else if (type === DocumentApp.ElementType.TEXT) {
+      var parent = el.getParent();
+      var pType  = parent.getType();
+      if (pType === DocumentApp.ElementType.LIST_ITEM)  para = parent.asListItem();
+      else if (pType === DocumentApp.ElementType.PARAGRAPH) para = parent.asParagraph();
+    }
+    if (para) _updateParaTextFromSheet(para, newAction, newStatus);
+    break;
+  }
+}
+
+/**
+ * Replaces the text content of a floating action paragraph with updated values
+ * from the ActionSheet.  Preserves the email prefix (email-led items) or the
+ * leading space that follows a person chip (chip-led items).
+ *
+ * Status "Open" is the scanner default and is omitted from the paragraph text,
+ * consistent with how floating actions are originally authored.
+ *
+ * @param {GoogleAppsScript.Document.Paragraph|ListItem} para
+ * @param {string} newAction
+ * @param {string} newStatus
+ */
+function _updateParaTextFromSheet(para, newAction, newStatus) {
+  var n = para.getNumChildren();
+  for (var i = 0; i < n; i++) {
+    var child = para.getChild(i);
+    if (child.getType() !== DocumentApp.ElementType.TEXT) continue;
+    var textEl  = child.asText();
+    var current = textEl.getText();
+
+    var prefix     = '';
+    var emailMatch = current.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+\s+)/i);
+    if (emailMatch) {
+      prefix = emailMatch[1];
+    } else if (current.length > 0 && current.charAt(0) === ' ') {
+      prefix = ' ';
+    }
+
+    var newContent = newAction;
+    if (newStatus && newStatus !== 'Open') {
+      newContent += ' (' + newStatus + ')';
+    }
+    textEl.setText(prefix + newContent);
+    return;
   }
 }

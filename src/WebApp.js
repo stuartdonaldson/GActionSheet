@@ -33,6 +33,10 @@ function doPost(e) {
     return _handleUpsertActionRows(payload);
   }
 
+  if (payload.action === 'sync_action_rows') {
+    return _handleSyncActionRows(payload);
+  }
+
   // Legacy POC — retained for diagnostics
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
@@ -115,11 +119,13 @@ function _loadExistingRowsByNamedRangeId(actionsSheet) {
     var namedRangeId = data[i][0];
     if (!namedRangeId) continue;
     result[namedRangeId] = {
+      rowIndex:      i + 2,
       id:            data[i][1],
       assigneeEmail: data[i][2],
       assigneeName:  data[i][3],
       action:        data[i][4],
-      status:        data[i][5]
+      status:        data[i][5],
+      dateModified:  data[i][8] instanceof Date ? data[i][8] : null
     };
   }
 
@@ -133,6 +139,79 @@ function _findMaxId(existingMap) {
     if (typeof id === 'number' && id > max) max = id;
   }
   return max;
+}
+
+/**
+ * Bidirectional sync handler.  Compares the doc state snapshot against the
+ * current ActionSheet rows using the last-sync timestamp as the conflict anchor.
+ *
+ * Payload shape:
+ *   { secret, action: 'sync_action_rows', docUrl, docTitle, lastSyncTime: ISO,
+ *     docState: [{ namedRangeId, assigneeEmail, assigneeName, actionText, status }] }
+ *
+ * Response shape:
+ *   { upserted, updated, sheetWins: [{ namedRangeId, action, status }] }
+ */
+function _handleSyncActionRows(payload) {
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found' });
+  }
+
+  var docUrl       = payload.docUrl   || '';
+  var docTitle     = payload.docTitle || 'Untitled';
+  var docState     = payload.docState || [];
+  var lastSyncTime = payload.lastSyncTime ? new Date(payload.lastSyncTime) : new Date(0);
+
+  var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
+  var maxId       = _findMaxId(existingMap);
+  var now         = new Date();
+  var upserted    = 0;
+  var updated     = 0;
+  var sheetWins   = [];
+
+  WriteGuard.wrap(function () {
+    for (var i = 0; i < docState.length; i++) {
+      var row      = docState[i];
+      var existing = existingMap[row.namedRangeId];
+
+      if (!existing) {
+        maxId++;
+        var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
+        actionsSheet.appendRow([
+          row.namedRangeId,
+          maxId,
+          row.assigneeEmail || '',
+          row.assigneeName  || '',
+          row.actionText    || '',
+          row.status        || 'Open',
+          docFormula,
+          now,
+          now
+        ]);
+        upserted++;
+      } else if (existing.dateModified && existing.dateModified > lastSyncTime) {
+        // Sheet was edited after last sync — sheet wins; SyncManager updates doc.
+        sheetWins.push({
+          namedRangeId: row.namedRangeId,
+          action:       existing.action,
+          status:       existing.status
+        });
+      } else {
+        // Doc is authoritative — update sheet row only when values differ.
+        if (existing.action !== row.actionText || existing.status !== row.status) {
+          var rowIdx = existing.rowIndex;
+          actionsSheet.getRange(rowIdx, 5).setValue(row.actionText || '');
+          actionsSheet.getRange(rowIdx, 6).setValue(row.status     || 'Open');
+          actionsSheet.getRange(rowIdx, 9).setValue(now);
+          updated++;
+        }
+      }
+    }
+  });
+
+  return _jsonResponse({ upserted: upserted, updated: updated, sheetWins: sheetWins });
 }
 
 function _escapeQuotes(s) {

@@ -1011,19 +1011,28 @@ function setupTestFixtures(scenario) {
               var ucbAction   = ucbData[ucbRi][4]; // col E: Action
               if (ucbAssignee === 'jane.smith@example.com') {
                 if (ucbAction.indexOf('Schedule the follow-up') !== -1) {
-                  // Var 4: Status Done → Closed
+                  // Var 4: Status Done → Closed; stamp Date Modified so sheet wins conflict resolution.
                   var ucbRow4 = ucbRi + 2;
-                  WriteGuard.wrap(function () { ucbSheet.getRange(ucbRow4, 6).setValue('Closed'); });
+                  WriteGuard.wrap(function () {
+                    ucbSheet.getRange(ucbRow4, 6).setValue('Closed');
+                    ucbSheet.getRange(ucbRow4, 9).setValue(new Date());
+                  });
                 } else if (ucbAction.indexOf('Approve the budget proposal') !== -1) {
-                  // Var 5: Action text change
+                  // Var 5: Action text change; stamp Date Modified so sheet wins conflict resolution.
                   var ucbRow5 = ucbRi + 2;
-                  WriteGuard.wrap(function () { ucbSheet.getRange(ucbRow5, 5).setValue('Approve the revised budget'); });
+                  WriteGuard.wrap(function () {
+                    ucbSheet.getRange(ucbRow5, 5).setValue('Approve the revised budget');
+                    ucbSheet.getRange(ucbRow5, 9).setValue(new Date());
+                  });
                 }
               } else if (ucbAssignee === 'bob_jones@example.com' &&
                          ucbAction.indexOf('Review the Q2 report') !== -1) {
-                // Var 6: Status Open → In Review
+                // Var 6: Status Open → In Review; stamp Date Modified so sheet wins conflict resolution.
                 var ucbRow6 = ucbRi + 2;
-                WriteGuard.wrap(function () { ucbSheet.getRange(ucbRow6, 6).setValue('In Review'); });
+                WriteGuard.wrap(function () {
+                  ucbSheet.getRange(ucbRow6, 6).setValue('In Review');
+                  ucbSheet.getRange(ucbRow6, 9).setValue(new Date());
+                });
               }
             }
           }
@@ -1081,7 +1090,10 @@ function setupTestFixtures(scenario) {
               if (ucbCData2[ucbCRi2][2] === 'jane.smith@example.com' &&
                   ucbCData2[ucbCRi2][4].indexOf('Schedule the follow-up') !== -1) {
                 var ucbCRowB = ucbCRi2 + 2;
-                WriteGuard.wrap(function () { ucbCSheet.getRange(ucbCRowB, 6).setValue('Closed'); });
+                WriteGuard.wrap(function () {
+                  ucbCSheet.getRange(ucbCRowB, 6).setValue('Closed');
+                  ucbCSheet.getRange(ucbCRowB, 9).setValue(new Date()); // stamp so sheet wins
+                });
                 break;
               }
             }
