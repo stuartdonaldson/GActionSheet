@@ -112,6 +112,7 @@ Apps Script execution logs: Apps Script editor → Executions (left sidebar). Ea
 | GAS execution timeout (> 6 min) | Execution log shows `Exceeded maximum execution time` | Reduce folder scope via `DOC_FOLDER_ID`, or run sync manually on smaller document sets |
 | Missing required sheet header | Sync fails with a logged error listing the missing column | Add the missing header to the tracking sheet or archive sheet |
 | Permission denied on a Doc | Sync skips that document with a logged error | Grant the executing user edit access to the document |
+| Floating actions not discovered | Sync logs `count: 0`; sheet gets no new rows | Ensure items begin with a PERSON chip or a valid email address (`word@word.tld`) as the very first content of the paragraph/list item |
 
 ---
 
@@ -127,13 +128,28 @@ Apps Script execution logs: Apps Script editor → Executions (left sidebar). Ea
 # Parser unit tests only (fast, no GAS/network):
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_floating_action_parser.py -x -v
 
-# UC scenario tests (requires live GAS — clasp push first):
-/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_uc_scenarios.py -x -v
+# UC-A acceptance tests (requires live GAS — clasp push first):
+/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_uc_a.py -x -v
 ```
 
 Each UC scenario test has significant setup/teardown cost (GAS invocation, log polling up to 60 s).
 A root-cause failure in an early scenario cascades to all later ones — running to completion wastes
 minutes and obscures the real defect. Fix the first failure before proceeding.
+
+### UC-A Tests
+
+**Prerequisites:** `npm run deploy:test` (clasp push + repoint TEST deployment).
+
+The `uc_a_clear` GAS fixture sets up the test doc automatically:
+1. Clears the ActionSheet and removes all named ranges from the test doc.
+2. Clears the doc body and inserts a chip-led bullet list item via the Docs REST API (`insertPerson` + `createParagraphBullets`).
+3. Appends an email-led bullet list item via a second REST API call (`_tfAppendTextListItem`).
+
+No manual doc preparation is required. The test doc needs no pre-existing chip items.
+
+**Tests:**
+- `test_uc_a_ac1_multi_format_detection` — one Sync; verifies chip-led and email-led items both appear in the ActionSheet with correct email, name, action text, and status.
+- `test_uc_a_ac2_idempotent_second_sync` — second Sync; verifies no duplicate rows, named range IDs unchanged, sheet rows and doc floating actions identical.
 
 ---
 

@@ -36,9 +36,14 @@ GActionSheet captures and tracks action items inside Google Docs and aggregates 
 - The visual checked state of a checklist item is **not** readable through any Google API; the source of truth for status is the trailing `(Status)` token
 
 ### Action Format
-- An **action** is a checklist item (Google Docs checklist; visually a checkbox) whose first inline child is a Google Docs PERSON chip
-- The assignee email and display name come from the chip
-- Action text is everything after the chip on the same paragraph, with any trailing `(Status)` token stripped
+
+A **floating action** (also called an action item) is a paragraph or list item in the doc identified by one of two detection rules:
+
+1. **Chip-led**: the first inline child is a Google Docs PERSON chip — the assignee email and display name come from the chip.
+2. **Email-at-start**: the first text content begins with a valid email address (`word@word.tld`) — the assignee email is extracted from the text; the display name is derived from the username portion (punctuation replaced with spaces, title-cased). e.g. `jane.smith@example.com` → `Jane Smith`.
+
+Common fields:
+- Action text is everything after the chip/email on the same paragraph, with any trailing `(Status)` token stripped
 - Status lives in a trailing parenthesized token at the end of the paragraph; `(Open)` is the default written when missing; `(Closed)` is recognized for archiving; any other value is preserved verbatim as a free-form status
 - Each action is anchored by a named range whose `namedRangeId` is the durable identity stored in the ActionSheet
 - Dates are stored in the ActionSheet as native sheet date values; in the in-doc tracker table they are written using the sheet's locale-formatted date
@@ -57,9 +62,9 @@ GActionSheet captures and tracks action items inside Google Docs and aggregates 
 |--------|-------|
 | NamedRangeId | The durable identity of the action; matches the `namedRangeId` of the anchor named range in the source doc |
 | ID | Document-scoped sequential integer for human reference (e.g. shown in the tracker table) |
-| Assignee Email | Canonical email address from the person chip |
-| Assignee Name | Display name from the person chip |
-| Action | Action item text (chip stripped, trailing `(Status)` stripped) |
+| Assignee Email | Canonical email address from the person chip or email-at-start text |
+| Assignee Name | Display name from the chip; or derived from email username if chip absent |
+| Action | Action item text (chip/email stripped, trailing `(Status)` stripped) |
 | Status | Current status; `Open` by default, `Closed` recognized for archiving, otherwise free-form |
 | Document | Hyperlink cell — display text is the document title, target is the document URL |
 | Assigned Date | Date the action was first written to the ActionSheet |
@@ -113,22 +118,21 @@ The tracker table is itself anchored by a named range so refresh can replace its
 Actor: Document author
 
 Preconditions:
-- The add-on is installed and the user has the doc open
+- The add-on is installed and the user has the doc open.
+- The doc contains at least one floating action: either a chip-led checklist item (PERSON chip as the first inline child of a paragraph or list item) or an email-at-start item (first text content begins with a valid email address).
 
 Primary Flow:
-1. Author writes a checklist item that begins with a person chip and optional action text.
+1. Author writes a checklist item that begins with a person chip or an email address, with optional action text and an optional trailing `(Status)` token.
 2. Author opens the sidebar and clicks **Sync now**.
-3. The add-on scans the doc, recognizes the new chip-led checklist item as an action, creates a named range anchoring it, and writes a row to the ActionSheet with `Status = Open`.
-4. The sidebar refreshes and shows the new action.
+3. The add-on scans the doc, detects each floating action by chip or email-at-start, creates a named range anchoring each one, and writes a row to the ActionSheet with the resolved assignee and `Status = Open` (or the trailing token value if present).
+4. The sidebar refreshes and shows the new actions.
 
 Postconditions:
-- The action has a `namedRangeId`-anchored row in the ActionSheet.
-- The action's paragraph ends with `(Open)` (added by the add-on if absent).
+- Each action has a `namedRangeId`-anchored row in the ActionSheet with `Assignee Email`, `Assignee Name`, `Action`, and `Status` populated.
 
 Acceptance Criteria:
-- After clicking Sync, a newly typed chip-led checklist item appears in the sidebar and in the ActionSheet, with the assignee email resolved from the chip and `Status = Open`.
-- The action's anchor survives an unrelated edit elsewhere in the doc — a second Sync does not produce a duplicate row.
-- A second Sync with no further edits produces no writes to the doc or the ActionSheet.
+- AC1: After Sync, both chip-led and email-led list items appear in the ActionSheet with correct `Assignee Email`, `Assignee Name`, action text, status, and a non-empty `NamedRangeId`. For email-led items, `Assignee Name` is derived from the username portion of the email.
+- AC2: A second Sync with no edits produces no new rows (anchor survives), all `NamedRangeId` values are unchanged, and both the ActionSheet rows and the doc floating actions are byte-for-byte identical to the first sync result (idempotent).
 
 ---
 
@@ -196,7 +200,7 @@ Acceptance Criteria:
 
 Errors are surfaced in the sidebar (for add-on operations) or logged to the automation script's execution transcript (for sweep/archive). The full sync run is never aborted by a single-doc failure; other docs continue.
 
-- **Checklist item missing a person chip** — surfaced as a warning row in the sidebar (`⚠ no assignee chip — fix in doc`); the row is not written to the ActionSheet.
+- **Checklist item with no detectable assignee** — no PERSON chip and no email-at-start text; the item is silently skipped by the scanner and does not appear in the ActionSheet. The sidebar only shows detected floating actions.
 - **Named range lost or deleted** — the scanner attempts to re-anchor if the action text and assignee still match a chip-led checklist item; otherwise the orphaned ActionSheet row is flagged in the sidebar for human resolution.
 - **Doc inaccessible during sweep** — that doc is skipped with a logged error; other docs continue.
 - **Docs REST API quota / scope error** — surfaced in the sidebar with the underlying message; no doc or sheet writes are made for that Sync.
