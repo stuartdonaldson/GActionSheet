@@ -446,6 +446,61 @@ function setupTestFixtures(scenario) {
         }
         break;
 
+      case 'uc_a_permutations':
+        // Full permutation coverage for floating-action detection.
+        // Items inserted (4 total; 3 produce rows, 1 is a negative case):
+        //   1. Chip item WITH explicit "(Done)" status token
+        //   2. Email item with NO status token (defaults to Open)
+        //   3. Email with underscore username bob_jones@example.com (name → "Bob Jones")
+        //   4. Plain-text list item with no chip and no email (no row expected)
+        var permNangedRanges = doc.getNamedRanges();
+        for (var permNri = 0; permNri < permNangedRanges.length; permNri++) {
+          permNangedRanges[permNri].remove();
+        }
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        var permToken = ScriptApp.getOAuthToken();
+        var permEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                     || Session.getActiveUser().getEmail();
+        var permChipOk = false;
+        try {
+          _tfInsertPersonChipListItem(permToken, testDocId, permEmail,
+                                      'Review the budget report (Done)');
+          permChipOk = true;
+        } catch (permChipErr) {
+          GasLogger.log('fixture.uc_a_permutations', {
+            namedRangesRemoved: permNangedRanges.length,
+            error: 'chip insert: ' + permChipErr.message
+          });
+        }
+        if (permChipOk) {
+          var permErrors = [];
+          try {
+            _tfAppendTextListItem(permToken, testDocId,
+              'jane.smith@example.com Approve the budget proposal');
+          } catch (e2) { permErrors.push('email-no-status: ' + e2.message); }
+          try {
+            _tfAppendTextListItem(permToken, testDocId,
+              'bob_jones@example.com Review the Q2 report');
+          } catch (e3) { permErrors.push('underscore-email: ' + e3.message); }
+          try {
+            _tfAppendTextListItem(permToken, testDocId,
+              'Complete the project documentation');
+          } catch (e4) { permErrors.push('plain-text: ' + e4.message); }
+          if (permErrors.length > 0) {
+            GasLogger.log('fixture.uc_a_permutations', {
+              namedRangesRemoved: permNangedRanges.length,
+              error: permErrors.join('; ')
+            });
+          } else {
+            GasLogger.log('fixture.uc_a_permutations', {
+              namedRangesRemoved: permNangedRanges.length,
+              itemsInserted: 4
+            });
+          }
+        }
+        break;
+
       case 'uc1_new_floating':
       case 'default':
         // Legacy: AI-prefix floating action — sync assigns id=1.
