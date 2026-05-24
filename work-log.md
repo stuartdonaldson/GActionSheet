@@ -292,3 +292,66 @@ UC-A green phase complete — all 4 acceptance tests passing end-to-end. Indepen
 ### Issues Closed
 - `GTaskSheet-mol-88d` — Verify UC-A passes full test suite
 - `GTaskSheet-mol-oib` — Independent agent review: UC-A
+
+## 2026-05-24 02:05:06
+
+### Summary
+Extended UC-A floating action detection to email-at-start format; refactored tests to multi-example ATDD paradigm; updated beads to reflect expanded permutation strategy.
+
+### Changes
+- **`src/SyncManager.js`**: Added email-at-start detection in `_scanFloatingActions` (renamed from `_scanChipLedActions`). Added `_nameFromEmail(email)` helper — splits username on `[._-]`, title-cases each word. Scanner now detects both PERSON chip and `word@word.tld` at start of text element.
+- **`src/TestFixtures.js`**: Added `_tfAppendTextListItem(token, docId, text)` — REST API only (no DocumentApp) to avoid GAS document caching between fixture and sync calls. `uc_a_clear` now inserts chip item + email item via REST API `batchUpdate`.
+- **`tests/test_uc_a.py`**: Replaced 3 single-example tests with 2 multi-example tests (AC1 + AC2). Added `_clear_logs_stable()` to handle Drive log sync race condition (GAS flush may still be syncing when next test's `clear_logs` runs — re-deletes until empty). Fixture inserts chip item ("Review the budget report") + email item ("jane.smith@example.com Approve the budget proposal (In Progress)").
+- **`src/SheetSetup.js`**: Added column-position comment above `SHEET_HEADERS`.
+- **Docs** (`CONTEXT.md`, `DESIGN.md`, `OPERATIONS.md`): Updated to describe both detection forms, name derivation, and UC-A test structure.
+
+### ATDD Strategy (Improved)
+Current AC1 covers 2 permutations (chip+default-status, email+explicit-status). Four permutations remain uncovered:
+1. Chip item WITH explicit status token (e.g., `(Done)`) — verifies status parsing for chip items
+2. Email item with NO status token — verifies default `Open` for email-led items
+3. Email with underscore username (`bob_jones@example.com`) — verifies name derivation handles `_` punctuation
+4. Negative case: plain text list item (no chip, no email) — verifies no false-positive ActionSheet row
+
+Strategy: all items in a single doc, single Sync. Expect 3 rows (chip, email, email-underscore) and zero row for plain text. One browser session, maximum coverage per execution run.
+
+Tracked as **GTaskSheet-ly7** (blocks mol-p30 sign-off gate).
+
+**UC-B test design** (GTaskSheet-5vk, notes updated): same multi-example paradigm — construct doc with multiple forms, make sheet edits, one Sync, assert all propagated. Include regression checks for append-instead-of-replace and duplicate tracker table insertion.
+
+### Issues
+- **GTaskSheet-ly7** (new, open): Expand UC-A fixture + tests to full permutation coverage
+- **GTaskSheet-mol-p30**: Blocked on ly7; sign-off criteria documented in notes
+- **GTaskSheet-5vk**: Notes updated with ATDD paradigm for UC-B
+
+## 2026-05-24 07:23:23
+
+### Summary
+Session-start check; reviewed UC-B readiness and test strategy; designed canonical test doc architecture for all UC tests; created hardening issue for parentheses corner case.
+
+### Details
+- Confirmed UC-B mol workflow state: use-cases, AC, and gate all closed; `mol-745` (Develop tests) is next
+- Resolved staged LL incident review: Branch A already applied (OPERATIONS.md + bd memory); Branch B still open
+- Reviewed UC-A test structure as the model for UC-B: batching multiple format variants into one Sync execution
+- Established that UC-B test variants are defined by **floating action format** (email-only, chip+status, chip+no-status, non-default status, etc.), not by edit direction
+- Designed canonical test doc: 7 floating action variants shared across all UCs; GAS fixture resets to or builds from this state per UC
+- Updated `GTaskSheet-mol-745` with full test architecture: 3 scenarios (doc-wins, sheet-wins, conflict-resolution), batching principle documented
+- Created `GTaskSheet-28q` (P3, hardening): parentheses-in-action-text corner case for status token parser
+- Persisted canonical test doc principle as bd memory (`canonical-test-doc-shared-fixture-across-all-ucs`)
+
+### Key Learnings
+- Execution runs are expensive (browser, GAS, Drive sync); format variants are cheap — invest in variant coverage in the document, not in separate test runs
+- UC-C and UC-D should build from the same canonical doc state rather than defining their own fixtures independently
+
+## 2026-05-24 07:41:07
+
+### Summary
+Implemented UC-B test suite (GTaskSheet-mol-745): GAS fixture scenarios for all three UC-B cases plus the Python xfail test file.
+
+### Changes
+- `src/TestFixtures.js`: Added `_tfAppendPersonChipListItem` REST API helper (appends a chip-led bullet to end of doc without clearing). Added `uc_b_doc_wins`, `uc_b_sheet_wins`, and `uc_b_conflict` fixture scenarios — each builds the canonical 7-item state (3 chip + 3 email + 1 plain-text negative), runs an intermediate `syncDocument()` call to anchor named ranges, then applies scenario-specific mutations. Extended `_tfResetDocBody` exclusion list to cover all three UC-B scenarios.
+- `tests/test_uc_b.py`: New file with three `@pytest.mark.xfail(strict=True)` tests covering AC1 (doc wins), AC2 (sheet wins), and AC3+conflict resolution. All tests collect cleanly; all will remain xfail until `GTaskSheet-mol-dyu` (UC-B implementation) is complete.
+
+### Key Learnings
+- UC-B fixture flow uses two GAS invocations per test: `setup_fixture('uc_b_XXX')` triggers the full canonical setup + intermediate sync + mutations; `sync_document(test_doc_id)` triggers the final convergence sync. Separating these avoids ambiguous `sync.complete` log entries from the intermediate sync.
+- `WriteGuard.wrap` is synchronous, so the classic IIFE loop-closure fix is unnecessary — capture the row number in a local variable instead.
+- The `_handleUpsertActionRows` Web App handler is INSERT-only (skips rows where `namedRangeId` already exists), confirming UC-B assertions will correctly xfail until bidirectional sync is implemented.

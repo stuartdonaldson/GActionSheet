@@ -298,6 +298,84 @@ function _tfAppendTextListItem(token, docId, text) {
 }
 
 /**
+ * Appends a chip-led bulleted list item to the END of the document via the
+ * Docs REST API, without clearing existing content.
+ *
+ * Mirrors _tfAppendTextListItem but inserts a PERSON chip before the action text.
+ * Must be called AFTER doc.saveAndClose() so the REST API sees current content.
+ *
+ * @param {string} token      OAuth2 access token from ScriptApp.getOAuthToken()
+ * @param {string} docId      Document ID
+ * @param {string} email      Assignee email (must be in contacts or Workspace directory)
+ * @param {string} actionText Text to append after the chip on the same line
+ */
+function _tfAppendPersonChipListItem(token, docId, email, actionText) {
+  var baseUrl    = 'https://docs.googleapis.com/v1/documents/';
+  var authHeader = { 'Authorization': 'Bearer ' + token };
+
+  var getResp = UrlFetchApp.fetch(
+    baseUrl + docId + '?fields=body.content',
+    { headers: authHeader, muteHttpExceptions: true }
+  );
+  if (getResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendPersonChipListItem GET failed: HTTP ' + getResp.getResponseCode());
+  }
+  var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
+
+  var lastParaEndIndex = null;
+  for (var ci = content.length - 1; ci >= 0; ci--) {
+    if (content[ci].paragraph) {
+      lastParaEndIndex = content[ci].endIndex;
+      break;
+    }
+  }
+  if (lastParaEndIndex === null) {
+    throw new Error('_tfAppendPersonChipListItem: no paragraph found in doc');
+  }
+
+  // Mirror _tfAppendTextListItem's splitting strategy:
+  //   1. Insert \n at (lastParaEndIndex - 1) to split the last (mandatory) paragraph.
+  //   2. Apply bullet formatting to the new paragraph starting at lastParaEndIndex.
+  //   3. Insert the person chip at lastParaEndIndex.
+  //   4. Insert the action text at (lastParaEndIndex + 1), after the chip (1 index).
+  var insertAt = lastParaEndIndex - 1;
+
+  var requests = [
+    { insertText: { location: { index: insertAt }, text: '\n' } },
+    { createParagraphBullets: {
+        range: { startIndex: lastParaEndIndex, endIndex: lastParaEndIndex + 1 },
+        bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE'
+      }
+    },
+    { insertPerson: {
+        personProperties: { email: email },
+        location: { index: lastParaEndIndex }
+      }
+    },
+    { insertText: {
+        location: { index: lastParaEndIndex + 1 },
+        text: ' ' + actionText
+      }
+    }
+  ];
+
+  var batchResp = UrlFetchApp.fetch(
+    baseUrl + docId + ':batchUpdate',
+    {
+      method: 'post',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeader),
+      payload: JSON.stringify({ requests: requests }),
+      muteHttpExceptions: true
+    }
+  );
+  if (batchResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendPersonChipListItem batchUpdate failed: HTTP ' +
+                    batchResp.getResponseCode() + ': ' +
+                    batchResp.getContentText().substring(0, 200));
+  }
+}
+
+/**
  * Builds a sheet row array in SHEET_HEADERS order.
  *
  * SHEET_HEADERS = [NamedRangeId, ID, Assignee Email, Assignee Name, Action,
@@ -384,10 +462,15 @@ function setupTestFixtures(scenario) {
     _tfClearSheetTab(ss, 'Archive');
 
     // -- Step 2: clear doc body -------------------------------------------
-    // UC-A clears via the Docs REST API deleteContentRange inside
-    // _tfInsertPersonChipListItem (called later, after saveAndClose).
+    // UC-A and UC-B scenarios clear via the Docs REST API deleteContentRange
+    // inside _tfInsertPersonChipListItem (called later, after saveAndClose).
     // All other scenarios use DocumentApp to reset to the standard heading.
-    if (resolvedScenario !== 'uc_a_clear' && resolvedScenario !== 'uc_a_permutations') {
+    var _ucbScenario = (resolvedScenario === 'uc_b_doc_wins' ||
+                        resolvedScenario === 'uc_b_sheet_wins' ||
+                        resolvedScenario === 'uc_b_conflict');
+    if (resolvedScenario !== 'uc_a_clear' &&
+        resolvedScenario !== 'uc_a_permutations' &&
+        !_ucbScenario) {
       _tfResetDocBody(body);
     }
 
@@ -822,6 +905,191 @@ function setupTestFixtures(scenario) {
           'AI- @test@example.com | Fix the bug |  | 2026-01-01 | 2026-01-01'
         );
         break;
+
+      // -----------------------------------------------------------------------
+      // UC-B scenarios: update an action from either side and converge.
+      //
+      // All three build a canonical 7-item doc (6 detected + 1 negative), run
+      // an intermediate sync to anchor named ranges and seed the ActionSheet,
+      // then apply mutations before returning.  The Python test triggers the
+      // final convergence sync and asserts the outcome.
+      //
+      // Canonical floating action variants:
+      //   Var 1: chip + "Review the budget report (Open)"         testAssigneeEmail
+      //   Var 2: chip + "Draft the Q3 plan (In Review)"           testAssigneeEmail
+      //   Var 3: chip + "Update the meeting notes"  (→ Open)      testAssigneeEmail
+      //   Var 4: email + "Schedule the follow-up (Done)"          jane.smith@example.com
+      //   Var 5: email + "Approve the budget proposal"  (→ Open)  jane.smith@example.com
+      //   Var 6: email + "Review the Q2 report"  (→ Open)         bob_jones@example.com
+      //   Var 7: plain text (negative) — never appears in ActionSheet
+      // -----------------------------------------------------------------------
+
+      case 'uc_b_doc_wins':
+      case 'uc_b_sheet_wins':
+      case 'uc_b_conflict': {
+        // -- Phase 1: build canonical 7-item state ---------------------------
+        var ucbNrs = doc.getNamedRanges();
+        for (var ucbNri = 0; ucbNri < ucbNrs.length; ucbNri++) {
+          ucbNrs[ucbNri].remove();
+        }
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+
+        var ucbToken = ScriptApp.getOAuthToken();
+        var ucbEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                    || Session.getActiveUser().getEmail();
+
+        // Var 1: chip + action text + (Open)
+        _tfInsertPersonChipListItem(ucbToken, testDocId, ucbEmail,
+                                    'Review the budget report (Open)');
+        // Var 2: chip + action text + (In Review)
+        _tfAppendPersonChipListItem(ucbToken, testDocId, ucbEmail,
+                                    'Draft the Q3 plan (In Review)');
+        // Var 3: chip + action text only (no status → Open)
+        _tfAppendPersonChipListItem(ucbToken, testDocId, ucbEmail,
+                                    'Update the meeting notes');
+        // Var 4: email + action text + (Done)
+        _tfAppendTextListItem(ucbToken, testDocId,
+                              'jane.smith@example.com Schedule the follow-up (Done)');
+        // Var 5: email + action text only (no status → Open)
+        _tfAppendTextListItem(ucbToken, testDocId,
+                              'jane.smith@example.com Approve the budget proposal');
+        // Var 6: underscore email + action text (no status → Open)
+        _tfAppendTextListItem(ucbToken, testDocId,
+                              'bob_jones@example.com Review the Q2 report');
+        // Var 7: plain text (negative — no chip, no email)
+        _tfAppendTextListItem(ucbToken, testDocId,
+                              'Complete the project documentation');
+
+        // -- Phase 2: intermediate sync to anchor named ranges + seed sheet --
+        syncDocument(testDocId);
+
+        // -- Phase 3: apply scenario-specific mutations -----------------------
+        if (resolvedScenario === 'uc_b_doc_wins') {
+          // Mutate variants 1-3 on the doc side (chip text children).
+          // The final sync should propagate these to the ActionSheet.
+          var ucbDocMut = DocumentApp.openById(testDocId);
+          var ucbBody   = ucbDocMut.getBody();
+          var ucbN      = ucbBody.getNumChildren();
+          for (var ucbI = 0; ucbI < ucbN; ucbI++) {
+            var ucbChild = ucbBody.getChild(ucbI);
+            if (ucbChild.getType() !== DocumentApp.ElementType.LIST_ITEM) continue;
+            var ucbItem = ucbChild.asListItem();
+            if (ucbItem.getNumChildren() === 0) continue;
+            if (ucbItem.getChild(0).getType() !== DocumentApp.ElementType.PERSON) continue;
+            if ((ucbItem.getChild(0).asPerson().getEmail() || '') !== ucbEmail) continue;
+            // Find the TEXT child that carries the action text + status
+            for (var ucbJ = 1; ucbJ < ucbItem.getNumChildren(); ucbJ++) {
+              if (ucbItem.getChild(ucbJ).getType() !== DocumentApp.ElementType.TEXT) continue;
+              var ucbTextEl = ucbItem.getChild(ucbJ).asText();
+              var ucbTxt    = ucbTextEl.getText();
+              if (ucbTxt.indexOf('Review the budget report') !== -1) {
+                // Var 1: (Open) → (Done)
+                ucbTextEl.setText(ucbTxt.replace('(Open)', '(Done)'));
+              } else if (ucbTxt.indexOf('Draft the Q3 plan') !== -1) {
+                // Var 2: change action text (preserve status token)
+                ucbTextEl.setText(ucbTxt.replace('Draft the Q3 plan', 'Draft the revised Q3 plan'));
+              } else if (ucbTxt.indexOf('Update the meeting notes') !== -1) {
+                // Var 3: add (In Progress) status to previously statusless item
+                ucbTextEl.setText(ucbTxt.trim() + ' (In Progress)');
+              }
+              break;
+            }
+          }
+          ucbDocMut.saveAndClose();
+          GasLogger.log('fixture.uc_b_doc_wins', { mutationsApplied: 3, assigneeEmail: ucbEmail });
+
+        } else if (resolvedScenario === 'uc_b_sheet_wins') {
+          // Mutate variants 4-6 on the sheet side.
+          // The final sync should propagate these to the doc floating actions.
+          var ucbSheet  = ss.getSheetByName('Actions');
+          var ucbLastR  = ucbSheet ? ucbSheet.getLastRow() : 1;
+          if (ucbSheet && ucbLastR > 1) {
+            var ucbData = ucbSheet.getRange(2, 1, ucbLastR - 1, SHEET_HEADERS.length).getValues();
+            for (var ucbRi = 0; ucbRi < ucbData.length; ucbRi++) {
+              var ucbAssignee = ucbData[ucbRi][2]; // col C: Assignee Email
+              var ucbAction   = ucbData[ucbRi][4]; // col E: Action
+              if (ucbAssignee === 'jane.smith@example.com') {
+                if (ucbAction.indexOf('Schedule the follow-up') !== -1) {
+                  // Var 4: Status Done → Closed
+                  var ucbRow4 = ucbRi + 2;
+                  WriteGuard.wrap(function () { ucbSheet.getRange(ucbRow4, 6).setValue('Closed'); });
+                } else if (ucbAction.indexOf('Approve the budget proposal') !== -1) {
+                  // Var 5: Action text change
+                  var ucbRow5 = ucbRi + 2;
+                  WriteGuard.wrap(function () { ucbSheet.getRange(ucbRow5, 5).setValue('Approve the revised budget'); });
+                }
+              } else if (ucbAssignee === 'bob_jones@example.com' &&
+                         ucbAction.indexOf('Review the Q2 report') !== -1) {
+                // Var 6: Status Open → In Review
+                var ucbRow6 = ucbRi + 2;
+                WriteGuard.wrap(function () { ucbSheet.getRange(ucbRow6, 6).setValue('In Review'); });
+              }
+            }
+          }
+          GasLogger.log('fixture.uc_b_sheet_wins', { mutationsApplied: 3 });
+
+        } else {
+          // uc_b_conflict: one action where the doc is the newer edit (var 1),
+          // one where the sheet is the newer edit (var 4).
+          // Stale the sheet's Date Modified for var 1 so the doc edit wins.
+          var ucbCSheet = ss.getSheetByName('Actions');
+          var ucbCLastR = ucbCSheet ? ucbCSheet.getLastRow() : 1;
+          if (ucbCSheet && ucbCLastR > 1) {
+            var ucbCData = ucbCSheet.getRange(2, 1, ucbCLastR - 1, SHEET_HEADERS.length).getValues();
+            for (var ucbCRi = 0; ucbCRi < ucbCData.length; ucbCRi++) {
+              var ucbCAssignee = ucbCData[ucbCRi][2];
+              var ucbCAction   = ucbCData[ucbCRi][4];
+              if (ucbCAssignee === ucbEmail &&
+                  ucbCAction.indexOf('Review the budget report') !== -1) {
+                // Force sheet Date Modified far in the past so doc edit wins
+                var ucbCRowA = ucbCRi + 2;
+                WriteGuard.wrap(function () {
+                  ucbCSheet.getRange(ucbCRowA, 9).setValue(new Date('2020-01-01'));
+                });
+              }
+            }
+          }
+          // Mutate var 1 on doc side (doc is now "newer" per Date Modified)
+          var ucbCDoc  = DocumentApp.openById(testDocId);
+          var ucbCBody = ucbCDoc.getBody();
+          var ucbCN    = ucbCBody.getNumChildren();
+          for (var ucbCI = 0; ucbCI < ucbCN; ucbCI++) {
+            var ucbCChild = ucbCBody.getChild(ucbCI);
+            if (ucbCChild.getType() !== DocumentApp.ElementType.LIST_ITEM) continue;
+            var ucbCItem = ucbCChild.asListItem();
+            if (ucbCItem.getNumChildren() === 0) continue;
+            if (ucbCItem.getChild(0).getType() !== DocumentApp.ElementType.PERSON) continue;
+            if ((ucbCItem.getChild(0).asPerson().getEmail() || '') !== ucbEmail) continue;
+            for (var ucbCJ = 1; ucbCJ < ucbCItem.getNumChildren(); ucbCJ++) {
+              if (ucbCItem.getChild(ucbCJ).getType() !== DocumentApp.ElementType.TEXT) continue;
+              var ucbCTxtEl = ucbCItem.getChild(ucbCJ).asText();
+              var ucbCTxt   = ucbCTxtEl.getText();
+              if (ucbCTxt.indexOf('Review the budget report') !== -1) {
+                ucbCTxtEl.setText(ucbCTxt.replace('(Open)', '(In Progress)'));
+                break;
+              }
+              break;
+            }
+          }
+          ucbCDoc.saveAndClose();
+          // Mutate var 4 on sheet side (sheet is "newer" — sheet Date Modified
+          // was set by the sync and is more recent than doc edits above)
+          if (ucbCSheet && ucbCLastR > 1) {
+            var ucbCData2 = ucbCSheet.getRange(2, 1, ucbCLastR - 1, SHEET_HEADERS.length).getValues();
+            for (var ucbCRi2 = 0; ucbCRi2 < ucbCData2.length; ucbCRi2++) {
+              if (ucbCData2[ucbCRi2][2] === 'jane.smith@example.com' &&
+                  ucbCData2[ucbCRi2][4].indexOf('Schedule the follow-up') !== -1) {
+                var ucbCRowB = ucbCRi2 + 2;
+                WriteGuard.wrap(function () { ucbCSheet.getRange(ucbCRowB, 6).setValue('Closed'); });
+                break;
+              }
+            }
+          }
+          GasLogger.log('fixture.uc_b_conflict', { conflictSetupDone: true });
+        }
+        break;
+      }
 
       default:
         // Unknown scenario — fall through to default (uc1_new_floating) behaviour.
