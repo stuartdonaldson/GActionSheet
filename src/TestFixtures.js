@@ -229,6 +229,75 @@ function _tfInsertPersonChipListItem(token, docId, email, actionText) {
 }
 
 /**
+ * Appends a plain-text bullet list item to the end of the document via the
+ * Docs REST API, without opening the document through DocumentApp.
+ *
+ * Strategy: GET the doc to find the last paragraph's endIndex, then split it
+ * by inserting \n before its terminal \n, then insert the text and apply
+ * createParagraphBullets — all in one batchUpdate.
+ *
+ * @param {string} token   OAuth token (ScriptApp.getOAuthToken())
+ * @param {string} docId   Google Doc ID
+ * @param {string} text    Text content of the new list item (no \n needed)
+ */
+function _tfAppendTextListItem(token, docId, text) {
+  var baseUrl    = 'https://docs.googleapis.com/v1/documents/';
+  var authHeader = { 'Authorization': 'Bearer ' + token };
+
+  var getResp = UrlFetchApp.fetch(
+    baseUrl + docId + '?fields=body.content',
+    { headers: authHeader, muteHttpExceptions: true }
+  );
+  if (getResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendTextListItem GET failed: HTTP ' + getResp.getResponseCode());
+  }
+  var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
+
+  var lastParaEndIndex = null;
+  for (var ci = content.length - 1; ci >= 0; ci--) {
+    if (content[ci].paragraph) {
+      lastParaEndIndex = content[ci].endIndex;
+      break;
+    }
+  }
+  if (lastParaEndIndex === null) {
+    throw new Error('_tfAppendTextListItem: no paragraph found in doc');
+  }
+
+  // Split the last paragraph by inserting \n before its terminal \n at
+  // (lastParaEndIndex - 1).  After the split, an empty paragraph begins at
+  // lastParaEndIndex.  Then fill that paragraph with the text and apply
+  // BULLET formatting.  All three requests apply in order within one call.
+  var insertAt = lastParaEndIndex - 1;
+  var textLen  = text.length;
+
+  var requests = [
+    { insertText: { location: { index: insertAt }, text: '\n' } },
+    { insertText: { location: { index: lastParaEndIndex }, text: text } },
+    { createParagraphBullets: {
+        range: { startIndex: lastParaEndIndex, endIndex: lastParaEndIndex + textLen + 1 },
+        bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE'
+      }
+    }
+  ];
+
+  var batchResp = UrlFetchApp.fetch(
+    baseUrl + docId + ':batchUpdate',
+    {
+      method: 'post',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeader),
+      payload: JSON.stringify({ requests: requests }),
+      muteHttpExceptions: true
+    }
+  );
+  if (batchResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendTextListItem batchUpdate failed: HTTP ' +
+                    batchResp.getResponseCode() + ': ' +
+                    batchResp.getContentText().substring(0, 200));
+  }
+}
+
+/**
  * Builds a sheet row array in SHEET_HEADERS order.
  *
  * SHEET_HEADERS = [NamedRangeId, ID, Assignee Email, Assignee Name, Action,
@@ -338,29 +407,42 @@ function setupTestFixtures(scenario) {
         docAlreadyClosed = true;
         // Insert a chip-led list item via the Docs REST API batchUpdate.
         // The chip is the assignee; the action text follows it on the same line.
-        var ucaToken = ScriptApp.getOAuthToken();
-        var ucaEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
-                    || Session.getActiveUser().getEmail();
+        var ucaToken  = ScriptApp.getOAuthToken();
+        var ucaEmail  = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                     || Session.getActiveUser().getEmail();
+        var ucaChipOk = false;
         try {
           _tfInsertPersonChipListItem(ucaToken, testDocId, ucaEmail,
                                       'Review the budget report');
-          GasLogger.log('fixture.uc_a_clear', {
-            namedRangesRemoved: namedRanges.length,
-            assigneeEmail: ucaEmail
-          });
+          ucaChipOk = true;
         } catch (chipErr) {
-          GasLogger.log('fixture.error', {
-            msg: chipErr.message,
-            scenario: 'uc_a_clear',
-            step: 'insertPersonChip'
-          });
-          // Re-log with the uc_a_clear tag so the test fails with a clear message
-          // rather than timing out waiting for a log entry that never arrives.
           GasLogger.log('fixture.uc_a_clear', {
             namedRangesRemoved: namedRanges.length,
             assigneeEmail: ucaEmail,
-            error: chipErr.message
+            error: 'chip insert: ' + chipErr.message
           });
+        }
+        if (ucaChipOk) {
+          // Also insert an email-led list item to exercise email-at-start detection.
+          // Use the REST API (not DocumentApp) to avoid GAS document caching between
+          // the chip batchUpdate and the subsequent syncDocument call.
+          try {
+            _tfAppendTextListItem(
+              ucaToken, testDocId,
+              'jane.smith@example.com Approve the budget proposal (In Progress)'
+            );
+            GasLogger.log('fixture.uc_a_clear', {
+              namedRangesRemoved: namedRanges.length,
+              assigneeEmail:      ucaEmail,
+              emailItemInserted:  true
+            });
+          } catch (emailErr) {
+            GasLogger.log('fixture.uc_a_clear', {
+              namedRangesRemoved: namedRanges.length,
+              assigneeEmail: ucaEmail,
+              error: 'email item append: ' + emailErr.message
+            });
+          }
         }
         break;
 

@@ -1,12 +1,14 @@
 /**
  * SyncManager.js
  *
- * UC-A: scan the doc for chip-led checklist items, anchor each with a named
- * range, and upsert rows to the ActionSheet via the Web App proxy (doPost).
+ * UC-A: scan the doc for floating actions, anchor each with a named range,
+ * and upsert rows to the ActionSheet via the Web App proxy (doPost).
  *
- * Detection rule: any BODY paragraph whose first child is a PERSON element.
- * The visual checkbox is not readable (isChecked() returns null) — the chip
- * is the only reliable marker.
+ * Detection rules (either satisfies):
+ *   1. PERSON chip — first child of the paragraph is a PERSON element.
+ *   2. Email-at-start — first child is TEXT whose content begins with a
+ *      valid email address (word@word.tld).  The assignee name is derived
+ *      from the username portion (punctuation → spaces, title-cased).
  *
  * Identity: DocumentApp.Document.addNamedRange() creates a named range that
  * is also visible (and deletable) via the Docs REST API. getId() returns the
@@ -25,17 +27,17 @@ function syncDocument(docId) {
     }
 
     var doc = DocumentApp.openById(docId);
-    var chipActions = _scanChipLedActions(doc);
+    var floatingActions = _scanFloatingActions(doc);
 
-    GasLogger.log('sync.scanned', { docId: docId, count: chipActions.length });
+    GasLogger.log('sync.scanned', { docId: docId, count: floatingActions.length });
 
-    if (chipActions.length === 0) {
+    if (floatingActions.length === 0) {
       GasLogger.log('sync.complete', { docId: docId, anchored: 0, upserted: 0 });
       return;
     }
 
     var anchoredMap = _buildAnchoredIndexMap(doc);
-    var anchorResults = _anchorNewActions(doc, chipActions, anchoredMap);
+    var anchorResults = _anchorNewActions(doc, floatingActions, anchoredMap);
 
     var docUrl   = doc.getUrl();
     var docTitle = doc.getName();
@@ -71,16 +73,18 @@ function onActionSheetEdit(e) {
 // ---------------------------------------------------------------------------
 
 /**
- * Walks the doc body and returns one entry per chip-led paragraph or list item.
+ * Walks the doc body and returns one entry per floating-action paragraph or
+ * list item.  Two detection strategies are tried in order:
  *
- * Both PARAGRAPH and LIST_ITEM elements are scanned — users create chip-led
- * actions in both plain paragraphs and bullet/checklist list items (GAS represents
- * bulleted/checked lists as LIST_ITEM, not PARAGRAPH).
+ *   1. PERSON chip — first child is a PERSON element.
+ *   2. Email-at-start — first child is TEXT beginning with word@word.tld.
+ *
+ * Both PARAGRAPH and LIST_ITEM body elements are scanned.
  *
  * @param {GoogleAppsScript.Document.Document} doc
  * @returns {Array<{bodyChildIndex, paragraph, assigneeEmail, assigneeName, actionText, status}>}
  */
-function _scanChipLedActions(doc) {
+function _scanFloatingActions(doc) {
   var body    = doc.getBody();
   var n       = body.getNumChildren();
   var actions = [];
@@ -95,16 +99,28 @@ function _scanChipLedActions(doc) {
     var para = isPara ? child.asParagraph() : child.asListItem();
     if (para.getNumChildren() === 0) continue;
 
-    var firstChild = para.getChild(0);
-    if (firstChild.getType() !== DocumentApp.ElementType.PERSON) continue;
+    var firstChild    = para.getChild(0);
+    var assigneeEmail = '';
+    var assigneeName  = '';
+    var rawText       = '';
+    var textStart     = 1;
 
-    var chip          = firstChild.asPerson();
-    var assigneeEmail = chip.getEmail() || '';
-    var assigneeName  = chip.getName()  || '';
+    if (firstChild.getType() === DocumentApp.ElementType.PERSON) {
+      var chip      = firstChild.asPerson();
+      assigneeEmail = chip.getEmail() || '';
+      assigneeName  = chip.getName()  || '';
+    } else if (firstChild.getType() === DocumentApp.ElementType.TEXT) {
+      var leadText   = firstChild.asText().getText();
+      var emailMatch = leadText.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
+      if (!emailMatch) continue;
+      assigneeEmail = emailMatch[1];
+      assigneeName  = _nameFromEmail(assigneeEmail);
+      rawText       = leadText.slice(emailMatch[0].length);
+    } else {
+      continue;
+    }
 
-    // Collect text from all children after the chip
-    var rawText = '';
-    for (var j = 1; j < para.getNumChildren(); j++) {
+    for (var j = textStart; j < para.getNumChildren(); j++) {
       var c = para.getChild(j);
       if (c.getType() === DocumentApp.ElementType.TEXT) {
         rawText += c.asText().getText();
@@ -132,6 +148,18 @@ function _scanChipLedActions(doc) {
   }
 
   return actions;
+}
+
+/**
+ * Derives a display name from an email address username.
+ * Punctuation (. _ -) is treated as a word separator and each word is
+ * title-cased.  e.g. "jane.smith@example.com" → "Jane Smith".
+ */
+function _nameFromEmail(email) {
+  var username = email.split('@')[0];
+  return username
+    .replace(/[._\-]+/g, ' ')
+    .replace(/\b\w/g, function(c) { return c.toUpperCase(); });
 }
 
 // ---------------------------------------------------------------------------
@@ -185,19 +213,19 @@ function _buildAnchoredIndexMap(doc) {
 }
 
 /**
- * For each chip-led action, either records the existing namedRangeId or
+ * For each floating action, either records the existing namedRangeId or
  * creates a new named range and records the new ID.
  *
  * @param {GoogleAppsScript.Document.Document} doc
- * @param {Array}  chipActions   Output of _scanChipLedActions.
- * @param {Object} anchoredMap  Output of _buildAnchoredIndexMap.
+ * @param {Array}  floatingActions  Output of _scanFloatingActions.
+ * @param {Object} anchoredMap      Output of _buildAnchoredIndexMap.
  * @returns {Array<{namedRangeId, wasNew, assigneeEmail, assigneeName, actionText, status}>}
  */
-function _anchorNewActions(doc, chipActions, anchoredMap) {
+function _anchorNewActions(doc, floatingActions, anchoredMap) {
   var results = [];
 
-  for (var i = 0; i < chipActions.length; i++) {
-    var action = chipActions[i];
+  for (var i = 0; i < floatingActions.length; i++) {
+    var action = floatingActions[i];
     var idx    = action.bodyChildIndex;
 
     if (anchoredMap[idx]) {
