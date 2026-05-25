@@ -81,6 +81,10 @@ The script runs automatically via installed triggers. Manual execution:
 1. Open the tracking Spreadsheet
 2. `Action Sync` menu → `Sync` — runs a full sync across all discovered documents immediately
 
+In the Google Docs sidebar for an active document:
+- **Sync now** — reconciles the doc's floating actions with the ActionSheet
+- **VerifySync** — performs a read-only comparison of floating actions, tracker rows when present, and ActionSheet rows for the same doc; the sidebar result card lists progress and mismatches
+
 To re-initialize triggers after a project clone or script re-creation:
 
 ```

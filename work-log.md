@@ -377,3 +377,24 @@ Captured and analyzed deployment process deviation (direct `clasp push` vs `npm 
 - LL incident: staged (resolution deferred per user)
 - Ready: GTaskSheet-mol-4vr (independent review) and 14 other open issues
 
+
+## 2026-05-24 22:14:53
+
+### Summary
+Completed GTaskSheet-5vk (UC-B: Sheet→Doc sync). All 3 UC-B acceptance tests now pass; UC-A regressions clean.
+
+### Changes
+- `src/SyncManager.js`: added `_syncSheetRowToDoc` (real-time `onActionSheetEdit` path) + call from `onActionSheetEdit`; fixed bug where Document column read via `getValues()` returned HYPERLINK display text instead of URL — changed to `sheet.getRange(row, 7).getFormula()`
+- `tests/test_uc_b.py`: updated module docstring to reflect active (non-xfail) state
+
+### Key Learnings
+`getValues()` returns the computed display value for formula cells (e.g. `=HYPERLINK("url","title")` → `"title"`); use `getFormula()` / `getFormulas()` when you need the raw formula string containing embedded URLs.
+
+### Tests
+- `test_uc_b_doc_wins` PASSED
+- `test_uc_b_sheet_wins` PASSED
+- `test_uc_b_conflict_resolution` PASSED
+- UC-A: 3/3 PASSED (no regressions)
+
+### Commit
+`7666507` feat(uc-b): complete Sheet→Doc sync — _syncSheetRowToDoc + activate UC-B tests

@@ -161,11 +161,12 @@ The two subgraphs share no arrow; communication is solely through `ActionSheet` 
 
 | Component | Responsibility |
 |-----------|---------------|
-| Sidebar UI | Renders the action list for the active doc; surfaces **Sync now**, **Insert / refresh tracker**, warning rows, and orphan-anchor prompts |
+| Sidebar UI | Renders the action list for the active doc; surfaces **Sync now**, **VerifySync**, **Insert / refresh tracker**, warning rows, and orphan-anchor prompts |
 | Action Scanner | Reads the active doc via DocumentApp: walks paragraphs and list items, identifies floating actions by two rules — (1) first inline child is a PERSON chip, or (2) first text content begins with a valid email address (`word@word.tld`); extracts assignee email/name, action text, and trailing `(Status)` token; reads existing named ranges via the REST API to resolve identity |
 | Named Range Manager | Creates a named range over a newly seen action paragraph; deletes a range when its action is no longer present; re-anchors when an existing row's range is missing but its action+assignee still match a paragraph |
 | Tracker Table Renderer | Inserts or refreshes the in-doc tracker table at its own named-range anchor, preceded by the instructional paragraph summarizing the sync rules; uses REST `batchUpdate` for atomic in-place replacement |
 | ActionSheet Sync | Reads ActionSheet rows for the active doc, compares with scanner output by `namedRangeId`, applies `Last Modified` precedence, writes diffs to either side; sets the automation project's `SYNC_IN_PROGRESS` script property on the ActionSheet before sheet writes |
+| VerifySync | Reads floating actions from the doc, reads ActionSheet rows for the same doc through a non-mutating Web App call, parses the in-doc tracker table when present, and reports progress plus mismatches in the sidebar result card; a floating action without an explicit trailing status token is itself a verification failure |
 
 ### Automation project
 
@@ -264,7 +265,7 @@ Conflict resolution applies only between the two authoritative surfaces using `L
 DocumentApp returns `null` for `isChecked()` on every task / checklist item, and the REST API exposes no equivalent field. The visual checkbox is **decorative only**. The truthful status is the trailing `(Status)` parenthesized token on the action paragraph. Components must never branch on visual checked state.
 
 ### Status token grammar
-A trailing parenthesized token at the end of the action paragraph. `Open` is the default written when missing. `Closed` is recognized for archiving. Any other value (e.g. `(In Review)`, `(Blocked)`) is preserved verbatim and round-trips to the ActionSheet `Status` column. Whitespace inside the parens is trimmed on read; the canonical written form has no leading/trailing whitespace.
+A trailing parenthesized token at the end of the action paragraph. If the paragraph omits the token, Sync rewrites the floating action with an explicit `(Open)` token. `Closed` is recognized for archiving. Any other value (e.g. `(In Review)`, `(Blocked)`) is preserved verbatim and round-trips to the ActionSheet `Status` column. Whitespace inside the parens is trimmed on read; the canonical written form has no leading/trailing whitespace.
 
 ### Programmatic Write Suppression
 Both the add-on's per-doc Sync and the automation's Sweep / Archive set the automation project's `SYNC_IN_PROGRESS` script property on the ActionSheet before any programmatic sheet write, and clear it in a `finally` block. The `onEdit Handler` reads this flag and returns immediately when set, preventing false `Last Modified` updates from automated writes.

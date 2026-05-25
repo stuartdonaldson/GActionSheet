@@ -56,6 +56,8 @@ function syncDocument(docId) {
       _applySheetWinToDoc(doc, sheetWins[i].namedRangeId, sheetWins[i].action, sheetWins[i].status);
     }
 
+    _normalizeMissingFloatingActionStatuses(floatingActions);
+
     doc.saveAndClose();
     props.setProperty('LAST_SYNC_TIME_' + docId, new Date().toISOString());
 
@@ -203,6 +205,7 @@ function _scanFloatingActions(doc) {
     var status     = 'Open';
     var actionText = rawText;
     var m = rawText.match(/\(([^)]*)\)\s*$/);
+    var hasExplicitStatus = !!m;
     if (m) {
       status     = m[1].trim() || 'Open';
       actionText = rawText.slice(0, rawText.length - m[0].length).trim();
@@ -214,7 +217,8 @@ function _scanFloatingActions(doc) {
       assigneeEmail:  assigneeEmail,
       assigneeName:   assigneeName,
       actionText:     actionText,
-      status:         status
+      status:         status,
+      hasExplicitStatus: hasExplicitStatus
     });
   }
 
@@ -439,13 +443,23 @@ function _applySheetWinToDoc(doc, namedRangeId, newAction, newStatus) {
   }
 }
 
+function _normalizeMissingFloatingActionStatuses(floatingActions) {
+  for (var i = 0; i < floatingActions.length; i++) {
+    var action = floatingActions[i];
+    if (action.hasExplicitStatus) {
+      continue;
+    }
+    _updateParaTextFromSheet(action.paragraph, action.actionText, action.status || 'Open');
+  }
+}
+
 /**
  * Replaces the text content of a floating action paragraph with updated values
  * from the ActionSheet.  Preserves the email prefix (email-led items) or the
  * leading space that follows a person chip (chip-led items).
  *
- * Status "Open" is the scanner default and is omitted from the paragraph text,
- * consistent with how floating actions are originally authored.
+ * Status is always written explicitly so the floating action text is fully
+ * normalized after sync.
  *
  * @param {GoogleAppsScript.Document.Paragraph|ListItem} para
  * @param {string} newAction
@@ -467,10 +481,8 @@ function _updateParaTextFromSheet(para, newAction, newStatus) {
       prefix = ' ';
     }
 
-    var newContent = newAction;
-    if (newStatus && newStatus !== 'Open') {
-      newContent += ' (' + newStatus + ')';
-    }
+    var normalizedStatus = newStatus || 'Open';
+    var newContent = newAction + ' (' + normalizedStatus + ')';
     textEl.setText(prefix + newContent);
     return;
   }

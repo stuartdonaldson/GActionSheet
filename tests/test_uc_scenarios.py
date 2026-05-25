@@ -59,12 +59,24 @@ SCENARIO_MATRIX = [
                     "assignee_email": "test@example.com",
                 },
             ],
+            "expected_sheet_rows": [
+                {"id": 1, "action": "Fix the bug", "status": "In Review", "doc_url_contains": "docs.google.com"},
+            ],
         },
     ),
     (
         "uc3_doc_wins",
         {
             "expected_log_tag": "sync.sheet-updated",
+            "expected_table_rows": [
+                {"id": 1, "action": "Fix the bug", "status": "Done"},
+            ],
+            "expected_floating_actions": [
+                {
+                    "id": 1, "action": "Fix the bug", "status": "Done",
+                    "assignee_email": "test@example.com",
+                },
+            ],
             "expected_sheet_rows": [
                 {"id": 1, "action": "Fix the bug", "status": "Done", "doc_url_contains": "docs.google.com"},
             ],

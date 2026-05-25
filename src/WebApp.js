@@ -37,6 +37,10 @@ function doPost(e) {
     return _handleSyncActionRows(payload);
   }
 
+  if (payload.action === 'verify_action_rows') {
+    return _handleVerifyActionRows(payload);
+  }
+
   // Legacy POC — retained for diagnostics
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
@@ -212,6 +216,57 @@ function _handleSyncActionRows(payload) {
   });
 
   return _jsonResponse({ upserted: upserted, updated: updated, sheetWins: sheetWins });
+}
+
+/**
+ * Returns ActionSheet rows for a single document without mutating any data.
+ *
+ * Payload shape:
+ *   { secret, action: 'verify_action_rows', docUrl }
+ *
+ * Response shape:
+ *   { rows: [{ namedRangeId, id, assigneeEmail, assigneeName, action, status }] }
+ */
+function _handleVerifyActionRows(payload) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found', rows: [] });
+  }
+
+  return _jsonResponse({
+    rows: _loadRowsForDocUrl(actionsSheet, payload.docUrl || '')
+  });
+}
+
+function _loadRowsForDocUrl(actionsSheet, docUrl) {
+  var lastRow = actionsSheet.getLastRow();
+  if (lastRow < 2) {
+    return [];
+  }
+
+  var numRows = lastRow - 1;
+  var data = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
+  var formulas = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
+  var rows = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var docFormula = formulas[i][0] || '';
+    if (docUrl && docFormula.indexOf(docUrl) === -1) {
+      continue;
+    }
+
+    rows.push({
+      namedRangeId: data[i][0] || '',
+      id: data[i][1] || '',
+      assigneeEmail: data[i][2] || '',
+      assigneeName: data[i][3] || '',
+      action: data[i][4] || '',
+      status: data[i][5] || 'Open'
+    });
+  }
+
+  return rows;
 }
 
 function _escapeQuotes(s) {

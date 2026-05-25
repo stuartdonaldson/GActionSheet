@@ -33,7 +33,8 @@ def floating_actions(document: docx.Document) -> list[dict]:
          the email address itself).
       4. Parse the trailing (Status) token; default status is 'Open'.
 
-    Returns list of dicts with keys: assignee_email, assignee_name, action, status.
+    Returns list of dicts with keys: assignee_email, assignee_name, action,
+    status, has_explicit_status.
     """
     # Build a map: rId -> target URL for all hyperlink relationships
     hyperlink_urls: dict[str, str] = {}
@@ -74,6 +75,7 @@ def floating_actions(document: docx.Document) -> list[dict]:
         status = 'Open'
         action_text = full_text
         sm = _STATUS_RE.search(full_text)
+        has_explicit_status = bool(sm)
         if sm:
             status = sm.group(1).strip() or 'Open'
             action_text = full_text[:sm.start()].strip()
@@ -98,6 +100,7 @@ def floating_actions(document: docx.Document) -> list[dict]:
             'assignee_name':  assignee_name,
             'action':         action_text,
             'status':         status,
+            'has_explicit_status': has_explicit_status,
         })
 
     return result

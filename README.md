@@ -12,6 +12,7 @@ Workspace Add-on that tracks action items inside Google Docs and aggregates them
 2. Open the GActionSheet sidebar (Extensions → GActionSheet).
 3. Click **Sync now**. The sidebar lists every action in the doc; the ActionSheet receives a row for each, anchored by a named range.
 4. Status lives at the end of the line in parentheses, e.g. `(Open)`, `(Closed)`, or any free-form value you prefer. `(Open)` is the default.
+5. Click **VerifySync** to compare the doc's floating actions, the in-doc tracker table when present, and the ActionSheet rows for this document. The sidebar shows the verification steps and any mismatches it finds.
 5. Click **Insert / refresh tracker** to write a summary table into the doc, prefixed with the sync rules.
 
 A timed sweep on the ActionSheet picks up changes in docs no one opened recently. Closed actions older than 30 days are moved to an archive sheet.
