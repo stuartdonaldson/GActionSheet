@@ -129,11 +129,11 @@ Primary Flow:
 4. The sidebar refreshes and shows the new actions.
 
 Postconditions:
-- Each action has a `namedRangeId`-anchored row in the ActionSheet with `Assignee Email`, `Assignee Name`, `Action`, and `Status` populated.
+- Every floating action in the document has exactly one corresponding ActionSheet row, and the pair agrees on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `NamedRangeId` (non-empty). The ActionSheet `Document` column display text equals the current document title. No ActionSheet rows for this document exist beyond those with a corresponding floating action.
 
 Acceptance Criteria:
 - AC1: After Sync, both chip-led and email-led list items appear in the ActionSheet with correct `Assignee Email`, `Assignee Name`, action text, status, and a non-empty `NamedRangeId`. For email-led items, `Assignee Name` is derived from the username portion of the email.
-- AC2: A second Sync with no edits produces no new rows and no lost rows. All `NamedRangeId` values are unchanged. Every floating action has exactly one ActionSheet row; the pair is consistent on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `NamedRangeId`.
+- AC2: A second Sync with no edits produces no new rows and no lost rows. All `NamedRangeId` values are unchanged. Every floating action has exactly one ActionSheet row; the pair is consistent on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `NamedRangeId`. The `Document` column display text equals the current document title.
 
 ---
 
@@ -154,7 +154,7 @@ Primary Flow:
 2. The next Sync (sidebar click or timed sweep) detects the difference and applies the later-modified side's values to the other.
 
 Postconditions:
-- After Sync, every floating action in the document has exactly one corresponding ActionSheet row. The pair is consistent on: `Assignee Email` and `Assignee Name` (match the floating action's assignee), `Action` text (exact match), `Status` (exact match), and `NamedRangeId` (stable, non-empty). No ActionSheet rows exist for floating actions that have been deleted; no floating actions exist without a matching ActionSheet row.
+- After Sync, every floating action in the document has exactly one corresponding ActionSheet row. The pair is consistent on: `Assignee Email` and `Assignee Name` (match the floating action's assignee), `Action` text (exact match), `Status` (exact match), `NamedRangeId` (stable, non-empty), and `Document` column display text (equals the current document title). No ActionSheet rows exist for floating actions that have been deleted; no floating actions exist without a matching ActionSheet row.
 - After the next tracker refresh, the in-doc tracker row for that action shows the same `Action` and `Status` values.
 - `Last Modified` on both sides reflects the time of the original user edit.
 
@@ -179,7 +179,7 @@ Primary Flow:
 2. The add-on inserts (or refreshes) the tracker table at its anchor, prefixed with the instructional paragraph, with one row per current action in document order.
 
 Postconditions:
-- The tracker table reflects the current set of actions in document order.
+- Every floating action in the document has exactly one tracker-table row and one ActionSheet row. All three agree on `Action` text and `Status`. The ActionSheet rows also agree with their paired floating actions on `Assignee Email`, `Assignee Name`, and `NamedRangeId`. The `Document` column display text on each ActionSheet row equals the current document title.
 
 Acceptance Criteria:
 - First click on a doc with N actions produces the instructional paragraph plus a table with N rows in document order, anchored so subsequent refreshes update in place.
@@ -192,6 +192,11 @@ Acceptance Criteria:
 ### UC-D: Archive closed actions
 
 Actor: System (timed sweep on the ActionSheet)
+
+Postconditions:
+- The ActionSheet contains no rows with `Status = Closed` and `Last Modified > 30 days`; all such rows have been moved to the archive sheet with `Last Modified` preserved.
+- All remaining ActionSheet rows are unchanged in content.
+- No document content has been altered.
 
 Acceptance Criteria:
 - An ActionSheet row with `Status = Closed` and `Last Modified > 30 days` is moved from the ActionSheet to the archive sheet on the next sweep, preserving `Last Modified`.

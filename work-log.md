@@ -398,3 +398,22 @@ Completed GTaskSheet-5vk (UC-B: Sheet→Doc sync). All 3 UC-B acceptance tests n
 
 ### Commit
 `7666507` feat(uc-b): complete Sheet→Doc sync — _syncSheetRowToDoc + activate UC-B tests
+## 2026-05-25 14:50:53
+
+### Summary
+Fixed named range anchor shift bug in UC-B sync; all 3 UC-B tests now pass. Fixed Python test helper to correctly parse chip-led floating actions from docx. Defaulted Playwright to headless.
+
+### Changes
+- **`src/SyncManager.js`**: Moved `_normalizeMissingFloatingActionStatuses` to run before `_buildAnchoredIndexMap` and `_anchorNewActions`. Root cause: GAS shifts a named range anchor to the next paragraph when `setText()` is called on a TEXT child after the NR is created for its parent LIST_ITEM. Normalizing text before NR creation eliminates the phantom 7th sheet row in UC-B sheet_wins and conflict_resolution tests. Removed debug logging from `_buildAnchoredIndexMap`.
+- **`tests/helpers/doc_inspect.py`**: Rewrote `floating_actions()` to exclude person-chip hyperlink display text from `action_text`. In docx export, a PERSON chip becomes a `<w:hyperlink>` whose display text is the person's name — that must not be included in the action string or `_verify_consistency` key matching fails.
+- **`src/TestFixtures.js`**: Fixed Var 3 mutation in `uc_b_doc_wins` to strip any existing status token before appending `(In Progress)`, preventing double token `(Open) (In Progress)` when the intermediate sync had already normalized the item.
+- **`tests/playwright/invoke_gas.js`**: Changed browser launch to `headless: true` by default; pass `--headed` flag to run visible.
+
+### Key Learnings
+- GAS named range anchor shift: calling `textEl.setText(...)` on a TEXT element whose parent LIST_ITEM already has a named range will shift that NR to the next paragraph in the document. Fix: stabilize all text before creating any named ranges.
+- Google Docs PERSON chip exports to docx as `<w:hyperlink>` with email in the URL; the display text (person's name) is inside the hyperlink element and is included in `para.text` — must be excluded when extracting action text.
+
+### Issues
+- GTaskSheet-1ar: closed (NR shift fix delivered)
+- GTaskSheet-x2s: filed — UC-A permutations test downloads 0 rows from xlsx despite sync logging `upserted:3`; likely Google Sheets export caching lag
+

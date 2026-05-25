@@ -1159,6 +1159,232 @@ function setupAndSync(scenario) {
 
 // syncDocument() is defined in SyncManager.js.
 
+// ---------------------------------------------------------------------------
+// Post-sync consistency verification (test helper)
+// ---------------------------------------------------------------------------
+
+/**
+ * Full-field consistency check between floating actions, ActionSheet rows, and
+ * (when present) tracker-table rows.  Reads the test doc and test sheet directly
+ * so all nine ActionSheet columns (including dates and Document formula) are
+ * available without going through the WebApp.
+ *
+ * Checked invariants (floating action ↔ ActionSheet row, keyed by namedRangeId):
+ *   assigneeEmail, assigneeName — exact match
+ *   action                      — exact text match
+ *   status                      — exact match (default 'Open' on both sides)
+ *   dateCreated, dateModified   — present and non-empty on ActionSheet row
+ *   Document column display text — must equal the current document title
+ *
+ * When a tracker table is present, each tracker row is also verified against
+ * the ActionSheet row for action and status.
+ *
+ * Logs verify.consistency.complete with the result object so Playwright tests
+ * can poll gasLogDir and assert result.ok === true.
+ *
+ * @param {string} [docId]  Defaults to TEST_DOC_ID script property.
+ */
+function verifyConsistencyForTest(docId) {
+  var props = PropertiesService.getScriptProperties();
+  var resolvedDocId = docId || props.getProperty('TEST_DOC_ID');
+  var testSheetId   = props.getProperty('TEST_SHEET_ID');
+
+  if (!resolvedDocId || !testSheetId) {
+    GasLogger.log('verify.consistency.complete', {
+      ok: false,
+      issues: ['TEST_DOC_ID or TEST_SHEET_ID script properties not set'],
+      counts: { floating: 0, sheet: 0, tracker: 0, matched: 0 },
+      docTitle: ''
+    });
+    GasLogger.flush();
+    return;
+  }
+
+  var result = {
+    ok: true,
+    issues: [],
+    counts: { floating: 0, sheet: 0, tracker: 0, matched: 0 },
+    docTitle: ''
+  };
+
+  try {
+    var doc = DocumentApp.openById(resolvedDocId);
+    result.docTitle = doc.getName();
+
+    // Collect floating actions with namedRangeIds (reuses VerifySync.js helpers).
+    var floatingActions = _collectFloatingActionState(doc);
+    result.counts.floating = floatingActions.length;
+
+    var tracker = _readTrackerTableState(doc);
+    result.counts.tracker = tracker.rows.length;
+
+    // Read ActionSheet rows directly (all 9 columns) to get dates and Document formula.
+    var ss = SpreadsheetApp.openById(testSheetId);
+    var actionsSheet = ss.getSheetByName('Actions');
+    var sheetRows = [];
+    if (actionsSheet && actionsSheet.getLastRow() > 1) {
+      var numRows = actionsSheet.getLastRow() - 1;
+      var data     = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
+      var formulas = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
+      for (var i = 0; i < data.length; i++) {
+        var formula = formulas[i][0] || '';
+        // Extract display name from =HYPERLINK("url","title")
+        var titleMatch = formula.match(/HYPERLINK\s*\(\s*"[^"]*"\s*,\s*"([^"]*)"\s*\)/i);
+        sheetRows.push({
+          namedRangeId: data[i][0] || '',
+          id:           data[i][1] || '',
+          assigneeEmail: data[i][2] || '',
+          assigneeName:  data[i][3] || '',
+          action:        data[i][4] || '',
+          status:        data[i][5] || 'Open',
+          docTitle:      titleMatch ? titleMatch[1] : '',
+          dateCreated:   data[i][7],
+          dateModified:  data[i][8]
+        });
+      }
+    }
+    result.counts.sheet = sheetRows.length;
+
+    _runConsistencyChecks(result, floatingActions, tracker, sheetRows, result.docTitle);
+    result.ok = result.issues.length === 0;
+
+    GasLogger.log('verify.consistency.complete', result);
+  } catch (e) {
+    result.ok = false;
+    result.issues.push('Error during consistency check: ' + e.message);
+    GasLogger.log('verify.consistency.complete', result);
+  }
+
+  GasLogger.flush();
+}
+
+/**
+ * Compares floating actions, tracker rows, and sheet rows for full-field agreement.
+ * Appends mismatch descriptions to result.issues.
+ *
+ * @param {object}   result
+ * @param {Array}    floatingActions  From _collectFloatingActionState.
+ * @param {object}   tracker         {found, rows} from _readTrackerTableState.
+ * @param {Array}    sheetRows       Direct ActionSheet read (all 9 fields + docTitle).
+ * @param {string}   docTitle        Current document title from doc.getName().
+ */
+function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docTitle) {
+  var floatingByNrId = {};
+  var sheetByNrId    = {};
+  var sheetById      = {};
+  var trackerById    = {};
+  var i;
+
+  for (i = 0; i < floatingActions.length; i++) {
+    var f = floatingActions[i];
+    if (!f.namedRangeId) {
+      result.issues.push('Floating action without namedRangeId: ' + (f.action || '(blank)'));
+      continue;
+    }
+    floatingByNrId[f.namedRangeId] = f;
+  }
+
+  for (i = 0; i < sheetRows.length; i++) {
+    var s = sheetRows[i];
+    if (!s.namedRangeId) continue;
+    if (sheetByNrId[s.namedRangeId]) {
+      result.issues.push('Duplicate namedRangeId in ActionSheet: ' + s.namedRangeId);
+      continue;
+    }
+    sheetByNrId[s.namedRangeId] = s;
+    if (s.id) sheetById[String(s.id)] = s;
+  }
+
+  if (tracker.found) {
+    for (i = 0; i < tracker.rows.length; i++) {
+      var t = tracker.rows[i];
+      if (!t.id) {
+        result.issues.push('Tracker row missing ID for action: ' + (t.action || '(blank)'));
+        continue;
+      }
+      trackerById[String(t.id)] = t;
+    }
+  }
+
+  // Check each floating action against its ActionSheet pair.
+  for (var nrId in floatingByNrId) {
+    if (!Object.prototype.hasOwnProperty.call(floatingByNrId, nrId)) continue;
+    var floating = floatingByNrId[nrId];
+    var sheet    = sheetByNrId[nrId];
+    if (!sheet) {
+      result.issues.push('Floating action has no ActionSheet row: ' + (floating.action || '(blank)'));
+      continue;
+    }
+
+    if (floating.assigneeEmail !== sheet.assigneeEmail) {
+      result.issues.push('assigneeEmail mismatch (ID ' + sheet.id + '): doc="' +
+        floating.assigneeEmail + '" sheet="' + sheet.assigneeEmail + '"');
+    }
+    if (floating.assigneeName !== sheet.assigneeName) {
+      result.issues.push('assigneeName mismatch (ID ' + sheet.id + '): doc="' +
+        floating.assigneeName + '" sheet="' + sheet.assigneeName + '"');
+    }
+    if (floating.action !== sheet.action) {
+      result.issues.push('action mismatch (ID ' + sheet.id + '): doc="' +
+        floating.action + '" sheet="' + sheet.action + '"');
+    }
+    var fStatus = floating.status || 'Open';
+    var sStatus = sheet.status   || 'Open';
+    if (fStatus !== sStatus) {
+      result.issues.push('status mismatch (ID ' + sheet.id + '): doc="' +
+        fStatus + '" sheet="' + sStatus + '"');
+    }
+    if (!sheet.dateCreated) {
+      result.issues.push('dateCreated empty for ID ' + sheet.id);
+    }
+    if (!sheet.dateModified) {
+      result.issues.push('dateModified empty for ID ' + sheet.id);
+    }
+    if (docTitle && sheet.docTitle && sheet.docTitle !== docTitle) {
+      result.issues.push('Document title mismatch (ID ' + sheet.id + '): expected="' +
+        docTitle + '" sheet="' + sheet.docTitle + '"');
+    }
+
+    if (tracker.found) {
+      var trackerRow = trackerById[String(sheet.id || '')];
+      if (!trackerRow) {
+        result.issues.push('Tracker table missing row for ID ' + sheet.id);
+      } else {
+        if (trackerRow.action !== sheet.action) {
+          result.issues.push('Tracker action mismatch (ID ' + sheet.id + '): tracker="' +
+            trackerRow.action + '" sheet="' + sheet.action + '"');
+        }
+        var tStatus = trackerRow.status || 'Open';
+        if (tStatus !== sStatus) {
+          result.issues.push('Tracker status mismatch (ID ' + sheet.id + '): tracker="' +
+            tStatus + '" sheet="' + sStatus + '"');
+        }
+      }
+    }
+
+    result.counts.matched++;
+  }
+
+  // ActionSheet rows with no corresponding floating action.
+  for (var snrId in sheetByNrId) {
+    if (!Object.prototype.hasOwnProperty.call(sheetByNrId, snrId)) continue;
+    if (!floatingByNrId[snrId]) {
+      var extra = sheetByNrId[snrId];
+      result.issues.push('ActionSheet row ID ' + extra.id + ' has no floating action in doc');
+    }
+  }
+
+  // Tracker rows with no ActionSheet row.
+  if (tracker.found) {
+    for (var tid in trackerById) {
+      if (!Object.prototype.hasOwnProperty.call(trackerById, tid)) continue;
+      if (!sheetById[tid]) {
+        result.issues.push('Tracker row ID ' + tid + ' has no ActionSheet row');
+      }
+    }
+  }
+}
+
 /**
  * Diagnostic: logs the body element types of the test doc to GasLogger.
  * Run via "Test: Debug Doc Body" menu item to verify fixture state.

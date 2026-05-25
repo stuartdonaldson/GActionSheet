@@ -20,6 +20,7 @@ function onOpen() {
     .addItem('Test: Setup Fixture', 'menuSetupFixture')
     .addItem('Test: Sync Document', 'menuSyncDocument')
     .addItem('Test: Setup And Sync', 'menuSetupAndSync')
+    .addItem('Test: Verify Consistency', 'menuVerifyConsistency')
     .addItem('Test: Debug Doc Body', 'menuDebugDocBody')
     .addToUi();
 }
@@ -53,6 +54,11 @@ function menuSyncDocument() {
 function menuSetupAndSync() {
   var scenario = _readTestControlArg();
   setupAndSync(scenario);
+}
+
+function menuVerifyConsistency() {
+  var docId = _readTestControlArg();
+  verifyConsistencyForTest(docId);
 }
 
 function menuDebugDocBody() {

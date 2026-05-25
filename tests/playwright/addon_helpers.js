@@ -153,6 +153,69 @@ async function sidebarActionRows(page) {
 }
 
 // ---------------------------------------------------------------------------
+// Post-sync consistency assertion helper
+// ---------------------------------------------------------------------------
+
+/**
+ * verifyConsistency — post-sync full-state consistency assertion.
+ *
+ * USAGE PATTERN (all UC tests must call this after every sync operation):
+ *
+ *   const result = await verifyConsistency(page, docId);
+ *   expect(result.ok, result.issues.join('\n')).toBe(true);
+ *
+ * FIELDS VERIFIED (floating action ↔ ActionSheet row, keyed by namedRangeId):
+ *   assigneeEmail, assigneeName — exact match
+ *   action                      — exact text match
+ *   status                      — exact match (default 'Open' on both sides)
+ *   dateCreated, dateModified   — present and non-empty on the ActionSheet row
+ *   Document column display text — must equal the current document title
+ *
+ * When a tracker table is present (UC-C and later), each tracker row is also
+ * verified against the ActionSheet row for action and status.
+ *
+ * Include result.issues in your assertion message for diagnostics:
+ *   expect(result.ok, result.issues.join('\n')).toBe(true);
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string} [docId]   Google Doc ID; defaults to settings.testDocId.
+ * @param {number} [timeoutMs=60000]
+ * @returns {Promise<{ok: boolean, issues: string[], counts: object, docTitle: string}>}
+ */
+async function verifyConsistency(page, docId, timeoutMs = 60000) {
+  const settings = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'local.settings.json'), 'utf8')
+  );
+  const sheetUrl = `https://docs.google.com/spreadsheets/d/${settings.testSheetId}/edit`;
+
+  if (!page.url().startsWith(sheetUrl.replace('/edit', ''))) {
+    await page.goto(sheetUrl);
+    await page.waitForSelector('.docs-title-outer', { timeout: 30000 });
+    await page.getByText('Action Sync', { exact: true }).waitFor({ timeout: 15000 });
+  }
+
+  const effectiveDocId = docId || settings.testDocId;
+  const testControlTab = page.locator('.docs-sheet-tab-name').filter({ hasText: /^TestControl$/ });
+  await testControlTab.waitFor({ timeout: 10000 });
+  await testControlTab.click();
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+Home');
+  await page.waitForTimeout(300);
+  await page.keyboard.type(String(effectiveDocId));
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(400);
+
+  clearLogs();
+  await page.getByText('Action Sync', { exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Test: Verify Consistency', exact: true }).waitFor({ timeout: 5000 });
+  await page.getByRole('menuitem', { name: 'Test: Verify Consistency', exact: true }).click();
+
+  const entry = await waitForLogEntry(e => e.tag === 'verify.consistency.complete', timeoutMs);
+  return entry.data;
+}
+
+// ---------------------------------------------------------------------------
 // CLI entry-point
 // ---------------------------------------------------------------------------
 
@@ -184,4 +247,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { openDocSidebar, clickSyncNow, sidebarActionRows, clearLogs, waitForLogEntry };
+module.exports = { openDocSidebar, clickSyncNow, sidebarActionRows, clearLogs, waitForLogEntry, verifyConsistency };
