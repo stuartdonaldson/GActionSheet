@@ -44,7 +44,7 @@ A **floating action** (also called an action item) is a paragraph or list item i
 
 Common fields:
 - Action text is everything after the chip/email on the same paragraph, with any trailing `(Status)` token stripped
-- Status lives in a trailing parenthesized token at the end of the paragraph; `(Open)` is the default written when missing; `(Closed)` is recognized for archiving; any other value is preserved verbatim as a free-form status
+- Status lives in a trailing parenthesized token at the end of the paragraph; Sync writes an explicit token when one is missing, using `(Open)` as the default; `(Closed)` is recognized for archiving; any other value is preserved verbatim as a free-form status
 - Each action is anchored by a named range whose `namedRangeId` is the durable identity stored in the ActionSheet
 - Dates are stored in the ActionSheet as native sheet date values; in the in-doc tracker table they are written using the sheet's locale-formatted date
 
@@ -65,7 +65,7 @@ Common fields:
 | Assignee Email | Canonical email address from the person chip or email-at-start text |
 | Assignee Name | Display name from the chip; or derived from email username if chip absent |
 | Action | Action item text (chip/email stripped, trailing `(Status)` stripped) |
-| Status | Current status; `Open` by default, `Closed` recognized for archiving, otherwise free-form |
+| Status | Current status; Sync writes it explicitly into the floating action, using `Open` as the default; `Closed` is recognized for archiving; otherwise free-form |
 | Document | Hyperlink cell — display text is the document title, target is the document URL |
 | Assigned Date | Date the action was first written to the ActionSheet |
 | Last Modified | Most recent reconcile or user edit time; empty means the row has never been synced (no separate Synced column) |
@@ -96,6 +96,7 @@ The tracker table is itself anchored by a named range so refresh can replace its
 - Anchor each action with a named range; the `namedRangeId` is the stable identity recorded in the ActionSheet
 - Maintain a trailing `(Status)` token on each action paragraph; default `(Open)`, recognize `(Closed)` for archiving, preserve any other value as a free-form custom status
 - Sync the active doc to the ActionSheet on demand from the sidebar — a single **Sync now** action that scans the doc and reconciles ActionSheet rows in one round (push/pull resolved by `Last Modified`)
+- Verify the active doc from the sidebar without mutating data — scans floating actions, the in-doc tracker table when present, and ActionSheet rows for the same doc; reports progress and mismatches in the sidebar
 - Insert or refresh the in-doc tracker table on demand, prefixed with concise instructional text summarizing the sync rules
 - Periodic timed sweep (owned by the ActionSheet automation script) reconciles all docs referenced by ActionSheet rows, catching docs no one opened recently
 - Archive ActionSheet rows with `Status = Closed` and `Last Modified > 30 days` to the archive sheet
@@ -132,7 +133,7 @@ Postconditions:
 
 Acceptance Criteria:
 - AC1: After Sync, both chip-led and email-led list items appear in the ActionSheet with correct `Assignee Email`, `Assignee Name`, action text, status, and a non-empty `NamedRangeId`. For email-led items, `Assignee Name` is derived from the username portion of the email.
-- AC2: A second Sync with no edits produces no new rows (anchor survives), all `NamedRangeId` values are unchanged, and both the ActionSheet rows and the doc floating actions are byte-for-byte identical to the first sync result (idempotent).
+- AC2: A second Sync with no edits produces no new rows and no lost rows. All `NamedRangeId` values are unchanged. Every floating action has exactly one ActionSheet row; the pair is consistent on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `NamedRangeId`.
 
 ---
 
@@ -153,12 +154,14 @@ Primary Flow:
 2. The next Sync (sidebar click or timed sweep) detects the difference and applies the later-modified side's values to the other.
 
 Postconditions:
-- Both authoritative sides match.
+- After Sync, every floating action in the document has exactly one corresponding ActionSheet row. The pair is consistent on: `Assignee Email` and `Assignee Name` (match the floating action's assignee), `Action` text (exact match), `Status` (exact match), and `NamedRangeId` (stable, non-empty). No ActionSheet rows exist for floating actions that have been deleted; no floating actions exist without a matching ActionSheet row.
+- After the next tracker refresh, the in-doc tracker row for that action shows the same `Action` and `Status` values.
 - `Last Modified` on both sides reflects the time of the original user edit.
 
 Acceptance Criteria:
 - A sheet edit to `Status`, `Action`, or `Assignee` reaches the floating action paragraph after Sync, regardless of which side was edited last; later `Last Modified` wins.
 - A doc edit to the floating action propagates to the ActionSheet after Sync for all three mutation types: trailing `(Status)` change (free-form value preserved verbatim), action text change, and chip-replaced assignee change.
+- After those values converge, the next **Insert / refresh tracker** updates the tracker-table row so its `Action` and `Status` cells match the floating action paragraph and the ActionSheet row for the same action.
 - The action's named-range anchor survives every edit type above, and no duplicate ActionSheet rows are created.
 - Edits typed directly into the in-doc tracker table cells are **not** reflected on the ActionSheet by any Sync; the next tracker refresh restores the rendered values from the floating actions (covered by UC-C).
 
@@ -181,6 +184,7 @@ Postconditions:
 Acceptance Criteria:
 - First click on a doc with N actions produces the instructional paragraph plus a table with N rows in document order, anchored so subsequent refreshes update in place.
 - A subsequent click after the user closes one action and adds another produces a table that reflects both changes, in the same location, without leaving stale rows.
+- For each tracked action, the refreshed table row's `Action` and `Status` cells match the current floating action paragraph and ActionSheet row values.
 - The tracker table is **view-only**: any edit a user types directly into its cells is discarded on the next refresh and replaced by the rendered values from the floating actions and ActionSheet. The instructional paragraph above the table states this explicitly.
 
 ---

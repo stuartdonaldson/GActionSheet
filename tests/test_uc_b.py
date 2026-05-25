@@ -125,6 +125,64 @@ def _run_final_sync(test_doc_id: str, gas_log_dir: str,
 
 
 # ---------------------------------------------------------------------------
+# Full-state consistency verification (reconciliation invariant)
+# ---------------------------------------------------------------------------
+
+def _verify_consistency(doc_fas: list, sheet_rows: list,
+                        tracker_rows: list | None = None,
+                        context: str = "") -> None:
+    """Assert full-state consistency between floating actions and ActionSheet rows.
+
+    Matches pairs by (assignee_email, action_text). Raises on orphaned entries
+    or field mismatches. tracker_rows is reserved for UC-C (not yet asserted).
+    """
+    prefix = f"[{context}] " if context else ""
+
+    def _fa_key(fa: dict) -> tuple:
+        return (
+            (fa.get("assignee_email") or "").strip().lower(),
+            (fa.get("action") or "").strip(),
+        )
+
+    def _row_key(row: dict) -> tuple:
+        return (
+            (row.get("Assignee Email") or "").strip().lower(),
+            (row.get("Action") or "").strip(),
+        )
+
+    fa_by_key  = {_fa_key(fa): fa   for fa  in doc_fas}
+    row_by_key = {_row_key(r):  r   for r   in sheet_rows}
+    fa_keys    = set(fa_by_key)
+    row_keys   = set(row_by_key)
+
+    orphaned_fas  = [fa_by_key[k]  for k in fa_keys  - row_keys]
+    orphaned_rows = [row_by_key[k] for k in row_keys - fa_keys]
+    assert not orphaned_fas, (
+        f"{prefix}Floating actions with no matching sheet row: {orphaned_fas}"
+    )
+    assert not orphaned_rows, (
+        f"{prefix}Sheet rows with no matching floating action: {orphaned_rows}"
+    )
+
+    mismatches = []
+    for key in fa_keys & row_keys:
+        fa  = fa_by_key[key]
+        row = row_by_key[key]
+        fa_status  = (fa.get("status")          or "Open").strip()
+        row_status = (row.get("Status")         or "").strip()
+        if fa_status != row_status:
+            mismatches.append(
+                f"  status mismatch {key}: FA={fa_status!r} sheet={row_status!r}"
+            )
+        if not (row.get("NamedRangeId") or "").strip():
+            mismatches.append(f"  NamedRangeId empty for {key}")
+
+    assert not mismatches, (
+        f"{prefix}Consistency violations:\n" + "\n".join(mismatches)
+    )
+
+
+# ---------------------------------------------------------------------------
 # AC4 assertion (shared across scenarios)
 # ---------------------------------------------------------------------------
 
@@ -220,6 +278,12 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"[uc_b_doc_wins] Expected 2 Jane rows, got {len(jane_rows)}."
     )
 
+    # Reconciliation: every FA has a matching sheet row; all fields consistent
+    docx_bytes = download_docx(test_doc_id)
+    doc = load_doc(docx_bytes)
+    fa  = floating_actions(doc)
+    _verify_consistency(fa, rows, context="uc_b_doc_wins")
+
 
 # ---------------------------------------------------------------------------
 # Test 2 — sheet wins (variants 4–6 mutated on sheet side)
@@ -284,6 +348,13 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"[uc_b_sheet_wins] Variant 5 floating action not found with mutated text "
         f"{_VAR5_ACTION_MUT!r}. All FAs: {fa}"
     )
+    assert var5_fa[0].get("status") == _VAR5_STATUS_ORIG, (
+        f"[uc_b_sheet_wins] Var 5 FA status: expected {_VAR5_STATUS_ORIG!r}, "
+        f"got {var5_fa[0].get('status')!r}"
+    )
+    assert var5_fa[0].get("has_explicit_status") is True, (
+        f"[uc_b_sheet_wins] Var 5 FA should have an explicit status token after sync. Got: {var5_fa[0]}"
+    )
 
     # Var 6: status must be "In Review" in the doc paragraph
     var6_fa = [a for a in fa
@@ -297,6 +368,9 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"[uc_b_sheet_wins] Var 6 FA status: expected {_VAR6_STATUS_MUT!r}, "
         f"got {var6_fa[0].get('status')!r}"
     )
+    assert var6_fa[0].get("has_explicit_status") is True, (
+        f"[uc_b_sheet_wins] Var 6 FA should have an explicit status token after sync. Got: {var6_fa[0]}"
+    )
 
     # Variants 1–3 chip paragraphs must remain unchanged in the doc
     chip_fa = [a for a in fa if a.get("assignee_email") == chip_email]
@@ -307,6 +381,21 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     assert len(var1_fa) == 1 and var1_fa[0].get("status") == _VAR1_STATUS_ORIG, (
         f"[uc_b_sheet_wins] Var 1 FA should be unchanged. Got: {var1_fa}"
     )
+
+    var3_fa = [a for a in chip_fa if _VAR3_ACTION_ORIG in (a.get("action") or "")]
+    assert len(var3_fa) == 1, (
+        f"[uc_b_sheet_wins] Variant 3 floating action not found. Got: {chip_fa}"
+    )
+    assert var3_fa[0].get("status") == _VAR3_STATUS_ORIG, (
+        f"[uc_b_sheet_wins] Var 3 FA status: expected {_VAR3_STATUS_ORIG!r}, "
+        f"got {var3_fa[0].get('status')!r}"
+    )
+    assert var3_fa[0].get("has_explicit_status") is True, (
+        f"[uc_b_sheet_wins] Var 3 FA should have an explicit status token after sync. Got: {var3_fa[0]}"
+    )
+
+    # Reconciliation: every FA has a matching sheet row; all fields consistent
+    _verify_consistency(fa, rows, context="uc_b_sheet_wins")
 
 
 # ---------------------------------------------------------------------------
@@ -374,3 +463,6 @@ def test_uc_b_conflict_resolution(test_sheet_id, test_doc_id, gas_log_dir, setti
         f"[uc_b_conflict] Var 4 (sheet wins): expected FA status='Closed', "
         f"got {var4_fa[0].get('status')!r}"
     )
+
+    # Reconciliation: every FA has a matching sheet row; all fields consistent
+    _verify_consistency(fa, rows, context="uc_b_conflict")
