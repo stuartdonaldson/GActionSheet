@@ -23,16 +23,24 @@ when the sidebar user does not have direct sheet access.
 | Root dir | `src/` |
 | GCP project | shared — see knowledge-base/adr/ |
 
-### Pushing
+### Deploying
+
+For normal development and test cycles, use the npm deploy script — it pushes HEAD
+**and** updates the versioned WebApp deployment in one step:
 
 ```bash
-npm run push       # clasp push from project root (rootDir: src/)
+npm run deploy:test   # push + update test WebApp revision
+npm run deploy:prod   # push + update prod WebApp revision
 ```
 
-If clasp reports `Skipping push.` (hash cache), use:
+`npm run push` alone (`clasp push`) updates HEAD but leaves the versioned deployment
+stale. The test suite calls the versioned WebApp endpoint, so a push-only will cause
+`sync.warn: Non-JSON response` failures until the deployment is also updated.
+
+If clasp reports `Skipping push.` (hash cache) during a deploy, run:
 
 ```bash
-clasp push --force
+clasp push --force && npm run deploy:test
 ```
 
 ## Deployment Steps (one-time per environment)
@@ -56,13 +64,13 @@ clasp push --force
 ## First-time Setup (new machine)
 
 1. `clasp login` (or restore `.auth/user.json` to `~/.clasprc.json`)
-2. `npm run push` to verify the project is reachable.
+2. `npm run deploy:test` to verify the project is reachable and update the test deployment.
 3. Open the Apps Script editor and run `bootstrap()` from `TestFixtures.js`
    to set script properties (`TEST_DOC_ID`, `TEST_SHEET_ID`, `GAS_LOGGER_FOLDER_ID`).
 
 ## POC Verification Checklist
 
-- [ ] `npm run push` succeeds
+- [ ] `npm run deploy:test` succeeds (push + test WebApp revision updated)
 - [ ] Web App deployed; `WEBAPP_URL` set in script properties
 - [ ] Add-on test deployment installed
 - [ ] **Test 1 (sheet macro):** Refresh ActionSheet → custom menu appears → item executes and writes a row

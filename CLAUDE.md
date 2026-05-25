@@ -103,4 +103,19 @@ bd close <id>         # Complete work
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+
+## GAS Deployment
+
+Use the npm scripts in `package.json` — never invoke `clasp` directly.
+
+| Goal | Command |
+|------|---------|
+| Deploy for test cycle | `npm run deploy:test` |
+| Deploy to production | `npm run deploy:prod` |
+| Push only (no redeploy) | `npm run push` |
+
+`npm run deploy:test` runs `update-revision.js` + `manage-deployments.js --deploy-prod`
+in one step. Running `clasp push` (or `npm run push`) alone leaves the versioned
+WebApp deployment stale — the test suite will call the old revision and produce
+`sync.warn: Non-JSON response` failures.
 <!-- END BEADS INTEGRATION -->

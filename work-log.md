@@ -355,3 +355,25 @@ Implemented UC-B test suite (GTaskSheet-mol-745): GAS fixture scenarios for all 
 - UC-B fixture flow uses two GAS invocations per test: `setup_fixture('uc_b_XXX')` triggers the full canonical setup + intermediate sync + mutations; `sync_document(test_doc_id)` triggers the final convergence sync. Separating these avoids ambiguous `sync.complete` log entries from the intermediate sync.
 - `WriteGuard.wrap` is synchronous, so the classic IIFE loop-closure fix is unnecessary — capture the row number in a local variable instead.
 - The `_handleUpsertActionRows` Web App handler is INSERT-only (skips rows where `namedRangeId` already exists), confirming UC-B assertions will correctly xfail until bidirectional sync is implemented.
+
+## 2026-05-24 10:15:00
+
+### Summary
+Captured and analyzed deployment process deviation (direct `clasp push` vs `npm run deploy:test`). Implemented corrective controls in CLAUDE.md and OPERATIONS.md. Verified UC-B green phase — all 6 tests pass.
+
+### Work Completed
+1. **Lessons Learned capture** — documented incident where Claude bypassed npm deploy toolchain; staged file with 5-why analysis (two root causes: undocumented npm script path + missing LL trigger for process deviations)
+2. **Option A1** — Added GAS Deployment section to CLAUDE.md with table: `npm run deploy:test` (test), `npm run deploy:prod` (prod), `npm run push` (push-only, deprecated). Explained stale deployment symptom.
+3. **Option A2** — Updated OPERATIONS.md §Pushing → §Deploying; led with npm deploy scripts; updated First-time Setup and POC Checklist to use `npm run deploy:test`.
+4. **Test suite verification** — Ran full UC-B + UC-A test suite: 6/6 pass (292s wall time). Closed GTaskSheet-mol-b7d.
+
+### Key Learnings
+- Structural gaps (undocumented mandatory paths) accumulate into repeated process deviations. Documenting the npm deploy toolchain as the authoritative path in CLAUDE.md prevents the next agent from using direct `clasp` commands.
+- Lessons-learned auto-trigger list should include "task required rework because wrong toolchain entry point was used" to catch process deviations earlier in the session.
+
+### Status
+- GTaskSheet-mol-dyu: closed (UC-B bidirectional sync implementation)
+- GTaskSheet-mol-b7d: closed (verification gate)
+- LL incident: staged (resolution deferred per user)
+- Ready: GTaskSheet-mol-4vr (independent review) and 14 other open issues
+
