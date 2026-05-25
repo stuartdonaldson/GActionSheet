@@ -204,13 +204,15 @@ function _handleSyncActionRows(payload) {
         });
       } else {
         // Doc is authoritative — update sheet row only when values differ.
+        var rowIdx = existing.rowIndex;
+        var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
         if (existing.action !== row.actionText || existing.status !== row.status) {
-          var rowIdx = existing.rowIndex;
           actionsSheet.getRange(rowIdx, 5).setValue(row.actionText || '');
           actionsSheet.getRange(rowIdx, 6).setValue(row.status     || 'Open');
-          actionsSheet.getRange(rowIdx, 9).setValue(now);
           updated++;
         }
+        actionsSheet.getRange(rowIdx, 7).setFormula(docFormula);
+        actionsSheet.getRange(rowIdx, 9).setValue(now);
       }
     }
   });
