@@ -17,8 +17,7 @@ Canonical floating action variants (shared doc fixture):
   Var 6: email + "Review the Q2 report"  (→ Open)       bob_jones@example.com
   Var 7: plain text (negative — must never appear in ActionSheet)
 
-All three tests are xfail (strict): UC-B bidirectional sync is not yet
-implemented (implementation tracked in GTaskSheet-mol-dyu).
+Tests are active; UC-B bidirectional sync is implemented (GTaskSheet-5vk).
 
 Acceptance criteria (from docs/CONTEXT.md §UC-B):
   AC1. A doc edit to the floating action (status token, action text) propagates

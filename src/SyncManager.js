@@ -87,9 +87,56 @@ function onActionSheetEdit(e) {
   if ([3, 4, 5, 6].indexOf(col) === -1) return; // Assignee Email, Name, Action, Status
   var sheet = range.getSheet();
   if (sheet.getName() !== 'Actions') return;
+
+  // Stamp Date Modified to trigger sync
+  var dateModified = new Date();
   WriteGuard.wrap(function () {
-    sheet.getRange(row, 9).setValue(new Date()); // Date Modified
+    sheet.getRange(row, 9).setValue(dateModified);
   });
+
+  // Sheet→Doc sync: read the edited row and propagate to the floating action
+  _syncSheetRowToDoc(sheet, row);
+}
+
+/**
+ * Propagates a single ActionSheet row edit to the corresponding floating action
+ * in the source document via the NamedRangeId.
+ *
+ * Reads: NamedRangeId (col 1), Action (col 5), Status (col 6), Document URL (col 7)
+ * Extracts docId from the Document hyperlink formula.
+ * Finds the floating action paragraph by its named range and updates it.
+ *
+ * @param {Sheet} sheet    The ActionSheet "Actions" tab
+ * @param {number} row     1-based row number (guaranteed >= 2)
+ */
+function _syncSheetRowToDoc(sheet, row) {
+  try {
+    var rowData = sheet.getRange(row, 1, 1, SHEET_HEADERS.length).getValues()[0];
+    var namedRangeId = rowData[0];  // Col 1: NamedRangeId
+    var action       = rowData[4];  // Col 5: Action
+    var status       = rowData[5];  // Col 6: Status
+    // getValues() returns the display text for HYPERLINK formulas; getFormula() returns the raw
+    // formula string which contains the URL we need to extract the docId.
+    var docFormula   = sheet.getRange(row, 7).getFormula();
+
+    if (!namedRangeId) return; // No anchor — can't sync
+    if (!docFormula) return;   // No document link
+
+    // Extract docId from =HYPERLINK("https://docs.google.com/document/d/DOCID/edit", "Title")
+    var docIdMatch = docFormula.match(/\/d\/([a-zA-Z0-9_-]+)\//);
+    if (!docIdMatch) return;
+    var docId = docIdMatch[1];
+
+    // Open the doc and apply the sheet-side edits
+    var doc = DocumentApp.openById(docId);
+    _applySheetWinToDoc(doc, namedRangeId, action, status);
+    doc.saveAndClose();
+  } catch (err) {
+    GasLogger.log('sync.sheet-to-doc.error', {
+      row:    row,
+      msg:    err.message
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
