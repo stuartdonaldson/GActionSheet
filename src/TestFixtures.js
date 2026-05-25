@@ -990,8 +990,10 @@ function setupTestFixtures(scenario) {
                 // Var 2: change action text (preserve status token)
                 ucbTextEl.setText(ucbTxt.replace('Draft the Q3 plan', 'Draft the revised Q3 plan'));
               } else if (ucbTxt.indexOf('Update the meeting notes') !== -1) {
-                // Var 3: add (In Progress) status to previously statusless item
-                ucbTextEl.setText(ucbTxt.trim() + ' (In Progress)');
+                // Var 3: set (In Progress) status; strip any existing token first
+                // (the intermediate sync may have normalized this item to (Open))
+                var ucbBase3 = ucbTxt.trim().replace(/\s*\([^)]*\)\s*$/, '');
+                ucbTextEl.setText(ucbBase3 + ' (In Progress)');
               }
               break;
             }

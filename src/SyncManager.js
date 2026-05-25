@@ -42,6 +42,11 @@ function syncDocument(docId) {
       return;
     }
 
+    // Normalize missing status tokens BEFORE building the anchor map.
+    // setText() on a LIST_ITEM paragraph shifts any named range anchored to it
+    // to the next paragraph; creating NRs after normalization avoids the shift.
+    _normalizeMissingFloatingActionStatuses(floatingActions);
+
     var anchoredMap  = _buildAnchoredIndexMap(doc);
     var anchorResults = _anchorNewActions(doc, floatingActions, anchoredMap);
 
@@ -55,8 +60,6 @@ function syncDocument(docId) {
     for (var i = 0; i < sheetWins.length; i++) {
       _applySheetWinToDoc(doc, sheetWins[i].namedRangeId, sheetWins[i].action, sheetWins[i].status);
     }
-
-    _normalizeMissingFloatingActionStatuses(floatingActions);
 
     doc.saveAndClose();
     props.setProperty('LAST_SYNC_TIME_' + docId, new Date().toISOString());
@@ -280,7 +283,7 @@ function _buildAnchoredIndexMap(doc) {
       var idx = body.getChildIndex(para);
       if (idx >= 0) map[idx] = nr.getId();
     } catch (e) {
-      // Paragraph is not a direct body child (e.g. inside a table) — skip
+      // paragraph no longer in body — skip
     }
   }
 

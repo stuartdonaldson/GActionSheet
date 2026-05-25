@@ -19,29 +19,33 @@ def floating_actions(document: docx.Document) -> list[dict]:
     Detection: list/checklist paragraphs (w:numPr present) where the first
     meaningful content resolves to an assignee.
 
-    When Google Docs exports a PERSON chip to .docx it becomes either:
-      (a) a hyperlink whose display text is the person's name — the relationship
-          target may be a Google profile URL, not mailto:; OR
-      (b) a plain-text run with the person's display name or email address.
-
-    Strategy:
-      1. Collect all relationship targets (URLs) from the document part for
-         hyperlinks that contain an email address (mailto: or ?email= params).
-      2. For each list paragraph, extract the full text and any hyperlink URLs.
-      3. Try to find an email: first from hyperlink rel targets, then from a
-         regex match on the raw text (covers the case where the chip renders as
-         the email address itself).
-      4. Parse the trailing (Status) token; default status is 'Open'.
+    When Google Docs exports a PERSON chip to .docx it becomes a hyperlink whose
+    display text is the person's display name and whose URL contains the email
+    (mailto: or ?email= param).  Building action_text from para.text would include
+    that display name, so we exclude chip-hyperlink text and collect only the
+    non-chip runs when building action_text for chip-led paragraphs.
 
     Returns list of dicts with keys: assignee_email, assignee_name, action,
     status, has_explicit_status.
     """
-    # Build a map: rId -> target URL for all hyperlink relationships
-    hyperlink_urls: dict[str, str] = {}
+    import urllib.parse as _urlparse
+
+    _R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+
+    # Build map: rId -> email for all email-containing hyperlink relationships
+    email_by_rid: dict[str, str] = {}
     try:
         for rel in document.part.rels.values():
-            if 'hyperlink' in rel.reltype:
-                hyperlink_urls[rel.rId] = rel.target_ref or ''
+            if 'hyperlink' not in rel.reltype:
+                continue
+            url = rel.target_ref or ''
+            m = re.match(r'mailto:([^\?&]+)', url, re.IGNORECASE)
+            if m:
+                email_by_rid[rel.rId] = m.group(1).strip()
+                continue
+            m = re.search(r'[?&]email=([^&]+)', url, re.IGNORECASE)
+            if m:
+                email_by_rid[rel.rId] = _urlparse.unquote(m.group(1)).strip()
     except Exception:
         pass
 
@@ -51,53 +55,56 @@ def floating_actions(document: docx.Document) -> list[dict]:
         if para._element.find('.//' + qn('w:numPr')) is None:
             continue  # not a list paragraph
 
-        full_text = para.text.strip()
-        if not full_text:
-            continue
+        # Find the first person-chip hyperlink in this paragraph
+        assignee_email = ''
+        chip_rid = ''
+        for hl in para._element.findall(qn('w:hyperlink')):
+            r_id = hl.get(f'{{{_R_NS}}}id', '')
+            if r_id in email_by_rid:
+                assignee_email = email_by_rid[r_id]
+                chip_rid = r_id
+                break
 
-        # Collect hyperlink URLs referenced from this paragraph's XML
-        para_emails: list[str] = []
-        for hl in para._element.findall(f'.//{qn("w:hyperlink")}'):
-            r_id = hl.get(f'{{{hl.nsmap.get("r", "http://schemas.openxmlformats.org/officeDocument/2006/relationships")}}}id', '')
-            url = hyperlink_urls.get(r_id, '')
-            # mailto: link
-            m = re.match(r'mailto:([^\?&]+)', url, re.IGNORECASE)
-            if m:
-                para_emails.append(m.group(1).strip())
+        if assignee_email:
+            # Chip-led: collect text from all direct children except the chip hyperlink.
+            # This excludes the chip's display name from action_text.
+            parts = []
+            for child in para._element:
+                local = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                if local == 'hyperlink' and child.get(f'{{{_R_NS}}}id', '') == chip_rid:
+                    continue  # skip chip display text
+                for t_el in child.iter(qn('w:t')):
+                    if t_el.text:
+                        parts.append(t_el.text)
+            raw_text = ''.join(parts).strip()
+        else:
+            # No chip hyperlink: fall back to email-at-start in full paragraph text
+            raw_text = para.text.strip()
+            if not raw_text:
                 continue
-            # email= query param (Google profile links)
-            m = re.search(r'[?&]email=([^&]+)', url, re.IGNORECASE)
-            if m:
-                import urllib.parse
-                para_emails.append(urllib.parse.unquote(m.group(1)).strip())
+            em = _EMAIL_RE.match(raw_text)
+            if em:
+                assignee_email = em.group(0)
+                raw_text = raw_text[len(em.group(0)):].strip()
+            else:
+                continue
+
+        if not assignee_email:
+            continue  # can't identify assignee — not a trackable floating action
 
         # Parse trailing (Status) token
-        status = 'Open'
-        action_text = full_text
-        sm = _STATUS_RE.search(full_text)
+        sm = _STATUS_RE.search(raw_text)
         has_explicit_status = bool(sm)
         if sm:
             status = sm.group(1).strip() or 'Open'
-            action_text = full_text[:sm.start()].strip()
-
-        # Determine assignee email
-        assignee_email = ''
-        assignee_name  = ''
-        if para_emails:
-            assignee_email = para_emails[0]
+            action_text = raw_text[:sm.start()].strip()
         else:
-            # Try to find email pattern in the raw text (chip rendered as email address)
-            em = _EMAIL_RE.match(action_text)
-            if em:
-                assignee_email = em.group(0)
-                action_text = action_text[len(assignee_email):].strip()
-
-        if not assignee_email and not assignee_name:
-            continue  # can't identify assignee — not a trackable floating action
+            status = 'Open'
+            action_text = raw_text
 
         result.append({
             'assignee_email': assignee_email,
-            'assignee_name':  assignee_name,
+            'assignee_name':  '',
             'action':         action_text,
             'status':         status,
             'has_explicit_status': has_explicit_status,
