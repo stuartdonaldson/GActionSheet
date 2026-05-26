@@ -1028,6 +1028,142 @@ function setupTestFixtures(scenario) {
       }
 
       // -----------------------------------------------------------------------
+      // UC-C scenarios: insert / refresh the in-doc tracker table (GTaskSheet-mol-bgq)
+      //
+      // All three scenarios accumulate on the shared clone doc without resetting.
+      // Scenario prefixes: UCC-FIRST: / UCC-REFRESH: / UCC-VIEWONLY:
+      //
+      // RED PHASE: insertTrackerTable() is defined by the UC-C implementation
+      // (GTaskSheet-mol-vzk). Until that lands these scenarios will log an error
+      // tag and the Python tests will fail as expected.
+      // -----------------------------------------------------------------------
+
+      case 'uc_c_first_insert': {
+        // Insert two chip-led floating actions, sync to anchor them, then call
+        // insertTrackerTable for the first time. Logs fixture.uc_c_first_insert.
+        var ucCFIToken = ScriptApp.getOAuthToken();
+        var ucCFIEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                      || Session.getActiveUser().getEmail();
+
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+
+        _tfInsertPersonChipListItem(ucCFIToken, testDocId, ucCFIEmail,
+                                    'UCC-FIRST: Schedule the kickoff meeting (Open)');
+        _tfAppendPersonChipListItem(ucCFIToken, testDocId, ucCFIEmail,
+                                    'UCC-FIRST: Review the project charter (In Review)');
+
+        syncDocument(testDocId);
+        insertTrackerTable(testDocId);
+
+        GasLogger.log('fixture.uc_c_first_insert', { rowsInserted: 2 });
+        break;
+      }
+
+      case 'uc_c_refresh': {
+        // Insert two chip-led FAs, sync+insert tracker, then simulate close+add:
+        //   close: set first UCC-REFRESH: row Status=Closed in sheet
+        //   add: append a new chip-led FA
+        // Final sync+refresh should reflect both changes.
+        var ucCRefToken = ScriptApp.getOAuthToken();
+        var ucCRefEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                       || Session.getActiveUser().getEmail();
+
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+
+        _tfInsertPersonChipListItem(ucCRefToken, testDocId, ucCRefEmail,
+                                    'UCC-REFRESH: Approve the proposal (Open)');
+        _tfAppendPersonChipListItem(ucCRefToken, testDocId, ucCRefEmail,
+                                    'UCC-REFRESH: Update the risk register (Done)');
+
+        syncDocument(testDocId);
+        insertTrackerTable(testDocId);
+
+        // Close the first UCC-REFRESH: row in the sheet.
+        var ucCRefActSheet = ss.getSheetByName('Actions');
+        var ucCRefLastR    = ucCRefActSheet ? ucCRefActSheet.getLastRow() : 1;
+        if (ucCRefActSheet && ucCRefLastR > 1) {
+          var ucCRefData = ucCRefActSheet.getRange(2, 1, ucCRefLastR - 1, 5).getValues();
+          var ucCRefFmls = ucCRefActSheet.getRange(2, 7, ucCRefLastR - 1, 1).getFormulas();
+          for (var ucCRefI = 0; ucCRefI < ucCRefData.length; ucCRefI++) {
+            if (ucCRefFmls[ucCRefI][0].indexOf(testDocId) !== -1 &&
+                (ucCRefData[ucCRefI][4] || '').indexOf('UCC-REFRESH: Approve') !== -1) {
+              var ucCRefRowNum = ucCRefI + 2;
+              WriteGuard.wrap(function () {
+                ucCRefActSheet.getRange(ucCRefRowNum, 6).setValue('Closed');
+                ucCRefActSheet.getRange(ucCRefRowNum, 9).setValue(new Date());
+              });
+              break;
+            }
+          }
+        }
+
+        // Add a new chip-led FA.
+        _tfAppendPersonChipListItem(ucCRefToken, testDocId, ucCRefEmail,
+                                    'UCC-REFRESH: Draft the status report');
+
+        // Sync to propagate the Closed status to the doc and anchor the new FA.
+        syncDocument(testDocId);
+        insertTrackerTable(testDocId);
+
+        GasLogger.log('fixture.uc_c_refresh', { refreshDone: true });
+        break;
+      }
+
+      case 'uc_c_view_only': {
+        // Insert two chip-led FAs, sync+insert tracker, then directly edit a tracker
+        // table cell (simulating a forbidden user edit). A second insertTrackerTable
+        // call should discard the edit and render the correct values.
+        var ucCVOToken = ScriptApp.getOAuthToken();
+        var ucCVOEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                      || Session.getActiveUser().getEmail();
+
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+
+        _tfInsertPersonChipListItem(ucCVOToken, testDocId, ucCVOEmail,
+                                    'UCC-VIEWONLY: Prepare the budget summary (Open)');
+        _tfAppendPersonChipListItem(ucCVOToken, testDocId, ucCVOEmail,
+                                    'UCC-VIEWONLY: Finalize the agenda (Open)');
+
+        syncDocument(testDocId);
+        insertTrackerTable(testDocId);
+
+        // Directly edit the first data cell of the tracker table to dirty it.
+        var ucCVODoc  = DocumentApp.openById(testDocId);
+        var ucCVOBody = ucCVODoc.getBody();
+        var ucCVOHdg  = false;
+        var ucCVOTbl  = null;
+        var ucCVON    = ucCVOBody.getNumChildren();
+        for (var ucCVOI = 0; ucCVOI < ucCVON; ucCVOI++) {
+          var ucCVOChild = ucCVOBody.getChild(ucCVOI);
+          if (!ucCVOHdg) {
+            if ((ucCVOChild.getType() === DocumentApp.ElementType.PARAGRAPH ||
+                 ucCVOChild.getType() === DocumentApp.ElementType.LIST_ITEM) &&
+                ucCVOChild.getText().trim() === '=== Tracked Actions ===') {
+              ucCVOHdg = true;
+            }
+          } else if (ucCVOChild.getType() === DocumentApp.ElementType.TABLE) {
+            ucCVOTbl = ucCVOChild.asTable();
+            break;
+          }
+        }
+        if (ucCVOTbl && ucCVOTbl.getNumRows() > 1) {
+          ucCVOTbl.getRow(1).getCell(0).setText(
+            ucCVOTbl.getRow(1).getCell(0).getText() + '-EDITED'
+          );
+        }
+        ucCVODoc.saveAndClose();
+
+        // Refresh — should overwrite the direct edit with the correct values.
+        insertTrackerTable(testDocId);
+
+        GasLogger.log('fixture.uc_c_view_only', { viewOnlyTestDone: true });
+        break;
+      }
+
+      // -----------------------------------------------------------------------
       // Sync Status column scenarios (GTaskSheet-ly5 AC1–AC7)
       //
       // Each scenario accumulates on the shared clone doc without resetting.

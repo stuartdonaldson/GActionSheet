@@ -23,6 +23,8 @@ function onOpen() {
     .addItem('Test: Sync Document', 'menuSyncDocument')
     .addItem('Test: Setup And Sync', 'menuSetupAndSync')
     .addItem('Test: Verify Consistency', 'menuVerifyConsistency')
+    .addItem('Test: Insert Tracker Table', 'menuInsertTrackerTable')
+    .addItem('Test: Run Archive', 'menuRunArchive')
     .addItem('Test: Debug Doc Body', 'menuDebugDocBody')
     .addToUi();
 }
@@ -70,6 +72,18 @@ function menuSetupAndSync() {
 function menuVerifyConsistency() {
   var docId = _readTestControlArg();
   verifyConsistencyForTest(docId);
+}
+
+function menuInsertTrackerTable() {
+  var docId = _readTestControlArg();
+  insertTrackerTable(docId);
+}
+
+function menuRunArchive() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var count = ArchiveManager.archive(ss);
+  GasLogger.log('archive.complete', { count: count });
+  GasLogger.flush();
 }
 
 function menuDebugDocBody() {
