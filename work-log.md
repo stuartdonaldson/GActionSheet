@@ -417,3 +417,43 @@ Fixed named range anchor shift bug in UC-B sync; all 3 UC-B tests now pass. Fixe
 - GTaskSheet-1ar: closed (NR shift fix delivered)
 - GTaskSheet-x2s: filed — UC-A permutations test downloads 0 rows from xlsx despite sync logging `upserted:3`; likely Google Sheets export caching lag
 
+
+## 2026-05-25 15:32:16
+
+### Summary
+Closed two P1 process gates (j5u, qea): operationalized AC postconditions as verifiable invariants and added verifyConsistency test helper. Designed two new bd issues for orphan handling (Sync Status column) and human-readable named ranges (AI-{id}).
+
+### Details
+
+**GTaskSheet-j5u — AC postconditions as verifiable invariants**
+- UC-A postconditions: replaced mutation-scoped language with full-state invariant (every FA ↔ ActionSheet row pair agrees on all fields; Document column display text equals current doc title; no extra rows)
+- UC-A AC2: added Document column title check to the invariant
+- UC-B postconditions: added Document column display text requirement to existing full-state invariant
+- UC-C postconditions: replaced "tracker table reflects current set" with 3-way consistency invariant (FA ↔ tracker row ↔ ActionSheet row for Action, Status, Assignee, NamedRangeId, Document title)
+- UC-D: added Postconditions section (no rows with Status=Closed + Last Modified >30 days remain; no doc content altered)
+
+**GTaskSheet-qea — verifyConsistency test gate helper**
+- `src/TestFixtures.js`: added `verifyConsistencyForTest(docId)` — reads doc+sheet directly (all 9 ActionSheet columns including dates and Document formula), runs full field comparison (assigneeEmail, assigneeName, action, status, dateCreated, dateModified, Document title), and logs `verify.consistency.complete` for Playwright to poll
+- `src/TestFixtures.js`: added `_runConsistencyChecks()` — compares floating↔sheet pairs, tracker rows (when present), reports sheet rows with no floating action, tracker rows with no sheet row
+- `src/MenuHandler.js`: added "Test: Verify Consistency" menu item and `menuVerifyConsistency()` handler
+- `tests/playwright/addon_helpers.js`: added `verifyConsistency(page, docId, timeoutMs)` with usage pattern docstring (navigates to sheet, writes docId to TestControl, invokes menu item, polls log, returns result); exported from module
+
+**Design discussions (new bd issues filed)**
+- Retrieved prior session discussion (from 62ebf8c3 JSONL) on deleted action items and deleted documents
+- **GTaskSheet-beh (P2)**: Sync Status column — blank (OK), "Removed" (FA named range gone), "Doc Not Found" (openById throws). No auto-archive on Removed. UC-C refresh includes Removed rows with visual indicator.
+- **GTaskSheet-6fu (P3)**: Human-readable named range names using AI-{id} prefix (e.g., AI-1, AI-5). ID pre-assigned by GAS before NR creation (read max from sheet). UUID remains primary identity key in NamedRangeId column.
+
+### Commit
+`16470d0` feat(test-gates): operationalize AC postconditions and add verifyConsistency helper (not yet pushed)
+
+## 2026-05-25 17:10:06
+
+### Summary:
+Closed VerifySync feature (bhh) after verifying all 5 ACs met; fixed doc-name stale bug (8in) in WebApp.js — doc-wins branch now refreshes HYPERLINK formula on every sync pass regardless of action/status change.
+
+### Details:
+- `bhh` (VerifySync): AC audit confirmed all criteria satisfied by commit 28eaa7e — sidebar button, progress reporting, cross-source comparison, orphan sheet-row detection, no mutations. Closed.
+- `8in` (bug): `_handleSyncActionRows` doc-wins else branch only wrote col 5/6 (action/status); col 7 (HYPERLINK formula) was never refreshed after initial insert. Fixed by moving `rowIdx` and `docFormula` outside inner if, always calling `setFormula` on col 7, and moving timestamp write outside the condition. UC-A (3 tests) pass. `uc2_new_table_row` pre-existing failure confirmed unrelated.
+
+### Key Learnings:
+Pre-existing live-GAS test failure (`uc2_new_table_row` — tracker table row ID=2 not found) reproduces before and after the WebApp.js change; likely requires a fixture reset or redeploy, not a code fix.

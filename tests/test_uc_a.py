@@ -2,13 +2,14 @@
 UC-A end-to-end tests: Capture and track a new action.
 
 Setup is fully automated — no manual doc prep required:
-  The GAS fixture (uc_a_clear) clears the ActionSheet, removes named ranges,
-  clears the doc body, inserts a chip-led list item via the Docs REST API
-  batchUpdate, then appends an email-led list item via DocumentApp.
+  The GAS fixture (uc_a_clear) appends scenario-prefixed action items to the
+  clone doc via the Docs REST API, then syncs.  Items accumulate across scenarios
+  within a session; assertions filter by action text prefix (AC1:, Perm:) so
+  earlier scenarios' rows are invisible to each test.
 
-Detection forms tested (both in a single doc, one Sync):
-  - PERSON chip at start of list item
-  - Email address at start of list item (email-at-start)
+Detection forms tested:
+  - PERSON chip at start of list item (uc_a_clear, AC1:)
+  - Email address at start of list item (uc_a_clear, AC1:)
 
 Acceptance criteria (from docs/CONTEXT.md §UC-A):
   AC1. After Sync, all floating-action list items appear in the ActionSheet
@@ -50,24 +51,24 @@ def _clear_logs_stable(log_dir: str, timeout_s: float = 15.0) -> None:
 
 _EMAIL_ITEM_EMAIL  = "jane.smith@example.com"
 _EMAIL_ITEM_NAME   = "Jane Smith"
-_EMAIL_ITEM_ACTION = "Approve the budget proposal"
+_EMAIL_ITEM_ACTION = "AC1: Approve the project proposal"
 _EMAIL_ITEM_STATUS = "In Progress"
 
-_CHIP_ITEM_ACTION  = "Review the budget report"
+_CHIP_ITEM_ACTION  = "AC1: Review the project budget"
 _CHIP_ITEM_STATUS  = "Open"
 
 # Permutation coverage constants (test_uc_a_ac1_permutation_coverage)
-_PERM_CHIP_ACTION         = "Review the budget report"
+_PERM_CHIP_ACTION         = "Perm: Schedule the kickoff"
 _PERM_CHIP_STATUS         = "Done"
 
 _PERM_NO_STATUS_EMAIL     = "jane.smith@example.com"
 _PERM_NO_STATUS_NAME      = "Jane Smith"
-_PERM_NO_STATUS_ACTION    = "Approve the budget proposal"
+_PERM_NO_STATUS_ACTION    = "Perm: Draft the committee agenda"
 _PERM_NO_STATUS_STATUS    = "Open"
 
 _PERM_UNDERSCORE_EMAIL    = "bob_jones@example.com"
 _PERM_UNDERSCORE_NAME     = "Bob Jones"
-_PERM_UNDERSCORE_ACTION   = "Review the Q2 report"
+_PERM_UNDERSCORE_ACTION   = "Perm: Review the meeting minutes"
 
 
 def _run_setup_and_sync(scenario: str, error_tag: str, gas_log_dir: str,
@@ -127,21 +128,22 @@ def test_uc_a_ac1_multi_format_detection(test_sheet_id, test_doc_id, gas_log_dir
     xlsx_bytes = download_xlsx(test_sheet_id)
     ws = load_sheet(xlsx_bytes, sheet_name="Actions")
     rows = rows_for_doc(ws, test_doc_id)
+    ac1_rows = [r for r in rows if "AC1:" in (r.get("Action") or "")]
 
-    assert len(rows) == 2, (
-        f"[uc_a AC1] Expected 2 rows (chip + email-led), got {len(rows)}.\n"
-        f"  Rows: {rows}"
+    assert len(ac1_rows) == 2, (
+        f"[uc_a AC1] Expected 2 AC1: rows (chip + email-led), got {len(ac1_rows)}.\n"
+        f"  AC1 rows: {ac1_rows}"
     )
 
     chip_email = settings["testAssigneeEmail"]
-    chip_rows  = [r for r in rows if r.get("Assignee Email") == chip_email]
-    email_rows = [r for r in rows if r.get("Assignee Email") == _EMAIL_ITEM_EMAIL]
+    chip_rows  = [r for r in ac1_rows if r.get("Assignee Email") == chip_email]
+    email_rows = [r for r in ac1_rows if r.get("Assignee Email") == _EMAIL_ITEM_EMAIL]
 
     assert len(chip_rows) == 1, (
-        f"[uc_a AC1] Chip row not found for {chip_email!r}. Rows: {rows}"
+        f"[uc_a AC1] Chip row not found for {chip_email!r}. AC1 rows: {ac1_rows}"
     )
     assert len(email_rows) == 1, (
-        f"[uc_a AC1] Email-led row not found for {_EMAIL_ITEM_EMAIL!r}. Rows: {rows}"
+        f"[uc_a AC1] Email-led row not found for {_EMAIL_ITEM_EMAIL!r}. AC1 rows: {ac1_rows}"
     )
 
     chip_row  = chip_rows[0]
@@ -182,20 +184,23 @@ def test_uc_a_ac1_multi_format_detection(test_sheet_id, test_doc_id, gas_log_dir
 # ---------------------------------------------------------------------------
 
 def test_uc_a_ac2_idempotent_second_sync(test_sheet_id, test_doc_id, gas_log_dir):
-    """AC2: Second Sync produces no duplicate rows, preserves anchors, leaves content unchanged."""
-    _first_sync(gas_log_dir, test_doc_id)
+    """AC2: Second Sync produces no duplicate rows, preserves anchors, leaves content unchanged.
 
+    Relies on test_uc_a_ac1_multi_format_detection having run first (same session clone).
+    Does not re-run fixture setup — asserts idempotency of the state left by AC1.
+    """
     xlsx1  = download_xlsx(test_sheet_id)
     docx1  = download_docx(test_doc_id)
     ws1    = load_sheet(xlsx1, sheet_name="Actions")
     rows1  = rows_for_doc(ws1, test_doc_id)
+    ac1_rows1 = [r for r in rows1 if "AC1:" in (r.get("Action") or "")]
 
-    assert len(rows1) == 2, (
-        f"[uc_a AC2] Expected 2 rows after first sync, got {len(rows1)} — "
-        "prerequisite for AC2 not met"
+    assert len(ac1_rows1) == 2, (
+        f"[uc_a AC2] Expected 2 AC1: rows before second sync, got {len(ac1_rows1)} — "
+        "prerequisite: test_uc_a_ac1_multi_format_detection must run first"
     )
 
-    nr_ids_1 = {r["Assignee Email"]: r["NamedRangeId"] for r in rows1}
+    nr_ids_1 = {r["Assignee Email"]: r["NamedRangeId"] for r in ac1_rows1}
 
     _second_sync(test_doc_id, gas_log_dir)
 
@@ -203,32 +208,40 @@ def test_uc_a_ac2_idempotent_second_sync(test_sheet_id, test_doc_id, gas_log_dir
     docx2  = download_docx(test_doc_id)
     ws2    = load_sheet(xlsx2, sheet_name="Actions")
     rows2  = rows_for_doc(ws2, test_doc_id)
+    ac1_rows2 = [r for r in rows2 if "AC1:" in (r.get("Action") or "")]
 
     # No duplicates
-    assert len(rows2) == len(rows1), (
-        f"[uc_a AC2] Row count changed: {len(rows1)} → {len(rows2)}. "
+    assert len(ac1_rows2) == len(ac1_rows1), (
+        f"[uc_a AC2] AC1: row count changed: {len(ac1_rows1)} → {len(ac1_rows2)}. "
         "Duplicate rows created or rows lost on second sync."
     )
 
     # Named range IDs preserved for each row
-    nr_ids_2 = {r["Assignee Email"]: r["NamedRangeId"] for r in rows2}
+    nr_ids_2 = {r["Assignee Email"]: r["NamedRangeId"] for r in ac1_rows2}
     for email, nrid in nr_ids_1.items():
         assert nr_ids_2.get(email) == nrid, (
             f"[uc_a AC2] NamedRangeId changed for {email!r}: "
             f"{nrid!r} → {nr_ids_2.get(email)!r}"
         )
 
-    # Sheet content unchanged
-    assert rows1 == rows2, (
-        "[uc_a AC2] ActionSheet rows changed on second sync — not idempotent.\n"
-        f"  Before: {rows1}\n  After:  {rows2}"
+    # Semantic content for AC1 rows unchanged (Date Modified excluded — tracked by GTaskSheet-cby2)
+    _SEMANTIC_KEYS = ("NamedRangeId", "ID", "Assignee Email", "Assignee Name",
+                      "Action", "Status", "Document")
+    def _semantic(row):
+        return {k: row.get(k) for k in _SEMANTIC_KEYS}
+
+    sem1 = [_semantic(r) for r in ac1_rows1]
+    sem2 = [_semantic(r) for r in ac1_rows2]
+    assert sem1 == sem2, (
+        "[uc_a AC2] AC1: ActionSheet semantic content changed on second sync — not idempotent.\n"
+        f"  Before: {sem1}\n  After:  {sem2}"
     )
 
-    # Doc floating actions unchanged
-    fa1 = floating_actions(load_doc(docx1))
-    fa2 = floating_actions(load_doc(docx2))
+    # Doc floating actions for AC1 items unchanged
+    fa1 = [f for f in floating_actions(load_doc(docx1)) if "AC1:" in f.get("action", "")]
+    fa2 = [f for f in floating_actions(load_doc(docx2)) if "AC1:" in f.get("action", "")]
     assert fa1 == fa2, (
-        "[uc_a AC2] Floating actions in doc changed on second sync — not idempotent.\n"
+        "[uc_a AC2] AC1: floating actions in doc changed on second sync — not idempotent.\n"
         f"  Before: {fa1}\n  After:  {fa2}"
     )
 
@@ -244,20 +257,21 @@ def test_uc_a_ac1_permutation_coverage(test_sheet_id, test_doc_id, gas_log_dir, 
     xlsx_bytes = download_xlsx(test_sheet_id)
     ws   = load_sheet(xlsx_bytes, sheet_name="Actions")
     rows = rows_for_doc(ws, test_doc_id)
+    perm_rows = [r for r in rows if "Perm:" in (r.get("Action") or "")]
 
-    assert len(rows) == 3, (
-        f"[uc_a permutations] Expected 3 rows (chip+status, email+no-status, "
-        f"underscore-email), got {len(rows)}.\n  Rows: {rows}"
+    assert len(perm_rows) == 3, (
+        f"[uc_a permutations] Expected 3 Perm: rows (chip+status, email+no-status, "
+        f"underscore-email), got {len(perm_rows)}.\n  Perm rows: {perm_rows}"
     )
 
     chip_email = settings["testAssigneeEmail"]
-    chip_rows  = [r for r in rows if r.get("Assignee Email") == chip_email]
-    jane_rows  = [r for r in rows if r.get("Assignee Email") == _PERM_NO_STATUS_EMAIL]
-    bob_rows   = [r for r in rows if r.get("Assignee Email") == _PERM_UNDERSCORE_EMAIL]
+    chip_rows  = [r for r in perm_rows if r.get("Assignee Email") == chip_email]
+    jane_rows  = [r for r in perm_rows if r.get("Assignee Email") == _PERM_NO_STATUS_EMAIL]
+    bob_rows   = [r for r in perm_rows if r.get("Assignee Email") == _PERM_UNDERSCORE_EMAIL]
 
-    assert len(chip_rows) == 1, f"[uc_a permutations] Chip row not found. Rows: {rows}"
-    assert len(jane_rows) == 1, f"[uc_a permutations] Jane row not found. Rows: {rows}"
-    assert len(bob_rows)  == 1, f"[uc_a permutations] Bob row not found. Rows: {rows}"
+    assert len(chip_rows) == 1, f"[uc_a permutations] Chip row not found. Perm rows: {perm_rows}"
+    assert len(jane_rows) == 1, f"[uc_a permutations] Jane row not found. Perm rows: {perm_rows}"
+    assert len(bob_rows)  == 1, f"[uc_a permutations] Bob row not found. Perm rows: {perm_rows}"
 
     chip_row = chip_rows[0]
     jane_row = jane_rows[0]

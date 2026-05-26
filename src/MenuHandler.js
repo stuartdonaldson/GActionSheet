@@ -17,6 +17,8 @@ function onOpen() {
         .addItem('Bootstrap Test Properties', 'menuBootstrap')
     )
     .addSeparator()
+    .addItem('Test: Begin Session', 'menuBeginTestSession')
+    .addItem('Test: End Session', 'menuEndTestSession')
     .addItem('Test: Setup Fixture', 'menuSetupFixture')
     .addItem('Test: Sync Document', 'menuSyncDocument')
     .addItem('Test: Setup And Sync', 'menuSetupAndSync')
@@ -39,6 +41,15 @@ function menuBootstrap() {
 
 function menuSync() {
   syncAll();
+}
+
+function menuBeginTestSession() {
+  var masterDocId = _readTestControlArg();
+  beginTestSession(masterDocId);
+}
+
+function menuEndTestSession() {
+  endTestSession();
 }
 
 function menuSetupFixture() {

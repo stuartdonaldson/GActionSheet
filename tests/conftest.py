@@ -26,8 +26,34 @@ def test_sheet_id(settings):
 
 
 @pytest.fixture(scope="session")
-def test_doc_id(settings):
-    return settings["testDocId"]
+def test_doc_id(settings, gas_log_dir):
+    """Per-run clone of the master template doc.
+
+    Creates a named clone at session start (TEST_DOC_ID script property is
+    updated to the clone ID), yields the clone ID to all tests, then trashes
+    the clone and restores the master at teardown.
+    """
+    from tests.helpers import gas_invoke as gi
+    from tests.helpers.gas_log import clear_logs, wait_for_log
+
+    clear_logs(gas_log_dir)
+    gi.begin_test_session(settings["testDocId"])
+    entry = wait_for_log(
+        gas_log_dir,
+        lambda e: e.get("tag") == "session.begin",
+        timeout_s=120.0,
+    )
+    clone_id = entry["data"]["cloneId"]
+
+    yield clone_id
+
+    clear_logs(gas_log_dir)
+    gi.end_test_session()
+    wait_for_log(
+        gas_log_dir,
+        lambda e: e.get("tag") == "session.end",
+        timeout_s=60.0,
+    )
 
 
 @pytest.fixture(scope="session")

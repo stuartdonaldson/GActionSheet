@@ -8,13 +8,17 @@ Fixture flow (two GAS invocations per test):
   2. sync_document(test_doc_id) — triggers the final convergence sync.
      Python waits for 'sync.complete'.
 
-Canonical floating action variants (shared doc fixture):
-  Var 1: chip  + "Review the budget report (Open)"      testAssigneeEmail
-  Var 2: chip  + "Draft the Q3 plan (In Review)"        testAssigneeEmail
-  Var 3: chip  + "Update the meeting notes"  (→ Open)   testAssigneeEmail
-  Var 4: email + "Schedule the follow-up (Done)"        jane.smith@example.com
-  Var 5: email + "Approve the budget proposal"  (→ Open) jane.smith@example.com
-  Var 6: email + "Review the Q2 report"  (→ Open)       bob_jones@example.com
+Each scenario appends scenario-prefixed items (UCB-DW:, UCB-SW:, UCB-CF:) to the
+shared clone doc so that scenarios accumulate without collision.  Assertions filter
+by the scenario prefix so earlier scenarios' rows are invisible.
+
+Canonical floating action variants per scenario (base text; prefix prepended in fixture):
+  Var 1: chip  + "<prefix>Review the budget report (Open)"      testAssigneeEmail
+  Var 2: chip  + "<prefix>Draft the Q3 plan (In Review)"        testAssigneeEmail
+  Var 3: chip  + "<prefix>Update the meeting notes"  (→ Open)   testAssigneeEmail
+  Var 4: email + "<prefix>Schedule the follow-up (Done)"        jane.smith@example.com
+  Var 5: email + "<prefix>Approve the budget proposal"  (→ Open) jane.smith@example.com
+  Var 6: email + "<prefix>Review the Q2 report"  (→ Open)       bob_jones@example.com
   Var 7: plain text (negative — must never appear in ActionSheet)
 
 Tests are active; UC-B bidirectional sync is implemented (GTaskSheet-5vk).
@@ -41,44 +45,52 @@ from tests.helpers.sheet_inspect import load_sheet, rows_for_doc
 from tests.helpers.doc_inspect import load_doc, floating_actions
 
 # ---------------------------------------------------------------------------
-# Constants — mirrors canonical fixture in TestFixtures.js
+# Scenario prefixes — must match ucbPrefix logic in TestFixtures.js
+# ---------------------------------------------------------------------------
+
+_DW_PREFIX = "UCB-DW: "   # uc_b_doc_wins scenario
+_SW_PREFIX = "UCB-SW: "   # uc_b_sheet_wins scenario
+_CF_PREFIX = "UCB-CF: "   # uc_b_conflict scenario
+
+# ---------------------------------------------------------------------------
+# Constants — base action texts (prefix is prepended per scenario in GAS)
 # ---------------------------------------------------------------------------
 
 _JANE_EMAIL       = "jane.smith@example.com"
 _BOB_EMAIL        = "bob_jones@example.com"
 
 # Variant 1 (chip, testAssigneeEmail)
-_VAR1_ACTION_ORIG = "Review the budget report"
+_VAR1_ACTION_BASE = "Review the budget report"
 _VAR1_STATUS_ORIG = "Open"
 _VAR1_STATUS_MUT  = "Done"         # doc mutation for uc_b_doc_wins
 
 # Variant 2 (chip, testAssigneeEmail)
-_VAR2_ACTION_ORIG = "Draft the Q3 plan"
+_VAR2_ACTION_BASE     = "Draft the Q3 plan"
+_VAR2_ACTION_MUT_BASE = "Draft the revised Q3 plan"   # doc mutation for uc_b_doc_wins
 _VAR2_STATUS_ORIG = "In Review"
-_VAR2_ACTION_MUT  = "Draft the revised Q3 plan"   # doc mutation for uc_b_doc_wins
 
 # Variant 3 (chip, testAssigneeEmail — no initial status → Open)
-_VAR3_ACTION_ORIG = "Update the meeting notes"
+_VAR3_ACTION_BASE = "Update the meeting notes"
 _VAR3_STATUS_ORIG = "Open"
 _VAR3_STATUS_MUT  = "In Progress"  # doc mutation for uc_b_doc_wins (adds status token)
 
 # Variant 4 (email, jane.smith)
-_VAR4_ACTION      = "Schedule the follow-up"
+_VAR4_ACTION_BASE = "Schedule the follow-up"
 _VAR4_STATUS_ORIG = "Done"
 _VAR4_STATUS_MUT  = "Closed"       # sheet mutation for uc_b_sheet_wins
 
 # Variant 5 (email, jane.smith — no initial status → Open)
-_VAR5_ACTION_ORIG = "Approve the budget proposal"
+_VAR5_ACTION_BASE     = "Approve the budget proposal"
+_VAR5_ACTION_MUT_BASE = "Approve the revised budget"  # sheet mutation for uc_b_sheet_wins
 _VAR5_STATUS_ORIG = "Open"
-_VAR5_ACTION_MUT  = "Approve the revised budget"  # sheet mutation for uc_b_sheet_wins
 
 # Variant 6 (email, bob_jones — no initial status → Open)
-_VAR6_ACTION      = "Review the Q2 report"
+_VAR6_ACTION_BASE = "Review the Q2 report"
 _VAR6_STATUS_ORIG = "Open"
 _VAR6_STATUS_MUT  = "In Review"    # sheet mutation for uc_b_sheet_wins
 
-# Negative (plain text, no chip/email)
-_VAR7_ACTION      = "Complete the project documentation"
+# Variant 7 base text (negative — plain text, no chip/email; never in ActionSheet)
+_VAR7_ACTION_BASE = "Complete the project documentation"
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +200,8 @@ def _verify_consistency(doc_fas: list, sheet_rows: list,
 
 def _assert_negative_absent(rows: list, context: str) -> None:
     """Variant 7 (plain text, no assignee) must not appear in any sheet row."""
-    plain_rows = [r for r in rows if (r.get("Action") or "").strip() == _VAR7_ACTION]
+    plain_rows = [r for r in rows
+                  if _VAR7_ACTION_BASE in (r.get("Action") or "")]
     assert not plain_rows, (
         f"[{context}] Variant 7 (plain text) must not appear in ActionSheet after sync. "
         f"Found: {plain_rows}"
@@ -217,11 +230,12 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
 
     xlsx_bytes = download_xlsx(test_sheet_id)
     ws   = load_sheet(xlsx_bytes, sheet_name="Actions")
-    rows = rows_for_doc(ws, test_doc_id)
+    all_rows = rows_for_doc(ws, test_doc_id)
+    rows = [r for r in all_rows if (r.get("Action") or "").startswith(_DW_PREFIX)]
 
-    # Exactly 6 rows (variants 1–6); variant 7 absent
+    # Exactly 6 UCB-DW rows (variants 1–6); variant 7 absent
     assert len(rows) == 6, (
-        f"[uc_b_doc_wins] Expected 6 sheet rows, got {len(rows)}.\n  Rows: {rows}"
+        f"[uc_b_doc_wins] Expected 6 UCB-DW: rows, got {len(rows)}.\n  Rows: {rows}"
     )
     _assert_negative_absent(rows, "uc_b_doc_wins")
 
@@ -238,9 +252,9 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
 
     # Var 1: Status must be updated to the mutated value
     var1_rows = [r for r in chip_rows
-                 if (r.get("Action") or "").strip() == _VAR1_ACTION_ORIG]
+                 if _VAR1_ACTION_BASE in (r.get("Action") or "")]
     assert len(var1_rows) == 1, (
-        f"[uc_b_doc_wins] Variant 1 row not found by action text {_VAR1_ACTION_ORIG!r}. "
+        f"[uc_b_doc_wins] Variant 1 row not found by action text {_VAR1_ACTION_BASE!r}. "
         f"Chip rows: {chip_rows}"
     )
     assert var1_rows[0].get("Status") == _VAR1_STATUS_MUT, (
@@ -250,9 +264,9 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
 
     # Var 2: Action text must be updated
     var2_rows = [r for r in chip_rows
-                 if (r.get("Action") or "").strip() == _VAR2_ACTION_MUT]
+                 if _VAR2_ACTION_MUT_BASE in (r.get("Action") or "")]
     assert len(var2_rows) == 1, (
-        f"[uc_b_doc_wins] Variant 2 row not found by mutated action text {_VAR2_ACTION_MUT!r}. "
+        f"[uc_b_doc_wins] Variant 2 row not found by mutated action text {_VAR2_ACTION_MUT_BASE!r}. "
         f"Chip rows: {chip_rows}"
     )
     assert var2_rows[0].get("Status") == _VAR2_STATUS_ORIG, (
@@ -262,9 +276,9 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
 
     # Var 3: Status must reflect the newly-added status token
     var3_rows = [r for r in chip_rows
-                 if (r.get("Action") or "").strip() == _VAR3_ACTION_ORIG]
+                 if _VAR3_ACTION_BASE in (r.get("Action") or "")]
     assert len(var3_rows) == 1, (
-        f"[uc_b_doc_wins] Variant 3 row not found by action text {_VAR3_ACTION_ORIG!r}. "
+        f"[uc_b_doc_wins] Variant 3 row not found by action text {_VAR3_ACTION_BASE!r}. "
         f"Chip rows: {chip_rows}"
     )
     assert var3_rows[0].get("Status") == _VAR3_STATUS_MUT, (
@@ -278,10 +292,11 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"[uc_b_doc_wins] Expected 2 Jane rows, got {len(jane_rows)}."
     )
 
-    # Reconciliation: every FA has a matching sheet row; all fields consistent
+    # Reconciliation: filter FAs to DW prefix; every FA has a matching sheet row
     docx_bytes = download_docx(test_doc_id)
     doc = load_doc(docx_bytes)
-    fa  = floating_actions(doc)
+    fa_all = floating_actions(doc)
+    fa = [a for a in fa_all if (a.get("action") or "").startswith(_DW_PREFIX)]
     _verify_consistency(fa, rows, context="uc_b_doc_wins")
 
 
@@ -306,13 +321,13 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     _run_fixture("uc_b_sheet_wins", "fixture.uc_b_sheet_wins", gas_log_dir)
     _run_final_sync(test_doc_id, gas_log_dir)
 
-    # Assert sheet unchanged for variants 1–3 (doc side not mutated)
     xlsx_bytes = download_xlsx(test_sheet_id)
     ws   = load_sheet(xlsx_bytes, sheet_name="Actions")
-    rows = rows_for_doc(ws, test_doc_id)
+    all_rows = rows_for_doc(ws, test_doc_id)
+    rows = [r for r in all_rows if (r.get("Action") or "").startswith(_SW_PREFIX)]
 
     assert len(rows) == 6, (
-        f"[uc_b_sheet_wins] Expected 6 sheet rows, got {len(rows)}.\n  Rows: {rows}"
+        f"[uc_b_sheet_wins] Expected 6 UCB-SW: rows, got {len(rows)}.\n  Rows: {rows}"
     )
     _assert_negative_absent(rows, "uc_b_sheet_wins")
 
@@ -325,15 +340,16 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     # Assert doc floating actions reflect the mutated sheet values
     docx_bytes = download_docx(test_doc_id)
     doc = load_doc(docx_bytes)
-    fa  = floating_actions(doc)
+    fa_all = floating_actions(doc)
+    fa = [a for a in fa_all if (a.get("action") or "").startswith(_SW_PREFIX)]
 
     # Var 4: status must be "Closed" in the doc paragraph
     var4_fa = [a for a in fa
                if a.get("assignee_email") == _JANE_EMAIL
-               and _VAR4_ACTION in (a.get("action") or "")]
+               and _VAR4_ACTION_BASE in (a.get("action") or "")]
     assert len(var4_fa) == 1, (
         f"[uc_b_sheet_wins] Variant 4 floating action not found for {_JANE_EMAIL!r} "
-        f"with action containing {_VAR4_ACTION!r}. All FAs: {fa}"
+        f"with action containing {_VAR4_ACTION_BASE!r}. SW FAs: {fa}"
     )
     assert var4_fa[0].get("status") == _VAR4_STATUS_MUT, (
         f"[uc_b_sheet_wins] Var 4 FA status: expected {_VAR4_STATUS_MUT!r}, "
@@ -343,10 +359,10 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     # Var 5: action text must be updated in the doc paragraph
     var5_fa = [a for a in fa
                if a.get("assignee_email") == _JANE_EMAIL
-               and _VAR5_ACTION_MUT in (a.get("action") or "")]
+               and _VAR5_ACTION_MUT_BASE in (a.get("action") or "")]
     assert len(var5_fa) == 1, (
         f"[uc_b_sheet_wins] Variant 5 floating action not found with mutated text "
-        f"{_VAR5_ACTION_MUT!r}. All FAs: {fa}"
+        f"{_VAR5_ACTION_MUT_BASE!r}. SW FAs: {fa}"
     )
     assert var5_fa[0].get("status") == _VAR5_STATUS_ORIG, (
         f"[uc_b_sheet_wins] Var 5 FA status: expected {_VAR5_STATUS_ORIG!r}, "
@@ -359,10 +375,10 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     # Var 6: status must be "In Review" in the doc paragraph
     var6_fa = [a for a in fa
                if a.get("assignee_email") == _BOB_EMAIL
-               and _VAR6_ACTION in (a.get("action") or "")]
+               and _VAR6_ACTION_BASE in (a.get("action") or "")]
     assert len(var6_fa) == 1, (
         f"[uc_b_sheet_wins] Variant 6 floating action not found for {_BOB_EMAIL!r}. "
-        f"All FAs: {fa}"
+        f"SW FAs: {fa}"
     )
     assert var6_fa[0].get("status") == _VAR6_STATUS_MUT, (
         f"[uc_b_sheet_wins] Var 6 FA status: expected {_VAR6_STATUS_MUT!r}, "
@@ -375,14 +391,14 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     # Variants 1–3 chip paragraphs must remain unchanged in the doc
     chip_fa = [a for a in fa if a.get("assignee_email") == chip_email]
     assert len(chip_fa) == 3, (
-        f"[uc_b_sheet_wins] Expected 3 chip FAs for {chip_email!r}, got {len(chip_fa)}."
+        f"[uc_b_sheet_wins] Expected 3 SW chip FAs for {chip_email!r}, got {len(chip_fa)}."
     )
-    var1_fa = [a for a in chip_fa if _VAR1_ACTION_ORIG in (a.get("action") or "")]
+    var1_fa = [a for a in chip_fa if _VAR1_ACTION_BASE in (a.get("action") or "")]
     assert len(var1_fa) == 1 and var1_fa[0].get("status") == _VAR1_STATUS_ORIG, (
         f"[uc_b_sheet_wins] Var 1 FA should be unchanged. Got: {var1_fa}"
     )
 
-    var3_fa = [a for a in chip_fa if _VAR3_ACTION_ORIG in (a.get("action") or "")]
+    var3_fa = [a for a in chip_fa if _VAR3_ACTION_BASE in (a.get("action") or "")]
     assert len(var3_fa) == 1, (
         f"[uc_b_sheet_wins] Variant 3 floating action not found. Got: {chip_fa}"
     )
@@ -394,7 +410,7 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"[uc_b_sheet_wins] Var 3 FA should have an explicit status token after sync. Got: {var3_fa[0]}"
     )
 
-    # Reconciliation: every FA has a matching sheet row; all fields consistent
+    # Reconciliation: every SW FA has a matching SW sheet row
     _verify_consistency(fa, rows, context="uc_b_sheet_wins")
 
 
@@ -423,10 +439,11 @@ def test_uc_b_conflict_resolution(test_sheet_id, test_doc_id, gas_log_dir, setti
 
     xlsx_bytes = download_xlsx(test_sheet_id)
     ws   = load_sheet(xlsx_bytes, sheet_name="Actions")
-    rows = rows_for_doc(ws, test_doc_id)
+    all_rows = rows_for_doc(ws, test_doc_id)
+    rows = [r for r in all_rows if (r.get("Action") or "").startswith(_CF_PREFIX)]
 
     assert len(rows) == 6, (
-        f"[uc_b_conflict] Expected 6 sheet rows (no duplicates), got {len(rows)}.\n  Rows: {rows}"
+        f"[uc_b_conflict] Expected 6 UCB-CF: rows (no duplicates), got {len(rows)}.\n  Rows: {rows}"
     )
     _assert_negative_absent(rows, "uc_b_conflict")
 
@@ -439,7 +456,7 @@ def test_uc_b_conflict_resolution(test_sheet_id, test_doc_id, gas_log_dir, setti
     # Var 1: doc wins — sheet row Status must reflect the doc mutation (In Progress)
     chip_rows = [r for r in rows if r.get("Assignee Email") == chip_email]
     var1_rows = [r for r in chip_rows
-                 if (r.get("Action") or "").strip() == _VAR1_ACTION_ORIG]
+                 if _VAR1_ACTION_BASE in (r.get("Action") or "")]
     assert len(var1_rows) == 1, (
         f"[uc_b_conflict] Variant 1 row not found. Chip rows: {chip_rows}"
     )
@@ -451,18 +468,19 @@ def test_uc_b_conflict_resolution(test_sheet_id, test_doc_id, gas_log_dir, setti
     # Var 4: sheet wins — doc paragraph status must reflect the sheet mutation (Closed)
     docx_bytes = download_docx(test_doc_id)
     doc = load_doc(docx_bytes)
-    fa  = floating_actions(doc)
+    fa_all = floating_actions(doc)
+    fa = [a for a in fa_all if (a.get("action") or "").startswith(_CF_PREFIX)]
 
     var4_fa = [a for a in fa
                if a.get("assignee_email") == _JANE_EMAIL
-               and _VAR4_ACTION in (a.get("action") or "")]
+               and _VAR4_ACTION_BASE in (a.get("action") or "")]
     assert len(var4_fa) == 1, (
-        f"[uc_b_conflict] Variant 4 floating action not found. All FAs: {fa}"
+        f"[uc_b_conflict] Variant 4 floating action not found. CF FAs: {fa}"
     )
     assert var4_fa[0].get("status") == "Closed", (
         f"[uc_b_conflict] Var 4 (sheet wins): expected FA status='Closed', "
         f"got {var4_fa[0].get('status')!r}"
     )
 
-    # Reconciliation: every FA has a matching sheet row; all fields consistent
+    # Reconciliation: every CF FA has a matching CF sheet row
     _verify_consistency(fa, rows, context="uc_b_conflict")

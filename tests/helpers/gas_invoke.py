@@ -56,3 +56,16 @@ def setup_and_sync(scenario: str, doc_id: str | None = None) -> None:
                 Provided for explicitness when calling code.
     """
     _invoke("Test: Setup And Sync", scenario)
+
+
+def begin_test_session(master_doc_id: str) -> None:
+    """Clone the master template doc and set TEST_DOC_ID to the clone.
+
+    GAS writes the clone ID to TestControl!B1 and logs session.begin.
+    """
+    _invoke("Test: Begin Session", master_doc_id, timeout=120)
+
+
+def end_test_session() -> None:
+    """Trash the clone and restore TEST_DOC_ID to the master template."""
+    _invoke("Test: End Session", timeout=60)

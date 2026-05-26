@@ -25,6 +25,7 @@ var _TF_TABLE_HEADERS = [
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+
 /**
  * Clears all data rows (keeps header in row 1) from a named sheet tab.
  * If the tab does not exist, logs a warning and returns.
@@ -47,16 +48,15 @@ function _tfClearSheetTab(ss, tabName) {
 }
 
 /**
- * Replaces the test doc body with just the section heading paragraph
- * ("=== Tracked Actions ===") using HEADING1 style.
- * All previous content is removed.
+ * Replaces the test doc body with just the "Floating Actions" heading paragraph
+ * using HEADING1 style. All previous content is removed.
  *
  * @param {Body} body  DocumentApp Body object.
  * @returns {Paragraph}  The heading paragraph that was appended.
  */
 function _tfResetDocBody(body) {
   body.clear();
-  var heading = body.appendParagraph('=== Tracked Actions ===');
+  var heading = body.appendParagraph('Floating Actions');
   heading.setHeading(DocumentApp.ParagraphHeading.HEADING1);
   return heading;
 }
@@ -131,7 +131,6 @@ function _tfInsertPersonChipListItem(token, docId, email, actionText) {
   var baseUrl    = 'https://docs.googleapis.com/v1/documents/';
   var authHeader = { 'Authorization': 'Bearer ' + token };
 
-  // GET the document body to determine the current content layout.
   var getResp = UrlFetchApp.fetch(
     baseUrl + docId + '?fields=body.content',
     { headers: authHeader, muteHttpExceptions: true }
@@ -140,78 +139,40 @@ function _tfInsertPersonChipListItem(token, docId, email, actionText) {
     throw new Error('Docs GET failed (' + getResp.getResponseCode() + '): ' +
                     getResp.getContentText());
   }
-  var docData = JSON.parse(getResp.getContentText());
-  var content = (docData.body && docData.body.content) || [];
+  var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
 
-  // Find the last paragraph element to determine what needs to be cleared.
-  // The Docs API never allows deleting the last paragraph; we clear its content.
-  var lastParaStartIndex = null;
-  var lastParaEndIndex   = null;
+  var lastParaEndIndex = null;
   for (var ci = content.length - 1; ci >= 0; ci--) {
     if (content[ci].paragraph) {
-      lastParaStartIndex = content[ci].startIndex;
-      lastParaEndIndex   = content[ci].endIndex;
+      lastParaEndIndex = content[ci].endIndex;
       break;
     }
   }
-  if (lastParaStartIndex === null) {
+  if (lastParaEndIndex === null) {
     throw new Error('_tfInsertPersonChipListItem: no paragraph found in doc body');
   }
 
-  var requests = [];
-
-  // Clear the doc body to a single empty paragraph.
-  //
-  // The Docs API never allows deleting the last paragraph in the body — it is the
-  // mandatory section-end marker. We must KEEP it but delete its content.
-  //
-  // Two cases:
-  //  A) Multiple paragraphs — delete everything before the last paragraph, which
-  //     shifts the last (empty) paragraph to index 1.  If the last paragraph also
-  //     has content, delete that content too.
-  //  B) Single paragraph (e.g. the chip from a previous fixture run) — delete its
-  //     content (indices 1..endIndex-2 inclusive) leaving only the trailing \n.
-  //     We cannot use lastParaStartIndex == 1 as a "nothing to delete" guard here.
-  if (lastParaStartIndex > 1) {
-    // Case A: remove all paragraphs before the last one.
-    requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: lastParaStartIndex } } });
-    // After this deletion, the last paragraph sits at index 1.  It should normally
-    // be empty, but delete any residual content just in case.
-    var lastParaContentLen = lastParaEndIndex - lastParaStartIndex - 1;
-    if (lastParaContentLen > 0) {
-      requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: 1 + lastParaContentLen } } });
+  // Append a chip-led bullet item before the mandatory terminal paragraph.
+  // Same split-last-para pattern as _tfAppendPersonChipListItem.
+  var insertAt = lastParaEndIndex - 1;
+  var requests = [
+    { insertText: { location: { index: insertAt }, text: '\n' } },
+    { createParagraphBullets: {
+        range: { startIndex: lastParaEndIndex, endIndex: lastParaEndIndex + 1 },
+        bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE'
+      }
+    },
+    { insertPerson: {
+        personProperties: { email: email },
+        location: { index: lastParaEndIndex }
+      }
+    },
+    { insertText: {
+        location: { index: lastParaEndIndex + 1 },
+        text: ' ' + actionText
+      }
     }
-  } else if (lastParaEndIndex > 2) {
-    // Case B: single paragraph with content — delete content, preserve trailing \n.
-    // endIndex is exclusive, so delete [1, endIndex-1) to keep only the \n at endIndex-1.
-    requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: lastParaEndIndex - 1 } } });
-  }
-  // After clearing: one empty paragraph at index 1-2 (just the \n).
-
-  // batchUpdate requests (applied in order; indices shift after each):
-  //  1. createParagraphBullets — marks the paragraph as a bulleted list item.
-  //     floating_actions() in the Python test detects this via w:numPr in .docx.
-  //  2. insertPerson           — inserts the @mention chip at index 1.
-  //     The chip occupies exactly 1 index in the Docs character stream.
-  //  3. insertText             — appends " <actionText>" after the chip (now at index 2).
-  requests.push({
-    createParagraphBullets: {
-      range: { startIndex: 1, endIndex: 2 },
-      bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE'
-    }
-  });
-  requests.push({
-    insertPerson: {
-      personProperties: { email: email },
-      location: { index: 1 }
-    }
-  });
-  requests.push({
-    insertText: {
-      location: { index: 2 },
-      text: ' ' + actionText
-    }
-  });
+  ];
 
   var batchResp = UrlFetchApp.fetch(
     baseUrl + docId + ':batchUpdate',
@@ -457,71 +418,39 @@ function setupTestFixtures(scenario) {
     var docUrl     = doc.getUrl();
     var docFormula = '=HYPERLINK("' + docUrl + '","Test Doc")';
 
-    // -- Step 1: clear both sheets -----------------------------------------
-    _tfClearSheetTab(ss, 'Actions');
-    _tfClearSheetTab(ss, 'Archive');
-
-    // -- Step 2: clear doc body -------------------------------------------
-    // UC-A and UC-B scenarios clear via the Docs REST API deleteContentRange
-    // inside _tfInsertPersonChipListItem (called later, after saveAndClose).
-    // All other scenarios use DocumentApp to reset to the standard heading.
-    var _ucbScenario = (resolvedScenario === 'uc_b_doc_wins' ||
-                        resolvedScenario === 'uc_b_sheet_wins' ||
-                        resolvedScenario === 'uc_b_conflict');
-    if (resolvedScenario !== 'uc_a_clear' &&
-        resolvedScenario !== 'uc_a_permutations' &&
-        !_ucbScenario) {
-      _tfResetDocBody(body);
-    }
-
-    // -- Step 3: seed per scenario; track whether doc was already closed ----
+    // -- Step 1: seed per scenario; track whether doc was already closed ----
     var docAlreadyClosed = false;
     switch (resolvedScenario) {
 
       case 'uc_a_clear':
-        // Remove all named ranges (unanchors existing actions).
-        var namedRanges = doc.getNamedRanges();
-        for (var nri = 0; nri < namedRanges.length; nri++) {
-          namedRanges[nri].remove();
-        }
-        // Flush DocumentApp writes before using the Docs REST API —
-        // the REST API must see the cleared body before inserting the chip.
+        // Flush DocumentApp writes before using the Docs REST API.
         doc.saveAndClose();
         docAlreadyClosed = true;
-        // Insert a chip-led list item via the Docs REST API batchUpdate.
-        // The chip is the assignee; the action text follows it on the same line.
         var ucaToken  = ScriptApp.getOAuthToken();
         var ucaEmail  = props.getProperty('TEST_ASSIGNEE_EMAIL')
                      || Session.getActiveUser().getEmail();
         var ucaChipOk = false;
         try {
           _tfInsertPersonChipListItem(ucaToken, testDocId, ucaEmail,
-                                      'Review the budget report');
+                                      'AC1: Review the project budget');
           ucaChipOk = true;
         } catch (chipErr) {
           GasLogger.log('fixture.uc_a_clear', {
-            namedRangesRemoved: namedRanges.length,
             assigneeEmail: ucaEmail,
             error: 'chip insert: ' + chipErr.message
           });
         }
         if (ucaChipOk) {
-          // Also insert an email-led list item to exercise email-at-start detection.
-          // Use the REST API (not DocumentApp) to avoid GAS document caching between
-          // the chip batchUpdate and the subsequent syncDocument call.
           try {
             _tfAppendTextListItem(
               ucaToken, testDocId,
-              'jane.smith@example.com Approve the budget proposal (In Progress)'
+              'jane.smith@example.com AC1: Approve the project proposal (In Progress)'
             );
             GasLogger.log('fixture.uc_a_clear', {
-              namedRangesRemoved: namedRanges.length,
-              assigneeEmail:      ucaEmail,
-              emailItemInserted:  true
+              assigneeEmail: ucaEmail, emailItemInserted: true
             });
           } catch (emailErr) {
             GasLogger.log('fixture.uc_a_clear', {
-              namedRangesRemoved: namedRanges.length,
               assigneeEmail: ucaEmail,
               error: 'email item append: ' + emailErr.message
             });
@@ -530,16 +459,11 @@ function setupTestFixtures(scenario) {
         break;
 
       case 'uc_a_permutations':
-        // Full permutation coverage for floating-action detection.
-        // Items inserted (4 total; 3 produce rows, 1 is a negative case):
+        // Items (4 total; 3 produce rows, 1 is a negative case):
         //   1. Chip item WITH explicit "(Done)" status token
         //   2. Email item with NO status token (defaults to Open)
         //   3. Email with underscore username bob_jones@example.com (name → "Bob Jones")
         //   4. Plain-text list item with no chip and no email (no row expected)
-        var permNangedRanges = doc.getNamedRanges();
-        for (var permNri = 0; permNri < permNangedRanges.length; permNri++) {
-          permNangedRanges[permNri].remove();
-        }
         doc.saveAndClose();
         docAlreadyClosed = true;
         var permToken = ScriptApp.getOAuthToken();
@@ -548,11 +472,10 @@ function setupTestFixtures(scenario) {
         var permChipOk = false;
         try {
           _tfInsertPersonChipListItem(permToken, testDocId, permEmail,
-                                      'Review the budget report (Done)');
+                                      'Perm: Schedule the kickoff (Done)');
           permChipOk = true;
         } catch (permChipErr) {
           GasLogger.log('fixture.uc_a_permutations', {
-            namedRangesRemoved: permNangedRanges.length,
             error: 'chip insert: ' + permChipErr.message
           });
         }
@@ -560,26 +483,20 @@ function setupTestFixtures(scenario) {
           var permErrors = [];
           try {
             _tfAppendTextListItem(permToken, testDocId,
-              'jane.smith@example.com Approve the budget proposal');
+              'jane.smith@example.com Perm: Draft the committee agenda');
           } catch (e2) { permErrors.push('email-no-status: ' + e2.message); }
           try {
             _tfAppendTextListItem(permToken, testDocId,
-              'bob_jones@example.com Review the Q2 report');
+              'bob_jones@example.com Perm: Review the meeting minutes');
           } catch (e3) { permErrors.push('underscore-email: ' + e3.message); }
           try {
             _tfAppendTextListItem(permToken, testDocId,
-              'Complete the project documentation');
+              'Perm: Write the project documentation');
           } catch (e4) { permErrors.push('plain-text: ' + e4.message); }
           if (permErrors.length > 0) {
-            GasLogger.log('fixture.uc_a_permutations', {
-              namedRangesRemoved: permNangedRanges.length,
-              error: permErrors.join('; ')
-            });
+            GasLogger.log('fixture.uc_a_permutations', { error: permErrors.join('; ') });
           } else {
-            GasLogger.log('fixture.uc_a_permutations', {
-              namedRangesRemoved: permNangedRanges.length,
-              itemsInserted: 4
-            });
+            GasLogger.log('fixture.uc_a_permutations', { itemsInserted: 4 });
           }
         }
         break;
@@ -812,7 +729,6 @@ function setupTestFixtures(scenario) {
 
       case 'no_table':
         // Doc has heading but no table — normalizer must auto-create the table.
-        // _tfResetDocBody() already set up the heading; nothing more to do.
         break;
 
       case 'onedit':
@@ -928,10 +844,10 @@ function setupTestFixtures(scenario) {
       case 'uc_b_sheet_wins':
       case 'uc_b_conflict': {
         // -- Phase 1: build canonical 7-item state ---------------------------
-        var ucbNrs = doc.getNamedRanges();
-        for (var ucbNri = 0; ucbNri < ucbNrs.length; ucbNri++) {
-          ucbNrs[ucbNri].remove();
-        }
+        var ucbPrefix = resolvedScenario === 'uc_b_doc_wins'   ? 'UCB-DW: '
+                      : resolvedScenario === 'uc_b_sheet_wins' ? 'UCB-SW: '
+                      : 'UCB-CF: ';
+
         doc.saveAndClose();
         docAlreadyClosed = true;
 
@@ -941,25 +857,25 @@ function setupTestFixtures(scenario) {
 
         // Var 1: chip + action text + (Open)
         _tfInsertPersonChipListItem(ucbToken, testDocId, ucbEmail,
-                                    'Review the budget report (Open)');
+                                    ucbPrefix + 'Review the budget report (Open)');
         // Var 2: chip + action text + (In Review)
         _tfAppendPersonChipListItem(ucbToken, testDocId, ucbEmail,
-                                    'Draft the Q3 plan (In Review)');
+                                    ucbPrefix + 'Draft the Q3 plan (In Review)');
         // Var 3: chip + action text only (no status → Open)
         _tfAppendPersonChipListItem(ucbToken, testDocId, ucbEmail,
-                                    'Update the meeting notes');
+                                    ucbPrefix + 'Update the meeting notes');
         // Var 4: email + action text + (Done)
         _tfAppendTextListItem(ucbToken, testDocId,
-                              'jane.smith@example.com Schedule the follow-up (Done)');
+                              'jane.smith@example.com ' + ucbPrefix + 'Schedule the follow-up (Done)');
         // Var 5: email + action text only (no status → Open)
         _tfAppendTextListItem(ucbToken, testDocId,
-                              'jane.smith@example.com Approve the budget proposal');
+                              'jane.smith@example.com ' + ucbPrefix + 'Approve the budget proposal');
         // Var 6: underscore email + action text (no status → Open)
         _tfAppendTextListItem(ucbToken, testDocId,
-                              'bob_jones@example.com Review the Q2 report');
+                              'bob_jones@example.com ' + ucbPrefix + 'Review the Q2 report');
         // Var 7: plain text (negative — no chip, no email)
         _tfAppendTextListItem(ucbToken, testDocId,
-                              'Complete the project documentation');
+                              ucbPrefix + 'Complete the project documentation');
 
         // -- Phase 2: intermediate sync to anchor named ranges + seed sheet --
         syncDocument(testDocId);
@@ -983,13 +899,13 @@ function setupTestFixtures(scenario) {
               if (ucbItem.getChild(ucbJ).getType() !== DocumentApp.ElementType.TEXT) continue;
               var ucbTextEl = ucbItem.getChild(ucbJ).asText();
               var ucbTxt    = ucbTextEl.getText();
-              if (ucbTxt.indexOf('Review the budget report') !== -1) {
+              if (ucbTxt.indexOf(ucbPrefix + 'Review the budget report') !== -1) {
                 // Var 1: (Open) → (Done)
                 ucbTextEl.setText(ucbTxt.replace('(Open)', '(Done)'));
-              } else if (ucbTxt.indexOf('Draft the Q3 plan') !== -1) {
+              } else if (ucbTxt.indexOf(ucbPrefix + 'Draft the Q3 plan') !== -1) {
                 // Var 2: change action text (preserve status token)
-                ucbTextEl.setText(ucbTxt.replace('Draft the Q3 plan', 'Draft the revised Q3 plan'));
-              } else if (ucbTxt.indexOf('Update the meeting notes') !== -1) {
+                ucbTextEl.setText(ucbTxt.replace(ucbPrefix + 'Draft the Q3 plan', ucbPrefix + 'Draft the revised Q3 plan'));
+              } else if (ucbTxt.indexOf(ucbPrefix + 'Update the meeting notes') !== -1) {
                 // Var 3: set (In Progress) status; strip any existing token first
                 // (the intermediate sync may have normalized this item to (Open))
                 var ucbBase3 = ucbTxt.trim().replace(/\s*\([^)]*\)\s*$/, '');
@@ -1012,23 +928,23 @@ function setupTestFixtures(scenario) {
               var ucbAssignee = ucbData[ucbRi][2]; // col C: Assignee Email
               var ucbAction   = ucbData[ucbRi][4]; // col E: Action
               if (ucbAssignee === 'jane.smith@example.com') {
-                if (ucbAction.indexOf('Schedule the follow-up') !== -1) {
+                if (ucbAction.indexOf(ucbPrefix + 'Schedule the follow-up') !== -1) {
                   // Var 4: Status Done → Closed; stamp Date Modified so sheet wins conflict resolution.
                   var ucbRow4 = ucbRi + 2;
                   WriteGuard.wrap(function () {
                     ucbSheet.getRange(ucbRow4, 6).setValue('Closed');
                     ucbSheet.getRange(ucbRow4, 9).setValue(new Date());
                   });
-                } else if (ucbAction.indexOf('Approve the budget proposal') !== -1) {
+                } else if (ucbAction.indexOf(ucbPrefix + 'Approve the budget proposal') !== -1) {
                   // Var 5: Action text change; stamp Date Modified so sheet wins conflict resolution.
                   var ucbRow5 = ucbRi + 2;
                   WriteGuard.wrap(function () {
-                    ucbSheet.getRange(ucbRow5, 5).setValue('Approve the revised budget');
+                    ucbSheet.getRange(ucbRow5, 5).setValue(ucbPrefix + 'Approve the revised budget');
                     ucbSheet.getRange(ucbRow5, 9).setValue(new Date());
                   });
                 }
               } else if (ucbAssignee === 'bob_jones@example.com' &&
-                         ucbAction.indexOf('Review the Q2 report') !== -1) {
+                         ucbAction.indexOf(ucbPrefix + 'Review the Q2 report') !== -1) {
                 // Var 6: Status Open → In Review; stamp Date Modified so sheet wins conflict resolution.
                 var ucbRow6 = ucbRi + 2;
                 WriteGuard.wrap(function () {
@@ -1052,7 +968,7 @@ function setupTestFixtures(scenario) {
               var ucbCAssignee = ucbCData[ucbCRi][2];
               var ucbCAction   = ucbCData[ucbCRi][4];
               if (ucbCAssignee === ucbEmail &&
-                  ucbCAction.indexOf('Review the budget report') !== -1) {
+                  ucbCAction.indexOf(ucbPrefix + 'Review the budget report') !== -1) {
                 // Force sheet Date Modified far in the past so doc edit wins
                 var ucbCRowA = ucbCRi + 2;
                 WriteGuard.wrap(function () {
@@ -1076,7 +992,7 @@ function setupTestFixtures(scenario) {
               if (ucbCItem.getChild(ucbCJ).getType() !== DocumentApp.ElementType.TEXT) continue;
               var ucbCTxtEl = ucbCItem.getChild(ucbCJ).asText();
               var ucbCTxt   = ucbCTxtEl.getText();
-              if (ucbCTxt.indexOf('Review the budget report') !== -1) {
+              if (ucbCTxt.indexOf(ucbPrefix + 'Review the budget report') !== -1) {
                 ucbCTxtEl.setText(ucbCTxt.replace('(Open)', '(In Progress)'));
                 break;
               }
@@ -1090,7 +1006,7 @@ function setupTestFixtures(scenario) {
             var ucbCData2 = ucbCSheet.getRange(2, 1, ucbCLastR - 1, SHEET_HEADERS.length).getValues();
             for (var ucbCRi2 = 0; ucbCRi2 < ucbCData2.length; ucbCRi2++) {
               if (ucbCData2[ucbCRi2][2] === 'jane.smith@example.com' &&
-                  ucbCData2[ucbCRi2][4].indexOf('Schedule the follow-up') !== -1) {
+                  ucbCData2[ucbCRi2][4].indexOf(ucbPrefix + 'Schedule the follow-up') !== -1) {
                 var ucbCRowB = ucbCRi2 + 2;
                 WriteGuard.wrap(function () {
                   ucbCSheet.getRange(ucbCRowB, 6).setValue('Closed');
@@ -1451,5 +1367,75 @@ function bootstrap() {
     logFolderId:     '1lg2CWtOmDGglMVasSjEk3jTaW9SXcO6s',
     assigneeEmail:   'stuart.donaldson@gmail.com'
   });
+  GasLogger.flush();
+}
+
+// ---------------------------------------------------------------------------
+// Session lifecycle — named-clone fixture isolation (ATDD lifecycle §Principle 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a named clone of the master template doc in the same Drive folder as
+ * the test sheet, sets TEST_DOC_ID to the clone, and stores the master ID in
+ * TEST_DOC_TEMPLATE_ID so endTestSession can restore it.
+ *
+ * Called by menuBeginTestSession; masterDocId is read from TestControl!A1.
+ *
+ * @param {string} masterDocId  ID of the master template doc (read-only).
+ */
+function beginTestSession(masterDocId) {
+  try {
+    var props       = PropertiesService.getScriptProperties();
+    var testSheetId = props.getProperty('TEST_SHEET_ID');
+
+    var sheetFile = DriveApp.getFileById(testSheetId);
+    var folder    = sheetFile.getParents().next();
+
+    var now      = new Date();
+    var dateStr  = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyyMMdd');
+    var hexSuffix = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4);
+    var cloneName = 'GActionSheet-Test-session-' + dateStr + '-' + hexSuffix;
+
+    var cloneFile = DriveApp.getFileById(masterDocId).makeCopy(cloneName, folder);
+    var cloneId   = cloneFile.getId();
+
+    props.setProperty('TEST_DOC_TEMPLATE_ID', masterDocId);
+    props.setProperty('TEST_DOC_ID', cloneId);
+
+    var ss   = SpreadsheetApp.openById(testSheetId);
+    var ctrl = ss.getSheetByName('TestControl');
+    if (ctrl) {
+      ctrl.getRange('B1').setValue(cloneId);
+    }
+
+    GasLogger.log('session.begin', { cloneId: cloneId, cloneName: cloneName, masterDocId: masterDocId });
+  } catch (err) {
+    GasLogger.log('session.begin.error', { msg: err.message, masterDocId: masterDocId });
+  }
+  GasLogger.flush();
+}
+
+/**
+ * Trashes the clone created by beginTestSession and restores TEST_DOC_ID to
+ * the master template ID stored in TEST_DOC_TEMPLATE_ID.
+ */
+function endTestSession() {
+  try {
+    var props      = PropertiesService.getScriptProperties();
+    var cloneId    = props.getProperty('TEST_DOC_ID');
+    var masterId   = props.getProperty('TEST_DOC_TEMPLATE_ID');
+
+    if (cloneId) {
+      DriveApp.getFileById(cloneId).setTrashed(true);
+    }
+    if (masterId) {
+      props.setProperty('TEST_DOC_ID', masterId);
+    }
+    props.deleteProperty('TEST_DOC_TEMPLATE_ID');
+
+    GasLogger.log('session.end', { cloneId: cloneId, masterDocId: masterId });
+  } catch (err) {
+    GasLogger.log('session.end.error', { msg: err.message });
+  }
   GasLogger.flush();
 }
