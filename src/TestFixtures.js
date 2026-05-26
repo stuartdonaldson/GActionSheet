@@ -923,8 +923,12 @@ function setupTestFixtures(scenario) {
           var ucbSheet  = ss.getSheetByName('Actions');
           var ucbLastR  = ucbSheet ? ucbSheet.getLastRow() : 1;
           if (ucbSheet && ucbLastR > 1) {
-            var ucbData = ucbSheet.getRange(2, 1, ucbLastR - 1, SHEET_HEADERS.length).getValues();
+            var ucbData    = ucbSheet.getRange(2, 1, ucbLastR - 1, SHEET_HEADERS.length).getValues();
+            // Filter by testDocId (Document column formula) to avoid matching rows from prior
+            // test sessions that accumulated in the sheet (accumulate-without-reset design).
+            var ucbDocFmls = ucbSheet.getRange(2, 7, ucbLastR - 1, 1).getFormulas();
             for (var ucbRi = 0; ucbRi < ucbData.length; ucbRi++) {
+              if (ucbDocFmls[ucbRi][0].indexOf(testDocId) === -1) continue;
               var ucbAssignee = ucbData[ucbRi][2]; // col C: Assignee Email
               var ucbAction   = ucbData[ucbRi][4]; // col E: Action
               if (ucbAssignee === 'jane.smith@example.com') {
@@ -959,17 +963,19 @@ function setupTestFixtures(scenario) {
         } else {
           // uc_b_conflict: one action where the doc is the newer edit (var 1),
           // one where the sheet is the newer edit (var 4).
-          // Stale the sheet's Date Modified for var 1 so the doc edit wins.
           var ucbCSheet = ss.getSheetByName('Actions');
           var ucbCLastR = ucbCSheet ? ucbCSheet.getLastRow() : 1;
           if (ucbCSheet && ucbCLastR > 1) {
-            var ucbCData = ucbCSheet.getRange(2, 1, ucbCLastR - 1, SHEET_HEADERS.length).getValues();
+            var ucbCData    = ucbCSheet.getRange(2, 1, ucbCLastR - 1, SHEET_HEADERS.length).getValues();
+            // Filter by testDocId to avoid matching rows from prior sessions in the shared sheet.
+            var ucbCDocFmls = ucbCSheet.getRange(2, 7, ucbCLastR - 1, 1).getFormulas();
             for (var ucbCRi = 0; ucbCRi < ucbCData.length; ucbCRi++) {
+              if (ucbCDocFmls[ucbCRi][0].indexOf(testDocId) === -1) continue;
               var ucbCAssignee = ucbCData[ucbCRi][2];
               var ucbCAction   = ucbCData[ucbCRi][4];
               if (ucbCAssignee === ucbEmail &&
                   ucbCAction.indexOf(ucbPrefix + 'Review the budget report') !== -1) {
-                // Force sheet Date Modified far in the past so doc edit wins
+                // Stale sheet Date Modified far in the past so the doc edit wins.
                 var ucbCRowA = ucbCRi + 2;
                 WriteGuard.wrap(function () {
                   ucbCSheet.getRange(ucbCRowA, 9).setValue(new Date('2020-01-01'));
@@ -1000,17 +1006,17 @@ function setupTestFixtures(scenario) {
             }
           }
           ucbCDoc.saveAndClose();
-          // Mutate var 4 on sheet side (sheet is "newer" — sheet Date Modified
-          // was set by the sync and is more recent than doc edits above)
+          // Mutate var 4 on sheet side — stamp future date so dateModified > lastSyncTime.
           if (ucbCSheet && ucbCLastR > 1) {
             var ucbCData2 = ucbCSheet.getRange(2, 1, ucbCLastR - 1, SHEET_HEADERS.length).getValues();
             for (var ucbCRi2 = 0; ucbCRi2 < ucbCData2.length; ucbCRi2++) {
+              if (ucbCDocFmls[ucbCRi2][0].indexOf(testDocId) === -1) continue;
               if (ucbCData2[ucbCRi2][2] === 'jane.smith@example.com' &&
                   ucbCData2[ucbCRi2][4].indexOf(ucbPrefix + 'Schedule the follow-up') !== -1) {
                 var ucbCRowB = ucbCRi2 + 2;
                 WriteGuard.wrap(function () {
                   ucbCSheet.getRange(ucbCRowB, 6).setValue('Closed');
-                  ucbCSheet.getRange(ucbCRowB, 9).setValue(new Date()); // stamp so sheet wins
+                  ucbCSheet.getRange(ucbCRowB, 9).setValue(new Date('2030-01-01'));
                 });
                 break;
               }

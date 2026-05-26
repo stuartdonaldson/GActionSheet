@@ -224,17 +224,10 @@ def test_uc_a_ac2_idempotent_second_sync(test_sheet_id, test_doc_id, gas_log_dir
             f"{nrid!r} → {nr_ids_2.get(email)!r}"
         )
 
-    # Semantic content for AC1 rows unchanged (Date Modified excluded — tracked by GTaskSheet-cby2)
-    _SEMANTIC_KEYS = ("NamedRangeId", "ID", "Assignee Email", "Assignee Name",
-                      "Action", "Status", "Document")
-    def _semantic(row):
-        return {k: row.get(k) for k in _SEMANTIC_KEYS}
-
-    sem1 = [_semantic(r) for r in ac1_rows1]
-    sem2 = [_semantic(r) for r in ac1_rows2]
-    assert sem1 == sem2, (
-        "[uc_a AC2] AC1: ActionSheet semantic content changed on second sync — not idempotent.\n"
-        f"  Before: {sem1}\n  After:  {sem2}"
+    # All fields for AC1 rows unchanged — including Date Modified (fix: GTaskSheet-6rn)
+    assert ac1_rows1 == ac1_rows2, (
+        "[uc_a AC2] AC1: ActionSheet rows changed on second sync — not idempotent.\n"
+        f"  Before: {ac1_rows1}\n  After:  {ac1_rows2}"
     )
 
     # Doc floating actions for AC1 items unchanged

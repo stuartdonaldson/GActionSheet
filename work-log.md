@@ -457,3 +457,43 @@ Closed VerifySync feature (bhh) after verifying all 5 ACs met; fixed doc-name st
 
 ### Key Learnings:
 Pre-existing live-GAS test failure (`uc2_new_table_row` — tracker table row ID=2 not found) reproduces before and after the WebApp.js change; likely requires a fixture reset or redeploy, not a code fix.
+
+## 2026-05-25 21:17:37
+
+### Summary
+Completed GTaskSheet-cby (named-clone fixture isolation) and diagnosed a regression in the Date Modified fix (GTaskSheet-6rn) that breaks UC-B conflict resolution.
+
+### GTaskSheet-cby — Named-clone fixture isolation (closed)
+- Replaced shared static TEST_DOC_ID with session-scoped clone: `beginTestSession` / `endTestSession` added to TestFixtures.js and MenuHandler.js; conftest.py `test_doc_id` fixture now clones and trashes per pytest run
+- Adopted accumulate-without-reset design: scenarios append unique-prefixed items to the clone doc without clearing; cleared clearing logic (`_tfResetDocBody`, named-range sweeps) removed from uc_a_clear, uc_a_permutations, and uc_b_* cases
+- Scenario prefixes: `AC1:` (uc_a_clear), `Perm:` (uc_a_permutations), `UCB-DW:` / `UCB-SW:` / `UCB-CF:` (uc_b scenarios)
+- Tests updated to filter rows and FAs by prefix before count/content assertions; AC2 no longer re-runs uc_a_clear setup (relies on session state from AC1)
+- All 6 tests green on first full run
+
+### GTaskSheet-6rn — Date Modified idempotency (regression in progress)
+- Root cause identified: in `_handleSyncActionRows` doc-wins branch (WebApp.js), `Date Modified` stamp and HYPERLINK refresh were unconditional — fired even when action/status unchanged. Design decision: Date Modified should only stamp on user-visible content changes (action, status, assignee), not on HYPERLINK formula refresh.
+- Fix applied: moved `setValue(now)` inside the content-changed guard; HYPERLINK refresh kept unconditional
+- AC2 full equality assertion restored (was weakened as workaround)
+- Regression: UC-B conflict resolution now fails — Var 4 (sheet wins, Status=Closed) shows 'Done' in doc after final sync. Consistent failure, isolated run confirms it. Investigating.
+
+### Key Learnings
+- The Date Modified idempotency fix exposed a pre-existing issue: the conflict resolution fixture relies on the intermediate sync stamping Date Modified at T1, then the mutation stamping T2 > T1 to trigger sheet-wins. If T2 ever equals T1 (or if the fix changes something subtle in the timing logic), Var 4 falls through to doc-wins and overwrites Closed→Done.
+- The accumulate-without-reset design means action text prefixes must propagate through ALL substring searches in Phase 3 fixture mutations — tested and confirmed working for doc_wins and sheet_wins, but conflict is fragile because it depends on timestamp ordering.
+
+## 2026-05-25 22:32:44
+
+### Summary
+Resolved GTaskSheet-6rn (Date Modified idempotency fix) — all 6 UC-A and UC-B tests green.
+
+### GTaskSheet-6rn — Root cause and fix
+- **WebApp.js fix (from previous session):** moved `setValue(now)` inside the content-changed guard in `_handleSyncActionRows` doc-wins branch; HYPERLINK refresh kept unconditional. UC-A AC2 full-equality assertion restored.
+- **Regression root cause:** The shared Actions sheet accumulates rows from all prior test sessions (accumulate-without-reset design). When `uc_b_conflict` Phase 3 searched for Var 4 by action text alone, it stamped an **old row from a previous session** (different namedRangeId) instead of the current session's row. The current row kept its Date Modified from `appendRow` (T_webapp < LAST_SYNC_TIME), so the conflict check `dateModified > lastSyncTime` evaluated FALSE → doc-wins branch fired → doc showed 'Done' instead of 'Closed'.
+- **TestFixtures.js fix:** Added `testDocId` filter (Document column formula check) to all Phase 3 row searches in both `uc_b_sheet_wins` and `uc_b_conflict` mutations. Also stamped Var 4 Date Modified with `new Date('2030-01-01')` in the conflict fixture for belt-and-suspenders (dateModified always >> lastSyncTime).
+
+### Test run results
+- `tests/test_uc_a.py` — 3 passed
+- `tests/test_uc_b.py` — 3 passed (including conflict resolution, which was the failing test)
+
+### Key Learnings
+- In an accumulate-without-reset sheet design, any fixture mutation that searches rows by action text or email alone will match rows from prior sessions. Always include a docId filter (Document column formula) when targeting the current session's rows.
+- The timing hypothesis (T2 == T_ls due to faster WebApp execution) was a red herring — the actual failure was deterministic: wrong row being mutated every time.
