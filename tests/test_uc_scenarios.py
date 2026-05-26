@@ -39,10 +39,10 @@ SCENARIO_MATRIX = [
         {
             "expected_log_tag": "sync.complete",
             "expected_table_rows": [
-                {"id": 2, "action": "Review the PR", "status": "Open"},
+                {"id": 2, "action": "UCS-2: Review the PR", "status": "Open"},
             ],
             "expected_sheet_rows": [
-                {"id": 2, "action": "Review the PR", "status": "Open", "doc_url_contains": "docs.google.com"},
+                {"id": 2, "action": "UCS-2: Review the PR", "status": "Open", "doc_url_contains": "docs.google.com"},
             ],
         },
     ),
@@ -51,16 +51,16 @@ SCENARIO_MATRIX = [
         {
             "expected_log_tag": "sync.doc-updated",
             "expected_table_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "In Review"},
+                {"id": 1, "action": "UCS-3SW: Fix the bug", "status": "In Review"},
             ],
             "expected_floating_actions": [
                 {
-                    "id": 1, "action": "Fix the bug", "status": "In Review",
+                    "id": 1, "action": "UCS-3SW: Fix the bug", "status": "In Review",
                     "assignee_email": "test@example.com",
                 },
             ],
             "expected_sheet_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "In Review", "doc_url_contains": "docs.google.com"},
+                {"id": 1, "action": "UCS-3SW: Fix the bug", "status": "In Review", "doc_url_contains": "docs.google.com"},
             ],
         },
     ),
@@ -69,16 +69,16 @@ SCENARIO_MATRIX = [
         {
             "expected_log_tag": "sync.sheet-updated",
             "expected_table_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "Done"},
+                {"id": 1, "action": "UCS-3DW: Fix the bug", "status": "Done"},
             ],
             "expected_floating_actions": [
                 {
-                    "id": 1, "action": "Fix the bug", "status": "Done",
+                    "id": 1, "action": "UCS-3DW: Fix the bug", "status": "Done",
                     "assignee_email": "test@example.com",
                 },
             ],
             "expected_sheet_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "Done", "doc_url_contains": "docs.google.com"},
+                {"id": 1, "action": "UCS-3DW: Fix the bug", "status": "Done", "doc_url_contains": "docs.google.com"},
             ],
         },
     ),
@@ -86,11 +86,12 @@ SCENARIO_MATRIX = [
         "uc4_archive",
         {
             "expected_log_tag": "sync.complete",
+            "active_rows_prefix": "UCS-4: ",
             "expected_xlsx_active_rows": [
-                {"id": 2, "action": "Review the PR", "status": "Open"},
+                {"id": 2, "action": "UCS-4: Review the PR", "status": "Open"},
             ],
             "expected_xlsx_archive_rows": [
-                {"id": 1, "action": "Fix the bug", "status": "Done"},
+                {"id": 1, "action": "UCS-4: Fix the bug", "status": "Done"},
             ],
         },
     ),
@@ -99,13 +100,13 @@ SCENARIO_MATRIX = [
         {
             "expected_log_tag": "sync.complete",
             "expected_table_rows": [
-                {"id": 3, "action": "Write tests", "status": "Open"},
+                {"id": 3, "action": "UCS-6: Write tests", "status": "Open"},
             ],
             "expected_floating_actions": [
-                {"id": 3, "action": "Write tests", "status": "Open"},
+                {"id": 3, "action": "UCS-6: Write tests", "status": "Open"},
             ],
             "expected_sheet_rows": [
-                {"id": 3, "action": "Write tests", "status": "Open", "doc_url_contains": "docs.google.com"},
+                {"id": 3, "action": "UCS-6: Write tests", "status": "Open", "doc_url_contains": "docs.google.com"},
             ],
         },
     ),

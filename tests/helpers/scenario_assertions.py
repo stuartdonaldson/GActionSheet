@@ -107,6 +107,9 @@ def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes
 
     if "expected_xlsx_active_rows" in expectations:
         active_rows = rows_for_doc(ws, test_doc_id) if test_doc_id else rows_as_dicts(ws)
+        active_prefix = expectations.get("active_rows_prefix")
+        if active_prefix:
+            active_rows = [r for r in active_rows if (r.get("Action") or "").startswith(active_prefix)]
         expected_count = len(expectations["expected_xlsx_active_rows"])
         assert len(active_rows) == expected_count, (
             f"[{name}] active sheet row count mismatch: "
@@ -115,7 +118,7 @@ def assert_scenario(name: str, expectations: dict, xlsx_bytes: bytes, docx_bytes
 
     if "expected_xlsx_archive_rows" in expectations:
         ws_archive = load_sheet(xlsx_bytes, sheet_name="Archive")
-        archive_rows = rows_as_dicts(ws_archive)  # archive cleared before each run; no doc-id filter needed
+        archive_rows = rows_for_doc(ws_archive, test_doc_id) if test_doc_id else rows_as_dicts(ws_archive)
         expected_count = len(expectations["expected_xlsx_archive_rows"])
         assert len(archive_rows) == expected_count, (
             f"[{name}] archive sheet row count mismatch: "

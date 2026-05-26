@@ -532,13 +532,13 @@ function setupTestFixtures(scenario) {
         // the sheet row's dateModified (2026-05-09).
         _tfInsertFloatingAction(
           body,
-          'AI-1 @test@example.com | Fix the bug | Done | 2026-01-01 | 2026-05-10'
+          'AI-1 @test@example.com | UCS-3DW: Fix the bug | Done | 2026-01-01 | 2026-05-10'
         );
         _tfAppendSheetRow(ss, _tfSheetRow({
           id: 1,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
-          action: 'Fix the bug',
+          action: 'UCS-3DW: Fix the bug',
           status: 'Open',
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
@@ -552,13 +552,13 @@ function setupTestFixtures(scenario) {
         // the floating action's dateModified (2026-05-09).
         _tfInsertFloatingAction(
           body,
-          'AI-1 @test@example.com | Fix the bug | Open | 2026-01-01 | 2026-05-09'
+          'AI-1 @test@example.com | UCS-3SW: Fix the bug | Open | 2026-01-01 | 2026-05-09'
         );
         _tfAppendSheetRow(ss, _tfSheetRow({
           id: 1,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
-          action: 'Fix the bug',
+          action: 'UCS-3SW: Fix the bug',
           status: 'In Review',
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
@@ -572,7 +572,7 @@ function setupTestFixtures(scenario) {
         // and sheet row — all with the same values and dateModified. Sync is a no-op.
         _tfInsertFloatingAction(
           body,
-          'AI-1 @test@example.com | Completed action | Done | 2026-01-01 | 2026-04-01'
+          'AI-1 @test@example.com | UCSIDM: Completed action | Done | 2026-01-01 | 2026-04-01'
         );
         // Append table with matching data row.
         var tableAc5 = _tfAppendEmptyTable(body);
@@ -580,7 +580,7 @@ function setupTestFixtures(scenario) {
           '1',
           'test@example.com',
           '',
-          'Completed action',
+          'UCSIDM: Completed action',
           'Done',
           '2026-01-01',
           '2026-04-01'
@@ -589,7 +589,7 @@ function setupTestFixtures(scenario) {
           id: 1,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
-          action: 'Completed action',
+          action: 'UCSIDM: Completed action',
           status: 'Done',
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
@@ -604,7 +604,7 @@ function setupTestFixtures(scenario) {
           id: 1,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
-          action: 'Fix the bug',
+          action: 'UCS-2: Fix the bug',
           status: 'Open',
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
@@ -615,7 +615,7 @@ function setupTestFixtures(scenario) {
           '',
           'test@example.com',
           '',
-          'Review the PR',
+          'UCS-2: Review the PR',
           '',
           '',
           ''
@@ -630,7 +630,7 @@ function setupTestFixtures(scenario) {
           id: 1,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
-          action: 'Fix the bug',
+          action: 'UCS-4: Fix the bug',
           status: 'Closed',
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
@@ -640,7 +640,7 @@ function setupTestFixtures(scenario) {
           id: 2,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
-          action: 'Review the PR',
+          action: 'UCS-4: Review the PR',
           status: 'Open',
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
@@ -651,14 +651,14 @@ function setupTestFixtures(scenario) {
           '2',
           'test@example.com',
           '',
-          'Review the PR',
+          'UCS-4: Review the PR',
           'Open',
           '2026-01-01',
           '2026-01-01'
         ]);
         _tfInsertFloatingAction(
           body,
-          'AI-2 @test@example.com | Review the PR | Open | 2026-01-01 | 2026-01-01'
+          'AI-2 @test@example.com | UCS-4: Review the PR | Open | 2026-01-01 | 2026-01-01'
         );
         break;
 
@@ -685,20 +685,20 @@ function setupTestFixtures(scenario) {
           '3',
           'test@example.com',
           '',
-          'Write tests',
+          'UCS-6: Write tests',
           'Open',
           '2026-01-01',
           '2026-01-01'
         ]);
         _tfInsertFloatingAction(
           body,
-          'AI-3 @test@example.com | Write tests (locally edited) | Done | 2026-01-01 | 2026-01-01'
+          'AI-3 @test@example.com | UCS-6: Write tests (locally edited) | Done | 2026-01-01 | 2026-01-01'
         );
         _tfAppendSheetRow(ss, _tfSheetRow({
           id: 3,
           assigneeEmail: 'test@example.com',
           assigneeName: '',
-          action: 'Write tests',
+          action: 'UCS-6: Write tests',
           status: 'Open',
           docFormula: docFormula,
           dateCreated: new Date('2026-01-01'),
