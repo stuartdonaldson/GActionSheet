@@ -77,6 +77,7 @@ function syncDocument(docId) {
     }
 
     doc.saveAndClose();
+    SpreadsheetApp.flush();
     props.setProperty('LAST_SYNC_TIME_' + docId, new Date().toISOString());
 
     GasLogger.log('sync.complete', {

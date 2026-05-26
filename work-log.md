@@ -497,3 +497,39 @@ Resolved GTaskSheet-6rn (Date Modified idempotency fix) — all 6 UC-A and UC-B 
 ### Key Learnings
 - In an accumulate-without-reset sheet design, any fixture mutation that searches rows by action text or email alone will match rows from prior sessions. Always include a docId filter (Document column formula) when targeting the current session's rows.
 - The timing hypothesis (T2 == T_ls due to faster WebApp execution) was a red herring — the actual failure was deterministic: wrong row being mutated every time.
+
+## 2026-05-26 10:25:00
+
+### Summary
+Wrote full test suite for UC-C (tracker table insert/refresh) and GTaskSheet-ly5 (Sync Status column). Identified Playwright session cost; built batch runner to reduce 18 browser launches to 4.
+
+### Detail
+
+**Tests written (red phase ATDD) — `tests/test_uc_c.py`:**
+- 3 UC-C tests: first insert (AC1+AC4 partial), refresh (AC2+AC3), view-only (AC4)
+- 7 Sync Status tests: header present, migration, deleted, doc-not-found, recovery, on-edit, archive
+
+**Design decisions:**
+- UC-C AC1/AC2/AC3/AC4a fold into `_verify_full_consistency` (three-way FA ↔ sheet ↔ tracker check); no need to assert named-range identity directly — orphaned/duplicate tracker rows surface the invariant implicitly
+- AC4b: explicit assertion on instructional paragraph containing "read-only"
+- Sync Status values asserted inline (not in consistency check) — targeted column value checks
+- Column references by header name throughout; `SHEET_HEADERS` in `SheetSetup.js` is the single source of truth — no magic column numbers in tests
+
+**New helpers (`tests/helpers/gas_invoke.py`):**
+- `insert_tracker_table(doc_id)` — calls "Test: Insert Tracker Table"
+- `run_archive()` — calls "Test: Run Archive"
+- `batch_invoke(commands)` — executes multiple GAS menu items in a single Playwright session
+
+**New Playwright script (`tests/playwright/invoke_gas_batch.js`):**
+- Opens one browser, fires N menu clicks, polls local log files for `awaitTag` between each click (clears logs before each wait to avoid stale hits), writes log entry results to stdout as JSON
+- Reduces browser launches from 18 to 4 for the full UC-C + ly5 suite
+
+**Module-scoped fixtures in `test_uc_c.py`:**
+- `uc_c_state`: one batch call for all 3 UC-C scenarios → downloads DOCX+XLSX once
+- `sync_status_state`: one batch call for all 6 sync-status scenarios → downloads XLSX once, extracts `sentinelDateModified` from on_edit log entry
+- All 10 tests make zero per-test Playwright calls
+
+### Key Learnings
+- The per-`_invoke()` cost is a full browser launch + Google Sheets page load, paid even for fire-and-forget GAS menu clicks. A batch runner that keeps the browser open between clicks eliminates this for all but the outermost session boundaries.
+- Log-file polling (already used by Python `wait_for_log`) is the right sequencing primitive for the batch runner too — the Node.js script polls the same Drive-mapped log directory, enabling adaptive waits without fixed sleeps.
+- With accumulate-without-reset fixtures, all scenarios for a module can share a single post-batch download; tests filter by prefix rather than each downloading independently.

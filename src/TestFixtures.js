@@ -1027,6 +1027,236 @@ function setupTestFixtures(scenario) {
         break;
       }
 
+      // -----------------------------------------------------------------------
+      // Sync Status column scenarios (GTaskSheet-ly5 AC1–AC7)
+      //
+      // Each scenario accumulates on the shared clone doc without resetting.
+      // Scenario prefixes: SS-DEL: / SS-NF: / SS-REC: / SS-EDIT: / SS-ARCH:
+      // -----------------------------------------------------------------------
+
+      case 'sync_status_migration': {
+        // Simulate a legacy sheet missing the Sync Status column by deleting col 10
+        // (if present), then call ensureSheetStructure() to trigger migration.
+        var ssMigSheet = ss.getSheetByName('Actions');
+        if (ssMigSheet && ssMigSheet.getMaxColumns() >= 10) {
+          WriteGuard.wrap(function () {
+            ssMigSheet.deleteColumn(10);
+          });
+        }
+        ensureSheetStructure();
+        GasLogger.log('fixture.sync_status_migration', { migrationTriggered: true });
+        break;
+      }
+
+      case 'sync_status_deleted': {
+        // Insert a chip-led floating action (SS-DEL: prefix), run an intermediate
+        // sync to anchor it, then delete the named range from the doc so the
+        // final sync writes 'Deleted' to Sync Status.
+        var ssDelToken = ScriptApp.getOAuthToken();
+        var ssDelEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                      || Session.getActiveUser().getEmail();
+
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+
+        _tfInsertPersonChipListItem(ssDelToken, testDocId, ssDelEmail,
+                                    'SS-DEL: Review the access log');
+
+        syncDocument(testDocId);
+
+        // Read NamedRangeId written to col 1 for the SS-DEL: row.
+        var ssDelActSheet = ss.getSheetByName('Actions');
+        var ssDelLastR    = ssDelActSheet ? ssDelActSheet.getLastRow() : 1;
+        var ssDelNRId     = null;
+        if (ssDelActSheet && ssDelLastR > 1) {
+          var ssDelData = ssDelActSheet.getRange(2, 1, ssDelLastR - 1, 5).getValues();
+          var ssDelFmls = ssDelActSheet.getRange(2, 7, ssDelLastR - 1, 1).getFormulas();
+          for (var ssDelI = 0; ssDelI < ssDelData.length; ssDelI++) {
+            if (ssDelFmls[ssDelI][0].indexOf(testDocId) !== -1 &&
+                (ssDelData[ssDelI][4] || '').indexOf('SS-DEL:') !== -1) {
+              ssDelNRId = ssDelData[ssDelI][0];
+              break;
+            }
+          }
+        }
+
+        // Delete the named range from the doc so the next sync detects 'Deleted'.
+        if (ssDelNRId) {
+          var ssDelDoc = DocumentApp.openById(testDocId);
+          var ssDelNRs = ssDelDoc.getNamedRanges();
+          for (var ssDelNI = 0; ssDelNI < ssDelNRs.length; ssDelNI++) {
+            if (ssDelNRs[ssDelNI].getId() === ssDelNRId) {
+              ssDelNRs[ssDelNI].remove();
+              break;
+            }
+          }
+          ssDelDoc.saveAndClose();
+        }
+
+        syncDocument(testDocId);
+
+        GasLogger.log('fixture.sync_status_deleted', { namedRangeId: ssDelNRId });
+        break;
+      }
+
+      case 'sync_status_doc_not_found': {
+        // Append a row referencing a non-existent doc ID, then call syncDocument
+        // with that fake ID — SyncManager should catch openById failure and write
+        // 'Doc Not Found' to every row in the sheet referencing this fake doc.
+        var ssNFDocId   = '1_FAKEID_SYNCSTATUS_DOCNOTFOUND_FIXTURE_001';
+        var ssNFFormula = '=HYPERLINK("https://docs.google.com/document/d/' +
+                          ssNFDocId + '/edit","SS-NF: Fake Doc")';
+        WriteGuard.wrap(function () {
+          var ssNFSheet = ss.getSheetByName('Actions');
+          if (ssNFSheet) {
+            ssNFSheet.appendRow([
+              'SS-NF-ANCHOR-FAKE-001',
+              999,
+              'test@example.com',
+              '',
+              'SS-NF: Review the compliance doc',
+              'Open',
+              ssNFFormula,
+              new Date('2026-01-01'),
+              new Date('2026-01-01')
+            ]);
+          }
+        });
+
+        try {
+          syncDocument(ssNFDocId);
+        } catch (ssNFErr) {
+          GasLogger.log('fixture.sync_status_doc_not_found.warn', { msg: ssNFErr.message });
+        }
+
+        GasLogger.log('fixture.sync_status_doc_not_found', { fakeDocId: ssNFDocId });
+        break;
+      }
+
+      case 'sync_status_recovery': {
+        // Insert a chip-led floating action (SS-REC: prefix), anchor it via sync,
+        // then manually set Sync Status = 'Deleted' to simulate a previously-flagged
+        // state.  A final sync finds the named range still present and clears the flag.
+        var ssRecToken = ScriptApp.getOAuthToken();
+        var ssRecEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                      || Session.getActiveUser().getEmail();
+
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+
+        _tfInsertPersonChipListItem(ssRecToken, testDocId, ssRecEmail,
+                                    'SS-REC: Update the access policy');
+
+        syncDocument(testDocId);
+
+        var ssRecSheet = ss.getSheetByName('Actions');
+        var ssRecLastR = ssRecSheet ? ssRecSheet.getLastRow() : 1;
+        if (ssRecSheet && ssRecLastR > 1) {
+          var ssRecData = ssRecSheet.getRange(2, 1, ssRecLastR - 1, 5).getValues();
+          var ssRecFmls = ssRecSheet.getRange(2, 7, ssRecLastR - 1, 1).getFormulas();
+          for (var ssRecI = 0; ssRecI < ssRecData.length; ssRecI++) {
+            if (ssRecFmls[ssRecI][0].indexOf(testDocId) !== -1 &&
+                (ssRecData[ssRecI][4] || '').indexOf('SS-REC:') !== -1) {
+              var ssRecRowNum = ssRecI + 2;
+              WriteGuard.wrap(function () {
+                ssRecSheet.getRange(ssRecRowNum, 10).setValue('Deleted');
+              });
+              break;
+            }
+          }
+        }
+
+        syncDocument(testDocId);
+
+        GasLogger.log('fixture.sync_status_recovery', { setupDone: true });
+        break;
+      }
+
+      case 'sync_status_on_edit': {
+        // Insert a chip-led floating action (SS-EDIT: prefix), sync to stamp a
+        // real Date Modified, then call onEdit() with a synthetic col-10 event to
+        // verify that editing Sync Status does NOT update Date Modified.
+        // Logs sentinelDateModified so the Python test can assert no change.
+        var ssEditToken = ScriptApp.getOAuthToken();
+        var ssEditEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                       || Session.getActiveUser().getEmail();
+
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+
+        _tfInsertPersonChipListItem(ssEditToken, testDocId, ssEditEmail,
+                                    'SS-EDIT: Approve the request');
+
+        syncDocument(testDocId);
+
+        var ssEditSheet    = ss.getSheetByName('Actions');
+        var ssEditLastR    = ssEditSheet ? ssEditSheet.getLastRow() : 1;
+        var ssEditSentinel = null;
+        var ssEditRowNum   = -1;
+        if (ssEditSheet && ssEditLastR > 1) {
+          var ssEditData = ssEditSheet.getRange(2, 1, ssEditLastR - 1, 9).getValues();
+          var ssEditFmls = ssEditSheet.getRange(2, 7, ssEditLastR - 1, 1).getFormulas();
+          for (var ssEditI = 0; ssEditI < ssEditData.length; ssEditI++) {
+            if (ssEditFmls[ssEditI][0].indexOf(testDocId) !== -1 &&
+                (ssEditData[ssEditI][4] || '').indexOf('SS-EDIT:') !== -1) {
+              ssEditSentinel = ssEditData[ssEditI][8]; // col 9 (0-indexed: 8) = Date Modified
+              ssEditRowNum   = ssEditI + 2;
+              break;
+            }
+          }
+        }
+
+        if (ssEditRowNum > 0 && ssEditSheet) {
+          var ssEditFakeEvent = { range: ssEditSheet.getRange(ssEditRowNum, 10) };
+          onEdit(ssEditFakeEvent);
+        }
+
+        GasLogger.log('fixture.sync_status_on_edit', { sentinelDateModified: ssEditSentinel });
+        break;
+      }
+
+      case 'sync_status_archive': {
+        // Insert a chip-led floating action (SS-ARCH: prefix), anchor it via sync,
+        // then mark it Closed with a 35-day-old Date Modified and Sync Status='Deleted'
+        // so the archive sweep moves it from Actions to Archive sheet.
+        var ssArchToken = ScriptApp.getOAuthToken();
+        var ssArchEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                       || Session.getActiveUser().getEmail();
+
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+
+        _tfInsertPersonChipListItem(ssArchToken, testDocId, ssArchEmail,
+                                    'SS-ARCH: Archive the policy doc');
+
+        syncDocument(testDocId);
+
+        var ssArchSheet   = ss.getSheetByName('Actions');
+        var ssArchLastR   = ssArchSheet ? ssArchSheet.getLastRow() : 1;
+        var ssArchOldDate = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000);
+        if (ssArchSheet && ssArchLastR > 1) {
+          var ssArchData = ssArchSheet.getRange(2, 1, ssArchLastR - 1, 5).getValues();
+          var ssArchFmls = ssArchSheet.getRange(2, 7, ssArchLastR - 1, 1).getFormulas();
+          for (var ssArchI = 0; ssArchI < ssArchData.length; ssArchI++) {
+            if (ssArchFmls[ssArchI][0].indexOf(testDocId) !== -1 &&
+                (ssArchData[ssArchI][4] || '').indexOf('SS-ARCH:') !== -1) {
+              var ssArchRowNum = ssArchI + 2;
+              WriteGuard.wrap(function () {
+                ssArchSheet.getRange(ssArchRowNum, 6).setValue('Closed');
+                ssArchSheet.getRange(ssArchRowNum, 9).setValue(ssArchOldDate);
+                ssArchSheet.getRange(ssArchRowNum, 10).setValue('Deleted');
+              });
+              break;
+            }
+          }
+        }
+
+        ArchiveManager.archive(ss);
+
+        GasLogger.log('fixture.sync_status_archive', { archiveTriggered: true });
+        break;
+      }
+
       default:
         // Unknown scenario — fall through to default (uc1_new_floating) behaviour.
         GasLogger.log('fixture.warn', {
