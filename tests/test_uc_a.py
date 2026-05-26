@@ -1,11 +1,11 @@
 """
 UC-A end-to-end tests: Capture and track a new action.
 
-Setup is fully automated — no manual doc prep required:
-  The GAS fixture (uc_a_clear) appends scenario-prefixed action items to the
-  clone doc via the Docs REST API, then syncs.  Items accumulate across scenarios
-  within a session; assertions filter by action text prefix (AC1:, Perm:) so
-  earlier scenarios' rows are invisible to each test.
+Setup runs once per module via two batch Playwright sessions:
+  Batch 1: uc_a_clear setup+sync — post-first-sync state (AC1 baseline, AC2 before-state).
+  Batch 2: second sync + uc_a_permutations setup+sync — final state (AC2 after-state,
+           permutation coverage).  AC1 rows are untouched by permutations, so comparing
+           xlsx_first vs xlsx_final is a stronger idempotency check than one extra sync.
 
 Detection forms tested:
   - PERSON chip at start of list item (uc_a_clear, AC1:)
@@ -16,38 +16,14 @@ Acceptance criteria (from docs/CONTEXT.md §UC-A):
        with correct assignee, action text, status, and a NamedRangeId anchor.
   AC2. A second Sync produces no duplicate rows, preserves named range IDs,
        and leaves the ActionSheet and doc content unchanged (idempotent).
-
-Sync is triggered via the GAS "Test: Sync Document" menu item (same underlying
-syncDocument() call as the sidebar "Sync now" button).
 """
 
-import pathlib
-import time
+import pytest
 
 from tests.helpers.download import download_xlsx, download_docx
-from tests.helpers.gas_invoke import setup_and_sync, sync_document
-from tests.helpers.gas_log import clear_logs, wait_for_log
+from tests.helpers.gas_invoke import batch_invoke
 from tests.helpers.sheet_inspect import load_sheet, rows_for_doc
 from tests.helpers.doc_inspect import load_doc, floating_actions
-
-def _clear_logs_stable(log_dir: str, timeout_s: float = 15.0) -> None:
-    """Clear logs and re-delete any files that reappear from Drive re-sync.
-
-    invoke_gas.js exits 1 second after clicking — GAS runs async.  The final
-    GasLogger.flush() from the previous test can still be syncing from Drive to
-    the local directory when this test's clear_logs runs.  Keep deleting until
-    the directory is empty so wait_for_log only sees fresh entries.
-    """
-    clear_logs(log_dir)
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        remaining = list(pathlib.Path(log_dir).glob("*.log"))
-        if not remaining:
-            return
-        for f in remaining:
-            f.unlink(missing_ok=True)
-        time.sleep(0.5)
-
 
 _EMAIL_ITEM_EMAIL  = "jane.smith@example.com"
 _EMAIL_ITEM_NAME   = "Jane Smith"
@@ -57,7 +33,6 @@ _EMAIL_ITEM_STATUS = "In Progress"
 _CHIP_ITEM_ACTION  = "AC1: Review the project budget"
 _CHIP_ITEM_STATUS  = "Open"
 
-# Permutation coverage constants (test_uc_a_ac1_permutation_coverage)
 _PERM_CHIP_ACTION         = "Perm: Schedule the kickoff"
 _PERM_CHIP_STATUS         = "Done"
 
@@ -71,63 +46,45 @@ _PERM_UNDERSCORE_NAME     = "Bob Jones"
 _PERM_UNDERSCORE_ACTION   = "Perm: Review the meeting minutes"
 
 
-def _run_setup_and_sync(scenario: str, error_tag: str, gas_log_dir: str,
-                        test_doc_id: str | None = None,
-                        timeout_s: float = 180.0) -> None:
-    """Run a named fixture scenario + sync; raise if GAS reports a fixture error."""
-    import os, json
-    _clear_logs_stable(gas_log_dir)
-    setup_and_sync(scenario)
-    # Filter on docId to avoid matching stale sync.complete{scenario} entries
-    # that arrive late from Drive after the previous test's setupAndSync flush.
-    def _match(e: dict) -> bool:
-        if e.get("tag") != "sync.complete":
-            return False
-        if test_doc_id is None:
-            return True
-        return e.get("data", {}).get("docId") == test_doc_id
-    wait_for_log(gas_log_dir, _match, timeout_s=timeout_s)
-    for fname in sorted(os.listdir(gas_log_dir)):
-        if not fname.endswith(".log"):
-            continue
-        with open(os.path.join(gas_log_dir, fname)) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    e = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if e.get("tag") == error_tag and e.get("data", {}).get("error"):
-                    raise RuntimeError(
-                        f"[{error_tag}] step failed in GAS: {e['data']['error']}"
-                    )
+# ---------------------------------------------------------------------------
+# Module fixture — two browser sessions cover all UC-A setup
+# ---------------------------------------------------------------------------
 
+@pytest.fixture(scope="module")
+def uc_a_state(test_sheet_id, test_doc_id):
+    batch_invoke([
+        {"menuItem": "Test: Setup And Sync", "arg": "uc_a_clear",
+         "awaitTag": "sync.complete", "timeoutMs": 300000},
+    ])
+    xlsx_first = download_xlsx(test_sheet_id)
+    docx_first = download_docx(test_doc_id)
 
-def _first_sync(gas_log_dir: str, test_doc_id: str | None = None) -> None:
-    """Run uc_a_clear fixture + first sync in one GAS/browser invocation."""
-    _run_setup_and_sync("uc_a_clear", "fixture.uc_a_clear", gas_log_dir, test_doc_id=test_doc_id)
+    batch_invoke([
+        {"menuItem": "Test: Sync Document", "arg": test_doc_id,
+         "awaitTag": "sync.complete", "timeoutMs": 180000},
+        {"menuItem": "Test: Setup And Sync", "arg": "uc_a_permutations",
+         "awaitTag": "sync.complete", "timeoutMs": 300000},
+    ])
+    xlsx_final = download_xlsx(test_sheet_id)
+    docx_final = download_docx(test_doc_id)
 
-
-def _second_sync(test_doc_id: str, gas_log_dir: str) -> None:
-    """Invoke a second sync via GAS menu and wait for sync.complete."""
-    _clear_logs_stable(gas_log_dir)
-    sync_document(test_doc_id)
-    wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.complete", timeout_s=120)
+    yield {
+        "xlsx_first": xlsx_first,
+        "docx_first": docx_first,
+        "xlsx_final": xlsx_final,
+        "docx_final": docx_final,
+        "doc_id": test_doc_id,
+    }
 
 
 # ---------------------------------------------------------------------------
 # AC1 — both detection forms appear in the ActionSheet after first Sync
 # ---------------------------------------------------------------------------
 
-def test_uc_a_ac1_multi_format_detection(test_sheet_id, test_doc_id, gas_log_dir, settings):
+def test_uc_a_ac1_multi_format_detection(uc_a_state, settings):
     """AC1: After Sync, chip-led and email-led items both appear in ActionSheet."""
-    _first_sync(gas_log_dir, test_doc_id)
-
-    xlsx_bytes = download_xlsx(test_sheet_id)
-    ws = load_sheet(xlsx_bytes, sheet_name="Actions")
-    rows = rows_for_doc(ws, test_doc_id)
+    ws = load_sheet(uc_a_state["xlsx_first"], sheet_name="Actions")
+    rows = rows_for_doc(ws, uc_a_state["doc_id"])
     ac1_rows = [r for r in rows if "AC1:" in (r.get("Action") or "")]
 
     assert len(ac1_rows) == 2, (
@@ -149,7 +106,6 @@ def test_uc_a_ac1_multi_format_detection(test_sheet_id, test_doc_id, gas_log_dir
     chip_row  = chip_rows[0]
     email_row = email_rows[0]
 
-    # Chip row
     assert chip_row.get("Status") == _CHIP_ITEM_STATUS, (
         f"[uc_a AC1] Chip row Status: expected {_CHIP_ITEM_STATUS!r}, got {chip_row.get('Status')!r}"
     )
@@ -161,7 +117,6 @@ def test_uc_a_ac1_multi_format_detection(test_sheet_id, test_doc_id, gas_log_dir
         f"got {chip_row.get('Action')!r}"
     )
 
-    # Email-led row
     assert email_row.get("Status") == _EMAIL_ITEM_STATUS, (
         f"[uc_a AC1] Email row Status: expected {_EMAIL_ITEM_STATUS!r}, "
         f"got {email_row.get('Status')!r}"
@@ -183,40 +138,31 @@ def test_uc_a_ac1_multi_format_detection(test_sheet_id, test_doc_id, gas_log_dir
 # AC2 — second Sync is idempotent: no duplicates, no content changes
 # ---------------------------------------------------------------------------
 
-def test_uc_a_ac2_idempotent_second_sync(test_sheet_id, test_doc_id, gas_log_dir):
-    """AC2: Second Sync produces no duplicate rows, preserves anchors, leaves content unchanged.
+def test_uc_a_ac2_idempotent_second_sync(uc_a_state):
+    """AC2: Multiple syncs produce no duplicate rows, preserve anchors, leave content unchanged.
 
-    Relies on test_uc_a_ac1_multi_format_detection having run first (same session clone).
-    Does not re-run fixture setup — asserts idempotency of the state left by AC1.
+    Uses xlsx_first (post-uc_a_clear) as the baseline and xlsx_final (post-second-sync
+    and post-permutations) as the after-state.  AC1: rows are not touched by the
+    permutations scenario, so this verifies idempotency across multiple syncs.
     """
-    xlsx1  = download_xlsx(test_sheet_id)
-    docx1  = download_docx(test_doc_id)
-    ws1    = load_sheet(xlsx1, sheet_name="Actions")
-    rows1  = rows_for_doc(ws1, test_doc_id)
+    ws1    = load_sheet(uc_a_state["xlsx_first"], sheet_name="Actions")
+    rows1  = rows_for_doc(ws1, uc_a_state["doc_id"])
     ac1_rows1 = [r for r in rows1 if "AC1:" in (r.get("Action") or "")]
 
     assert len(ac1_rows1) == 2, (
-        f"[uc_a AC2] Expected 2 AC1: rows before second sync, got {len(ac1_rows1)} — "
-        "prerequisite: test_uc_a_ac1_multi_format_detection must run first"
+        f"[uc_a AC2] Expected 2 AC1: rows in first-sync state, got {len(ac1_rows1)}"
     )
-
     nr_ids_1 = {r["Assignee Email"]: r["NamedRangeId"] for r in ac1_rows1}
 
-    _second_sync(test_doc_id, gas_log_dir)
-
-    xlsx2  = download_xlsx(test_sheet_id)
-    docx2  = download_docx(test_doc_id)
-    ws2    = load_sheet(xlsx2, sheet_name="Actions")
-    rows2  = rows_for_doc(ws2, test_doc_id)
+    ws2    = load_sheet(uc_a_state["xlsx_final"], sheet_name="Actions")
+    rows2  = rows_for_doc(ws2, uc_a_state["doc_id"])
     ac1_rows2 = [r for r in rows2 if "AC1:" in (r.get("Action") or "")]
 
-    # No duplicates
     assert len(ac1_rows2) == len(ac1_rows1), (
         f"[uc_a AC2] AC1: row count changed: {len(ac1_rows1)} → {len(ac1_rows2)}. "
-        "Duplicate rows created or rows lost on second sync."
+        "Duplicate rows created or rows lost on subsequent syncs."
     )
 
-    # Named range IDs preserved for each row
     nr_ids_2 = {r["Assignee Email"]: r["NamedRangeId"] for r in ac1_rows2}
     for email, nrid in nr_ids_1.items():
         assert nr_ids_2.get(email) == nrid, (
@@ -224,17 +170,15 @@ def test_uc_a_ac2_idempotent_second_sync(test_sheet_id, test_doc_id, gas_log_dir
             f"{nrid!r} → {nr_ids_2.get(email)!r}"
         )
 
-    # All fields for AC1 rows unchanged — including Date Modified (fix: GTaskSheet-6rn)
     assert ac1_rows1 == ac1_rows2, (
-        "[uc_a AC2] AC1: ActionSheet rows changed on second sync — not idempotent.\n"
+        "[uc_a AC2] AC1: ActionSheet rows changed on subsequent syncs — not idempotent.\n"
         f"  Before: {ac1_rows1}\n  After:  {ac1_rows2}"
     )
 
-    # Doc floating actions for AC1 items unchanged
-    fa1 = [f for f in floating_actions(load_doc(docx1)) if "AC1:" in f.get("action", "")]
-    fa2 = [f for f in floating_actions(load_doc(docx2)) if "AC1:" in f.get("action", "")]
+    fa1 = [f for f in floating_actions(load_doc(uc_a_state["docx_first"])) if "AC1:" in f.get("action", "")]
+    fa2 = [f for f in floating_actions(load_doc(uc_a_state["docx_final"])) if "AC1:" in f.get("action", "")]
     assert fa1 == fa2, (
-        "[uc_a AC2] AC1: floating actions in doc changed on second sync — not idempotent.\n"
+        "[uc_a AC2] AC1: floating actions in doc changed on subsequent syncs — not idempotent.\n"
         f"  Before: {fa1}\n  After:  {fa2}"
     )
 
@@ -243,13 +187,10 @@ def test_uc_a_ac2_idempotent_second_sync(test_sheet_id, test_doc_id, gas_log_dir
 # AC1 extended — all detection permutations in one Sync
 # ---------------------------------------------------------------------------
 
-def test_uc_a_ac1_permutation_coverage(test_sheet_id, test_doc_id, gas_log_dir, settings):
+def test_uc_a_ac1_permutation_coverage(uc_a_state, settings):
     """AC1 permutations: chip+status-token, email+no-status, underscore-email, plain-text negative."""
-    _run_setup_and_sync("uc_a_permutations", "fixture.uc_a_permutations", gas_log_dir, test_doc_id=test_doc_id)
-
-    xlsx_bytes = download_xlsx(test_sheet_id)
-    ws   = load_sheet(xlsx_bytes, sheet_name="Actions")
-    rows = rows_for_doc(ws, test_doc_id)
+    ws   = load_sheet(uc_a_state["xlsx_final"], sheet_name="Actions")
+    rows = rows_for_doc(ws, uc_a_state["doc_id"])
     perm_rows = [r for r in rows if "Perm:" in (r.get("Action") or "")]
 
     assert len(perm_rows) == 3, (
@@ -270,7 +211,6 @@ def test_uc_a_ac1_permutation_coverage(test_sheet_id, test_doc_id, gas_log_dir, 
     jane_row = jane_rows[0]
     bob_row  = bob_rows[0]
 
-    # Chip item WITH explicit "(Done)" status token
     assert chip_row.get("Status") == _PERM_CHIP_STATUS, (
         f"[uc_a permutations] Chip row Status: expected {_PERM_CHIP_STATUS!r}, "
         f"got {chip_row.get('Status')!r}"
@@ -283,7 +223,6 @@ def test_uc_a_ac1_permutation_coverage(test_sheet_id, test_doc_id, gas_log_dir, 
         "[uc_a permutations] Chip row NamedRangeId not set — anchor not created"
     )
 
-    # Email item with NO status token → defaults to Open
     assert jane_row.get("Status") == _PERM_NO_STATUS_STATUS, (
         f"[uc_a permutations] Jane row Status: expected {_PERM_NO_STATUS_STATUS!r} (default), "
         f"got {jane_row.get('Status')!r}"
@@ -300,7 +239,6 @@ def test_uc_a_ac1_permutation_coverage(test_sheet_id, test_doc_id, gas_log_dir, 
         "[uc_a permutations] Jane row NamedRangeId not set — anchor not created"
     )
 
-    # Email with underscore username → name derivation (punctuation→space, title-case)
     assert bob_row.get("Assignee Name") == _PERM_UNDERSCORE_NAME, (
         f"[uc_a permutations] Bob row Assignee Name: expected {_PERM_UNDERSCORE_NAME!r}, "
         f"got {bob_row.get('Assignee Name')!r}"

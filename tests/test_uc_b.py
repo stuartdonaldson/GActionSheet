@@ -1,16 +1,17 @@
 """
 UC-B end-to-end tests: Update an action from either side and converge.
 
-Fixture flow (two GAS invocations per test):
-  1. setup_fixture('uc_b_<scenario>') — GAS builds the canonical 7-item doc,
-     runs an intermediate sync (UC-A anchoring), then applies mutations.
-     Python waits for the fixture log tag before proceeding.
-  2. sync_document(test_doc_id) — triggers the final convergence sync.
-     Python waits for 'sync.complete'.
+Setup runs once per module via a single batch Playwright session (6 GAS commands,
+1 browser launch).  Each scenario appends scenario-prefixed items (UCB-DW:, UCB-SW:,
+UCB-CF:) to the shared clone doc so scenarios accumulate without collision.
+Assertions filter by the scenario prefix so earlier scenarios' rows are invisible.
 
-Each scenario appends scenario-prefixed items (UCB-DW:, UCB-SW:, UCB-CF:) to the
-shared clone doc so that scenarios accumulate without collision.  Assertions filter
-by the scenario prefix so earlier scenarios' rows are invisible.
+Fixture flow per scenario:
+  1. Test: Setup Fixture (<scenario>) — GAS builds the canonical 7-item doc,
+     runs an intermediate sync (UC-A anchoring), then applies mutations.
+     Batch runner waits for the fixture log tag before proceeding.
+  2. Test: Sync Document — triggers the final convergence sync.
+     Batch runner waits for sync.complete before the next scenario begins.
 
 Canonical floating action variants per scenario (base text; prefix prepended in fixture):
   Var 1: chip  + "<prefix>Review the budget report (Open)"      testAssigneeEmail
@@ -33,14 +34,10 @@ Acceptance criteria (from docs/CONTEXT.md §UC-B):
        after every sync.
 """
 
-import pathlib
-import time
-
 import pytest
 
 from tests.helpers.download import download_xlsx, download_docx
-from tests.helpers.gas_invoke import setup_fixture, sync_document
-from tests.helpers.gas_log import clear_logs, wait_for_log
+from tests.helpers.gas_invoke import batch_invoke
 from tests.helpers.sheet_inspect import load_sheet, rows_for_doc
 from tests.helpers.doc_inspect import load_doc, floating_actions
 
@@ -59,85 +56,62 @@ _CF_PREFIX = "UCB-CF: "   # uc_b_conflict scenario
 _JANE_EMAIL       = "jane.smith@example.com"
 _BOB_EMAIL        = "bob_jones@example.com"
 
-# Variant 1 (chip, testAssigneeEmail)
 _VAR1_ACTION_BASE = "Review the budget report"
 _VAR1_STATUS_ORIG = "Open"
-_VAR1_STATUS_MUT  = "Done"         # doc mutation for uc_b_doc_wins
+_VAR1_STATUS_MUT  = "Done"
 
-# Variant 2 (chip, testAssigneeEmail)
 _VAR2_ACTION_BASE     = "Draft the Q3 plan"
-_VAR2_ACTION_MUT_BASE = "Draft the revised Q3 plan"   # doc mutation for uc_b_doc_wins
+_VAR2_ACTION_MUT_BASE = "Draft the revised Q3 plan"
 _VAR2_STATUS_ORIG = "In Review"
 
-# Variant 3 (chip, testAssigneeEmail — no initial status → Open)
 _VAR3_ACTION_BASE = "Update the meeting notes"
 _VAR3_STATUS_ORIG = "Open"
-_VAR3_STATUS_MUT  = "In Progress"  # doc mutation for uc_b_doc_wins (adds status token)
+_VAR3_STATUS_MUT  = "In Progress"
 
-# Variant 4 (email, jane.smith)
 _VAR4_ACTION_BASE = "Schedule the follow-up"
 _VAR4_STATUS_ORIG = "Done"
-_VAR4_STATUS_MUT  = "Closed"       # sheet mutation for uc_b_sheet_wins
+_VAR4_STATUS_MUT  = "Closed"
 
-# Variant 5 (email, jane.smith — no initial status → Open)
 _VAR5_ACTION_BASE     = "Approve the budget proposal"
-_VAR5_ACTION_MUT_BASE = "Approve the revised budget"  # sheet mutation for uc_b_sheet_wins
+_VAR5_ACTION_MUT_BASE = "Approve the revised budget"
 _VAR5_STATUS_ORIG = "Open"
 
-# Variant 6 (email, bob_jones — no initial status → Open)
 _VAR6_ACTION_BASE = "Review the Q2 report"
 _VAR6_STATUS_ORIG = "Open"
-_VAR6_STATUS_MUT  = "In Review"    # sheet mutation for uc_b_sheet_wins
+_VAR6_STATUS_MUT  = "In Review"
 
-# Variant 7 base text (negative — plain text, no chip/email; never in ActionSheet)
 _VAR7_ACTION_BASE = "Complete the project documentation"
 
 
 # ---------------------------------------------------------------------------
+# Module fixture — one browser session covers all three UC-B scenarios
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def uc_b_state(test_sheet_id, test_doc_id):
+    batch_invoke([
+        {"menuItem": "Test: Setup Fixture", "arg": "uc_b_doc_wins",
+         "awaitTag": "fixture.uc_b_doc_wins", "timeoutMs": 300000},
+        {"menuItem": "Test: Sync Document", "arg": test_doc_id,
+         "awaitTag": "sync.complete", "timeoutMs": 180000},
+        {"menuItem": "Test: Setup Fixture", "arg": "uc_b_sheet_wins",
+         "awaitTag": "fixture.uc_b_sheet_wins", "timeoutMs": 300000},
+        {"menuItem": "Test: Sync Document", "arg": test_doc_id,
+         "awaitTag": "sync.complete", "timeoutMs": 180000},
+        {"menuItem": "Test: Setup Fixture", "arg": "uc_b_conflict",
+         "awaitTag": "fixture.uc_b_conflict", "timeoutMs": 300000},
+        {"menuItem": "Test: Sync Document", "arg": test_doc_id,
+         "awaitTag": "sync.complete", "timeoutMs": 180000},
+    ])
+    yield {
+        "xlsx_bytes": download_xlsx(test_sheet_id),
+        "docx_bytes": download_docx(test_doc_id),
+        "doc_id": test_doc_id,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Shared helpers
-# ---------------------------------------------------------------------------
-
-def _clear_logs_stable(log_dir: str, timeout_s: float = 15.0) -> None:
-    """Clear logs and re-delete any files that reappear from Drive re-sync."""
-    clear_logs(log_dir)
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        remaining = list(pathlib.Path(log_dir).glob("*.log"))
-        if not remaining:
-            return
-        for f in remaining:
-            f.unlink(missing_ok=True)
-        time.sleep(0.5)
-
-
-def _run_fixture(scenario: str, fixture_tag: str, gas_log_dir: str,
-                 timeout_s: float = 240.0) -> None:
-    """
-    Invoke a UC-B fixture scenario and wait until GAS logs the fixture tag.
-
-    The fixture builds the canonical 7-item state, runs the intermediate
-    UC-A sync internally, then applies scenario-specific mutations.
-    """
-    _clear_logs_stable(gas_log_dir)
-    setup_fixture(scenario)
-    wait_for_log(gas_log_dir,
-                 lambda e: e.get("tag") == fixture_tag,
-                 timeout_s=timeout_s)
-
-
-def _run_final_sync(test_doc_id: str, gas_log_dir: str,
-                    timeout_s: float = 120.0) -> None:
-    """Clear logs, trigger the convergence sync, wait for sync.complete."""
-    _clear_logs_stable(gas_log_dir)
-    sync_document(test_doc_id)
-    wait_for_log(gas_log_dir,
-                 lambda e: (e.get("tag") == "sync.complete" and
-                            e.get("data", {}).get("docId") == test_doc_id),
-                 timeout_s=timeout_s)
-
-
-# ---------------------------------------------------------------------------
-# Full-state consistency verification (reconciliation invariant)
 # ---------------------------------------------------------------------------
 
 def _verify_consistency(doc_fas: list, sheet_rows: list,
@@ -194,10 +168,6 @@ def _verify_consistency(doc_fas: list, sheet_rows: list,
     )
 
 
-# ---------------------------------------------------------------------------
-# AC4 assertion (shared across scenarios)
-# ---------------------------------------------------------------------------
-
 def _assert_negative_absent(rows: list, context: str) -> None:
     """Variant 7 (plain text, no assignee) must not appear in any sheet row."""
     plain_rows = [r for r in rows
@@ -212,8 +182,7 @@ def _assert_negative_absent(rows: list, context: str) -> None:
 # Test 1 — doc wins (variants 1–3 mutated on doc side)
 # ---------------------------------------------------------------------------
 
-
-def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
+def test_uc_b_doc_wins(uc_b_state, settings):
     """
     AC1 + AC3 + AC4: Doc-side mutations to variants 1–3 propagate to ActionSheet
     after Sync; named-range anchors preserved; no duplicates; variant 7 absent.
@@ -225,15 +194,10 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     """
     chip_email = settings["testAssigneeEmail"]
 
-    _run_fixture("uc_b_doc_wins", "fixture.uc_b_doc_wins", gas_log_dir)
-    _run_final_sync(test_doc_id, gas_log_dir)
-
-    xlsx_bytes = download_xlsx(test_sheet_id)
-    ws   = load_sheet(xlsx_bytes, sheet_name="Actions")
-    all_rows = rows_for_doc(ws, test_doc_id)
+    ws   = load_sheet(uc_b_state["xlsx_bytes"], sheet_name="Actions")
+    all_rows = rows_for_doc(ws, uc_b_state["doc_id"])
     rows = [r for r in all_rows if (r.get("Action") or "").startswith(_DW_PREFIX)]
 
-    # Exactly 6 UCB-DW rows (variants 1–6); variant 7 absent
     assert len(rows) == 6, (
         f"[uc_b_doc_wins] Expected 6 UCB-DW: rows, got {len(rows)}.\n  Rows: {rows}"
     )
@@ -244,13 +208,11 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"[uc_b_doc_wins] Expected 3 chip rows for {chip_email!r}, got {len(chip_rows)}."
     )
 
-    # Verify all chip rows still have NamedRangeIds (anchors preserved)
     for row in chip_rows:
         assert row.get("NamedRangeId") not in (None, ""), (
             f"[uc_b_doc_wins] NamedRangeId missing after doc mutation — anchor lost. Row: {row}"
         )
 
-    # Var 1: Status must be updated to the mutated value
     var1_rows = [r for r in chip_rows
                  if _VAR1_ACTION_BASE in (r.get("Action") or "")]
     assert len(var1_rows) == 1, (
@@ -262,7 +224,6 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"got {var1_rows[0].get('Status')!r}"
     )
 
-    # Var 2: Action text must be updated
     var2_rows = [r for r in chip_rows
                  if _VAR2_ACTION_MUT_BASE in (r.get("Action") or "")]
     assert len(var2_rows) == 1, (
@@ -274,7 +235,6 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"got {var2_rows[0].get('Status')!r}"
     )
 
-    # Var 3: Status must reflect the newly-added status token
     var3_rows = [r for r in chip_rows
                  if _VAR3_ACTION_BASE in (r.get("Action") or "")]
     assert len(var3_rows) == 1, (
@@ -286,15 +246,12 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"got {var3_rows[0].get('Status')!r}"
     )
 
-    # Variants 4–6 unchanged
     jane_rows = [r for r in rows if r.get("Assignee Email") == _JANE_EMAIL]
     assert len(jane_rows) == 2, (
         f"[uc_b_doc_wins] Expected 2 Jane rows, got {len(jane_rows)}."
     )
 
-    # Reconciliation: filter FAs to DW prefix; every FA has a matching sheet row
-    docx_bytes = download_docx(test_doc_id)
-    doc = load_doc(docx_bytes)
+    doc = load_doc(uc_b_state["docx_bytes"])
     fa_all = floating_actions(doc)
     fa = [a for a in fa_all if (a.get("action") or "").startswith(_DW_PREFIX)]
     _verify_consistency(fa, rows, context="uc_b_doc_wins")
@@ -304,8 +261,7 @@ def test_uc_b_doc_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
 # Test 2 — sheet wins (variants 4–6 mutated on sheet side)
 # ---------------------------------------------------------------------------
 
-
-def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
+def test_uc_b_sheet_wins(uc_b_state, settings):
     """
     AC2 + AC3 + AC4: Sheet-side mutations to variants 4–6 propagate to the
     floating action paragraphs after Sync; named-range anchors preserved;
@@ -318,12 +274,8 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     """
     chip_email = settings["testAssigneeEmail"]
 
-    _run_fixture("uc_b_sheet_wins", "fixture.uc_b_sheet_wins", gas_log_dir)
-    _run_final_sync(test_doc_id, gas_log_dir)
-
-    xlsx_bytes = download_xlsx(test_sheet_id)
-    ws   = load_sheet(xlsx_bytes, sheet_name="Actions")
-    all_rows = rows_for_doc(ws, test_doc_id)
+    ws   = load_sheet(uc_b_state["xlsx_bytes"], sheet_name="Actions")
+    all_rows = rows_for_doc(ws, uc_b_state["doc_id"])
     rows = [r for r in all_rows if (r.get("Action") or "").startswith(_SW_PREFIX)]
 
     assert len(rows) == 6, (
@@ -331,19 +283,15 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
     )
     _assert_negative_absent(rows, "uc_b_sheet_wins")
 
-    # All rows must still have NamedRangeIds (AC3)
     for row in rows:
         assert row.get("NamedRangeId") not in (None, ""), (
             f"[uc_b_sheet_wins] NamedRangeId missing — anchor lost. Row: {row}"
         )
 
-    # Assert doc floating actions reflect the mutated sheet values
-    docx_bytes = download_docx(test_doc_id)
-    doc = load_doc(docx_bytes)
+    doc = load_doc(uc_b_state["docx_bytes"])
     fa_all = floating_actions(doc)
     fa = [a for a in fa_all if (a.get("action") or "").startswith(_SW_PREFIX)]
 
-    # Var 4: status must be "Closed" in the doc paragraph
     var4_fa = [a for a in fa
                if a.get("assignee_email") == _JANE_EMAIL
                and _VAR4_ACTION_BASE in (a.get("action") or "")]
@@ -356,7 +304,6 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"got {var4_fa[0].get('status')!r}"
     )
 
-    # Var 5: action text must be updated in the doc paragraph
     var5_fa = [a for a in fa
                if a.get("assignee_email") == _JANE_EMAIL
                and _VAR5_ACTION_MUT_BASE in (a.get("action") or "")]
@@ -372,7 +319,6 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"[uc_b_sheet_wins] Var 5 FA should have an explicit status token after sync. Got: {var5_fa[0]}"
     )
 
-    # Var 6: status must be "In Review" in the doc paragraph
     var6_fa = [a for a in fa
                if a.get("assignee_email") == _BOB_EMAIL
                and _VAR6_ACTION_BASE in (a.get("action") or "")]
@@ -388,7 +334,6 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"[uc_b_sheet_wins] Var 6 FA should have an explicit status token after sync. Got: {var6_fa[0]}"
     )
 
-    # Variants 1–3 chip paragraphs must remain unchanged in the doc
     chip_fa = [a for a in fa if a.get("assignee_email") == chip_email]
     assert len(chip_fa) == 3, (
         f"[uc_b_sheet_wins] Expected 3 SW chip FAs for {chip_email!r}, got {len(chip_fa)}."
@@ -410,7 +355,6 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
         f"[uc_b_sheet_wins] Var 3 FA should have an explicit status token after sync. Got: {var3_fa[0]}"
     )
 
-    # Reconciliation: every SW FA has a matching SW sheet row
     _verify_consistency(fa, rows, context="uc_b_sheet_wins")
 
 
@@ -418,8 +362,7 @@ def test_uc_b_sheet_wins(test_sheet_id, test_doc_id, gas_log_dir, settings):
 # Test 3 — conflict resolution (doc wins for var 1, sheet wins for var 4)
 # ---------------------------------------------------------------------------
 
-
-def test_uc_b_conflict_resolution(test_sheet_id, test_doc_id, gas_log_dir, settings):
+def test_uc_b_conflict_resolution(uc_b_state, settings):
     """
     AC1 + AC2 + AC3: When both sides diverge, the later Last Modified wins.
 
@@ -434,12 +377,8 @@ def test_uc_b_conflict_resolution(test_sheet_id, test_doc_id, gas_log_dir, setti
     """
     chip_email = settings["testAssigneeEmail"]
 
-    _run_fixture("uc_b_conflict", "fixture.uc_b_conflict", gas_log_dir)
-    _run_final_sync(test_doc_id, gas_log_dir)
-
-    xlsx_bytes = download_xlsx(test_sheet_id)
-    ws   = load_sheet(xlsx_bytes, sheet_name="Actions")
-    all_rows = rows_for_doc(ws, test_doc_id)
+    ws   = load_sheet(uc_b_state["xlsx_bytes"], sheet_name="Actions")
+    all_rows = rows_for_doc(ws, uc_b_state["doc_id"])
     rows = [r for r in all_rows if (r.get("Action") or "").startswith(_CF_PREFIX)]
 
     assert len(rows) == 6, (
@@ -447,13 +386,11 @@ def test_uc_b_conflict_resolution(test_sheet_id, test_doc_id, gas_log_dir, setti
     )
     _assert_negative_absent(rows, "uc_b_conflict")
 
-    # All rows must still have NamedRangeIds (AC3)
     for row in rows:
         assert row.get("NamedRangeId") not in (None, ""), (
             f"[uc_b_conflict] NamedRangeId missing — anchor lost. Row: {row}"
         )
 
-    # Var 1: doc wins — sheet row Status must reflect the doc mutation (In Progress)
     chip_rows = [r for r in rows if r.get("Assignee Email") == chip_email]
     var1_rows = [r for r in chip_rows
                  if _VAR1_ACTION_BASE in (r.get("Action") or "")]
@@ -465,9 +402,7 @@ def test_uc_b_conflict_resolution(test_sheet_id, test_doc_id, gas_log_dir, setti
         f"got {var1_rows[0].get('Status')!r}"
     )
 
-    # Var 4: sheet wins — doc paragraph status must reflect the sheet mutation (Closed)
-    docx_bytes = download_docx(test_doc_id)
-    doc = load_doc(docx_bytes)
+    doc = load_doc(uc_b_state["docx_bytes"])
     fa_all = floating_actions(doc)
     fa = [a for a in fa_all if (a.get("action") or "").startswith(_CF_PREFIX)]
 
@@ -482,5 +417,4 @@ def test_uc_b_conflict_resolution(test_sheet_id, test_doc_id, gas_log_dir, setti
         f"got {var4_fa[0].get('status')!r}"
     )
 
-    # Reconciliation: every CF FA has a matching CF sheet row
     _verify_consistency(fa, rows, context="uc_b_conflict")
