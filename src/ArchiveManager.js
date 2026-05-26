@@ -20,7 +20,7 @@ var ArchiveManager = (function () {
   // 1-based column indices (matching SHEET_HEADERS with NamedRangeId as col 1).
   var COL_STATUS        = 6;
   var COL_DATE_MODIFIED = 9;
-  var TOTAL_COLS        = 9;
+  var TOTAL_COLS        = 10;
 
   /**
    * Converts a value to a Date, or returns null.

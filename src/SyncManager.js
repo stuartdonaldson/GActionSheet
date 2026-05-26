@@ -30,7 +30,14 @@ function syncDocument(docId) {
     var lastSyncStr  = props.getProperty('LAST_SYNC_TIME_' + docId);
     var lastSyncTime = lastSyncStr ? new Date(lastSyncStr) : new Date(0);
 
-    var doc            = DocumentApp.openById(docId);
+    var doc;
+    try {
+      doc = DocumentApp.openById(docId);
+    } catch (openErr) {
+      GasLogger.log('sync.warn', { msg: 'Doc not found', docId: docId, err: openErr.message });
+      _markDocNotFound(docId);
+      return;
+    }
     var floatingActions = _scanFloatingActions(doc);
 
     GasLogger.log('sync.scanned', { docId: docId, count: floatingActions.length });
@@ -53,8 +60,16 @@ function syncDocument(docId) {
     var docUrl   = doc.getUrl();
     var docTitle = doc.getName();
 
+    // Collect all named range IDs still present in the doc so the WebApp can
+    // detect orphaned sheet rows (named range deleted along with its paragraph).
+    var allNamedRanges = doc.getNamedRanges();
+    var allDocNamedRangeIds = [];
+    for (var nri = 0; nri < allNamedRanges.length; nri++) {
+      allDocNamedRangeIds.push(allNamedRanges[nri].getId());
+    }
+
     // Keep doc open until sheetWins updates are applied.
-    var syncResult = _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTime.toISOString());
+    var syncResult = _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTime.toISOString(), docId, allDocNamedRangeIds);
 
     var sheetWins = syncResult.sheetWins || [];
     for (var i = 0; i < sheetWins.length; i++) {
@@ -351,13 +366,15 @@ function _countNew(anchorResults) {
  * POSTs the doc state to the Web App for conflict resolution and sheet writes.
  * Returns { upserted, updated, sheetWins: [{ namedRangeId, action, status }] }.
  *
- * @param {Array}  anchorResults    Output of _anchorNewActions.
+ * @param {Array}  anchorResults       Output of _anchorNewActions.
  * @param {string} docUrl
  * @param {string} docTitle
- * @param {string} lastSyncTimeIso  ISO timestamp of previous sync (or epoch).
+ * @param {string} lastSyncTimeIso     ISO timestamp of previous sync (or epoch).
+ * @param {string} docId               Document ID (for orphan detection).
+ * @param {Array}  allDocNamedRangeIds All named range IDs currently in the doc.
  * @returns {{upserted: number, updated: number, sheetWins: Array}}
  */
-function _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTimeIso) {
+function _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTimeIso, docId, allDocNamedRangeIds) {
   var props     = PropertiesService.getScriptProperties();
   var webAppUrl = props.getProperty('WEBAPP_URL');
   var secret    = props.getProperty('WEBAPP_SECRET');
@@ -386,12 +403,14 @@ function _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTimeIso) {
     muteHttpExceptions: true,
     headers:            { 'Authorization': 'Bearer ' + oauthToken },
     payload:            JSON.stringify({
-      secret:       secret || '',
-      action:       'sync_action_rows',
-      docUrl:       docUrl,
-      docTitle:     docTitle,
-      lastSyncTime: lastSyncTimeIso,
-      docState:     docState
+      secret:             secret || '',
+      action:             'sync_action_rows',
+      docUrl:             docUrl,
+      docTitle:           docTitle,
+      docId:              docId              || '',
+      lastSyncTime:       lastSyncTimeIso,
+      docState:           docState,
+      allDocNamedRangeIds: allDocNamedRangeIds || []
     })
   });
 
@@ -410,6 +429,32 @@ function _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTimeIso) {
     GasLogger.log('sync.warn', { msg: 'Non-JSON sync_action_rows response', body: resp.getContentText().substring(0, 100) });
     return { upserted: 0, updated: 0, sheetWins: [] };
   }
+}
+
+/**
+ * POSTs mark_doc_not_found to the WebApp so it can stamp 'Doc Not Found' on
+ * all Actions rows whose Document formula references this docId.
+ *
+ * @param {string} docId
+ */
+function _markDocNotFound(docId) {
+  var props     = PropertiesService.getScriptProperties();
+  var webAppUrl = props.getProperty('WEBAPP_URL');
+  var secret    = props.getProperty('WEBAPP_SECRET');
+  if (!webAppUrl) return;
+  var oauthToken = ScriptApp.getOAuthToken();
+  UrlFetchApp.fetch(webAppUrl, {
+    method:             'post',
+    contentType:        'application/json',
+    muteHttpExceptions: true,
+    headers:            { 'Authorization': 'Bearer ' + oauthToken },
+    payload:            JSON.stringify({
+      secret: secret || '',
+      action: 'mark_doc_not_found',
+      docId:  docId
+    })
+  });
+  GasLogger.flush();
 }
 
 /**

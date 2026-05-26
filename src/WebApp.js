@@ -41,6 +41,10 @@ function doPost(e) {
     return _handleVerifyActionRows(payload);
   }
 
+  if (payload.action === 'mark_doc_not_found') {
+    return _handleMarkDocNotFound(payload);
+  }
+
   // Legacy POC — retained for diagnostics
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
@@ -96,7 +100,8 @@ function _handleUpsertActionRows(payload) {
         row.status        || 'Open',
         docFormula,
         now,
-        now
+        now,
+        ''  // Sync Status — blank on insert
       ]);
       upserted++;
     }
@@ -163,10 +168,18 @@ function _handleSyncActionRows(payload) {
     return _jsonResponse({ error: 'Actions sheet not found' });
   }
 
-  var docUrl       = payload.docUrl   || '';
-  var docTitle     = payload.docTitle || 'Untitled';
-  var docState     = payload.docState || [];
-  var lastSyncTime = payload.lastSyncTime ? new Date(payload.lastSyncTime) : new Date(0);
+  var docUrl              = payload.docUrl   || '';
+  var docTitle            = payload.docTitle || 'Untitled';
+  var docId               = payload.docId    || '';
+  var docState            = payload.docState || [];
+  var lastSyncTime        = payload.lastSyncTime ? new Date(payload.lastSyncTime) : new Date(0);
+  var allDocNamedRangeIds = payload.allDocNamedRangeIds || [];
+
+  // Build a set for O(1) membership checks.
+  var activeNrIdSet = {};
+  for (var ai = 0; ai < allDocNamedRangeIds.length; ai++) {
+    activeNrIdSet[allDocNamedRangeIds[ai]] = true;
+  }
 
   var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
   var maxId       = _findMaxId(existingMap);
@@ -174,6 +187,12 @@ function _handleSyncActionRows(payload) {
   var upserted    = 0;
   var updated     = 0;
   var sheetWins   = [];
+
+  // Load col 7 formulas for orphan detection (need docId to match rows to this doc).
+  var lastRow      = actionsSheet.getLastRow();
+  var formulasCol7 = lastRow >= 2
+    ? actionsSheet.getRange(2, 7, lastRow - 1, 1).getFormulas()
+    : [];
 
   WriteGuard.wrap(function () {
     for (var i = 0; i < docState.length; i++) {
@@ -192,7 +211,8 @@ function _handleSyncActionRows(payload) {
           row.status        || 'Open',
           docFormula,
           now,
-          now
+          now,
+          ''  // Sync Status — blank on insert
         ]);
         upserted++;
       } else if (existing.dateModified && existing.dateModified > lastSyncTime) {
@@ -202,9 +222,11 @@ function _handleSyncActionRows(payload) {
           action:       existing.action,
           status:       existing.status
         });
+        // Row synced successfully — clear any prior Sync Status.
+        actionsSheet.getRange(existing.rowIndex, 10).setValue('');
       } else {
         // Doc is authoritative — update sheet row only when content values differ.
-        var rowIdx = existing.rowIndex;
+        var rowIdx     = existing.rowIndex;
         var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
         if (existing.action !== row.actionText || existing.status !== row.status) {
           actionsSheet.getRange(rowIdx, 5).setValue(row.actionText || '');
@@ -213,6 +235,21 @@ function _handleSyncActionRows(payload) {
           updated++;
         }
         actionsSheet.getRange(rowIdx, 7).setFormula(docFormula);
+        // Row synced successfully — clear any prior Sync Status.
+        actionsSheet.getRange(rowIdx, 10).setValue('');
+      }
+    }
+
+    // Detect orphaned rows: rows for this doc whose named range is gone from the doc.
+    if (docId) {
+      for (var nrId in existingMap) {
+        if (activeNrIdSet[nrId]) continue; // still in the doc
+        var entry = existingMap[nrId];
+        var fIdx  = entry.rowIndex - 2; // formulasCol7 is 0-based from row 2
+        var formula = (fIdx >= 0 && fIdx < formulasCol7.length) ? formulasCol7[fIdx][0] : '';
+        if (formula.indexOf(docId) === -1) continue; // belongs to a different doc
+        actionsSheet.getRange(entry.rowIndex, 10).setValue('Deleted');
+        GasLogger.log('sync.info', { msg: 'Sync Status — Deleted', row: entry.rowIndex, namedRangeId: nrId });
       }
     }
   });
@@ -269,6 +306,42 @@ function _loadRowsForDocUrl(actionsSheet, docUrl) {
   }
 
   return rows;
+}
+
+/**
+ * Marks all Actions rows whose Document formula references docId as
+ * 'Doc Not Found' in the Sync Status column.
+ *
+ * Payload shape: { secret, action: 'mark_doc_not_found', docId }
+ */
+function _handleMarkDocNotFound(payload) {
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found', marked: 0 });
+  }
+
+  var docId   = payload.docId || '';
+  var lastRow = actionsSheet.getLastRow();
+  if (!docId || lastRow < 2) {
+    return _jsonResponse({ marked: 0 });
+  }
+
+  var numRows      = lastRow - 1;
+  var formulasCol7 = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
+  var marked       = 0;
+
+  WriteGuard.wrap(function () {
+    for (var i = 0; i < formulasCol7.length; i++) {
+      var formula = formulasCol7[i][0] || '';
+      if (formula.indexOf(docId) === -1) continue;
+      actionsSheet.getRange(i + 2, 10).setValue('Doc Not Found');
+      marked++;
+    }
+  });
+
+  GasLogger.log('sync.warn', { msg: 'Doc Not Found', docId: docId, marked: marked });
+  return _jsonResponse({ marked: marked });
 }
 
 function _escapeQuotes(s) {

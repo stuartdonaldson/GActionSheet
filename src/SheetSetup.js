@@ -7,7 +7,8 @@
  */
 
 // Column positions (1-based): NamedRangeId=1, ID=2, Assignee Email=3,
-// Assignee Name=4, Action=5, Status=6, Document=7, Date Created=8, Date Modified=9
+// Assignee Name=4, Action=5, Status=6, Document=7, Date Created=8, Date Modified=9,
+// Sync Status=10
 var SHEET_HEADERS = [
   'NamedRangeId',
   'ID',
@@ -17,7 +18,8 @@ var SHEET_HEADERS = [
   'Status',
   'Document',
   'Date Created',
-  'Date Modified'
+  'Date Modified',
+  'Sync Status'
 ];
 
 /**
