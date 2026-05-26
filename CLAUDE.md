@@ -104,6 +104,24 @@ bd close <id>         # Complete work
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
+## Testing Strategy & Issue Conventions
+
+This project follows the ATDD lifecycle defined in `docs/proposed-atdd-lifecycle.md`. Key rules for every session:
+
+**Issue title prefixes (required on all new issues):**
+- `[IMP]` — GAS implementation work
+- `[TST]` — Python test/fixture work
+- `[FIX]` — bug or regression fix
+- `[INF]` — infrastructure, deployment, CI
+
+**Twin-ticket rule:** every new feature AC gets a paired `[IMP]` + `[TST]` issue created at the same time. Neither merges until both are green.
+
+**Pre-code contract:** before either ticket starts coding, document in the issue description: (1) GAS entry-point signature, (2) GAS log tag that signals completion, (3) output schema (XLSX columns / DOCX structure) the test will assert against.
+
+**No shared context:** the `[TST]` owner must not read GAS implementation; the `[IMP]` owner must not read test assertions. The contract is the only shared artifact.
+
+**Existing open issues** are not retroactively renamed — apply the prefix convention to all issues created from this point forward.
+
 ## GAS Deployment
 
 Use the npm scripts in `package.json` — never invoke `clasp` directly.
