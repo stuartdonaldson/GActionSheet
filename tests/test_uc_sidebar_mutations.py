@@ -89,7 +89,7 @@ def test_sidebar_set_status_updates_doc(sidebar_mutation_state, settings):
     target = [
         fa for fa in fas
         if fa.get("action") == _CHIP_ACTION
-        and fa.get("assigneeEmail") == chip_email
+        and fa.get("assignee_email") == chip_email
     ]
 
     assert len(target) == 1, (
@@ -136,7 +136,7 @@ def test_sidebar_delete_action_removes_from_doc(sidebar_mutation_state):
     remaining = [
         fa for fa in fas
         if fa.get("action") == _EMAIL_ACTION
-        and fa.get("assigneeEmail") == _EMAIL_EMAIL
+        and fa.get("assignee_email") == _EMAIL_EMAIL
     ]
 
     assert len(remaining) == 0, (

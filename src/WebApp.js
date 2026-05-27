@@ -56,6 +56,10 @@ function doPost(e) {
     return _handleMarkDocNotFound(payload);
   }
 
+  if (payload.action === 'delete_action_row') {
+    return _handleDeleteActionRow(payload);
+  }
+
   // Legacy POC — retained for diagnostics
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
@@ -422,6 +426,43 @@ function _handleMarkDocNotFound(payload) {
 
   GasLogger.log('sync.warn', { msg: 'Doc Not Found', docId: docId, marked: marked });
   return _jsonResponse({ marked: marked });
+}
+
+/**
+ * Permanently deletes the ActionSheet row whose NamedRangeId matches
+ * payload.namedRangeId.  Called by sidebarDeleteAction after the doc-side
+ * paragraph and named range have already been removed.
+ *
+ * Payload shape:
+ *   { secret, action: 'delete_action_row', namedRangeId }
+ *
+ * Response shape:
+ *   { deleted: 0|1 }
+ */
+function _handleDeleteActionRow(payload) {
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found', deleted: 0 });
+  }
+
+  var namedRangeId = payload.namedRangeId || '';
+  if (!namedRangeId) {
+    return _jsonResponse({ error: 'namedRangeId required', deleted: 0 });
+  }
+
+  var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
+  var entry       = existingMap[namedRangeId];
+  if (!entry) {
+    return _jsonResponse({ deleted: 0 });
+  }
+
+  WriteGuard.wrap(function () {
+    actionsSheet.deleteRow(entry.rowIndex);
+  });
+
+  GasLogger.log('sidebar.delete.row', { namedRangeId: namedRangeId, rowIndex: entry.rowIndex });
+  return _jsonResponse({ deleted: 1 });
 }
 
 function _escapeQuotes(s) {

@@ -1508,22 +1508,59 @@ function setupTestFixtures(scenario) {
       case 'sidebar_set_status': {
         // Mutation: change the chip-led "AC1: Review the project budget" action
         // from "Open" to "Done" using sidebarSetStatus.
-        // Targets the action by text match; namedRangeId is resolved at fixture time.
-        // Implemented in green phase (GTaskSheet-cw5.7).
-        GasLogger.log('fixture.sidebar_set_status', { stub: true });
-        _TF_RESULT = { tag: 'fixture.sidebar_set_status', data: { stub: true } };
-        docAlreadyClosed = false; // doc stays open for save
+        // Resolves namedRangeId by scanning floating actions for the target text.
+        var sssTargetText = 'AC1: Review the project budget';
+        var sssNewStatus  = 'Done';
+        var sssFloating   = _scanFloatingActions(doc);
+        var sssNrId       = '';
+        var sssAnchoredMap = _buildAnchoredIndexMap(doc);
+        for (var ssi = 0; ssi < sssFloating.length; ssi++) {
+          if (sssFloating[ssi].actionText === sssTargetText) {
+            var sssIdx = sssFloating[ssi].bodyChildIndex;
+            sssNrId = sssAnchoredMap[sssIdx] || '';
+            break;
+          }
+        }
+        if (!sssNrId) {
+          GasLogger.log('fixture.sidebar_set_status', { error: 'action not found', target: sssTargetText });
+          _TF_RESULT = { tag: 'fixture.sidebar_set_status', data: { error: 'action not found' } };
+          docAlreadyClosed = false;
+          break;
+        }
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        sidebarSetStatus(sssNrId, sssNewStatus, testDocId);
+        _TF_RESULT = { tag: 'fixture.sidebar_set_status', data: { namedRangeId: sssNrId, newStatus: sssNewStatus } };
         break;
       }
 
       case 'sidebar_delete_action': {
         // Mutation: delete the email-led "AC1: Approve the project proposal" action
         // (jane.smith@example.com) using sidebarDeleteAction.
-        // Targets the action by text + email match; namedRangeId resolved at fixture time.
-        // Implemented in green phase (GTaskSheet-cw5.7).
-        GasLogger.log('fixture.sidebar_delete_action', { stub: true });
-        _TF_RESULT = { tag: 'fixture.sidebar_delete_action', data: { stub: true } };
-        docAlreadyClosed = false;
+        // Resolves namedRangeId by scanning floating actions for the target text + email.
+        var sdaTargetText  = 'AC1: Approve the project proposal';
+        var sdaTargetEmail = 'jane.smith@example.com';
+        var sdaFloating    = _scanFloatingActions(doc);
+        var sdaNrId        = '';
+        var sdaAnchoredMap = _buildAnchoredIndexMap(doc);
+        for (var sdai = 0; sdai < sdaFloating.length; sdai++) {
+          var sdaFa = sdaFloating[sdai];
+          if (sdaFa.actionText === sdaTargetText && sdaFa.assigneeEmail === sdaTargetEmail) {
+            var sdaIdx = sdaFa.bodyChildIndex;
+            sdaNrId = sdaAnchoredMap[sdaIdx] || '';
+            break;
+          }
+        }
+        if (!sdaNrId) {
+          GasLogger.log('fixture.sidebar_delete_action', { error: 'action not found', target: sdaTargetText });
+          _TF_RESULT = { tag: 'fixture.sidebar_delete_action', data: { error: 'action not found' } };
+          docAlreadyClosed = false;
+          break;
+        }
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        sidebarDeleteAction(sdaNrId, testDocId);
+        _TF_RESULT = { tag: 'fixture.sidebar_delete_action', data: { namedRangeId: sdaNrId } };
         break;
       }
 
