@@ -76,8 +76,9 @@ function _poc_submitCreateAction(e) {
   var status       = formInput.poc_status || 'Open';
 
   if (!actionText) {
+    GasLogger.log('CREATE_ACTION_TRIGGER.validation', { msg: 'actionText required' });
     return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Action text is required.'))
+      .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Required', 'Action text cannot be empty.')))
       .build();
   }
 
@@ -102,7 +103,7 @@ function _poc_submitCreateAction(e) {
   if (!result || result.error) {
     GasLogger.log('CREATE_ACTION_TRIGGER.error', { err: result && result.error });
     return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Failed to create action: ' + (result && result.error || 'unknown error')))
+      .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Error', 'Failed to create action: ' + ((result && result.error) || 'unknown error'))))
       .build();
   }
 
@@ -110,8 +111,10 @@ function _poc_submitCreateAction(e) {
   _poc_insertActionChip(doc, namedRangeId, actionText, assigneeEmail, status);
 
   GasLogger.log('CREATE_ACTION_TRIGGER.done', { namedRangeId: namedRangeId, upserted: result.upserted });
+  // createActionTrigger context rejects notification, pushCard, popCard, setStateChanged.
+  // Try updateCard (replace in-place with a confirmation card) as the last option.
   return CardService.newActionResponseBuilder()
-    .setNotification(CardService.newNotification().setText('Action created: ' + actionText))
+    .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Action created', actionText)))
     .build();
 }
 
@@ -205,6 +208,23 @@ function _poc_buildPreviewCard(url) {
 }
 
 /**
+ * Builds a minimal single-message card (used for success/error feedback in
+ * createActionTrigger context, where setNotification is disallowed).
+ *
+ * @param {string} title
+ * @param {string} message
+ * @returns {GoogleAppsScript.Card_Service.Card}
+ */
+function _poc_buildMessageCard(title, message) {
+  return CardService.newCardBuilder()
+    .setHeader(CardService.newCardHeader().setTitle(title)
+      .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png'))
+    .addSection(CardService.newCardSection()
+      .addWidget(CardService.newTextParagraph().setText(message)))
+    .build();
+}
+
+/**
  * Looks up a single action row from the ActionSheet by namedRangeId.
  * Uses verify_action_rows with no docUrl filter (returns all rows) then finds match.
  *
@@ -244,7 +264,10 @@ function _poc_insertActionChip(doc, namedRangeId, actionText, assigneeEmail, sta
   if (!cursor) return; // no cursor — silent; doc may not be editable at trigger time
 
   var chipUrl  = _POC_ACTION_URL_BASE + namedRangeId;
-  var chipText = actionText + (assigneeEmail ? ' @' + assigneeEmail.split('@')[0] : '') + ' [' + status + ']';
+
+  // Display text: truncated action + assignee handle. Details are in the hover preview card.
+  var truncated = actionText.length > 40 ? actionText.slice(0, 37) + '…' : actionText;
+  var chipText  = '@action: ' + truncated + (assigneeEmail ? ' (' + assigneeEmail.split('@')[0] + ')' : '');
 
   var element = cursor.insertText(chipText);
   if (!element) return;
