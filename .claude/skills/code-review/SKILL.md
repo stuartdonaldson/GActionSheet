@@ -10,7 +10,7 @@ description: >-
   features shipped before the ATDD lifecycle was adopted.
 metadata:
   category: process
-  version: "1.0"
+  version: "1.1"
   status: documented
   validation: untested
   priority: high
@@ -48,6 +48,10 @@ were written, or behavior identified late that was never in AC.
 - Important features shipped before ATDD lifecycle adopted — test suite has no coverage for entire
   subsystems; only code review fires unconditionally to surface the gap
 - AC refined after tests written — new behavior added to implementation, test suite not updated
+- Review output that mixes blockers, speculation, and style nits — author cannot tell what must be
+  fixed before merge
+- Diff-only review that misses auth, data migration, config, idempotence, or deploy-time regressions
+  because the code change itself looks small
 
 ## Input
 
@@ -60,21 +64,30 @@ were written, or behavior identified late that was never in AC.
 ## Procedure
 
 1. **Diff inventory** → list all files changed → group by: implementation files, test files,
-   config/infra | Fail: if no diff available, ask for file list before continuing
+  config/infra, docs | Note the merge target / comparison base if known | Fail: if no diff
+  available, ask for file list before continuing
 
 2. **Correctness scan** → for each implementation file changed, verify:
    - Logic matches AC (if AC exists)
    - Error paths are handled (not silently swallowed)
-   - No obvious off-by-one, null-reference, or type coercion issues
+  - No obvious off-by-one, null-reference, or type coercion issues
+  - Side effects remain bounded (no accidental extra writes, trigger loops, duplicate calls)
    | Note findings; do not block on style — block only on correctness
 
-3. **Entry point inventory** → scan all changed and related files for state-modifying entry points:
+3. **Risk category scan** → explicitly check whether the change touches any of these review classes:
+  auth/permissions, data/schema compatibility, config/deployment, concurrency/idempotence,
+  observability/logging, rollback safety → for each applicable class, record either "checked, no
+  finding" or a concrete finding | Fail: if a changed file handles identity, persistence, trigger
+  orchestration, manifest/config, or deployment metadata and none of these classes were evaluated,
+  the review is incomplete
+
+4. **Entry point inventory** → scan all changed and related files for state-modifying entry points:
    menu item handlers, time-based trigger functions, onEdit/onOpen handlers, sidebar button actions,
    HTTP route handlers → list every entry point found, including pre-existing ones in changed files
    | Fail: if a file contains a menu registration or trigger setup and no entry point is listed,
    re-scan — registration without a handler list is incomplete
 
-4. **Entry point coverage check** → for each entry point in the inventory:
+5. **Entry point coverage check** → for each entry point in the inventory:
    a. Search the test suite for a scenario that calls this function directly as the entry point
       (not only a function it delegates to)
    b. Mark: ✓ covered | ✗ no test call-site | ~ pre-existing gap (entry point predates this change)
@@ -82,24 +95,39 @@ were written, or behavior identified late that was never in AC.
    a [TST] issue before proceeding | Pre-existing gaps (~) should be noted but do not block merge
    — they are candidates for a [TST] issue, not a blocker on the current change
 
-5. **Regression coverage scan** → for subsystems touched by this change, ask:
+6. **Regression coverage scan** → for subsystems touched by this change, ask:
    - Is there any important behavior in this subsystem with no test coverage at all?
    - Would a regression in this subsystem be caught by the current test suite?
+  - Are failure-path, negative, and no-op/idempotent behaviors covered where the change depends on
+    them?
    | If a significant coverage gap is found: create a [TST] issue; note it in the review; do not
    block merge unless the gap is in code directly modified by this change
 
-6. **Bug-fix coverage rule** → if this change is a bug fix ([FIX] issue):
+7. **Bug-fix coverage rule** → if this change is a bug fix ([FIX] issue):
    - Confirm a regression test for this specific failure exists or is in a paired [TST] issue
    - Enumerate the entry-point class for the affected subsystem (all entry points in the same
      functional area) and verify each has a test call-site; gaps → [TST] issues
    | Fail: a [FIX] with no regression test is incomplete — require [TST] issue before close
 
-7. **Summary** → produce a review summary:
+8. **Evidence discipline** → every finding must include: severity, impacted behavior, concrete
+  evidence (file/symbol/test gap), and why the current change set does not already mitigate it |
+  Fail: if a finding is speculative or style-only, move it to open questions / notes instead of
+  blockers
+
+9. **Summary** → produce a review summary with findings first, ordered by severity, then open
+  questions / assumptions, then a short change summary:
    ```
+  Findings:
+  - [severity] file/symbol — impact and evidence
+
+  Open questions / assumptions:
+  - [question or assumption]
+
    Files changed: N
    Entry points inventoried: [list]
    Coverage: ✓ N covered | ✗ N blocked | ~ N pre-existing gaps
    Correctness findings: [list or "none"]
+  Risk classes checked: [list]
    [TST] issues required: [list or "none"]
    Verdict: PASS | BLOCK
    ```
@@ -109,8 +137,13 @@ were written, or behavior identified late that was never in AC.
 ## Success Criteria
 
 - [ ] All changed files inventoried (verify: file list matches `git diff --name-only`)
+- [ ] Review output lists findings first, ordered by severity, with open questions separated from
+  blockers
 - [ ] Every state-modifying entry point in changed files listed by name (verify: list shown)
 - [ ] Each entry point marked ✓ / ✗ / ~ with test file and scenario name for ✓ entries
+- [ ] Applicable risk classes explicitly checked: auth, data/config, idempotence/concurrency,
+  deployment/observability
+- [ ] Every blocking finding includes severity, impacted behavior, and concrete evidence
 - [ ] No ✗ entry points on changed or new code without a blocking [TST] issue
 - [ ] Bug fixes have a regression test or a [TST] issue for one
 - [ ] Summary produced with explicit PASS or BLOCK verdict
@@ -146,3 +179,16 @@ were written, or behavior identified late that was never in AC.
   points in changed files for coverage gaps
 **Prevented by:** Step 3 instruction — "including pre-existing ones in changed files"
 **Found:** Would have caught syncAll in the file changed by the Sync Status feature commit
+
+**Pattern:** Findings without evidence
+**Symptom:** Reviewer reports a possible bug but cannot name the impacted entry point, file, or
+  missing test; author cannot tell whether it is real
+**Prevented by:** Step 8 — every blocker must include severity, impact, and concrete evidence
+**Found:** Common review failure mode when feedback is based on intuition rather than the actual
+  changed control path
+
+**Pattern:** Small-diff tunnel vision
+**Symptom:** Review focuses on a few edited lines and misses manifest, deploy, auth, or idempotence
+  regressions because the visible logic change looks minor
+**Prevented by:** Step 3 risk-category scan — review classes are checked explicitly even for small
+  changes

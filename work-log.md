@@ -547,3 +547,71 @@ Updated README.md, docs/CONTEXT.md, and docs/DESIGN.md to match the validated UC
 
 ### Key Learnings
 Conflict ordering still needs a reconciliation watermark plus per-row Date Modified; collapsing both into a single last-synced value would lose last-writer-wins behavior. Re-anchor cleanup needs an explicit duplicate-removal pass in ActionSheet reconciliation because the doc can already be correct while stale duplicate sheet rows remain.
+## 2026-05-26 23:39:03
+
+### Summary:
+Delivered the Docs add-on card-only homepage increment on feature/html-sidebar: added Scan card plus Sort and Filter controls, kept Sync now, VerifySync, tracker refresh, and version footer, and validated the card with focused Playwright coverage. Updated CONTEXT.md, DESIGN.md, and OPERATIONS.md to describe the shipped card-first behavior and the HTTP-fixture-first test approach. Switched the header and manifest logo to action-logo-t-128.png, published that asset to master so GitHub Pages serves it, redeployed the TEST add-on, and pushed the feature branch changes that match the deployed revision.
+
+### Key Learnings:
+GitHub Pages for this repo is served from the master branch, so static asset changes must land there before feature-branch code can rely on the new URL. The add-on logo has two live references that must stay aligned: the CardService header image in src/Addon.js and the manifest logoUrl in src/appsscript.json.
+## 2026-05-27 01:23:31
+
+### Summary:
+Refined the Docs add-on homepage card and focused the Playwright harness on the real sidebar behavior. Removed the fragile session-clone/trash recovery direction, shifted UI tests to fresh browser-created docs seeded via HTTP fixtures, and kept the add-on launch path aligned with the side-panel icon strategy. Diagnosed the tracker-refresh red as primarily a test/harness issue, narrowed the failing assertion from global sheet consistency to document-local behavior, and recorded the reusable testing guidance in docs/lessons-learned/2026-05-27-docs-addon-sidebar-testing-notes.md.
+
+### Key Learnings:
+For Docs add-on UI tests, create a fresh doc in the browser and seed that exact doc over HTTP instead of relying on shared TEST_DOC_ID session state. When the UI appears to work but a test fails, inspect whether the assertion is checking shared-environment cleanliness rather than the local behavior under test. If GAS logs are quiet, browser console and network traces can expose add-on ExecuteAddOn 500s that never reach Logger.log or file-backed GasLogger output.
+## 2026-05-27 01:23:40
+
+### Summary:
+Refined the Docs add-on homepage card and focused the Playwright harness on the real sidebar behavior. Removed the fragile session-clone/trash recovery direction, shifted UI tests to fresh browser-created docs seeded via HTTP fixtures, and kept the add-on launch path aligned with the side-panel icon strategy. Diagnosed the tracker-refresh red as primarily a test/harness issue, narrowed the failing assertion from global sheet consistency to document-local behavior, and recorded the reusable testing guidance in docs/lessons-learned/2026-05-27-docs-addon-sidebar-testing-notes.md.
+
+### Key Learnings:
+For Docs add-on UI tests, create a fresh doc in the browser and seed that exact doc over HTTP instead of relying on shared TEST_DOC_ID session state. When the UI appears to work but a test fails, inspect whether the assertion is checking shared-environment cleanliness rather than the local behavior under test. If GAS logs are quiet, browser console and network traces can expose add-on ExecuteAddOn 500s that never reach Logger.log or file-backed GasLogger output.
+
+## 2026-05-27 21:42:29
+
+### Summary
+Replaced Playwright-based fixture invocation with HTTP for UC-A, UC-B, and session lifecycle; fixed UC-B sheet-wins conflict resolution broken by Dirty-flag migration; resolved sync_status_archive caching bug; all 17 tests green in 320s (down from 788s / 9 failures).
+
+### Changes
+- **TestFixtures.js** — Added `Sync Status='Dirty'` to `uc_b_sheet_wins` (vars 4/5/6), `uc_b_sheet_assignee_wins` (var 6), and `uc_b_conflict` (var 4); these fixtures previously used date-manipulation (`lastSyncTime`) which was removed in the Dirty-flag migration
+- **TestFixtures.js** — Added `sync_document`, `begin_test_session`, `end_test_session` fixture cases to `setupTestFixtures` so they can be invoked via HTTP without Playwright
+- **TestFixtures.js** — Added `SpreadsheetApp.flush()` after `syncDocument()` in `sync_status_archive` case to prevent stale sheet cache from hiding the newly-appended row
+- **conftest.py** — Session lifecycle (`begin_test_session` / `end_test_session`) migrated from `gas_invoke` (Playwright) to `invoke_fixture` (HTTP); ~60s of browser overhead removed per run
+- **test_uc_a.py** — Module fixture migrated from `batch_invoke` to `invoke_fixture`; `uc_a_clear`, `sync_document`, `uc_a_permutations` calls are now HTTP
+- **test_uc_b.py** — Module fixture and `test_uc_b_sheet_assignee_wins` migrated from `batch_invoke` to `invoke_fixture`
+- **test_uc_c.py** — Scoped `still_active` check in `test_sync_status_archive_preserved` to current session doc_id; prevents stale rows from prior failed runs causing false failures
+
+### Key Learnings
+- GAS `SpreadsheetApp` instances from the outer scope do not see rows appended by a nested `syncDocument` call (which opens its own `openById` instance) without an explicit `SpreadsheetApp.flush()` between them
+- The `still_active` test assertion must be scoped to the current session's doc ID; the shared Actions sheet accumulates rows from all sessions and a prior failed run's unarchived row will persist indefinitely
+- Removing Playwright from session setup cuts the full suite wall-clock time by more than half (788s → 320s) and eliminates the 25-35s browser-launch overhead per fixture batch
+
+## 2026-05-27 09:55:00
+
+### Summary:
+Implemented sidebar mutation workflows (cw5.6, cw5.7, cw5.1) — status dropdown + delete action with full doc+sheet round-trip; all 5 AC tests green.
+
+### Details:
+
+**cw5.7 [IMP] — Sidebar mutation implementation**
+- `sidebarDeleteAction`: fixed "Can't remove the last paragraph in a document section" GAS error by appending a blank guard paragraph before `removeFromParent()`; mirrors the `sync_status_deleted` fixture pattern
+- Card UI: replaced hardcoded "Close" `TextButton` with a `SelectionInput` DROPDOWN (Open / In Progress / In Review / Done / Closed) that fires `onSetActionStatus` via `setOnChangeAction` — no separate submit button needed
+- `onSetActionStatus`: new card handler reads selected status from `e.formInputs[fieldName][0]` (fieldName is `ss_<index>`, unique per action in the list) and calls `sidebarSetStatus`
+- `onSetActionClosed` removed and replaced by the generic `onSetActionStatus`
+- `delete_action_row` WebApp route and `_handleDeleteActionRow` already implemented in prior session; no changes needed
+
+**cw5.6 [TST] — Sidebar mutation tests**
+- `test_uc_sidebar_mutations.py`: fixed `fa.get("assigneeEmail")` → `fa.get("assignee_email")` to match `floating_actions()` helper's snake_case keys
+- All 5 tests pass: set_status_updates_doc, set_status_updates_sheet, delete_removes_from_doc, delete_removes_from_sheet, delete_preserves_other_actions
+- Test run time: ~101s (module fixture runs full uc_a_clear + sync + both mutations once)
+
+**cw5.1 [INF] — Docs update**
+- CONTEXT.md Glossary: "Sidebar" updated from "HTML UI" to "card-based UI (CardService, not HtmlService)"; "Status" expanded to list all five recognized values
+- DESIGN.md: "Sidebar UI" component updated to describe delivered card structure — overview section, action buttons section, per-action list with status dropdown + Delete button; full round-trip mutation contract documented
+
+### Key Learnings:
+- GAS "Can't remove the last paragraph in a document section" fires on `removeFromParent()` even when other paragraphs exist — the fix is `body.appendParagraph('')` guard before removal; this is the same pattern already used in `sync_status_deleted` fixture
+- CardService `SelectionInput.setOnChangeAction()` fires immediately on dropdown change, eliminating the need for a separate submit button; fieldName must be unique per action instance when multiple dropdowns appear in the same card
+- `floating_actions()` helper in `doc_inspect.py` returns snake_case keys (`assignee_email`); test assertions must use snake_case — camelCase silently returns `None` from `.get()`
