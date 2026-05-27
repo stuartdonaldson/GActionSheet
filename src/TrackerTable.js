@@ -47,7 +47,7 @@ function insertTrackerTable(docId) {
     var floatingActions = _scanFloatingActions(doc);
     var anchoredMap     = _buildAnchoredIndexMap(doc);
 
-    var ss        = SpreadsheetApp.getActiveSpreadsheet();
+    var ss        = _openActionSheetSpreadsheet();
     var sheetRows = _readTrackerSheetRows(ss, docId);
     var dataRows  = _buildTrackerDataRows(floatingActions, anchoredMap, sheetRows);
 
@@ -63,9 +63,25 @@ function insertTrackerTable(docId) {
     GasLogger.log('tracker.insert.complete', { docId: docId, rowCount: dataRows.length });
   } catch (e) {
     GasLogger.log('tracker.error', { msg: e.message, docId: docId });
+    throw e;
   } finally {
     GasLogger.flush();
   }
+}
+
+function _openActionSheetSpreadsheet() {
+  var activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (activeSpreadsheet) {
+    return activeSpreadsheet;
+  }
+
+  var props = PropertiesService.getScriptProperties();
+  var spreadsheetId = props.getProperty('ACTION_SHEET_ID') || props.getProperty('TEST_SHEET_ID');
+  if (!spreadsheetId) {
+    throw new Error('ActionSheet spreadsheet is unavailable in this context');
+  }
+
+  return SpreadsheetApp.openById(spreadsheetId);
 }
 
 // ---------------------------------------------------------------------------

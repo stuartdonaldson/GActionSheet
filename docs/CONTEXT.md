@@ -3,7 +3,7 @@
 ## Introduction & Goals
 
 ### Purpose
-GActionSheet captures and tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Authors create actions natively — a checklist item that begins with a Google Docs person chip is an action assigned to that person. Each action is anchored with a named range so its identity survives edits. The sidebar (a Workspace Add-on) is the user-facing surface for the active document; the ActionSheet is the cross-doc store.
+GActionSheet captures and tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Authors create actions natively — a checklist item that begins with a Google Docs person chip is an action assigned to that person. Each action is anchored with a named range so its identity survives edits. The Workspace Add-on homepage card is the user-facing surface for the active document; the ActionSheet is the cross-doc store.
 
 ### Quality Goals
 | Priority | Quality Goal | Scenario |
@@ -95,8 +95,10 @@ The tracker table is itself anchored by a named range so refresh can replace its
 - Detect actions in the **active doc** (the doc the sidebar is attached to) as checklist items beginning with a PERSON chip
 - Anchor each action with a named range; the `namedRangeId` is the stable identity recorded in the ActionSheet
 - Maintain a trailing `(Status)` token on each action paragraph; default `(Open)`, recognize `(Closed)` for archiving, preserve any other value as a free-form custom status
-- Sync the active doc to the ActionSheet on demand from the sidebar — a single **Sync now** action that scans the doc and reconciles ActionSheet rows in one round (push/pull resolved by `Last Modified`)
-- Verify the active doc from the sidebar without mutating data — scans floating actions, the in-doc tracker table when present, and ActionSheet rows for the same doc; reports progress and mismatches in the sidebar
+- Refresh the homepage card without mutating data — **Scan card** re-reads the current doc, tracker, and sheet-derived summary state so the visible card catches up to edits or a recent sync
+- Sync the active doc to the ActionSheet on demand from the homepage card — a single **Sync now** action that scans the doc and reconciles ActionSheet rows in one round (push/pull resolved by `Last Modified`)
+- Verify the active doc from the homepage card without mutating data — scans floating actions, the in-doc tracker table when present, and ActionSheet rows for the same doc; reports progress and mismatches in the verification card
+- Sort and filter the active document's action list directly in the homepage card without changing document state
 - Insert or refresh the in-doc tracker table on demand, prefixed with concise instructional text summarizing the sync rules
 - Periodic timed sweep (owned by the ActionSheet automation script) reconciles all docs referenced by ActionSheet rows, catching docs no one opened recently
 - Archive ActionSheet rows with `Status = Closed` and `Last Modified > 30 days` to the archive sheet
@@ -124,9 +126,9 @@ Preconditions:
 
 Primary Flow:
 1. Author writes a checklist item that begins with a person chip or an email address, with optional action text and an optional trailing `(Status)` token.
-2. Author opens the sidebar and clicks **Sync now**.
+2. Author opens the homepage card and clicks **Sync now**.
 3. The add-on scans the doc, detects each floating action by chip or email-at-start, creates a named range anchoring each one, and writes a row to the ActionSheet with the resolved assignee and `Status = Open` (or the trailing token value if present).
-4. The sidebar refreshes and shows the new actions.
+4. The homepage card refreshes and shows the new actions.
 
 Postconditions:
 - Every floating action in the document has exactly one corresponding ActionSheet row, and the pair agrees on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `NamedRangeId` (non-empty). The ActionSheet `Document` column display text equals the current document title. No ActionSheet rows for this document exist beyond those with a corresponding floating action.

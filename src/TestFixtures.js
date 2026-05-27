@@ -510,6 +510,29 @@ function setupTestFixtures(scenario) {
         }
         break;
 
+      case 'uc_c_pending_sync_refresh': {
+        var ucCPendingToken = ScriptApp.getOAuthToken();
+        var ucCPendingEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                          || Session.getActiveUser().getEmail();
+
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+
+        _tfInsertPersonChipListItem(ucCPendingToken, testDocId, ucCPendingEmail,
+                                    'UCC-PENDING: Schedule the kickoff meeting (Open)');
+        _tfAppendPersonChipListItem(ucCPendingToken, testDocId, ucCPendingEmail,
+                                    'UCC-PENDING: Review the project charter (In Review)');
+
+        syncDocument(testDocId);
+        insertTrackerTable(testDocId);
+
+        _tfAppendPersonChipListItem(ucCPendingToken, testDocId, ucCPendingEmail,
+                                    'UCC-PENDING: Add the follow-up action (Open)');
+
+        GasLogger.log('fixture.uc_c_pending_sync_refresh', { trackerRows: 2, pendingFloatingActions: 3 });
+        break;
+      }
+
       case 'uc1_new_floating':
       case 'default':
         // Legacy: AI-prefix floating action — sync assigns id=1.
@@ -1488,8 +1511,17 @@ function setupTestFixtures(scenario) {
 
       case 'end_test_session': {
         // Trash the clone and restore TEST_DOC_ID to the master template.
-        endTestSession();
+        endTestSession(testDocId);
         _TF_RESULT = { tag: 'fixture.end_test_session', data: {} };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'verify_consistency': {
+        _TF_RESULT = {
+          tag: 'fixture.verify_consistency',
+          data: verifyConsistencyForTest(testDocId)
+        };
         docAlreadyClosed = true;
         break;
       }
@@ -1590,7 +1622,12 @@ function verifyConsistencyForTest(docId) {
       docTitle: ''
     });
     GasLogger.flush();
-    return;
+    return {
+      ok: false,
+      issues: ['TEST_DOC_ID or TEST_SHEET_ID script properties not set'],
+      counts: { floating: 0, sheet: 0, tracker: 0, matched: 0 },
+      docTitle: ''
+    };
   }
 
   var result = {
@@ -1649,6 +1686,7 @@ function verifyConsistencyForTest(docId) {
   }
 
   GasLogger.flush();
+  return result;
 }
 
 /**
@@ -1866,7 +1904,12 @@ function beginTestSession(masterDocId) {
     var testSheetId = props.getProperty('TEST_SHEET_ID');
 
     var sheetFile = DriveApp.getFileById(testSheetId);
-    var folder    = sheetFile.getParents().next();
+    var folderIter = sheetFile.getParents();
+    var folder = folderIter.hasNext() ? folderIter.next() : null;
+
+    if (!folder || (folder.isTrashed && folder.isTrashed())) {
+      folder = DriveApp.getRootFolder();
+    }
 
     var now      = new Date();
     var dateStr  = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyyMMdd');
@@ -1874,6 +1917,9 @@ function beginTestSession(masterDocId) {
     var cloneName = 'GActionSheet-Test-session-' + dateStr + '-' + hexSuffix;
 
     var cloneFile = DriveApp.getFileById(masterDocId).makeCopy(cloneName, folder);
+    if (cloneFile.setTrashed) {
+      cloneFile.setTrashed(false);
+    }
     var cloneId   = cloneFile.getId();
 
     props.setProperty('TEST_DOC_TEMPLATE_ID', masterDocId);
@@ -1885,7 +1931,13 @@ function beginTestSession(masterDocId) {
       ctrl.getRange('B1').setValue(cloneId);
     }
 
-    GasLogger.log('session.begin', { cloneId: cloneId, cloneName: cloneName, masterDocId: masterDocId });
+    GasLogger.log('session.begin', {
+      cloneId: cloneId,
+      cloneName: cloneName,
+      masterDocId: masterDocId,
+      folderId: folder.getId(),
+      folderName: folder.getName()
+    });
   } catch (err) {
     GasLogger.log('session.begin.error', { msg: err.message, masterDocId: masterDocId });
   }
@@ -1895,14 +1947,16 @@ function beginTestSession(masterDocId) {
 /**
  * Trashes the clone created by beginTestSession and restores TEST_DOC_ID to
  * the master template ID stored in TEST_DOC_TEMPLATE_ID.
+ *
+ * @param {string} [cloneIdOverride]  Explicit clone ID to end. Falls back to TEST_DOC_ID.
  */
-function endTestSession() {
+function endTestSession(cloneIdOverride) {
   try {
     var props      = PropertiesService.getScriptProperties();
-    var cloneId    = props.getProperty('TEST_DOC_ID');
+    var cloneId    = cloneIdOverride || props.getProperty('TEST_DOC_ID');
     var masterId   = props.getProperty('TEST_DOC_TEMPLATE_ID');
 
-    if (cloneId) {
+    if (cloneId && cloneId !== masterId) {
       DriveApp.getFileById(cloneId).setTrashed(true);
     }
     if (masterId) {

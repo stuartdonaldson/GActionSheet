@@ -81,9 +81,12 @@ The script runs automatically via installed triggers. Manual execution:
 1. Open the tracking Spreadsheet
 2. `Action Sync` menu → `Sync` — runs a full sync across all discovered documents immediately
 
-In the Google Docs sidebar for an active document:
+In the Google Docs homepage card for an active document:
+- **Scan card** — refreshes the card from current doc, tracker, and sheet summary state without writing changes
 - **Sync now** — reconciles the doc's floating actions with the ActionSheet
-- **VerifySync** — performs a read-only comparison of floating actions, tracker rows when present, and ActionSheet rows for the same doc; the sidebar result card lists progress and mismatches
+- **VerifySync** — performs a read-only comparison of floating actions, tracker rows when present, and ActionSheet rows for the same doc; the verification card lists progress and mismatches
+- **Insert / refresh tracker** — inserts or refreshes the in-doc tracker table
+- **Sort** / **Filter** — reorder or narrow the rendered action list without changing the underlying document or sheet data
 
 To re-initialize triggers after a project clone or script re-creation:
 
@@ -142,7 +145,9 @@ minutes and obscures the real defect. Fix the first failure before proceeding.
 
 ### UC-A Tests
 
-**Prerequisites:** `npm run deploy:test` (clasp push + repoint TEST deployment).
+**Prerequisites:** `npm run deploy:test` (pushes `src/`, stamps the revision, and repoints the TEST deployment).
+
+Prefer the Web App HTTP fixtures for setup and state mutation whenever the UI itself is not the subject of the test. Reserve Playwright for assertions about the Docs homepage card and other user-visible add-on behavior.
 
 The `uc_a_clear` GAS fixture sets up the test doc automatically:
 1. Clears the ActionSheet and removes all named ranges from the test doc.

@@ -24,7 +24,7 @@
   "addOns": {
     "common": {
       "name": "Action Sync",
-      "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/logo-128.png",
+      "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-128.png",
       "homepageTrigger": {
         "runFunction": "buildHomepageCard"
       }

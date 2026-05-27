@@ -59,17 +59,33 @@ function _handleRunFixture(payload) {
 
   var fixtureName = payload.fixture   || '';
   var testDocId   = payload.testDocId || '';
+  var previousTestDocId = props.getProperty('TEST_DOC_ID') || '';
 
   if (!fixtureName) {
     return _jsonResponse({ error: 'fixture name required' });
   }
 
   // Allow caller to override TEST_DOC_ID for the duration of this invocation.
-  // setupTestFixtures reads TEST_DOC_ID from Script Properties.
-  if (testDocId) {
-    props.setProperty('TEST_DOC_ID', testDocId);
-  }
+  // begin/end session fixtures intentionally manage persistent session state;
+  // all other fixtures restore the prior TEST_DOC_ID when they finish.
+  var shouldRestoreTestDocId = !!testDocId &&
+    fixtureName !== 'begin_test_session' &&
+    fixtureName !== 'end_test_session';
 
-  var result = setupTestFixtures(fixtureName);
-  return _jsonResponse(result || { tag: 'fixture.' + fixtureName, data: {} });
+  try {
+    if (testDocId) {
+      props.setProperty('TEST_DOC_ID', testDocId);
+    }
+
+    var result = setupTestFixtures(fixtureName);
+    return _jsonResponse(result || { tag: 'fixture.' + fixtureName, data: {} });
+  } finally {
+    if (shouldRestoreTestDocId) {
+      if (previousTestDocId) {
+        props.setProperty('TEST_DOC_ID', previousTestDocId);
+      } else {
+        props.deleteProperty('TEST_DOC_ID');
+      }
+    }
+  }
 }

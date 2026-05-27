@@ -82,22 +82,12 @@ async function openDocSidebar(page, docId) {
   }
   await page.waitForSelector('.docs-title-outer', { timeout: 30000 });
 
-  // The add-on icon lives in the right-side panel strip.
-  // aria-label matches the add-on name field in appsscript.json addOns.common.name.
-  // We wait explicitly (up to 15s) because the panel renders after the doc title.
   const panelIcon = page.locator('[aria-label="Action Sync"]').first();
   try {
     await panelIcon.waitFor({ state: 'visible', timeout: 15000 });
     await panelIcon.click();
   } catch {
-    // Panel icon not found — fall back to Extensions > Action Sync submenu.
-    // This path is used in environments where the add-on is menu-only (not side-panel).
-    await page.getByRole('menuitem', { name: 'Extensions' }).click();
-    const addonTrigger = page.locator('[role="menuitem"]').filter({ hasText: 'Action Sync' }).first();
-    await addonTrigger.waitFor({ timeout: 10000 });
-    await addonTrigger.hover();
-    await page.getByRole('menuitem', { name: 'Open', exact: true }).waitFor({ timeout: 5000 });
-    await page.getByRole('menuitem', { name: 'Open', exact: true }).click();
+    throw new Error('Action Sync side-panel icon was not available');
   }
 
   // Allow sidebar iframe to load — GAS cold start can take 15-20s.
