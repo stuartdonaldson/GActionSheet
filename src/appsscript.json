@@ -32,7 +32,14 @@
     "docs": {
       "homepageTrigger": {
         "runFunction": "buildHomepageCard"
-      }
+      },
+      "createActionTriggers": [
+        {
+          "runFunction": "createActionTrigger",
+          "labelText": "Create action",
+          "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png"
+        }
+      ]
     }
   }
 }
