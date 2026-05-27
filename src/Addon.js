@@ -354,39 +354,40 @@ function _buildActionListSection(homepageState) {
 
     // Per-action mutations — only shown when the action is anchored.
     if (action.namedRangeId) {
-      // Status dropdown: fires immediately on selection change.
-      var currentStatus   = action.status || 'Open';
-      var statusFieldName = 'ss_' + i;   // unique per loop index
-      section.addWidget(
-        CardService.newSelectionInput()
-          .setType(CardService.SelectionInputType.DROPDOWN)
-          .setTitle('Set status')
-          .setFieldName(statusFieldName)
-          .addItem('Open',        'Open',        currentStatus === 'Open')
-          .addItem('In Progress', 'In Progress', currentStatus === 'In Progress')
-          .addItem('In Review',   'In Review',   currentStatus === 'In Review')
-          .addItem('Done',        'Done',        currentStatus === 'Done')
-          .addItem('Closed',      'Closed',      currentStatus === 'Closed')
-          .setOnChangeAction(
+      // One ImageButton per status + one delete button, all in a single row.
+      var _ICON_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/';
+      var _STATUS_ICONS = [
+        { status: 'Open',        icon: _ICON_BASE + 'status-open.svg',        alt: 'Set Open' },
+        { status: 'In Progress', icon: _ICON_BASE + 'status-inprogress.svg',  alt: 'Set In Progress' },
+        { status: 'In Review',   icon: _ICON_BASE + 'status-inreview.svg',    alt: 'Set In Review' },
+        { status: 'Done',        icon: _ICON_BASE + 'status-done.svg',        alt: 'Set Done' },
+        { status: 'Closed',      icon: _ICON_BASE + 'status-closed.svg',      alt: 'Set Closed' }
+      ];
+      var mutationRow = CardService.newButtonSet();
+      for (var si = 0; si < _STATUS_ICONS.length; si++) {
+        var sIcon = _STATUS_ICONS[si];
+        mutationRow.addButton(
+          CardService.newImageButton()
+            .setIconUrl(sIcon.icon)
+            .setAltText(sIcon.alt)
+            .setOnClickAction(
+              CardService.newAction()
+                .setFunctionName('onSetActionStatus')
+                .setParameters({ namedRangeId: action.namedRangeId, newStatus: sIcon.status })
+            )
+        );
+      }
+      mutationRow.addButton(
+        CardService.newImageButton()
+          .setIconUrl(_ICON_BASE + 'action-delete.svg')
+          .setAltText('Delete action')
+          .setOnClickAction(
             CardService.newAction()
-              .setFunctionName('onSetActionStatus')
-              .setParameters({ namedRangeId: action.namedRangeId, fieldName: statusFieldName })
+              .setFunctionName('onDeleteAction')
+              .setParameters({ namedRangeId: action.namedRangeId })
           )
       );
-
-      // Delete button.
-      section.addWidget(
-        CardService.newButtonSet()
-          .addButton(
-            CardService.newTextButton()
-              .setText('Delete')
-              .setOnClickAction(
-                CardService.newAction()
-                  .setFunctionName('onDeleteAction')
-                  .setParameters({ namedRangeId: action.namedRangeId })
-              )
-          )
-      );
+      section.addWidget(mutationRow);
     }
   }
 
@@ -662,20 +663,17 @@ function _deleteActionRowFromSheet(namedRangeId) {
 // ---------------------------------------------------------------------------
 
 /**
- * Card dropdown onChange handler: update the action status to the selected value.
- * Called with e.parameters.namedRangeId and e.parameters.fieldName.
- * The selected value is read from e.formInputs[fieldName][0].
+ * Card ImageButton handler: set the action status to the value in
+ * e.parameters.newStatus.  No form input required — status is baked into
+ * the button's action parameters at render time.
  */
 function onSetActionStatus(e) {
   var namedRangeId = e.parameters.namedRangeId;
-  var fieldName    = e.parameters.fieldName;
-  var newStatus    = e.formInputs && e.formInputs[fieldName]
-    ? e.formInputs[fieldName][0]
-    : null;
+  var newStatus    = e.parameters.newStatus;
 
   if (!newStatus) {
     return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('No status selected'))
+      .setNotification(CardService.newNotification().setText('No status specified'))
       .build();
   }
 
