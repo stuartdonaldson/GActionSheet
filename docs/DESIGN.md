@@ -109,7 +109,7 @@ Omitting `urlFetchWhitelist` produces a hard error at call time, not a manifest 
 ```mermaid
 graph LR
     subgraph AddOn["Add-on project (standalone, Workspace Add-on for Docs)"]
-        Sidebar["Sidebar UI<br/>(HTML service)"]
+        Sidebar["Homepage Card UI<br/>(CardService)"]
         Scanner["Action Scanner<br/>(DocumentApp + REST namedRanges)"]
         NRM["Named Range Manager<br/>(REST batchUpdate)"]
         Tracker["Tracker Table Renderer<br/>(REST batchUpdate)"]
@@ -161,12 +161,12 @@ The two subgraphs share no arrow; communication is solely through `ActionSheet` 
 
 | Component | Responsibility |
 |-----------|---------------|
-| Sidebar UI | Renders the action list for the active doc; surfaces **Sync now**, **VerifySync**, **Insert / refresh tracker**, warning rows, and orphan-anchor prompts |
+| Sidebar UI | Renders the homepage card for the active doc; surfaces **Scan card**, **Sync now**, **VerifySync**, **Insert / refresh tracker**, sort/filter controls, version footer, warning rows, and orphan-anchor prompts |
 | Action Scanner | Reads the active doc via DocumentApp: walks paragraphs and list items, identifies floating actions by two rules — (1) first inline child is a PERSON chip, or (2) first text content begins with a valid email address (`word@word.tld`); extracts assignee email/name, action text, and trailing `(Status)` token; reads existing named ranges via the REST API to resolve identity |
 | Named Range Manager | Creates a named range over a newly seen action paragraph; deletes a range when its action is no longer present; re-anchors when an existing row's range is missing but its action+assignee still match a paragraph |
 | Tracker Table Renderer | Inserts or refreshes the in-doc tracker table at its own named-range anchor, preceded by the instructional paragraph summarizing the sync rules; uses REST `batchUpdate` for atomic in-place replacement |
 | ActionSheet Sync | Reads ActionSheet rows for the active doc, compares with scanner output by `namedRangeId`, applies `Last Modified` precedence, writes diffs to either side; sets the automation project's `SYNC_IN_PROGRESS` script property on the ActionSheet before sheet writes |
-| VerifySync | Reads floating actions from the doc, reads ActionSheet rows for the same doc through a non-mutating Web App call, parses the in-doc tracker table when present, and reports progress plus mismatches in the sidebar result card; a floating action without an explicit trailing status token is itself a verification failure |
+| VerifySync | Reads floating actions from the doc, reads ActionSheet rows for the same doc through a non-mutating Web App call, parses the in-doc tracker table when present, and reports progress plus mismatches in the verification result card; a floating action without an explicit trailing status token is itself a verification failure |
 
 ### Automation project
 
@@ -287,7 +287,7 @@ A Sync or Sweep that finds no differences shall make no writes to any doc or she
 |---|---|
 | Framework | `pytest` + `python-docx` + `openpyxl` + Playwright (Node.js) |
 | Run command | `uv run pytest tests/ -x -v` |
-| Trigger mechanism for end-to-end tests | Playwright drives the sidebar in a live Doc (sidebar UI clicks **Sync now** / **Insert / refresh tracker**); for sweep / archive tests, Playwright runs the automation script's functions from the Apps Script editor |
+| Trigger mechanism for end-to-end tests | Use HTTP fixtures and Web App test hooks for setup whenever UI is not under test; use Playwright only for the live homepage card interactions in Docs (for example **Scan card**, **Sync now**, and action-list rendering). For sweep / archive tests, Playwright runs the automation script's functions from the Apps Script editor |
 | Declared methodology | `atdd-bdd` (end-to-end first; atomic tests support root-cause isolation) |
 
 ### Fixture Scope Architecture
