@@ -533,3 +533,17 @@ Wrote full test suite for UC-C (tracker table insert/refresh) and GTaskSheet-ly5
 - The per-`_invoke()` cost is a full browser launch + Google Sheets page load, paid even for fire-and-forget GAS menu clicks. A batch runner that keeps the browser open between clicks eliminates this for all but the outermost session boundaries.
 - Log-file polling (already used by Python `wait_for_log`) is the right sequencing primitive for the batch runner too — the Node.js script polls the same Drive-mapped log directory, enabling adaptive waits without fixed sleeps.
 - With accumulate-without-reset fixtures, all scenarios for a module can share a single post-batch download; tests filter by prefix rather than each downloading independently.
+
+## 2026-05-26 17:45:03
+
+### Summary
+Completed the UC-B molecule and its blocker chain. Fixed sheet-side assignee propagation so ActionSheet edits to Assignee, Action, and Status converge back to the floating action paragraph; added a dedicated UC-B assignee scenario and test; and updated reconciliation to remove stale duplicate ActionSheet rows left behind by re-anchor events.
+
+### Validation
+Ran npm run deploy:test and pytest -x tests/test_uc_b.py -q; the UC-B slice finished green with 4 passing tests.
+
+### Documentation and Cleanup
+Updated README.md, docs/CONTEXT.md, and docs/DESIGN.md to match the validated UC-B behavior and deploy flow. Renamed the per-document watermark from LAST_SYNC_TIME_<docId> to LAST_RECONCILED_AT_<docId> in code, kept backward-compatible reads from the legacy key, and documented that it represents last successful reconciliation rather than last data change.
+
+### Key Learnings
+Conflict ordering still needs a reconciliation watermark plus per-row Date Modified; collapsing both into a single last-synced value would lose last-writer-wins behavior. Re-anchor cleanup needs an explicit duplicate-removal pass in ActionSheet reconciliation because the doc can already be correct while stale duplicate sheet rows remain.

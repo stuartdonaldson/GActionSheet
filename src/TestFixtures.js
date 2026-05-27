@@ -842,10 +842,12 @@ function setupTestFixtures(scenario) {
 
       case 'uc_b_doc_wins':
       case 'uc_b_sheet_wins':
+      case 'uc_b_sheet_assignee_wins':
       case 'uc_b_conflict': {
         // -- Phase 1: build canonical 7-item state ---------------------------
         var ucbPrefix = resolvedScenario === 'uc_b_doc_wins'   ? 'UCB-DW: '
                       : resolvedScenario === 'uc_b_sheet_wins' ? 'UCB-SW: '
+                      : resolvedScenario === 'uc_b_sheet_assignee_wins' ? 'UCB-SA: '
                       : 'UCB-CF: ';
 
         doc.saveAndClose();
@@ -959,6 +961,32 @@ function setupTestFixtures(scenario) {
             }
           }
           GasLogger.log('fixture.uc_b_sheet_wins', { mutationsApplied: 3 });
+
+        } else if (resolvedScenario === 'uc_b_sheet_assignee_wins') {
+          // Mutate variant 6 assignee on the sheet side only.
+          // The final sync should propagate the assignee change to the doc.
+          var ucbASheet = ss.getSheetByName('Actions');
+          var ucbALastR = ucbASheet ? ucbASheet.getLastRow() : 1;
+          if (ucbASheet && ucbALastR > 1) {
+            var ucbAData    = ucbASheet.getRange(2, 1, ucbALastR - 1, SHEET_HEADERS.length).getValues();
+            var ucbADocFmls = ucbASheet.getRange(2, 7, ucbALastR - 1, 1).getFormulas();
+            for (var ucbARi = 0; ucbARi < ucbAData.length; ucbARi++) {
+              if (ucbADocFmls[ucbARi][0].indexOf(testDocId) === -1) continue;
+              var ucbAAssignee = ucbAData[ucbARi][2];
+              var ucbAAction   = ucbAData[ucbARi][4];
+              if (ucbAAssignee === 'bob_jones@example.com' &&
+                  ucbAAction.indexOf(ucbPrefix + 'Review the Q2 report') !== -1) {
+                var ucbARow = ucbARi + 2;
+                WriteGuard.wrap(function () {
+                  ucbASheet.getRange(ucbARow, 3).setValue('jane.smith@example.com');
+                  ucbASheet.getRange(ucbARow, 4).setValue('Jane Smith');
+                  ucbASheet.getRange(ucbARow, 9).setValue(new Date());
+                });
+                break;
+              }
+            }
+          }
+          GasLogger.log('fixture.uc_b_sheet_assignee_wins', { mutationsApplied: 1 });
 
         } else {
           // uc_b_conflict: one action where the doc is the newer edit (var 1),

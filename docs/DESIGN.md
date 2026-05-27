@@ -258,8 +258,12 @@ An action exists on **three** surfaces, but only **two** are authoritative:
 
 Conflict resolution applies only between the two authoritative surfaces using `Last Modified`. The renderer does not read tracker-table cell contents to decide anything; it always re-renders from the floating actions and ActionSheet row pair.
 
+The per-document script property `LAST_RECONCILED_AT_<docId>` is the reconciliation watermark used during Sync. It records the last successful doc-vs-sheet comparison for that document, not the last time a row's data changed.
+
 ### Identity
 `namedRangeId` is the durable identity. The ActionSheet stores it on every row. During scan, the add-on resolves each chip-led checklist paragraph to a `namedRangeId` by intersecting paragraph indices with the doc's existing named ranges. A paragraph with no covering named range becomes a new action; a named range whose covered paragraph is no longer chip-led becomes a candidate orphan and is offered for re-anchoring (if a paragraph with matching action text and assignee still exists) or surfaced in the sidebar for human resolution.
+
+During reconciliation, the Web App also removes stale duplicate ActionSheet rows when the current doc still contains the same action state under a newer anchor. This keeps UC-B's sheet-wins path at a 1:1 doc-row pairing even after a re-anchor event.
 
 ### Checked state is unreadable
 DocumentApp returns `null` for `isChecked()` on every task / checklist item, and the REST API exposes no equivalent field. The visual checkbox is **decorative only**. The truthful status is the trailing `(Status)` parenthesized token on the action paragraph. Components must never branch on visual checked state.

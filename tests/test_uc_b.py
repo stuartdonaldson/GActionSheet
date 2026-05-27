@@ -47,6 +47,7 @@ from tests.helpers.doc_inspect import load_doc, floating_actions
 
 _DW_PREFIX = "UCB-DW: "   # uc_b_doc_wins scenario
 _SW_PREFIX = "UCB-SW: "   # uc_b_sheet_wins scenario
+_SA_PREFIX = "UCB-SA: "   # uc_b_sheet_assignee_wins scenario
 _CF_PREFIX = "UCB-CF: "   # uc_b_conflict scenario
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,7 @@ _VAR5_STATUS_ORIG = "Open"
 _VAR6_ACTION_BASE = "Review the Q2 report"
 _VAR6_STATUS_ORIG = "Open"
 _VAR6_STATUS_MUT  = "In Review"
+_VAR6_ASSIGNEE_MUT = _JANE_EMAIL
 
 _VAR7_ACTION_BASE = "Complete the project documentation"
 
@@ -270,7 +272,7 @@ def test_uc_b_sheet_wins(uc_b_state, settings):
     Mutations applied by the fixture before the final sync:
       Var 4: Status Done → Closed
       Var 5: Action "Approve the budget proposal" → "Approve the revised budget"
-      Var 6: Status Open → In Review
+            Var 6: Status Open → In Review
     """
     chip_email = settings["testAssigneeEmail"]
 
@@ -356,6 +358,65 @@ def test_uc_b_sheet_wins(uc_b_state, settings):
     )
 
     _verify_consistency(fa, rows, context="uc_b_sheet_wins")
+
+
+def test_uc_b_sheet_assignee_wins(test_sheet_id, test_doc_id):
+    """
+    AC2 + AC3: A sheet-side assignee edit propagates to the floating action
+    paragraph after Sync; named-range anchor preserved; no duplicate rows.
+    """
+    batch_invoke([
+        {"menuItem": "Test: Setup Fixture", "arg": "uc_b_sheet_assignee_wins",
+         "awaitTag": "fixture.uc_b_sheet_assignee_wins", "timeoutMs": 300000},
+        {"menuItem": "Test: Sync Document", "arg": test_doc_id,
+         "awaitTag": "sync.complete", "timeoutMs": 180000},
+    ])
+
+    ws = load_sheet(download_xlsx(test_sheet_id), sheet_name="Actions")
+    all_rows = rows_for_doc(ws, test_doc_id)
+    rows = [r for r in all_rows if (r.get("Action") or "").startswith(_SA_PREFIX)]
+
+    assert len(rows) == 6, (
+        f"[uc_b_sheet_assignee_wins] Expected 6 UCB-SA: rows, got {len(rows)}.\n  Rows: {rows}"
+    )
+
+    var6_rows = [r for r in rows
+                 if r.get("Assignee Email") == _VAR6_ASSIGNEE_MUT
+                 and _VAR6_ACTION_BASE in (r.get("Action") or "")]
+    assert len(var6_rows) == 1, (
+        f"[uc_b_sheet_assignee_wins] Variant 6 sheet row not found for {_VAR6_ASSIGNEE_MUT!r}. "
+        f"Rows: {rows}"
+    )
+
+    stale_var6_rows = [r for r in rows
+                       if r.get("Assignee Email") == _BOB_EMAIL
+                       and _VAR6_ACTION_BASE in (r.get("Action") or "")]
+    assert not stale_var6_rows, (
+        f"[uc_b_sheet_assignee_wins] Variant 6 should no longer be assigned to {_BOB_EMAIL!r}. "
+        f"Found: {stale_var6_rows}"
+    )
+
+    doc = load_doc(download_docx(test_doc_id))
+    fa_all = floating_actions(doc)
+    fa = [a for a in fa_all if (a.get("action") or "").startswith(_SA_PREFIX)]
+
+    var6_fa = [a for a in fa
+               if a.get("assignee_email") == _VAR6_ASSIGNEE_MUT
+               and _VAR6_ACTION_BASE in (a.get("action") or "")]
+    assert len(var6_fa) == 1, (
+        f"[uc_b_sheet_assignee_wins] Variant 6 floating action not found for {_VAR6_ASSIGNEE_MUT!r}. "
+        f"Floating actions: {fa}"
+    )
+
+    stale_var6_fa = [a for a in fa
+                     if a.get("assignee_email") == _BOB_EMAIL
+                     and _VAR6_ACTION_BASE in (a.get("action") or "")]
+    assert not stale_var6_fa, (
+        f"[uc_b_sheet_assignee_wins] Variant 6 should no longer be assigned to {_BOB_EMAIL!r}. "
+        f"Found: {stale_var6_fa}"
+    )
+
+    _verify_consistency(fa, rows, context="uc_b_sheet_assignee_wins")
 
 
 # ---------------------------------------------------------------------------

@@ -155,6 +155,7 @@ Primary Flow:
 
 Postconditions:
 - After Sync, every floating action in the document has exactly one corresponding ActionSheet row. The pair is consistent on: `Assignee Email` and `Assignee Name` (match the floating action's assignee), `Action` text (exact match), `Status` (exact match), `NamedRangeId` (stable, non-empty), and `Document` column display text (equals the current document title). No ActionSheet rows exist for floating actions that have been deleted; no floating actions exist without a matching ActionSheet row.
+- If an earlier re-anchor left a stale duplicate ActionSheet row for the same action, the next successful Sync removes the stale row so the doc returns to a 1:1 doc-row pairing.
 - After the next tracker refresh, the in-doc tracker row for that action shows the same `Action` and `Status` values.
 - `Last Modified` on both sides reflects the time of the original user edit.
 

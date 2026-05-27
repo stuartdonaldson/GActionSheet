@@ -26,9 +26,11 @@ function syncDocument(docId) {
       return;
     }
 
-    var props        = PropertiesService.getScriptProperties();
-    var lastSyncStr  = props.getProperty('LAST_SYNC_TIME_' + docId);
-    var lastSyncTime = lastSyncStr ? new Date(lastSyncStr) : new Date(0);
+    var props              = PropertiesService.getScriptProperties();
+    var reconciledAtKey    = 'LAST_RECONCILED_AT_' + docId;
+    var legacyLastSyncKey  = 'LAST_SYNC_TIME_' + docId;
+    var lastSyncStr        = props.getProperty(reconciledAtKey) || props.getProperty(legacyLastSyncKey);
+    var lastSyncTime       = lastSyncStr ? new Date(lastSyncStr) : new Date(0);
 
     var doc;
     try {
@@ -44,7 +46,7 @@ function syncDocument(docId) {
 
     if (floatingActions.length === 0) {
       doc.saveAndClose();
-      props.setProperty('LAST_SYNC_TIME_' + docId, new Date().toISOString());
+      props.setProperty(reconciledAtKey, new Date().toISOString());
       GasLogger.log('sync.complete', { docId: docId, anchored: 0, upserted: 0, updated: 0 });
       return;
     }
@@ -73,12 +75,18 @@ function syncDocument(docId) {
 
     var sheetWins = syncResult.sheetWins || [];
     for (var i = 0; i < sheetWins.length; i++) {
-      _applySheetWinToDoc(doc, sheetWins[i].namedRangeId, sheetWins[i].action, sheetWins[i].status);
+      _applySheetWinToDoc(
+        doc,
+        sheetWins[i].namedRangeId,
+        sheetWins[i].action,
+        sheetWins[i].status,
+        sheetWins[i].assigneeEmail
+      );
     }
 
     doc.saveAndClose();
     SpreadsheetApp.flush();
-    props.setProperty('LAST_SYNC_TIME_' + docId, new Date().toISOString());
+    props.setProperty(reconciledAtKey, new Date().toISOString());
 
     GasLogger.log('sync.complete', {
       docId:    docId,
@@ -134,6 +142,7 @@ function _syncSheetRowToDoc(sheet, row) {
   try {
     var rowData = sheet.getRange(row, 1, 1, SHEET_HEADERS.length).getValues()[0];
     var namedRangeId = rowData[0];  // Col 1: NamedRangeId
+    var assigneeEmail = rowData[2]; // Col 3: Assignee Email
     var action       = rowData[4];  // Col 5: Action
     var status       = rowData[5];  // Col 6: Status
     // getValues() returns the display text for HYPERLINK formulas; getFormula() returns the raw
@@ -150,7 +159,7 @@ function _syncSheetRowToDoc(sheet, row) {
 
     // Open the doc and apply the sheet-side edits
     var doc = DocumentApp.openById(docId);
-    _applySheetWinToDoc(doc, namedRangeId, action, status);
+    _applySheetWinToDoc(doc, namedRangeId, action, status, assigneeEmail);
     doc.saveAndClose();
   } catch (err) {
     GasLogger.log('sync.sheet-to-doc.error', {
@@ -365,7 +374,7 @@ function _countNew(anchorResults) {
 
 /**
  * POSTs the doc state to the Web App for conflict resolution and sheet writes.
- * Returns { upserted, updated, sheetWins: [{ namedRangeId, action, status }] }.
+ * Returns { upserted, updated, sheetWins: [{ namedRangeId, action, status, assigneeEmail }] }.
  *
  * @param {Array}  anchorResults       Output of _anchorNewActions.
  * @param {string} docUrl
@@ -467,8 +476,9 @@ function _markDocNotFound(docId) {
  * @param {string} namedRangeId
  * @param {string} newAction
  * @param {string} newStatus
+ * @param {string} newAssigneeEmail
  */
-function _applySheetWinToDoc(doc, namedRangeId, newAction, newStatus) {
+function _applySheetWinToDoc(doc, namedRangeId, newAction, newStatus, newAssigneeEmail) {
   var namedRanges = doc.getNamedRanges();
   for (var i = 0; i < namedRanges.length; i++) {
     if (namedRanges[i].getId() !== namedRangeId) continue;
@@ -487,7 +497,7 @@ function _applySheetWinToDoc(doc, namedRangeId, newAction, newStatus) {
       if (pType === DocumentApp.ElementType.LIST_ITEM)  para = parent.asListItem();
       else if (pType === DocumentApp.ElementType.PARAGRAPH) para = parent.asParagraph();
     }
-    if (para) _updateParaTextFromSheet(para, newAction, newStatus);
+    if (para) _updateParaTextFromSheet(para, newAction, newStatus, newAssigneeEmail);
     break;
   }
 }
@@ -513,8 +523,15 @@ function _normalizeMissingFloatingActionStatuses(floatingActions) {
  * @param {GoogleAppsScript.Document.Paragraph|ListItem} para
  * @param {string} newAction
  * @param {string} newStatus
+ * @param {string} newAssigneeEmail
  */
-function _updateParaTextFromSheet(para, newAction, newStatus) {
+function _updateParaTextFromSheet(para, newAction, newStatus, newAssigneeEmail) {
+  var currentAssigneeEmail = '';
+  var firstChild = para.getNumChildren() > 0 ? para.getChild(0) : null;
+  if (firstChild && firstChild.getType() === DocumentApp.ElementType.PERSON) {
+    currentAssigneeEmail = firstChild.asPerson().getEmail() || '';
+  }
+
   var n = para.getNumChildren();
   for (var i = 0; i < n; i++) {
     var child = para.getChild(i);
@@ -522,17 +539,33 @@ function _updateParaTextFromSheet(para, newAction, newStatus) {
     var textEl  = child.asText();
     var current = textEl.getText();
 
-    var prefix     = '';
-    var emailMatch = current.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+\s+)/i);
-    if (emailMatch) {
-      prefix = emailMatch[1];
-    } else if (current.length > 0 && current.charAt(0) === ' ') {
-      prefix = ' ';
+    var emailMatch = current.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s+/i);
+    if (!currentAssigneeEmail && emailMatch) {
+      currentAssigneeEmail = emailMatch[1];
+    }
+
+    var normalizedAssigneeEmail = newAssigneeEmail || currentAssigneeEmail;
+    var assigneeChanged = normalizedAssigneeEmail && normalizedAssigneeEmail !== currentAssigneeEmail;
+    var prefix = '';
+
+    if (firstChild && firstChild.getType() === DocumentApp.ElementType.PERSON) {
+      if (assigneeChanged) {
+        para.removeChild(firstChild);
+        prefix = normalizedAssigneeEmail + ' ';
+      } else {
+        prefix = ' ';
+      }
+    } else if (normalizedAssigneeEmail) {
+      prefix = normalizedAssigneeEmail + ' ';
     }
 
     var normalizedStatus = newStatus || 'Open';
     var newContent = newAction + ' (' + normalizedStatus + ')';
-    textEl.setText(prefix + newContent);
+    var replacement = prefix + newContent;
+    if (current.length > 0) {
+      textEl.deleteText(0, current.length - 1);
+    }
+    textEl.insertText(0, replacement);
     return;
   }
 }

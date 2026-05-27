@@ -150,6 +150,14 @@ function _findMaxId(existingMap) {
   return max;
 }
 
+function _rowIdentityKey(assigneeEmail, action, status) {
+  return [
+    assigneeEmail || '',
+    action || '',
+    status || 'Open'
+  ].join('\u0001');
+}
+
 /**
  * Bidirectional sync handler.  Compares the doc state snapshot against the
  * current ActionSheet rows using the last-sync timestamp as the conflict anchor.
@@ -159,7 +167,7 @@ function _findMaxId(existingMap) {
  *     docState: [{ namedRangeId, assigneeEmail, assigneeName, actionText, status }] }
  *
  * Response shape:
- *   { upserted, updated, sheetWins: [{ namedRangeId, action, status }] }
+ *   { upserted, updated, sheetWins: [{ namedRangeId, action, status, assigneeEmail }] }
  */
 function _handleSyncActionRows(payload) {
   var ss           = SpreadsheetApp.getActiveSpreadsheet();
@@ -187,12 +195,21 @@ function _handleSyncActionRows(payload) {
   var upserted    = 0;
   var updated     = 0;
   var sheetWins   = [];
+  var docStateByNamedRangeId = {};
+  var docStateIdentitySet    = {};
+
+  for (var dsi = 0; dsi < docState.length; dsi++) {
+    var docRow = docState[dsi];
+    docStateByNamedRangeId[docRow.namedRangeId] = true;
+    docStateIdentitySet[_rowIdentityKey(docRow.assigneeEmail, docRow.actionText, docRow.status)] = true;
+  }
 
   // Load col 7 formulas for orphan detection (need docId to match rows to this doc).
   var lastRow      = actionsSheet.getLastRow();
   var formulasCol7 = lastRow >= 2
     ? actionsSheet.getRange(2, 7, lastRow - 1, 1).getFormulas()
     : [];
+  var duplicateRowIndexes = [];
 
   WriteGuard.wrap(function () {
     for (var i = 0; i < docState.length; i++) {
@@ -219,6 +236,7 @@ function _handleSyncActionRows(payload) {
         // Sheet was edited after last sync — sheet wins; SyncManager updates doc.
         sheetWins.push({
           namedRangeId: row.namedRangeId,
+          assigneeEmail: existing.assigneeEmail,
           action:       existing.action,
           status:       existing.status
         });
@@ -228,7 +246,12 @@ function _handleSyncActionRows(payload) {
         // Doc is authoritative — update sheet row only when content values differ.
         var rowIdx     = existing.rowIndex;
         var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
-        if (existing.action !== row.actionText || existing.status !== row.status) {
+        if (existing.assigneeEmail !== row.assigneeEmail ||
+            existing.assigneeName !== row.assigneeName ||
+            existing.action !== row.actionText ||
+            existing.status !== row.status) {
+          actionsSheet.getRange(rowIdx, 3).setValue(row.assigneeEmail || '');
+          actionsSheet.getRange(rowIdx, 4).setValue(row.assigneeName  || '');
           actionsSheet.getRange(rowIdx, 5).setValue(row.actionText || '');
           actionsSheet.getRange(rowIdx, 6).setValue(row.status     || 'Open');
           actionsSheet.getRange(rowIdx, 9).setValue(now);
@@ -243,13 +266,29 @@ function _handleSyncActionRows(payload) {
     // Detect orphaned rows: rows for this doc whose named range is gone from the doc.
     if (docId) {
       for (var nrId in existingMap) {
-        if (activeNrIdSet[nrId]) continue; // still in the doc
+        if (docStateByNamedRangeId[nrId]) continue;
         var entry = existingMap[nrId];
         var fIdx  = entry.rowIndex - 2; // formulasCol7 is 0-based from row 2
         var formula = (fIdx >= 0 && fIdx < formulasCol7.length) ? formulasCol7[fIdx][0] : '';
         if (formula.indexOf(docId) === -1) continue; // belongs to a different doc
+
+        // If the current doc still has the same action state under a different
+        // named range, this row is a stale duplicate left behind by a re-anchor.
+        var identityKey = _rowIdentityKey(entry.assigneeEmail, entry.action, entry.status);
+        if (docStateIdentitySet[identityKey]) {
+          duplicateRowIndexes.push(entry.rowIndex);
+          continue;
+        }
+
+        if (activeNrIdSet[nrId]) continue; // still in the doc
+
         actionsSheet.getRange(entry.rowIndex, 10).setValue('Deleted');
         GasLogger.log('sync.info', { msg: 'Sync Status — Deleted', row: entry.rowIndex, namedRangeId: nrId });
+      }
+
+      duplicateRowIndexes.sort(function (a, b) { return b - a; });
+      for (var dri = 0; dri < duplicateRowIndexes.length; dri++) {
+        actionsSheet.deleteRow(duplicateRowIndexes[dri]);
       }
     }
   });

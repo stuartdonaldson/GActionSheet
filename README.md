@@ -2,7 +2,7 @@
 
 Workspace Add-on that tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Actions are recognized natively as checklist items led by a person chip — no typed prefix syntax — and anchored with named ranges so identity survives edits.
 
-**Status:** Design
+**Status:** Active prototype
 
 ---
 
@@ -11,9 +11,10 @@ Workspace Add-on that tracks action items inside Google Docs and aggregates them
 1. In any Google Doc, type a checklist item that begins with a person chip (`@name`). The chip's email is the assignee.
 2. Open the GActionSheet sidebar (Extensions → GActionSheet).
 3. Click **Sync now**. The sidebar lists every action in the doc; the ActionSheet receives a row for each, anchored by a named range.
-4. Status lives at the end of the line in parentheses, e.g. `(Open)`, `(Closed)`, or any free-form value you prefer. `(Open)` is the default.
-5. Click **VerifySync** to compare the doc's floating actions, the in-doc tracker table when present, and the ActionSheet rows for this document. The sidebar shows the verification steps and any mismatches it finds.
-5. Click **Insert / refresh tracker** to write a summary table into the doc, prefixed with the sync rules.
+4. Later edits on either authoritative side converge on the next Sync: ActionSheet edits to `Status`, `Action`, or `Assignee` update the floating action paragraph, and doc-side edits update the matching ActionSheet row without leaving duplicate rows behind.
+5. Status lives at the end of the line in parentheses, e.g. `(Open)`, `(Closed)`, or any free-form value you prefer. `(Open)` is the default.
+6. Click **VerifySync** to compare the doc's floating actions, the in-doc tracker table when present, and the ActionSheet rows for this document. The sidebar shows the verification steps and any mismatches it finds.
+7. Click **Insert / refresh tracker** to write a summary table into the doc, prefixed with the sync rules.
 
 A timed sweep on the ActionSheet picks up changes in docs no one opened recently. Closed actions older than 30 days are moved to an archive sheet.
 
@@ -36,13 +37,15 @@ Two Apps Script projects are deployed independently:
 | **GActionSheet Add-on** | Standalone script with Workspace Add-on manifest (Docs) | Sidebar UI, per-doc Sync, named ranges, tracker-table render |
 | **ActionSheet Automation** | Container-bound script on the ActionSheet spreadsheet | `onEdit` timestamp stamping, timed sweep, archiving |
 
+Use the repo scripts instead of calling `clasp` directly:
+
 ```bash
-clasp login
-# Add-on project
-cd src/addon && clasp clone <addonScriptId> && clasp push
-# Automation project
-cd ../automation && clasp clone <automationScriptId> && clasp push
+npm install
+npm run push
+npm run deploy:test
 ```
+
+`npm run deploy:test` pushes the Apps Script sources and repoints the TEST web-app deployment to the new revision. `npm run deploy:prod` does the same for production.
 
 ### First run
 
