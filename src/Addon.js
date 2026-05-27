@@ -5,10 +5,18 @@
  * Entry point: buildHomepageCard() — registered as homepageTrigger in appsscript.json.
  */
 
-function buildHomepageCard(eventOrVerificationResult) {
+/**
+ * @param {object=} eventOrVerificationResult
+ * @param {object=} opts
+ * @param {boolean=} opts.skipSheetFetch  When true, omit the verify_action_rows HTTP call.
+ *   Used after sidebar mutations where the sheet was just patched and is known correct —
+ *   avoids a second ~3s WebApp round-trip just to rebuild the card.
+ */
+function buildHomepageCard(eventOrVerificationResult, opts) {
   var verificationResult = _isVerificationResult(eventOrVerificationResult)
     ? eventOrVerificationResult
     : null;
+  var skipSheetFetch = !!(opts && opts.skipSheetFetch);
 
   try {
     var doc = _resolveActiveDocForRead(DocumentApp.getActiveDocument());
@@ -22,7 +30,7 @@ function buildHomepageCard(eventOrVerificationResult) {
         )
       );
     } else {
-      var homepageState = _buildHomepageState(doc, verificationResult);
+      var homepageState = _buildHomepageState(doc, verificationResult, skipSheetFetch);
       card
         .addSection(_buildOverviewSection(homepageState))
         .addSection(_buildActionButtonsSection(homepageState))
@@ -241,18 +249,20 @@ function _safeGetDocTitle(doc) {
   }
 }
 
-function _buildHomepageState(doc, verificationResult) {
+function _buildHomepageState(doc, verificationResult, skipSheetFetch) {
   var floatingActions = _collectFloatingActionState(doc);
   var tracker = _readTrackerTableState(doc);
   var sheetRows = [];
   var syncState = 'No actions found';
   var syncMeta = 'Add a floating action and click Sync now.';
 
-  try {
-    sheetRows = _fetchSheetRowsForVerification(doc.getUrl());
-  } catch (e) {
-    syncState = 'Status unavailable';
-    syncMeta = 'VerifySync can confirm the current state.';
+  if (!skipSheetFetch) {
+    try {
+      sheetRows = _fetchSheetRowsForVerification(doc.getUrl());
+    } catch (e) {
+      syncState = 'Status unavailable';
+      syncMeta = 'VerifySync can confirm the current state.';
+    }
   }
 
   if (verificationResult) {
@@ -265,6 +275,10 @@ function _buildHomepageState(doc, verificationResult) {
     if (missingAnchors > 0) {
       syncState = 'Needs sync';
       syncMeta = missingAnchors + ' action(s) still need a named-range anchor.';
+    } else if (skipSheetFetch) {
+      // Post-mutation fast path: sheet was just patched, doc is source of truth.
+      syncState = 'Tracked';
+      syncMeta = floatingActions.length + ' action(s) recorded for this document.';
     } else if (sheetRows.length === floatingActions.length) {
       syncState = 'Tracked';
       syncMeta = sheetRows.length + ' action(s) recorded for this document.';
@@ -278,7 +292,7 @@ function _buildHomepageState(doc, verificationResult) {
     docName: _safeGetDocTitle(doc),
     floatingActions: floatingActions,
     trackerFound: tracker.found,
-    sheetRowCount: sheetRows.length,
+    sheetRowCount: skipSheetFetch ? floatingActions.length : sheetRows.length,
     syncState: syncState,
     syncMeta: syncMeta,
     statusBreakdown: _summarizeStatuses(floatingActions)
@@ -484,14 +498,18 @@ function _buildSidebarAction(functionName) {
  * @param {string=} docId  Optional — resolved from getActiveDocument() when omitted.
  */
 function sidebarSetStatus(namedRangeId, newStatus, docId) {
+  var t0 = Date.now();
   if (!docId) {
     var activeDoc = DocumentApp.getActiveDocument();
     docId = activeDoc ? activeDoc.getId() : '';
   }
+
   var doc = DocumentApp.openById(docId);
+  var t1 = Date.now(); // after openById
 
   var namedRanges = doc.getNamedRanges();
   var found = false;
+  var hasTracker = false;
   for (var i = 0; i < namedRanges.length; i++) {
     var nr = namedRanges[i];
     if (nr.getId() !== namedRangeId) continue;
@@ -514,22 +532,40 @@ function sidebarSetStatus(namedRangeId, newStatus, docId) {
     }
 
     if (para) {
-      // Read current action text and assignee, then rewrite with the new status.
       var currentAction = _readActionTextFromPara(para);
       _updateParaTextFromSheet(para, currentAction, newStatus, '');
+      hasTracker = _readTrackerTableState(doc).found;
       found = true;
     }
     break;
   }
+  var t2 = Date.now(); // after para update + tracker check
 
   doc.saveAndClose();
+  var t3 = Date.now(); // after saveAndClose
 
   if (found) {
-    // Targeted sheet update — avoids the full syncDocument round-trip (slow) and the
-    // sheetWins revert bug (syncDocument could overwrite the paragraph back to the old
-    // status if the row carried a stale 'Dirty' Sync Status from a prior onEdit).
     _patchActionStatus(namedRangeId, newStatus);
-    GasLogger.log('sidebar.status-set.complete', { namedRangeId: namedRangeId, newStatus: newStatus });
+    var t4 = Date.now(); // after patch HTTP call
+
+    if (hasTracker) {
+      insertTrackerTable(docId);
+    }
+    var t5 = Date.now(); // after tracker refresh (or same as t4 when no tracker)
+
+    GasLogger.log('sidebar.status-set.complete', {
+      namedRangeId: namedRangeId,
+      newStatus:    newStatus,
+      hasTracker:   hasTracker,
+      ms: {
+        openById:       t1 - t0,
+        findAndUpdate:  t2 - t1,
+        saveAndClose:   t3 - t2,
+        patchHttp:      t4 - t3,
+        trackerRefresh: t5 - t4,
+        total:          t5 - t0
+      }
+    });
   } else {
     GasLogger.log('sidebar.status-set.warn', { msg: 'Named range not found', namedRangeId: namedRangeId });
   }
@@ -715,10 +751,18 @@ function onSetActionStatus(e) {
   }
 
   try {
+    var tA = Date.now();
     sidebarSetStatus(namedRangeId, newStatus);
+    var tB = Date.now();
+    var card = buildHomepageCard(null, { skipSheetFetch: true });
+    var tC = Date.now();
+    GasLogger.log('sidebar.status-set.handler', {
+      ms: { sidebarSetStatus: tB - tA, buildHomepageCard: tC - tB, total: tC - tA }
+    });
+    GasLogger.flush();
     return CardService.newActionResponseBuilder()
       .setNotification(CardService.newNotification().setText('Status set to ' + newStatus))
-      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+      .setNavigation(CardService.newNavigation().updateCard(card))
       .build();
   } catch (err) {
     GasLogger.log('addon.setstatus.error', { msg: err.message });
@@ -738,7 +782,9 @@ function onDeleteAction(e) {
   sidebarDeleteAction(namedRangeId);
   return CardService.newActionResponseBuilder()
     .setNotification(CardService.newNotification().setText('Action deleted'))
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+    .setNavigation(CardService.newNavigation().updateCard(
+      buildHomepageCard(null, { skipSheetFetch: true })
+    ))
     .build();
 }
 
