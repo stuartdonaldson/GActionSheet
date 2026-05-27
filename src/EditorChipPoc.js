@@ -48,15 +48,14 @@ function createActionTrigger(e) { // eslint-disable-line no-unused-vars
  * Triggered when a user hovers over an action smart-chip link.
  * Registered via appsscript.json addOns.docs.linkPreviewTriggers.
  * Log tag: LINK_PREVIEW
- * Full implementation: GTaskSheet-6ov.5
  *
  * @param {GoogleAppsScript.Addons.EventObject} e
  * @returns {GoogleAppsScript.Card_Service.Card}
  */
 function onLinkPreview(e) { // eslint-disable-line no-unused-vars
-  GasLogger.log('LINK_PREVIEW', { url: e && e.docs && e.docs.matchedUrl && e.docs.matchedUrl.url });
-  // stub — GTaskSheet-6ov.5
-  return _poc_buildPreviewStubCard(e);
+  var url = (e && e.docs && e.docs.matchedUrl && e.docs.matchedUrl.url) || '';
+  GasLogger.log('LINK_PREVIEW', { url: url });
+  return _poc_buildPreviewCard(url);
 }
 
 // ---------------------------------------------------------------------------
@@ -169,26 +168,61 @@ function _poc_buildCreationCard() {
 }
 
 /**
- * Stub preview card shown on link hover until GTaskSheet-6ov.5 is implemented.
+ * Builds the smart-chip hover preview card for an action URL.
+ * Looks up the action in the ActionSheet by namedRangeId.
  *
- * @param {GoogleAppsScript.Addons.EventObject} e
+ * @param {string} url  The matched action URL
  * @returns {GoogleAppsScript.Card_Service.Card}
  */
-function _poc_buildPreviewStubCard(e) {
-  var url = (e && e.docs && e.docs.matchedUrl && e.docs.matchedUrl.url) || '';
+function _poc_buildPreviewCard(url) {
   var namedRangeId = url.replace(_POC_ACTION_URL_BASE, '');
+  var action       = _poc_lookupAction(namedRangeId);
+
+  var title  = (action && action.action)        || namedRangeId || 'GActionSheet Action';
+  var status = (action && action.status)         || '';
+  var assignee = (action && action.assigneeEmail) || '';
+
+  var header = CardService.newCardHeader()
+    .setTitle(title)
+    .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png')
+    .setImageStyle(CardService.ImageStyle.SQUARE);
+
+  var section = CardService.newCardSection();
+  if (status) {
+    section.addWidget(CardService.newDecoratedText().setTopLabel('Status').setText(status));
+  }
+  if (assignee) {
+    section.addWidget(CardService.newDecoratedText().setTopLabel('Assignee').setText(assignee));
+  }
+  if (!status && !assignee) {
+    section.addWidget(CardService.newTextParagraph().setText('No details available.'));
+  }
 
   return CardService.newCardBuilder()
-    .setHeader(
-      CardService.newCardHeader()
-        .setTitle('GActionSheet Action')
-        .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png')
-    )
-    .addSection(
-      CardService.newCardSection()
-        .addWidget(CardService.newTextParagraph().setText(namedRangeId || 'Action preview — GTaskSheet-6ov.5'))
-    )
+    .setHeader(header)
+    .addSection(section)
     .build();
+}
+
+/**
+ * Looks up a single action row from the ActionSheet by namedRangeId.
+ * Uses verify_action_rows with no docUrl filter (returns all rows) then finds match.
+ *
+ * @param {string} namedRangeId
+ * @returns {Object|null}  Row object {namedRangeId, id, assigneeEmail, assigneeName, action, status} or null
+ */
+function _poc_lookupAction(namedRangeId) {
+  if (!namedRangeId) return null;
+
+  var result = _poc_callWebApp('verify_action_rows', { docUrl: '' });
+  if (!result || !result.rows) return null;
+
+  for (var i = 0; i < result.rows.length; i++) {
+    if (result.rows[i].namedRangeId === namedRangeId) {
+      return result.rows[i];
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

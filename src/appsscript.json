@@ -39,6 +39,19 @@
           "labelText": "Create action",
           "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png"
         }
+      ],
+      "linkPreviewTriggers": [
+        {
+          "labelText": "GActionSheet Action",
+          "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png",
+          "patterns": [
+            {
+              "hostPattern": "stuartdonaldson.github.io",
+              "pathPrefix": "/GActionSheet/action/"
+            }
+          ],
+          "runFunction": "onLinkPreview"
+        }
       ]
     }
   }
