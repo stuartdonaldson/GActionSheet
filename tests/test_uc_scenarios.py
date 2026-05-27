@@ -2,25 +2,22 @@
 Parametrized UC scenario matrix tests.
 
 Each scenario follows the standard sync flow:
-  1. Clear GAS logs.
-  2. Call setup_and_sync(scenario, test_doc_id) — sets up fixtures and triggers sync in GAS.
-  3. Wait for the expected log tag to appear.
-  4. Download sheet as .xlsx and doc as .docx.
-  5. Assert the expected outcome via assert_scenario().
+  1. invoke_fixture(scenario) — sets up doc/sheet state via HTTP (no browser).
+  2. invoke_fixture("sync_document") — runs the sync synchronously via HTTP.
+  3. Download sheet as .xlsx and doc as .docx.
+  4. Assert the expected outcome via assert_scenario().
 
-The uc_idempotent scenario runs the flow twice and asserts byte-level equality.
+The uc_idempotent scenario runs the flow twice and asserts content equality.
 
 Prerequisites:
-  - local.settings.json populated with testSheetId, testDocId, scriptId, gasLogDir
+  - local.settings.json populated with testSheetId, testDocId, scriptId, testToken
   - Test sheet shared with "Anyone with link (viewer)"
   - Test doc shared with "Anyone with link (viewer)"
-  - .auth/user.json present (run `node tests/playwright/authenticate.js` once)
 """
 import pytest
 
 from tests.helpers.download import download_xlsx, download_docx
-from tests.helpers.gas_log import clear_logs, wait_for_log
-from tests.helpers.gas_invoke import setup_and_sync
+from tests.helpers.fixture_invoke import invoke_fixture
 from tests.helpers.scenario_assertions import assert_scenario
 
 # ---------------------------------------------------------------------------
@@ -37,7 +34,6 @@ SCENARIO_MATRIX = [
     (
         "uc2_new_table_row",
         {
-            "expected_log_tag": "sync.complete",
             "expected_table_rows": [
                 {"id": 2, "action": "UCS-2: Review the PR", "status": "Open"},
             ],
@@ -49,7 +45,6 @@ SCENARIO_MATRIX = [
     (
         "uc3_sheet_wins",
         {
-            "expected_log_tag": "sync.doc-updated",
             "expected_table_rows": [
                 {"id": 1, "action": "UCS-3SW: Fix the bug", "status": "In Review"},
             ],
@@ -67,7 +62,6 @@ SCENARIO_MATRIX = [
     (
         "uc3_doc_wins",
         {
-            "expected_log_tag": "sync.sheet-updated",
             "expected_table_rows": [
                 {"id": 1, "action": "UCS-3DW: Fix the bug", "status": "Done"},
             ],
@@ -85,7 +79,6 @@ SCENARIO_MATRIX = [
     (
         "uc4_archive",
         {
-            "expected_log_tag": "sync.complete",
             "active_rows_prefix": "UCS-4: ",
             "expected_xlsx_active_rows": [
                 {"id": 2, "action": "UCS-4: Review the PR", "status": "Open"},
@@ -98,7 +91,6 @@ SCENARIO_MATRIX = [
     (
         "uc6_revert_local_edit",
         {
-            "expected_log_tag": "sync.complete",
             "expected_table_rows": [
                 {"id": 3, "action": "UCS-6: Write tests", "status": "Open"},
             ],
@@ -128,39 +120,31 @@ SCENARIO_MATRIX = [
     SCENARIO_MATRIX,
     ids=[s[0] for s in SCENARIO_MATRIX],
 )
-def test_uc_scenario(scenario, expectations, test_sheet_id, test_doc_id, gas_log_dir):
+def test_uc_scenario(scenario, expectations, test_sheet_id, test_doc_id, settings):
     if scenario == "uc_idempotent":
-        _run_idempotent(expectations, test_sheet_id, test_doc_id, gas_log_dir)
+        _run_idempotent(test_sheet_id, test_doc_id, settings)
     else:
-        _run_standard(scenario, expectations, test_sheet_id, test_doc_id, gas_log_dir)
+        _run_standard(scenario, expectations, test_sheet_id, test_doc_id, settings)
 
 
-def _run_standard(scenario, expectations, test_sheet_id, test_doc_id, gas_log_dir):
-    clear_logs(gas_log_dir)
-    setup_and_sync(scenario, test_doc_id)
-    def _log_matches(e):
-        if e.get("tag") != expectations["expected_log_tag"]:
-            return False
-        doc_id_in_entry = e.get("data", {}).get("docId")
-        return doc_id_in_entry is None or doc_id_in_entry == test_doc_id
-    wait_for_log(gas_log_dir, _log_matches)
+def _run_standard(scenario, expectations, test_sheet_id, test_doc_id, settings):
+    invoke_fixture(scenario, test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document", test_doc_id, settings, timeout=180)
     xlsx_bytes = download_xlsx(test_sheet_id)
     docx_bytes = download_docx(test_doc_id)
     assert_scenario(scenario, expectations, xlsx_bytes, docx_bytes, test_doc_id=test_doc_id)
 
 
-def _run_idempotent(expectations, test_sheet_id, test_doc_id, gas_log_dir):
+def _run_idempotent(test_sheet_id, test_doc_id, settings):
     # First sync
-    clear_logs(gas_log_dir)
-    setup_and_sync("uc_idempotent", test_doc_id)
-    wait_for_log(gas_log_dir, lambda e: e.get("tag") == expectations["expected_log_tag"])
+    invoke_fixture("uc_idempotent", test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document", test_doc_id, settings, timeout=180)
     xlsx1 = download_xlsx(test_sheet_id)
     docx1 = download_docx(test_doc_id)
 
     # Second sync (same setup — fixture is deterministic, re-runs normalize+reconcile)
-    clear_logs(gas_log_dir)
-    setup_and_sync("uc_idempotent", test_doc_id)
-    wait_for_log(gas_log_dir, lambda e: e.get("tag") == expectations["expected_log_tag"])
+    invoke_fixture("uc_idempotent", test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document", test_doc_id, settings, timeout=180)
     xlsx2 = download_xlsx(test_sheet_id)
     docx2 = download_docx(test_doc_id)
 

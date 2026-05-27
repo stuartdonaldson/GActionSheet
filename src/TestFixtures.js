@@ -1496,6 +1496,15 @@ function setupTestFixtures(scenario) {
         break;
       }
 
+      case 'ensure_sheet_structure': {
+        // Ensure the ActionSheet has the correct tab layout and headers.
+        // Used by test_infrastructure.py before header-layout assertions.
+        ensureSheetStructure();
+        _TF_RESULT = { tag: 'fixture.ensure_sheet_structure', data: { ensured: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'begin_test_session': {
         // masterDocId was stored in TEST_DOC_ID by _handleRunFixture from the HTTP payload.
         // beginTestSession creates a named clone and updates TEST_DOC_ID to the clone.

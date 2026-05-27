@@ -60,6 +60,10 @@ def gas_log_dir(settings):
 
 @pytest.fixture(scope="session")
 def gas_invoke():
-    """Returns the gas_invoke module for calling GAS functions via Playwright."""
+    """Returns the gas_invoke module (Playwright-based).
+
+    Retained for UI-level tests (e.g. TestMenuHandler) that require a browser.
+    Fixture setup uses invoke_fixture (HTTP) instead — see fixture_invoke.py.
+    """
     from tests.helpers import gas_invoke as _gas_invoke
     return _gas_invoke

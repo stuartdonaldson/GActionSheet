@@ -8,7 +8,6 @@ import pytest
 from tests.helpers.download import download_xlsx
 from tests.helpers.sheet_inspect import load_sheet, headers
 from tests.helpers.gas_log import clear_logs, wait_for_log
-from tests.helpers.gas_invoke import ensure_sheet_structure
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
 _OPEN_SHEET_JS = _REPO_ROOT / "tests" / "playwright" / "open_sheet.js"
@@ -89,25 +88,13 @@ class TestInitializeTriggers:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="session", autouse=True)
-def sheet_structure_ready(gas_log_dir):
-    """Run ensureSheetStructure via the custom menu before any header tests.
+def sheet_structure_ready(settings):
+    """Ensure the ActionSheet has the correct layout before header tests.
 
-    Log-wait is best-effort — Drive sync can lag. If the log doesn't appear
-    within 60 s the fixture still succeeds; TestSheetHeaders will catch any
-    schema mismatch with a clear assertion error.
+    Uses HTTP fixture invocation — no browser required.
     """
-    if gas_log_dir is None:
-        return
-    clear_logs(gas_log_dir)
-    ensure_sheet_structure()
-    try:
-        wait_for_log(
-            gas_log_dir,
-            lambda e: e.get("tag") == "sheet.structure.ensured",
-            timeout_s=60,
-        )
-    except TimeoutError:
-        pass  # proceed; test assertions will catch a schema mismatch
+    from tests.helpers.fixture_invoke import invoke_fixture
+    invoke_fixture("ensure_sheet_structure", settings["testDocId"], settings, timeout=60)
 
 
 class TestSheetHeaders:

@@ -1,11 +1,11 @@
 """
 UC-A end-to-end tests: Capture and track a new action.
 
-Setup runs once per module via two batch Playwright sessions:
-  Batch 1: uc_a_clear setup+sync — post-first-sync state (AC1 baseline, AC2 before-state).
-  Batch 2: second sync + uc_a_permutations setup+sync — final state (AC2 after-state,
-           permutation coverage).  AC1 rows are untouched by permutations, so comparing
-           xlsx_first vs xlsx_final is a stronger idempotency check than one extra sync.
+Setup runs once per module via HTTP fixture invocation (no browser):
+  Step 1: uc_a_clear setup+sync — post-first-sync state (AC1 baseline, AC2 before-state).
+  Step 2: second sync + uc_a_permutations setup+sync — final state (AC2 after-state,
+          permutation coverage).  AC1 rows are untouched by permutations, so comparing
+          xlsx_first vs xlsx_final is a stronger idempotency check than one extra sync.
 
 Detection forms tested:
   - PERSON chip at start of list item (uc_a_clear, AC1:)
@@ -47,7 +47,7 @@ _PERM_UNDERSCORE_ACTION   = "Perm: Review the meeting minutes"
 
 
 # ---------------------------------------------------------------------------
-# Module fixture — two browser sessions cover all UC-A setup
+# Module fixture — HTTP fixture invocation, no browser needed
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")

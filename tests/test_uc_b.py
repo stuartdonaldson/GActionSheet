@@ -1,9 +1,9 @@
 """
 UC-B end-to-end tests: Update an action from either side and converge.
 
-Setup runs once per module via a single batch Playwright session (6 GAS commands,
-1 browser launch).  Each scenario appends scenario-prefixed items (UCB-DW:, UCB-SW:,
-UCB-CF:) to the shared clone doc so scenarios accumulate without collision.
+Setup runs once per module via HTTP fixture invocation (no browser).
+Each scenario appends scenario-prefixed items (UCB-DW:, UCB-SW:, UCB-CF:) to the
+shared clone doc so scenarios accumulate without collision.
 Assertions filter by the scenario prefix so earlier scenarios' rows are invisible.
 
 Fixture flow per scenario:
@@ -86,7 +86,7 @@ _VAR7_ACTION_BASE = "Complete the project documentation"
 
 
 # ---------------------------------------------------------------------------
-# Module fixture — one browser session covers all three UC-B scenarios
+# Module fixture — HTTP fixture invocation, no browser needed
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
