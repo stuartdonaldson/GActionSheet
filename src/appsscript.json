@@ -18,7 +18,7 @@
     "https://docs.googleapis.com/"
   ],
   "webapp": {
-    "access": "ANYONE",
+    "access": "ANYONE_ANONYMOUS",
     "executeAs": "USER_DEPLOYING"
   },
   "addOns": {

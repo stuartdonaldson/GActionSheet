@@ -174,7 +174,8 @@ function _loadExistingRowsByNamedRangeId(actionsSheet) {
       assigneeName:  data[i][3],
       action:        data[i][4],
       status:        data[i][5],
-      dateModified:  data[i][8] instanceof Date ? data[i][8] : null
+      dateModified:  data[i][8] instanceof Date ? data[i][8] : null,
+      syncStatus:    data[i][9] || ''
     };
   }
 
@@ -203,7 +204,7 @@ function _rowIdentityKey(assigneeEmail, action, status) {
  * current ActionSheet rows using the last-sync timestamp as the conflict anchor.
  *
  * Payload shape:
- *   { secret, action: 'sync_action_rows', docUrl, docTitle, lastSyncTime: ISO,
+ *   { secret, action: 'sync_action_rows', docUrl, docTitle,
  *     docState: [{ namedRangeId, assigneeEmail, assigneeName, actionText, status }] }
  *
  * Response shape:
@@ -220,7 +221,6 @@ function _handleSyncActionRows(payload) {
   var docTitle            = payload.docTitle || 'Untitled';
   var docId               = payload.docId    || '';
   var docState            = payload.docState || [];
-  var lastSyncTime        = payload.lastSyncTime ? new Date(payload.lastSyncTime) : new Date(0);
   var allDocNamedRangeIds = payload.allDocNamedRangeIds || [];
 
   // Build a set for O(1) membership checks.
@@ -272,8 +272,9 @@ function _handleSyncActionRows(payload) {
           ''  // Sync Status — blank on insert
         ]);
         upserted++;
-      } else if (existing.dateModified && existing.dateModified > lastSyncTime) {
-        // Sheet was edited after last sync — sheet wins; SyncManager updates doc.
+      } else if (existing.syncStatus === 'Dirty') {
+        // Sheet was edited (onActionSheetEdit set Sync Status = 'Dirty') — sheet wins.
+        // SyncManager will apply the sheet values back to the doc floating action.
         sheetWins.push({
           namedRangeId: row.namedRangeId,
           assigneeEmail: existing.assigneeEmail,

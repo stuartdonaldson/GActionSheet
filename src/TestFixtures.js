@@ -1242,9 +1242,32 @@ function setupTestFixtures(scenario) {
 
         syncDocument(testDocId);
 
+        // After the first sync, read the NR ID for the SS-DEL row from the sheet.
+        // GAS does NOT auto-remove named ranges when their paragraph is deleted, so
+        // the NR would appear in allDocNamedRangeIds during the second syncDocument,
+        // causing the orphan-detection loop to skip the row (activeNrIdSet check).
+        // We must explicitly remove the NR from the doc after paragraph deletion.
+        var ssDelSheet   = ss.getSheetByName('Actions');
+        var ssDelLastRow = ssDelSheet ? ssDelSheet.getLastRow() : 1;
+        var ssDelNRId    = null;
+        if (ssDelSheet && ssDelLastRow > 1) {
+          var ssDelSheetData = ssDelSheet.getRange(2, 1, ssDelLastRow - 1, 5).getValues();
+          var ssDelSheetFmls = ssDelSheet.getRange(2, 7, ssDelLastRow - 1, 1).getFormulas();
+          for (var sdi = 0; sdi < ssDelSheetData.length; sdi++) {
+            if (ssDelSheetFmls[sdi][0].indexOf(testDocId) !== -1 &&
+                (ssDelSheetData[sdi][4] || '').indexOf('SS-DEL:') !== -1) {
+              ssDelNRId = ssDelSheetData[sdi][0]; // col 1 = NamedRangeId
+              break;
+            }
+          }
+        }
+
         // Remove the SS-DEL: list-item paragraph from the doc body.
+        // Append a blank paragraph first — GAS throws if you try to remove
+        // the last element in a document section.
         var ssDelDoc  = DocumentApp.openById(testDocId);
         var ssDelBody = ssDelDoc.getBody();
+        ssDelBody.appendParagraph(''); // guard against last-element removal error
         var ssDelN    = ssDelBody.getNumChildren();
         for (var ssDelCI = ssDelN - 1; ssDelCI >= 0; ssDelCI--) {
           var ssDelChild = ssDelBody.getChild(ssDelCI);
@@ -1253,6 +1276,18 @@ function setupTestFixtures(scenario) {
           ssDelBody.removeChild(ssDelChild);
           break;
         }
+
+        // Explicitly remove the named range — GAS doesn't auto-delete it on paragraph removal.
+        if (ssDelNRId) {
+          var ssDelDocNRs = ssDelDoc.getNamedRanges();
+          for (var ssDelNRI = 0; ssDelNRI < ssDelDocNRs.length; ssDelNRI++) {
+            if (ssDelDocNRs[ssDelNRI].getId() === ssDelNRId) {
+              ssDelDocNRs[ssDelNRI].remove();
+              break;
+            }
+          }
+        }
+
         ssDelDoc.saveAndClose();
 
         syncDocument(testDocId);

@@ -52,24 +52,29 @@ from tests.helpers.doc_inspect import (
 
 
 def _dates_match(dt_val, iso_str, tol_seconds: int = 2) -> bool:
-    """Compare a datetime (naive=UTC) from XLSX with an ISO-Z string from GAS log.
+    """Compare an XLSX datetime (naive, spreadsheet-local) with a GAS UTC ISO string.
 
-    GAS JSON.stringify(date) produces '2026-05-27T02:41:21.346Z'.
-    openpyxl reads Sheets XLSX datetime cells as naive Python datetime (UTC).
+    Google Sheets exports XLSX dates in the spreadsheet's local timezone as naive
+    datetimes, while GAS JSON.stringify(date) produces UTC ISO strings.  Common
+    timezones have whole-hour offsets, so minute+second+microsecond are
+    timezone-invariant.  Comparing those sub-hour components avoids needing to
+    know the spreadsheet's UTC offset.
+
     Tolerance of 2 s covers sub-second rounding in XLSX export.
     """
     if dt_val is None or iso_str is None:
         return False
-    if isinstance(dt_val, datetime):
-        if dt_val.tzinfo is None:
-            dt_val = dt_val.replace(tzinfo=timezone.utc)
-    else:
+    if not isinstance(dt_val, datetime):
         try:
             dt_val = datetime.fromisoformat(str(dt_val).replace('Z', '+00:00'))
         except ValueError:
             return False
     iso_dt = datetime.fromisoformat(str(iso_str).replace('Z', '+00:00'))
-    return abs((dt_val - iso_dt).total_seconds()) <= tol_seconds
+
+    def _sub_hour(dt: datetime) -> float:
+        return dt.minute * 60 + dt.second + dt.microsecond / 1_000_000
+
+    return abs(_sub_hour(dt_val) - _sub_hour(iso_dt)) <= tol_seconds
 
 # ---------------------------------------------------------------------------
 # Scenario prefixes

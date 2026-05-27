@@ -27,10 +27,6 @@ function syncDocument(docId) {
     }
 
     var props              = PropertiesService.getScriptProperties();
-    var reconciledAtKey    = 'LAST_RECONCILED_AT_' + docId;
-    var legacyLastSyncKey  = 'LAST_SYNC_TIME_' + docId;
-    var lastSyncStr        = props.getProperty(reconciledAtKey) || props.getProperty(legacyLastSyncKey);
-    var lastSyncTime       = lastSyncStr ? new Date(lastSyncStr) : new Date(0);
 
     var doc;
     try {
@@ -44,10 +40,28 @@ function syncDocument(docId) {
 
     GasLogger.log('sync.scanned', { docId: docId, count: floatingActions.length });
 
+    // Always capture docUrl and docTitle before closing the doc — needed even when
+    // floatingActions is empty so WebApp can run orphan detection on existing rows.
+    var docUrl   = doc.getUrl();
+    var docTitle = doc.getName();
+
     if (floatingActions.length === 0) {
+      // No floating actions remain.  Still call WebApp with an empty docState so
+      // the orphan-detection loop can mark any previously-synced rows as 'Deleted'.
+      // Skipping this call would leave stale rows with no Sync Status indefinitely.
+      var allDocNRsEmpty = doc.getNamedRanges();
+      var allDocNRIdsEmpty = [];
+      for (var ei = 0; ei < allDocNRsEmpty.length; ei++) {
+        allDocNRIdsEmpty.push(allDocNRsEmpty[ei].getId());
+      }
       doc.saveAndClose();
-      props.setProperty(reconciledAtKey, new Date().toISOString());
-      GasLogger.log('sync.complete', { docId: docId, anchored: 0, upserted: 0, updated: 0 });
+      var emptySync = _syncActionRows([], docUrl, docTitle, docId, allDocNRIdsEmpty);
+      SpreadsheetApp.flush();
+      GasLogger.log('sync.complete', {
+        docId: docId, anchored: 0,
+        upserted: emptySync.upserted || 0,
+        updated:  emptySync.updated  || 0
+      });
       return;
     }
 
@@ -59,9 +73,6 @@ function syncDocument(docId) {
     var anchoredMap  = _buildAnchoredIndexMap(doc);
     var anchorResults = _anchorNewActions(doc, floatingActions, anchoredMap);
 
-    var docUrl   = doc.getUrl();
-    var docTitle = doc.getName();
-
     // Collect all named range IDs still present in the doc so the WebApp can
     // detect orphaned sheet rows (named range deleted along with its paragraph).
     var allNamedRanges = doc.getNamedRanges();
@@ -71,7 +82,7 @@ function syncDocument(docId) {
     }
 
     // Keep doc open until sheetWins updates are applied.
-    var syncResult = _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTime.toISOString(), docId, allDocNamedRangeIds);
+    var syncResult = _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocNamedRangeIds);
 
     var sheetWins = syncResult.sheetWins || [];
     for (var i = 0; i < sheetWins.length; i++) {
@@ -86,7 +97,6 @@ function syncDocument(docId) {
 
     doc.saveAndClose();
     SpreadsheetApp.flush();
-    props.setProperty(reconciledAtKey, new Date().toISOString());
 
     GasLogger.log('sync.complete', {
       docId:    docId,
@@ -117,10 +127,13 @@ function onActionSheetEdit(e) {
   var sheet = range.getSheet();
   if (sheet.getName() !== 'Actions') return;
 
-  // Stamp Date Modified to trigger sync
+  // Stamp Date Modified and mark Sync Status = 'Dirty' so the next bidirectional
+  // sync knows this row was edited on the sheet side (sheet wins conflict resolution).
+  // The Dirty flag is cleared by _handleSyncActionRows after pushing the change to the doc.
   var dateModified = new Date();
   WriteGuard.wrap(function () {
     sheet.getRange(row, 9).setValue(dateModified);
+    sheet.getRange(row, 10).setValue('Dirty');
   });
 
   // Sheet→Doc sync: read the edited row and propagate to the floating action
@@ -379,12 +392,11 @@ function _countNew(anchorResults) {
  * @param {Array}  anchorResults       Output of _anchorNewActions.
  * @param {string} docUrl
  * @param {string} docTitle
- * @param {string} lastSyncTimeIso     ISO timestamp of previous sync (or epoch).
  * @param {string} docId               Document ID (for orphan detection).
  * @param {Array}  allDocNamedRangeIds All named range IDs currently in the doc.
  * @returns {{upserted: number, updated: number, sheetWins: Array}}
  */
-function _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTimeIso, docId, allDocNamedRangeIds) {
+function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocNamedRangeIds) {
   var props     = PropertiesService.getScriptProperties();
   var webAppUrl = props.getProperty('WEBAPP_URL');
   var secret    = props.getProperty('WEBAPP_SECRET');
@@ -417,8 +429,7 @@ function _syncActionRows(anchorResults, docUrl, docTitle, lastSyncTimeIso, docId
       action:             'sync_action_rows',
       docUrl:             docUrl,
       docTitle:           docTitle,
-      docId:              docId              || '',
-      lastSyncTime:       lastSyncTimeIso,
+      docId:              docId || '',
       docState:           docState,
       allDocNamedRangeIds: allDocNamedRangeIds || []
     })
