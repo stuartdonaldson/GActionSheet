@@ -1505,6 +1505,28 @@ function setupTestFixtures(scenario) {
         break;
       }
 
+      case 'sidebar_set_status': {
+        // Mutation: change the chip-led "AC1: Review the project budget" action
+        // from "Open" to "Done" using sidebarSetStatus.
+        // Targets the action by text match; namedRangeId is resolved at fixture time.
+        // Implemented in green phase (GTaskSheet-cw5.7).
+        GasLogger.log('fixture.sidebar_set_status', { stub: true });
+        _TF_RESULT = { tag: 'fixture.sidebar_set_status', data: { stub: true } };
+        docAlreadyClosed = false; // doc stays open for save
+        break;
+      }
+
+      case 'sidebar_delete_action': {
+        // Mutation: delete the email-led "AC1: Approve the project proposal" action
+        // (jane.smith@example.com) using sidebarDeleteAction.
+        // Targets the action by text + email match; namedRangeId resolved at fixture time.
+        // Implemented in green phase (GTaskSheet-cw5.7).
+        GasLogger.log('fixture.sidebar_delete_action', { stub: true });
+        _TF_RESULT = { tag: 'fixture.sidebar_delete_action', data: { stub: true } };
+        docAlreadyClosed = false;
+        break;
+      }
+
       case 'begin_test_session': {
         // masterDocId was stored in TEST_DOC_ID by _handleRunFixture from the HTTP payload.
         // beginTestSession creates a named clone and updates TEST_DOC_ID to the clone.
