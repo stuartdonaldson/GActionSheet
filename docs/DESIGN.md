@@ -161,7 +161,7 @@ The two subgraphs share no arrow; communication is solely through `ActionSheet` 
 
 | Component | Responsibility |
 |-----------|---------------|
-| Sidebar UI | Renders the homepage card for the active doc; surfaces **Scan card**, **Sync now**, **VerifySync**, **Insert / refresh tracker**, sort/filter controls, version footer, warning rows, and orphan-anchor prompts |
+| Sidebar UI | Renders the homepage card for the active doc using CardService. Sections: (1) overview — sync state and record count; (2) action buttons — **Sync now**, **VerifySync**, **Insert tracker** (hidden when tracker already present); (3) action list — each anchored action shows a status dropdown (Open / In Progress / In Review / Done / Closed) that fires `onSetActionStatus` on change, and a **Delete** button that fires `onDeleteAction`. Mutations complete a full doc+sheet round-trip before returning the refreshed card. |
 | Action Scanner | Reads the active doc via DocumentApp: walks paragraphs and list items, identifies floating actions by two rules — (1) first inline child is a PERSON chip, or (2) first text content begins with a valid email address (`word@word.tld`); extracts assignee email/name, action text, and trailing `(Status)` token; reads existing named ranges via the REST API to resolve identity |
 | Named Range Manager | Creates a named range over a newly seen action paragraph; deletes a range when its action is no longer present; re-anchors when an existing row's range is missing but its action+assignee still match a paragraph |
 | Tracker Table Renderer | Inserts or refreshes the in-doc tracker table at its own named-range anchor, preceded by the instructional paragraph summarizing the sync rules; uses REST `batchUpdate` for atomic in-place replacement |

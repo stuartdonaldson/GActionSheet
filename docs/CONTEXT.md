@@ -237,8 +237,8 @@ Errors are surfaced in the sidebar (for add-on operations) or logged to the auto
 | Anchor (named range anchor) | The named range covering an action's checklist paragraph; its `namedRangeId` is the action's durable identity. |
 | Automation script | The container-bound Apps Script on the ActionSheet that owns the `onEdit` timestamp stamper, the timed sweep trigger, and the archive job. |
 | Last Modified | A timestamp column on each ActionSheet row and (implicitly) each anchored action. Records the most recent reconcile or user edit time. Empty means never synced. |
-| Sidebar | The HTML UI shown by the add-on in the active doc. |
-| Status | The recognized values are `Open` (default) and `Closed` (eligible for archive); any other parenthesized value is preserved as a free-form custom status. |
+| Sidebar | The card-based UI shown by the add-on in the active doc, built with CardService (not HtmlService). Surfaces sync state, action buttons (Sync now, VerifySync, Insert tracker), and a per-action list with status dropdown and delete. |
+| Status | The recognized values are `Open`, `In Progress`, `In Review`, `Done`, and `Closed` (eligible for archive). The sidebar status dropdown exposes all five values; any other parenthesized token found in the doc is preserved as a free-form custom status. |
 | Sweep | The time-based reconcile run on the ActionSheet that iterates rows grouped by document and pulls updates from docs no one opened recently. |
 | Sync | One on-demand round in the sidebar that scans the active doc and reconciles ActionSheet rows for that doc in one shot. |
 | Tracker table | The in-doc summary table written by **Insert / refresh tracker**, preceded by an instructional paragraph summarizing the sync rules. |
