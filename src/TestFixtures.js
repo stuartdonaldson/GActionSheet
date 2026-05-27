@@ -944,27 +944,30 @@ function setupTestFixtures(scenario) {
               var ucbAction   = ucbData[ucbRi][4]; // col E: Action
               if (ucbAssignee === 'jane.smith@example.com') {
                 if (ucbAction.indexOf(ucbPrefix + 'Schedule the follow-up') !== -1) {
-                  // Var 4: Status Done → Closed; stamp Date Modified so sheet wins conflict resolution.
+                  // Var 4: Status Done → Closed; set Dirty so sheet wins conflict resolution.
                   var ucbRow4 = ucbRi + 2;
                   WriteGuard.wrap(function () {
                     ucbSheet.getRange(ucbRow4, 6).setValue('Closed');
                     ucbSheet.getRange(ucbRow4, 9).setValue(new Date());
+                    ucbSheet.getRange(ucbRow4, 10).setValue('Dirty');
                   });
                 } else if (ucbAction.indexOf(ucbPrefix + 'Approve the budget proposal') !== -1) {
-                  // Var 5: Action text change; stamp Date Modified so sheet wins conflict resolution.
+                  // Var 5: Action text change; set Dirty so sheet wins conflict resolution.
                   var ucbRow5 = ucbRi + 2;
                   WriteGuard.wrap(function () {
                     ucbSheet.getRange(ucbRow5, 5).setValue(ucbPrefix + 'Approve the revised budget');
                     ucbSheet.getRange(ucbRow5, 9).setValue(new Date());
+                    ucbSheet.getRange(ucbRow5, 10).setValue('Dirty');
                   });
                 }
               } else if (ucbAssignee === 'bob_jones@example.com' &&
                          ucbAction.indexOf(ucbPrefix + 'Review the Q2 report') !== -1) {
-                // Var 6: Status Open → In Review; stamp Date Modified so sheet wins conflict resolution.
+                // Var 6: Status Open → In Review; set Dirty so sheet wins conflict resolution.
                 var ucbRow6 = ucbRi + 2;
                 WriteGuard.wrap(function () {
                   ucbSheet.getRange(ucbRow6, 6).setValue('In Review');
                   ucbSheet.getRange(ucbRow6, 9).setValue(new Date());
+                  ucbSheet.getRange(ucbRow6, 10).setValue('Dirty');
                 });
               }
             }
@@ -990,6 +993,7 @@ function setupTestFixtures(scenario) {
                   ucbASheet.getRange(ucbARow, 3).setValue('jane.smith@example.com');
                   ucbASheet.getRange(ucbARow, 4).setValue('Jane Smith');
                   ucbASheet.getRange(ucbARow, 9).setValue(new Date());
+                  ucbASheet.getRange(ucbARow, 10).setValue('Dirty');
                 });
                 break;
               }
@@ -1043,7 +1047,7 @@ function setupTestFixtures(scenario) {
             }
           }
           ucbCDoc.saveAndClose();
-          // Mutate var 4 on sheet side — stamp future date so dateModified > lastSyncTime.
+          // Mutate var 4 on sheet side — set Dirty so sheet wins conflict resolution.
           if (ucbCSheet && ucbCLastR > 1) {
             var ucbCData2 = ucbCSheet.getRange(2, 1, ucbCLastR - 1, SHEET_HEADERS.length).getValues();
             for (var ucbCRi2 = 0; ucbCRi2 < ucbCData2.length; ucbCRi2++) {
@@ -1053,7 +1057,8 @@ function setupTestFixtures(scenario) {
                 var ucbCRowB = ucbCRi2 + 2;
                 WriteGuard.wrap(function () {
                   ucbCSheet.getRange(ucbCRowB, 6).setValue('Closed');
-                  ucbCSheet.getRange(ucbCRowB, 9).setValue(new Date('2030-01-01'));
+                  ucbCSheet.getRange(ucbCRowB, 9).setValue(new Date());
+                  ucbCSheet.getRange(ucbCRowB, 10).setValue('Dirty');
                 });
                 break;
               }
@@ -1431,6 +1436,7 @@ function setupTestFixtures(scenario) {
                                     'SS-ARCH: Archive the policy doc');
 
         syncDocument(testDocId);
+        SpreadsheetApp.flush(); // ensure syncDocument's appended row is visible to ss
 
         var ssArchSheet   = ss.getSheetByName('Actions');
         var ssArchLastR   = ssArchSheet ? ssArchSheet.getLastRow() : 1;
@@ -1455,6 +1461,36 @@ function setupTestFixtures(scenario) {
         ArchiveManager.archive(ss);
 
         GasLogger.log('fixture.sync_status_archive', { archiveTriggered: true });
+        break;
+      }
+
+      case 'sync_document': {
+        // Sync the clone doc. Called between fixture steps in the HTTP test runner.
+        // testDocId was stored in TEST_DOC_ID by _handleRunFixture before calling us.
+        syncDocument(testDocId);
+        _TF_RESULT = { tag: 'fixture.sync_document', data: { synced: true, docId: testDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'begin_test_session': {
+        // masterDocId was stored in TEST_DOC_ID by _handleRunFixture from the HTTP payload.
+        // beginTestSession creates a named clone and updates TEST_DOC_ID to the clone.
+        beginTestSession(testDocId);
+        var btsCloneId = props.getProperty('TEST_DOC_ID');
+        _TF_RESULT = {
+          tag:  'fixture.begin_test_session',
+          data: { cloneId: btsCloneId }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'end_test_session': {
+        // Trash the clone and restore TEST_DOC_ID to the master template.
+        endTestSession();
+        _TF_RESULT = { tag: 'fixture.end_test_session', data: {} };
+        docAlreadyClosed = true;
         break;
       }
 

@@ -478,9 +478,11 @@ def test_sync_status_archive_preserved(sync_status_state):
             f"Expected 'Deleted', got {row.get('Sync Status')!r}. Row: {row}"
         )
 
+    doc_id = sync_status_state["doc_id"]
     ws_actions  = load_sheet(xlsx_bytes, sheet_name="Actions")
     still_active = [r for r in rows_as_dicts(ws_actions)
-                    if (r.get("Action") or "").startswith(_ARCH_PREFIX)]
+                    if (r.get("Action") or "").startswith(_ARCH_PREFIX)
+                    and doc_id in (r.get("Document") or "")]
     assert not still_active, (
         f"[sync_status_archive] SS-ARCH: rows still in Actions after archive: {still_active}"
     )

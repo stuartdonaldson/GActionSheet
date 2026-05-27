@@ -37,7 +37,7 @@ Acceptance criteria (from docs/CONTEXT.md §UC-B):
 import pytest
 
 from tests.helpers.download import download_xlsx, download_docx
-from tests.helpers.gas_invoke import batch_invoke
+from tests.helpers.fixture_invoke import invoke_fixture
 from tests.helpers.sheet_inspect import load_sheet, rows_for_doc
 from tests.helpers.doc_inspect import load_doc, floating_actions
 
@@ -90,21 +90,13 @@ _VAR7_ACTION_BASE = "Complete the project documentation"
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def uc_b_state(test_sheet_id, test_doc_id):
-    batch_invoke([
-        {"menuItem": "Test: Setup Fixture", "arg": "uc_b_doc_wins",
-         "awaitTag": "fixture.uc_b_doc_wins", "timeoutMs": 300000},
-        {"menuItem": "Test: Sync Document", "arg": test_doc_id,
-         "awaitTag": "sync.complete", "timeoutMs": 180000},
-        {"menuItem": "Test: Setup Fixture", "arg": "uc_b_sheet_wins",
-         "awaitTag": "fixture.uc_b_sheet_wins", "timeoutMs": 300000},
-        {"menuItem": "Test: Sync Document", "arg": test_doc_id,
-         "awaitTag": "sync.complete", "timeoutMs": 180000},
-        {"menuItem": "Test: Setup Fixture", "arg": "uc_b_conflict",
-         "awaitTag": "fixture.uc_b_conflict", "timeoutMs": 300000},
-        {"menuItem": "Test: Sync Document", "arg": test_doc_id,
-         "awaitTag": "sync.complete", "timeoutMs": 180000},
-    ])
+def uc_b_state(test_sheet_id, test_doc_id, settings):
+    invoke_fixture("uc_b_doc_wins",  test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document",  test_doc_id, settings, timeout=180)
+    invoke_fixture("uc_b_sheet_wins", test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document",  test_doc_id, settings, timeout=180)
+    invoke_fixture("uc_b_conflict",  test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document",  test_doc_id, settings, timeout=180)
     yield {
         "xlsx_bytes": download_xlsx(test_sheet_id),
         "docx_bytes": download_docx(test_doc_id),
@@ -360,17 +352,13 @@ def test_uc_b_sheet_wins(uc_b_state, settings):
     _verify_consistency(fa, rows, context="uc_b_sheet_wins")
 
 
-def test_uc_b_sheet_assignee_wins(test_sheet_id, test_doc_id):
+def test_uc_b_sheet_assignee_wins(test_sheet_id, test_doc_id, settings):
     """
     AC2 + AC3: A sheet-side assignee edit propagates to the floating action
     paragraph after Sync; named-range anchor preserved; no duplicate rows.
     """
-    batch_invoke([
-        {"menuItem": "Test: Setup Fixture", "arg": "uc_b_sheet_assignee_wins",
-         "awaitTag": "fixture.uc_b_sheet_assignee_wins", "timeoutMs": 300000},
-        {"menuItem": "Test: Sync Document", "arg": test_doc_id,
-         "awaitTag": "sync.complete", "timeoutMs": 180000},
-    ])
+    invoke_fixture("uc_b_sheet_assignee_wins", test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document",            test_doc_id, settings, timeout=180)
 
     ws = load_sheet(download_xlsx(test_sheet_id), sheet_name="Actions")
     all_rows = rows_for_doc(ws, test_doc_id)

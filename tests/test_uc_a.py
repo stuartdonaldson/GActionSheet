@@ -21,7 +21,7 @@ Acceptance criteria (from docs/CONTEXT.md §UC-A):
 import pytest
 
 from tests.helpers.download import download_xlsx, download_docx
-from tests.helpers.gas_invoke import batch_invoke
+from tests.helpers.fixture_invoke import invoke_fixture
 from tests.helpers.sheet_inspect import load_sheet, rows_for_doc
 from tests.helpers.doc_inspect import load_doc, floating_actions
 
@@ -51,20 +51,17 @@ _PERM_UNDERSCORE_ACTION   = "Perm: Review the meeting minutes"
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def uc_a_state(test_sheet_id, test_doc_id):
-    batch_invoke([
-        {"menuItem": "Test: Setup And Sync", "arg": "uc_a_clear",
-         "awaitTag": "sync.complete", "timeoutMs": 300000},
-    ])
+def uc_a_state(test_sheet_id, test_doc_id, settings):
+    # Setup + first sync (uc_a_clear baseline)
+    invoke_fixture("uc_a_clear",     test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document",  test_doc_id, settings, timeout=180)
     xlsx_first = download_xlsx(test_sheet_id)
     docx_first = download_docx(test_doc_id)
 
-    batch_invoke([
-        {"menuItem": "Test: Sync Document", "arg": test_doc_id,
-         "awaitTag": "sync.complete", "timeoutMs": 180000},
-        {"menuItem": "Test: Setup And Sync", "arg": "uc_a_permutations",
-         "awaitTag": "sync.complete", "timeoutMs": 300000},
-    ])
+    # Second sync (idempotency) + permutations + sync
+    invoke_fixture("sync_document",      test_doc_id, settings, timeout=180)
+    invoke_fixture("uc_a_permutations",  test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document",      test_doc_id, settings, timeout=180)
     xlsx_final = download_xlsx(test_sheet_id)
     docx_final = download_docx(test_doc_id)
 
