@@ -1,0 +1,75 @@
+/**
+ * TestWebApp.js
+ *
+ * HTTP fixture dispatcher for integration tests.
+ *
+ * Provides a doPost route (`run_fixture`) that invokes GAS test fixture
+ * functions directly, bypassing the Sheets UI and Playwright.
+ *
+ * Security model:
+ *   - Validated by a per-deployment TEST_TOKEN (separate from WEBAPP_SECRET).
+ *   - Token expires TEST_TOKEN_EXPIRES hours after `npm run deploy:test`.
+ *   - Token is registered via the `set_test_token` action in WebApp.js.
+ *   - Only the `run_fixture` action uses this token; all production routes
+ *     continue to use WEBAPP_SECRET.
+ *
+ * Flow:
+ *   1. Deployment script generates UUID testToken, POSTs set_test_token to WebApp.
+ *   2. GAS stores testToken + expiresAt in Script Properties.
+ *   3. Deployment script writes testToken to local.settings.json.
+ *   4. Python tests POST run_fixture with testToken — no browser needed.
+ *   5. GAS runs the fixture synchronously and returns { tag, data } in the body.
+ */
+
+/**
+ * HTTP fixture dispatcher.  Called from doPost in WebApp.js when
+ * payload.action === 'run_fixture'.
+ *
+ * Payload shape:
+ *   { action: 'run_fixture', testToken, fixture, testDocId? }
+ *
+ * Response shape (success):
+ *   { tag: 'fixture.<name>', data: { ... } }
+ *
+ * Response shape (error):
+ *   { error: '<message>' }
+ *
+ * Token errors return plain text (not JSON) to match doPost's unauthorized
+ * response style: 'test-token-unauthorized' or 'test-token-expired'.
+ */
+function _handleRunFixture(payload) {
+  var props     = PropertiesService.getScriptProperties();
+  var stored    = props.getProperty('TEST_TOKEN')         || '';
+  var expiresAt = props.getProperty('TEST_TOKEN_EXPIRES') || '';
+  var incoming  = payload.testToken || '';
+
+  // Token presence + match check.
+  if (!stored || incoming !== stored) {
+    return ContentService
+      .createTextOutput('test-token-unauthorized')
+      .setMimeType(ContentService.MimeType.TEXT);
+  }
+
+  // Expiry check (empty expiresAt = no expiry enforced, for local dev convenience).
+  if (expiresAt && new Date() > new Date(expiresAt)) {
+    return ContentService
+      .createTextOutput('test-token-expired')
+      .setMimeType(ContentService.MimeType.TEXT);
+  }
+
+  var fixtureName = payload.fixture   || '';
+  var testDocId   = payload.testDocId || '';
+
+  if (!fixtureName) {
+    return _jsonResponse({ error: 'fixture name required' });
+  }
+
+  // Allow caller to override TEST_DOC_ID for the duration of this invocation.
+  // setupTestFixtures reads TEST_DOC_ID from Script Properties.
+  if (testDocId) {
+    props.setProperty('TEST_DOC_ID', testDocId);
+  }
+
+  var result = setupTestFixtures(fixtureName);
+  return _jsonResponse(result || { tag: 'fixture.' + fixtureName, data: {} });
+}

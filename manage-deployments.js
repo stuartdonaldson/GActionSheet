@@ -21,9 +21,12 @@
  */
 
 const { execSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { checkbox, confirm, select } = require('@inquirer/prompts');
+
+const SETTINGS_PATH = path.join(__dirname, 'local.settings.json');
 
 const TARGETS = {
   test:       { anchor: 'TEST-WEB-APP', label: 'TEST',       emoji: '🧪' },
@@ -113,6 +116,64 @@ async function deployToTarget(target, deployments, nonInteractive) {
   console.log(`\n✅ ${label} deploy complete.`);
   console.log(`🔗 ${label} URL: ${webAppUrl(match.deploymentId)}`);
   console.log(`   Visit that URL once in a browser to self-register WEBAPP_URL in script properties.\n`);
+
+  if (target === 'test') {
+    await registerTestToken(match.deploymentId);
+  }
+}
+
+/**
+ * Generates a fresh per-deployment test token, registers it with the GAS WebApp
+ * (via set_test_token — protected by WEBAPP_SECRET), and writes it to
+ * local.settings.json so Python tests can use it without a browser.
+ *
+ * Requires local.settings.json to have: webappTestUrl, webappSecret.
+ *
+ * @param {string} deploymentId  The TEST-WEB-APP deployment ID (for URL construction).
+ */
+async function registerTestToken(deploymentId) {
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+  } catch {
+    console.warn('⚠️  Could not read local.settings.json — skipping test token registration.');
+    return;
+  }
+
+  const url    = settings.webappTestUrl || webAppUrl(deploymentId);
+  const secret = settings.webappSecret;
+  if (!secret) {
+    console.warn('⚠️  webappSecret not set in local.settings.json — skipping test token registration.');
+    return;
+  }
+
+  const testToken  = crypto.randomUUID();
+  const expiresAt  = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // +24 h
+
+  console.log('\n🔑 Registering test token with GAS WebApp...');
+  try {
+    const resp = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ secret, action: 'set_test_token', testToken, expiresAt }),
+    });
+    const body = await resp.text();
+    let parsed;
+    try { parsed = JSON.parse(body); } catch { parsed = {}; }
+    if (!parsed.ok) {
+      console.warn(`⚠️  set_test_token returned unexpected response: ${body}`);
+      return;
+    }
+  } catch (err) {
+    console.warn(`⚠️  Failed to register test token: ${err.message}`);
+    return;
+  }
+
+  // Persist token to local.settings.json for Python tests.
+  settings.testToken          = testToken;
+  settings.testTokenExpiresAt = expiresAt;
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
+  console.log(`✅ Test token registered. Expires: ${expiresAt}`);
 }
 
 async function main() {

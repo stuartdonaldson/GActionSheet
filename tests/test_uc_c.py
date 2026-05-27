@@ -41,13 +41,35 @@ GTaskSheet-mol-bgq / GTaskSheet-ly5.
 """
 
 import pytest
+from datetime import datetime, timezone
 
 from tests.helpers.download import download_xlsx, download_docx
-from tests.helpers.gas_invoke import batch_invoke
+from tests.helpers.fixture_invoke import invoke_fixture
 from tests.helpers.sheet_inspect import load_sheet, rows_for_doc, rows_as_dicts, headers
 from tests.helpers.doc_inspect import (
     load_doc, floating_actions, tracked_actions_table, _iter_block_items,
 )
+
+
+def _dates_match(dt_val, iso_str, tol_seconds: int = 2) -> bool:
+    """Compare a datetime (naive=UTC) from XLSX with an ISO-Z string from GAS log.
+
+    GAS JSON.stringify(date) produces '2026-05-27T02:41:21.346Z'.
+    openpyxl reads Sheets XLSX datetime cells as naive Python datetime (UTC).
+    Tolerance of 2 s covers sub-second rounding in XLSX export.
+    """
+    if dt_val is None or iso_str is None:
+        return False
+    if isinstance(dt_val, datetime):
+        if dt_val.tzinfo is None:
+            dt_val = dt_val.replace(tzinfo=timezone.utc)
+    else:
+        try:
+            dt_val = datetime.fromisoformat(str(dt_val).replace('Z', '+00:00'))
+        except ValueError:
+            return False
+    iso_dt = datetime.fromisoformat(str(iso_str).replace('Z', '+00:00'))
+    return abs((dt_val - iso_dt).total_seconds()) <= tol_seconds
 
 # ---------------------------------------------------------------------------
 # Scenario prefixes
@@ -68,31 +90,14 @@ _ARCH_PREFIX     = "SS-ARCH: "
 
 @pytest.fixture(scope="module")
 def uc_c_state(settings, test_sheet_id, test_doc_id):
-    """Run all UC-C scenario fixtures in one Playwright session, download once.
+    """Run all UC-C scenario fixtures via HTTP (no browser), download once.
 
     Yields a dict with keys: docx_bytes, xlsx_bytes, doc_id.
     """
-    commands = [
-        {
-            "menuItem": "Test: Setup Fixture",
-            "arg": "uc_c_first_insert",
-            "awaitTag": "fixture.uc_c_first_insert",
-            "timeoutMs": 300000,
-        },
-        {
-            "menuItem": "Test: Setup Fixture",
-            "arg": "uc_c_refresh",
-            "awaitTag": "fixture.uc_c_refresh",
-            "timeoutMs": 300000,
-        },
-        {
-            "menuItem": "Test: Setup Fixture",
-            "arg": "uc_c_view_only",
-            "awaitTag": "fixture.uc_c_view_only",
-            "timeoutMs": 300000,
-        },
-    ]
-    batch_invoke(commands)
+    invoke_fixture("uc_c_first_insert", test_doc_id, settings)
+    invoke_fixture("uc_c_refresh",      test_doc_id, settings)
+    invoke_fixture("uc_c_view_only",    test_doc_id, settings)
+
     yield {
         "docx_bytes": download_docx(test_doc_id),
         "xlsx_bytes": download_xlsx(test_sheet_id),
@@ -102,56 +107,20 @@ def uc_c_state(settings, test_sheet_id, test_doc_id):
 
 @pytest.fixture(scope="module")
 def sync_status_state(settings, test_sheet_id, test_doc_id):
-    """Run all Sync Status scenario fixtures in one Playwright session, download once.
+    """Run all Sync Status scenario fixtures via HTTP (no browser), download once.
 
     Yields a dict with keys: xlsx_bytes, doc_id, sentinel_date_modified.
     Archive scenario runs last because it moves rows from Actions → Archive sheet.
     """
-    commands = [
-        {
-            "menuItem": "Test: Setup Fixture",
-            "arg": "sync_status_migration",
-            "awaitTag": "fixture.sync_status_migration",
-            "timeoutMs": 180000,
-        },
-        {
-            "menuItem": "Test: Setup Fixture",
-            "arg": "sync_status_deleted",
-            "awaitTag": "fixture.sync_status_deleted",
-            "timeoutMs": 240000,
-        },
-        {
-            "menuItem": "Test: Setup Fixture",
-            "arg": "sync_status_doc_not_found",
-            "awaitTag": "fixture.sync_status_doc_not_found",
-            "timeoutMs": 300000,
-        },
-        {
-            "menuItem": "Test: Setup Fixture",
-            "arg": "sync_status_recovery",
-            "awaitTag": "fixture.sync_status_recovery",
-            "timeoutMs": 240000,
-        },
-        {
-            "menuItem": "Test: Setup Fixture",
-            "arg": "sync_status_on_edit",
-            "awaitTag": "fixture.sync_status_on_edit",
-            "timeoutMs": 180000,
-        },
-        {
-            "menuItem": "Test: Setup Fixture",
-            "arg": "sync_status_archive",
-            "awaitTag": "fixture.sync_status_archive",
-            "timeoutMs": 240000,
-        },
-    ]
-    results = batch_invoke(commands)
+    invoke_fixture("sync_status_migration",     test_doc_id, settings)
+    invoke_fixture("sync_status_deleted",       test_doc_id, settings)
+    invoke_fixture("sync_status_doc_not_found", test_doc_id, settings)
+    invoke_fixture("sync_status_recovery",      test_doc_id, settings)
 
-    sentinel = (
-        (results.get("fixture.sync_status_on_edit") or {})
-        .get("data", {})
-        .get("sentinelDateModified")
-    )
+    on_edit_result = invoke_fixture("sync_status_on_edit", test_doc_id, settings)
+    sentinel = (on_edit_result.get("data") or {}).get("sentinelDateModified")
+
+    invoke_fixture("sync_status_archive", test_doc_id, settings)
 
     yield {
         "xlsx_bytes": download_xlsx(test_sheet_id),
@@ -405,12 +374,13 @@ def test_sync_status_migration(sync_status_state):
 # ---------------------------------------------------------------------------
 
 def test_sync_status_deleted(sync_status_state):
-    """ly5 AC3: Sync Status = 'Deleted' when named range removed before sync."""
+    """ly5 AC3: Sync Status = 'Deleted' when floating action removed from doc before sync."""
     ws   = load_sheet(sync_status_state["xlsx_bytes"], sheet_name="Actions")
-    rows = [r for r in rows_as_dicts(ws)
+    # Filter to the current session's doc to avoid stale rows from previous runs.
+    rows = [r for r in rows_for_doc(ws, sync_status_state["doc_id"])
             if (r.get("Action") or "").startswith(_DEL_PREFIX)]
 
-    assert rows, "[sync_status_deleted] No SS-DEL: rows found in Actions sheet."
+    assert rows, "[sync_status_deleted] No SS-DEL: rows found for current doc in Actions sheet."
     for row in rows:
         assert row.get("Sync Status") == "Deleted", (
             f"[sync_status_deleted] Expected 'Deleted', "
@@ -468,15 +438,17 @@ def test_sync_status_on_edit_no_date_change(sync_status_state):
     )
 
     ws   = load_sheet(sync_status_state["xlsx_bytes"], sheet_name="Actions")
-    rows = [r for r in rows_as_dicts(ws)
+    # Filter to the current session's doc to avoid stale SS-EDIT: rows from prior runs.
+    rows = [r for r in rows_for_doc(ws, sync_status_state["doc_id"])
             if (r.get("Action") or "").startswith(_EDIT_PREFIX)]
 
-    assert rows, "[sync_status_on_edit] No SS-EDIT: rows found in Actions sheet."
+    assert rows, "[sync_status_on_edit] No SS-EDIT: rows found for current doc in Actions sheet."
     for row in rows:
-        date_modified = str(row.get("Date Modified") or "")
-        assert date_modified == str(sentinel), (
+        date_modified = row.get("Date Modified")
+        assert _dates_match(date_modified, sentinel), (
             f"[sync_status_on_edit] Date Modified changed after col-10 edit — "
-            f"onEdit fired incorrectly. Before: {sentinel!r}, After: {date_modified!r}."
+            f"onEdit fired incorrectly. "
+            f"Before (sentinel): {sentinel!r}, After: {date_modified!r}."
         )
 
 

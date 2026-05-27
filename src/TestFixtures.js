@@ -21,6 +21,14 @@ var _TF_TABLE_HEADERS = [
   'Date Modified'
 ];
 
+/**
+ * Holds the structured return value for the most recent setupTestFixtures call.
+ * Set by fixture cases that produce meaningful data (e.g. sentinelDateModified).
+ * Read by _handleRunFixture in TestWebApp.js to build the HTTP response body.
+ * Resets to null at the start of each setupTestFixtures invocation.
+ */
+var _TF_RESULT = null;
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -398,6 +406,7 @@ function _tfAppendSheetRow(ss, rowData) {
  */
 function setupTestFixtures(scenario) {
   var resolvedScenario = scenario || 'default';
+  _TF_RESULT = null; // reset for this invocation
   try {
     // -- Read test IDs from script properties --------------------------------
     var props = PropertiesService.getScriptProperties();
@@ -1214,8 +1223,13 @@ function setupTestFixtures(scenario) {
 
       case 'sync_status_deleted': {
         // Insert a chip-led floating action (SS-DEL: prefix), run an intermediate
-        // sync to anchor it, then delete the named range from the doc so the
+        // sync to anchor it, then DELETE THE ENTIRE PARAGRAPH from the doc so the
         // final sync writes 'Deleted' to Sync Status.
+        //
+        // Deleting only the named range (not the paragraph) causes re-anchoring on
+        // the next sync, which the duplicate detector treats as a stale duplicate
+        // and removes — never writing 'Deleted'.  Removing the paragraph entirely
+        // means no floating action survives to match, so the orphan path fires cleanly.
         var ssDelToken = ScriptApp.getOAuthToken();
         var ssDelEmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
                       || Session.getActiveUser().getEmail();
@@ -1228,38 +1242,22 @@ function setupTestFixtures(scenario) {
 
         syncDocument(testDocId);
 
-        // Read NamedRangeId written to col 1 for the SS-DEL: row.
-        var ssDelActSheet = ss.getSheetByName('Actions');
-        var ssDelLastR    = ssDelActSheet ? ssDelActSheet.getLastRow() : 1;
-        var ssDelNRId     = null;
-        if (ssDelActSheet && ssDelLastR > 1) {
-          var ssDelData = ssDelActSheet.getRange(2, 1, ssDelLastR - 1, 5).getValues();
-          var ssDelFmls = ssDelActSheet.getRange(2, 7, ssDelLastR - 1, 1).getFormulas();
-          for (var ssDelI = 0; ssDelI < ssDelData.length; ssDelI++) {
-            if (ssDelFmls[ssDelI][0].indexOf(testDocId) !== -1 &&
-                (ssDelData[ssDelI][4] || '').indexOf('SS-DEL:') !== -1) {
-              ssDelNRId = ssDelData[ssDelI][0];
-              break;
-            }
-          }
+        // Remove the SS-DEL: list-item paragraph from the doc body.
+        var ssDelDoc  = DocumentApp.openById(testDocId);
+        var ssDelBody = ssDelDoc.getBody();
+        var ssDelN    = ssDelBody.getNumChildren();
+        for (var ssDelCI = ssDelN - 1; ssDelCI >= 0; ssDelCI--) {
+          var ssDelChild = ssDelBody.getChild(ssDelCI);
+          if (ssDelChild.getType() !== DocumentApp.ElementType.LIST_ITEM) continue;
+          if (ssDelChild.asListItem().getText().indexOf('SS-DEL:') === -1) continue;
+          ssDelBody.removeChild(ssDelChild);
+          break;
         }
-
-        // Delete the named range from the doc so the next sync detects 'Deleted'.
-        if (ssDelNRId) {
-          var ssDelDoc = DocumentApp.openById(testDocId);
-          var ssDelNRs = ssDelDoc.getNamedRanges();
-          for (var ssDelNI = 0; ssDelNI < ssDelNRs.length; ssDelNI++) {
-            if (ssDelNRs[ssDelNI].getId() === ssDelNRId) {
-              ssDelNRs[ssDelNI].remove();
-              break;
-            }
-          }
-          ssDelDoc.saveAndClose();
-        }
+        ssDelDoc.saveAndClose();
 
         syncDocument(testDocId);
 
-        GasLogger.log('fixture.sync_status_deleted', { namedRangeId: ssDelNRId });
+        GasLogger.log('fixture.sync_status_deleted', { scenario: 'paragraph-deleted' });
         break;
       }
 
@@ -1372,9 +1370,13 @@ function setupTestFixtures(scenario) {
 
         if (ssEditRowNum > 0 && ssEditSheet) {
           var ssEditFakeEvent = { range: ssEditSheet.getRange(ssEditRowNum, 10) };
-          onEdit(ssEditFakeEvent);
+          onActionSheetEdit(ssEditFakeEvent);
         }
 
+        _TF_RESULT = {
+          tag:  'fixture.sync_status_on_edit',
+          data: { sentinelDateModified: ssEditSentinel }
+        };
         GasLogger.log('fixture.sync_status_on_edit', { sentinelDateModified: ssEditSentinel });
         break;
       }
@@ -1439,13 +1441,17 @@ function setupTestFixtures(scenario) {
     }
 
     GasLogger.log('fixture.setup', { scenario: resolvedScenario });
+    // Return structured result for HTTP callers (_handleRunFixture in TestWebApp.js).
+    // Playwright callers ignore the return value and use GasLogger.flush() instead.
+    return _TF_RESULT || { tag: 'fixture.' + resolvedScenario, data: {} };
   } catch (outerErr) {
     // Catch errors that escape the per-scenario try blocks so the test always
     // receives a log entry instead of timing out on an empty flush.
     GasLogger.log('fixture.error', { msg: outerErr.message, scenario: resolvedScenario });
     GasLogger.log('fixture.' + resolvedScenario, { error: outerErr.message });
+    return { tag: 'fixture.' + resolvedScenario, error: outerErr.message };
   } finally {
-    GasLogger.flush();
+    GasLogger.flush(); // still fires after return — needed for Playwright log-polling compat
   }
 }
 

@@ -24,9 +24,20 @@ function doPost(e) {
     return _jsonResponse({ error: 'bad JSON' }, 200);
   }
 
+  // Test fixture route — authenticated by per-deployment TEST_TOKEN, not WEBAPP_SECRET.
+  // Must be checked before the WEBAPP_SECRET gate so the deployment script can register
+  // the token using WEBAPP_SECRET without the token already being required.
+  if (payload.action === 'run_fixture') {
+    return _handleRunFixture(payload);
+  }
+
   var expected = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
   if (!expected || payload.secret !== expected) {
     return ContentService.createTextOutput('unauthorized').setMimeType(ContentService.MimeType.TEXT);
+  }
+
+  if (payload.action === 'set_test_token') {
+    return _handleSetTestToken(payload);
   }
 
   if (payload.action === 'upsert_action_rows') {
@@ -49,6 +60,35 @@ function doPost(e) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
   return ContentService.createTextOutput('ok');
+}
+
+// ---------------------------------------------------------------------------
+// set_test_token handler  (deployment script only — requires WEBAPP_SECRET)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stores a per-deployment test token in Script Properties.
+ * Called once by the deployment script after each `npm run deploy:test`.
+ * The token expires at expiresAt (ISO string); run_fixture rejects expired tokens.
+ *
+ * Payload shape:
+ *   { secret, action: 'set_test_token', testToken: '<uuid>', expiresAt: '<ISO>' }
+ *
+ * Response shape:
+ *   { ok: true, expiresAt }
+ */
+function _handleSetTestToken(payload) {
+  var testToken = payload.testToken || '';
+  var expiresAt = payload.expiresAt || '';
+  if (!testToken) {
+    return _jsonResponse({ error: 'testToken required' });
+  }
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('TEST_TOKEN', testToken);
+  props.setProperty('TEST_TOKEN_EXPIRES', expiresAt);
+  GasLogger.log('test.token.set', { expiresAt: expiresAt });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, expiresAt: expiresAt });
 }
 
 // ---------------------------------------------------------------------------
