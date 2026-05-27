@@ -109,9 +109,55 @@ function syncDocument(docId) {
   }
 }
 
+/**
+ * Syncs every document referenced by an existing ActionSheet row.
+ *
+ * Enumerates unique docIds from the Document HYPERLINK formulas in column 7,
+ * then calls syncDocument() for each one.  If a document has been deleted or
+ * is no longer accessible, syncDocument() stamps 'Doc Not Found' on every row
+ * for that docId.  If a document exists but some actions were removed, the
+ * orphan-detection pass in _handleSyncActionRows stamps those rows 'Deleted'.
+ *
+ * Called by:
+ *   - Action Sync > Sync menu item (menuSync)
+ *   - 30-minute time-based trigger
+ */
 function syncAll() {
   try {
-    GasLogger.log('sync.all.complete', {});
+    var ss           = SpreadsheetApp.getActiveSpreadsheet();
+    var actionsSheet = ss.getSheetByName('Actions');
+    if (!actionsSheet) {
+      GasLogger.log('sync.all.error', { msg: 'Actions sheet not found' });
+      return;
+    }
+
+    var lastRow = actionsSheet.getLastRow();
+    if (lastRow < 2) {
+      GasLogger.log('sync.all.complete', { docCount: 0 });
+      return;
+    }
+
+    // Extract unique docIds from the HYPERLINK formula in column 7.
+    // Formula shape: =HYPERLINK("https://docs.google.com/document/d/DOCID/edit", "Title")
+    var numRows      = lastRow - 1;
+    var formulasCol7 = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
+    var docIdSet     = {};
+    for (var i = 0; i < formulasCol7.length; i++) {
+      var formula = formulasCol7[i][0] || '';
+      var m = formula.match(/\/d\/([a-zA-Z0-9_-]+)\//);
+      if (m) docIdSet[m[1]] = true;
+    }
+
+    var docIds = Object.keys(docIdSet);
+    GasLogger.log('sync.all.start', { docCount: docIds.length });
+
+    for (var j = 0; j < docIds.length; j++) {
+      syncDocument(docIds[j]);
+    }
+
+    GasLogger.log('sync.all.complete', { docCount: docIds.length });
+  } catch (e) {
+    GasLogger.log('sync.all.error', { msg: e.message });
   } finally {
     GasLogger.flush();
   }

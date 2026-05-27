@@ -122,6 +122,18 @@ This project follows the ATDD lifecycle defined in `docs/proposed-atdd-lifecycle
 
 **Existing open issues** are not retroactively renamed — apply the prefix convention to all issues created from this point forward.
 
+**Regression coverage — retroactive path (Path B):** when a bug or user-reported failure identifies
+a missing test, the fix must be accompanied by a `[TST]` issue that closes the coverage gap. The
+`[TST]` issue must audit the full entry-point class for the affected subsystem — not only the
+specific failure. Enumerate all state-modifying entry points (menu items, time-based triggers,
+sidebar buttons, HTTP routes) in the same functional area and verify each appears as a call-site
+in ≥1 test scenario. This applies regardless of whether ATDD was followed at development time.
+
+**Entry point coverage invariant:** the regression suite must exercise every state-modifying entry
+point at least once with observable state verification. The entry point itself must be the
+call-site — testing only the mechanism it delegates to is not sufficient. Standalone or sequential
+test structure is not required; the entry point may be exercised as part of any scenario.
+
 ## GAS Deployment
 
 Use the npm scripts in `package.json` — never invoke `clasp` directly.
