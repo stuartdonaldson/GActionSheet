@@ -525,7 +525,10 @@ function sidebarSetStatus(namedRangeId, newStatus, docId) {
   doc.saveAndClose();
 
   if (found) {
-    syncDocument(docId);
+    // Targeted sheet update — avoids the full syncDocument round-trip (slow) and the
+    // sheetWins revert bug (syncDocument could overwrite the paragraph back to the old
+    // status if the row carried a stale 'Dirty' Sync Status from a prior onEdit).
+    _patchActionStatus(namedRangeId, newStatus);
     GasLogger.log('sidebar.status-set.complete', { namedRangeId: namedRangeId, newStatus: newStatus });
   } else {
     GasLogger.log('sidebar.status-set.warn', { msg: 'Named range not found', namedRangeId: namedRangeId });
@@ -625,6 +628,40 @@ function _readActionTextFromPara(para) {
   if (m) rawText = rawText.slice(0, rawText.length - m[0].length).trim();
 
   return rawText;
+}
+
+/**
+ * Calls the Web App proxy to update Status + Date Modified for a single ActionSheet
+ * row, and clears any stale 'Dirty' Sync Status flag.  Used by sidebarSetStatus in
+ * place of the full syncDocument round-trip.
+ */
+function _patchActionStatus(namedRangeId, newStatus) {
+  var props     = PropertiesService.getScriptProperties();
+  var webAppUrl = props.getProperty('WEBAPP_URL');
+  var secret    = props.getProperty('WEBAPP_SECRET');
+
+  if (!webAppUrl) {
+    GasLogger.log('sidebar.patch.error', { msg: 'WEBAPP_URL not set' });
+    return;
+  }
+
+  var oauthToken = ScriptApp.getOAuthToken();
+  var resp = UrlFetchApp.fetch(webAppUrl, {
+    method:             'post',
+    contentType:        'application/json',
+    muteHttpExceptions: true,
+    headers:            { 'Authorization': 'Bearer ' + oauthToken },
+    payload:            JSON.stringify({
+      secret:        secret || '',
+      action:        'patch_action_status',
+      namedRangeId:  namedRangeId,
+      newStatus:     newStatus
+    })
+  });
+
+  if (resp.getResponseCode() !== 200) {
+    GasLogger.log('sidebar.patch.error', { msg: 'patch_action_status HTTP ' + resp.getResponseCode() });
+  }
 }
 
 /**

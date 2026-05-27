@@ -60,6 +60,10 @@ function doPost(e) {
     return _handleDeleteActionRow(payload);
   }
 
+  if (payload.action === 'patch_action_status') {
+    return _handlePatchActionStatus(payload);
+  }
+
   // Legacy POC — retained for diagnostics
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
@@ -463,6 +467,50 @@ function _handleDeleteActionRow(payload) {
 
   GasLogger.log('sidebar.delete.row', { namedRangeId: namedRangeId, rowIndex: entry.rowIndex });
   return _jsonResponse({ deleted: 1 });
+}
+
+/**
+ * Updates Status and Date Modified for a single ActionSheet row, identified by
+ * namedRangeId.  Also clears Sync Status so a stale 'Dirty' flag cannot cause
+ * the next bidirectional sync to overwrite the change.
+ *
+ * Called by sidebarSetStatus instead of the full syncDocument — avoids the
+ * sheet-wins revert bug and is ~10× faster (no doc scan, no full sheet scan).
+ *
+ * Payload shape:
+ *   { secret, action: 'patch_action_status', namedRangeId, newStatus }
+ *
+ * Response shape:
+ *   { patched: 0|1 }
+ */
+function _handlePatchActionStatus(payload) {
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found', patched: 0 });
+  }
+
+  var namedRangeId = payload.namedRangeId || '';
+  var newStatus    = payload.newStatus    || '';
+  if (!namedRangeId || !newStatus) {
+    return _jsonResponse({ error: 'namedRangeId and newStatus required', patched: 0 });
+  }
+
+  var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
+  var entry       = existingMap[namedRangeId];
+  if (!entry) {
+    return _jsonResponse({ patched: 0 });
+  }
+
+  var now = new Date();
+  WriteGuard.wrap(function () {
+    actionsSheet.getRange(entry.rowIndex, 6).setValue(newStatus); // Status
+    actionsSheet.getRange(entry.rowIndex, 9).setValue(now);       // Date Modified
+    actionsSheet.getRange(entry.rowIndex, 10).setValue('');       // clear Sync Status
+  });
+
+  GasLogger.log('sidebar.status.patched', { namedRangeId: namedRangeId, newStatus: newStatus, row: entry.rowIndex });
+  return _jsonResponse({ patched: 1 });
 }
 
 function _escapeQuotes(s) {
