@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>GActionSheet Sidebar Mockup</title>
+<style>
+  :root{
+    --bg:#f6f8fb; --panel:#ffffff; --line:#d9e1ec; --text:#1f2937; --muted:#6b7280;
+    --blue:#2563eb; --blue2:#dbeafe; --green:#059669; --green2:#d1fae5; --red:#dc2626; --red2:#fee2e2;
+    --amber:#d97706; --amber2:#fef3c7; --shadow:0 8px 28px rgba(15,23,42,.08);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(180deg,#eef2ff, #f8fafc 140px);color:var(--text)}
+  .frame{width:420px; height:760px; margin:18px auto; background:var(--bg); border:1px solid var(--line); border-radius:18px; box-shadow:var(--shadow); overflow:hidden; display:flex; flex-direction:column}
+  .top{padding:14px 14px 10px; background:var(--panel); border-bottom:1px solid var(--line)}
+  .title{display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:6px}
+  .title h1{font-size:16px; margin:0}
+  .doc{color:var(--muted); font-size:12px; margin-top:2px}
+  .sync{display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap}
+  .pill{display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border-radius:999px; border:1px solid var(--line); background:#fff}
+  .dot{width:8px; height:8px; border-radius:50%}
+  .dot.green{background:var(--green)}
+  .dot.amber{background:var(--amber)}
+  .dot.red{background:var(--red)}
+  .meta{color:var(--muted); font-size:12px}
+  .actions{padding:10px 14px 12px; display:grid; grid-template-columns:1fr 1fr; gap:8px; background:var(--bg)}
+  button, select, input{font:inherit}
+  .btn{appearance:none; border:1px solid var(--line); background:var(--panel); border-radius:10px; padding:9px 10px; cursor:pointer; text-align:left; box-shadow:0 1px 0 rgba(0,0,0,.02)}
+  .btn.primary{background:var(--blue); border-color:var(--blue); color:#fff}
+  .btn.small{padding:6px 8px; border-radius:8px}
+  .btn.disabled{opacity:.45; cursor:not-allowed}
+  .filters{padding:0 14px 10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .field{display:flex; align-items:center; gap:6px; color:var(--muted)}
+  .sel{border:1px solid var(--line); background:#fff; border-radius:9px; padding:6px 8px}
+  .body{flex:1; overflow:auto; padding:0 14px 14px}
+  .section{font-size:12px; color:var(--muted); margin:2px 0 8px; display:flex; justify-content:space-between}
+  .list{display:flex; flex-direction:column; gap:8px}
+  .row{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 10px 9px; box-shadow:0 1px 0 rgba(0,0,0,.02)}
+  .row-head{display:flex; justify-content:space-between; gap:10px; align-items:flex-start}
+  .left{min-width:0; flex:1}
+  .line1{display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap}
+  .assignee{font-weight:600; color:#111827; white-space:nowrap}
+  .action{min-width:0; flex:1; color:#111827; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .status{display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); background:#f9fafb; cursor:pointer; user-select:none; white-space:nowrap}
+  .status.open{background:var(--blue2); border-color:#bfdbfe}
+  .status.progress{background:var(--amber2); border-color:#fde68a}
+  .status.closed{background:var(--green2); border-color:#a7f3d0}
+  .controls{display:flex; gap:6px; align-items:center; margin-top:8px; justify-content:flex-end}
+  .iconbtn{border:1px solid var(--line); background:#fff; border-radius:8px; padding:5px 8px; cursor:pointer}
+  .iconbtn.del{color:var(--red)}
+  .details{margin-top:7px; color:var(--muted); font-size:12px; display:none}
+  .row.expanded .details{display:block}
+  .row.expanded .action{white-space:normal}
+  .menu{position:fixed; z-index:50; background:#fff; border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); padding:8px; width:220px; display:none}
+  .menu h4{margin:0 0 8px; font-size:12px; color:var(--muted)}
+  .menu .opt{width:100%; margin:4px 0; padding:7px 8px; border:1px solid var(--line); background:#fff; border-radius:9px; text-align:left; cursor:pointer}
+  .menu .custom{width:100%; margin-top:6px; padding:8px 9px; border:1px solid var(--line); border-radius:9px}
+  .hint{padding:8px 14px 0; color:var(--muted); font-size:12px}
+  .footer{padding:10px 14px 14px; color:var(--muted); font-size:12px}
+  .toast{position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:9px 12px; border-radius:999px; font-size:12px; opacity:0; pointer-events:none; transition:opacity .2s}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="top">
+      <div class="title">
+        <div>
+          <h1>GActionSheet</h1>
+          <div class="doc">Project Plan – Q2 Launch</div>
+        </div>
+        <button class="btn small" id="scanBtn">Scan</button>
+      </div>
+      <div class="sync">
+        <span class="pill" id="syncPill"><span class="dot green" id="syncDot"></span><span id="syncState">In sync</span></span>
+        <span class="meta" id="syncMeta">Last synced: May 26, 6:55 PM</span>
+      </div>
+      <div class="hint">Background sync runs every 30 minutes. If changes are detected, this mockup flips to out of date.</div>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="syncBtn">Sync now</button>
+      <button class="btn" id="insertActionBtn">Insert action</button>
+      <button class="btn" id="insertTableBtn">Insert table</button>
+      <button class="btn disabled" id="tableStateBtn">Table present</button>
+    </div>
+
+    <div class="filters">
+      <div class="field">Sort <select class="sel" id="sortSel"><option>Open first</option><option>In Progress first</option><option>Closed first</option><option>By assignee</option></select></div>
+      <div class="field">Filter <select class="sel" id="filterSel"><option>All</option><option>Alice</option><option>Bob</option><option>Carol</option><option>Open</option><option>In Progress</option><option>Closed</option></select></div>
+    </div>
+
+    <div class="body">
+      <div class="section"><span>Actions for this document (drag/scroll)</span><span id="countLabel">6 items</span></div>
+      <div class="list" id="list"></div>
+    </div>
+
+    <div class="footer">Click a status chip to change it. Delete removes the action. Insert table is disabled once a tracker table exists.</div>
+  </div>
+
+  <div class="menu" id="statusMenu">
+    <h4>Choose status</h4>
+    <button class="opt" data-status="Open">Open</button>
+    <button class="opt" data-status="In Progress">In Progress</button>
+    <button class="opt" data-status="Blocked">Blocked</button>
+    <button class="opt" data-status="Closed">Closed</button>
+    <input class="custom" id="customStatus" placeholder="Type custom status…" />
+  </div>
+  <div class="toast" id="toast"></div>
+
+<script>
+const state = {
+  synced: true,
+  tableExists: false,
+  lastSync: 'May 26, 6:55 PM',
+  filter: 'All',
+  sort: 'Open first',
+  actions: [
+    {id:1, assignee:'@Alice', text:'Fix login bug', status:'Open'},
+    {id:2, assignee:'@Bob', text:'Write API docs', status:'In Progress'},
+    {id:3, assignee:'@Carol', text:'Review PR #142', status:'Open'},
+    {id:4, assignee:'@Dave', text:'Set up staging env', status:'Closed'},
+    {id:5, assignee:'@Alice', text:'Update onboarding flow', status:'In Progress'},
+    {id:6, assignee:'@Eve', text:'Draft release notes', status:'Open'},
+  ]
+};
+let editingId = null;
+const list = document.getElementById('list');
+const toast = document.getElementById('toast');
+const menu = document.getElementById('statusMenu');
+const syncState = document.getElementById('syncState');
+const syncDot = document.getElementById('syncDot');
+const syncMeta = document.getElementById('syncMeta');
+const insertTableBtn = document.getElementById('insertTableBtn');
+const tableStateBtn = document.getElementById('tableStateBtn');
+const countLabel = document.getElementById('countLabel');
+
+function showToast(msg){ toast.textContent = msg; toast.classList.add('show'); clearTimeout(showToast.t); showToast.t = setTimeout(()=>toast.classList.remove('show'), 1300); }
+function renderHeader(){
+  syncState.textContent = state.synced ? 'In sync' : 'Out of date';
+  syncDot.className = 'dot ' + (state.synced ? 'green' : 'amber');
+  syncMeta.textContent = 'Last synced: ' + state.lastSync + (state.tableExists ? ' • Tracker table inserted' : ' • No tracker table');
+  insertTableBtn.classList.toggle('disabled', state.tableExists);
+  insertTableBtn.textContent = state.tableExists ? 'Insert table (exists)' : 'Insert table';
+  tableStateBtn.textContent = state.tableExists ? 'Table present' : 'No table yet';
+}
+function sortActions(arr){
+  const s = state.sort;
+  const order = { 'Open first': {'Open':0,'In Progress':1,'Blocked':2,'Closed':3}, 'In Progress first': {'In Progress':0,'Open':1,'Blocked':2,'Closed':3}, 'Closed first': {'Closed':0,'Open':1,'In Progress':2,'Blocked':3}, 'By assignee': null };
+  return [...arr].sort((a,b)=>{
+    if (s==='By assignee') return a.assignee.localeCompare(b.assignee) || a.text.localeCompare(b.text);
+    const oa = order[s][a.status] ?? 9, ob = order[s][b.status] ?? 9;
+    return oa - ob || a.assignee.localeCompare(b.assignee) || a.text.localeCompare(b.text);
+  });
+}
+function filtered(){
+  return sortActions(state.actions.filter(a => {
+    if (state.filter==='All') return true;
+    if (['Alice','Bob','Carol'].includes(state.filter)) return a.assignee.includes(state.filter);
+    return a.status===state.filter;
+  }));
+}
+function render(){
+  renderHeader();
+  const items = filtered();
+  countLabel.textContent = items.length + ' items';
+  list.innerHTML = '';
+  items.forEach(a => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <div class="row-head">
+        <div class="left">
+          <div class="line1">
+            <span class="assignee">${a.assignee}</span>
+            <span class="action">${a.text}</span>
+            <span class="status ${statusClass(a.status)}" data-id="${a.id}">${a.status} ▾</span>
+          </div>
+          <div class="details">Named range: action_${a.id} • Doc + Sheet stay in sync • Click status to change</div>
+        </div>
+        <button class="iconbtn del" data-del="${a.id}" title="Delete">🗑</button>
+      </div>`;
+    row.querySelector('.status').addEventListener('click', openStatusMenu);
+    row.querySelector('[data-del]').addEventListener('click', () => {
+      if (confirm('Delete this action from the doc and ActionSheet?')) {
+        state.actions = state.actions.filter(x => x.id !== a.id);
+        state.synced = false;
+        render();
+        showToast('Action deleted');
+      }
+    });
+    row.addEventListener('dblclick', ()=>row.classList.toggle('expanded'));
+    list.appendChild(row);
+  });
+}
+function statusClass(s){ return s==='Open' ? 'open' : s==='In Progress' ? 'progress' : s==='Closed' ? 'closed' : ''; }
+function openStatusMenu(e){
+  const id = Number(e.currentTarget.dataset.id); editingId = id;
+  const r = e.currentTarget.getBoundingClientRect();
+  menu.style.left = Math.min(r.right - 220, window.innerWidth - 230) + 'px';
+  menu.style.top = (r.bottom + 8) + 'px';
+  menu.style.display = 'block';
+  document.getElementById('customStatus').value = '';
+}
+function closeMenu(){ menu.style.display = 'none'; editingId = null; }
+document.addEventListener('click', (e)=>{ if(!menu.contains(e.target) && !e.target.classList.contains('status')) closeMenu(); });
+menu.querySelectorAll('.opt').forEach(b => b.addEventListener('click', ()=>{
+  setStatus(editingId, b.dataset.status); closeMenu();
+}));
+document.getElementById('customStatus').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ setStatus(editingId, e.target.value.trim() || 'Custom'); closeMenu(); } });
+function setStatus(id, status){
+  const a = state.actions.find(x=>x.id===id); if(!a) return;
+  a.status = status; state.synced = false; render(); showToast('Status updated to ' + status);
+}
+document.getElementById('syncBtn').addEventListener('click', ()=>{ state.synced = true; state.lastSync = new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}); render(); showToast('Synced with ActionSheet'); });
+document.getElementById('scanBtn').addEventListener('click', ()=>{ showToast('Scanned doc: ' + state.actions.length + ' actions'); state.synced = false; render(); });
+document.getElementById('insertTableBtn').addEventListener('click', ()=>{ if(state.tableExists) return showToast('Table already exists'); state.tableExists = true; render(); showToast('Tracker table inserted'); });
+document.getElementById('insertActionBtn').addEventListener('click', ()=>{
+  const name = prompt('Assignee name (e.g. Alice)'); if(!name) return;
+  const text = prompt('Action text'); if(!text) return;
+  state.actions.unshift({id:Date.now(), assignee:'@'+name.replace(/^@/,'').trim(), text, status:'Open'});
+  state.synced = false; render(); showToast('Action inserted');
+});
+document.getElementById('sortSel').addEventListener('change', e=>{ state.sort = e.target.value; render(); });
+document.getElementById('filterSel').addEventListener('change', e=>{ state.filter = e.target.value; render(); });
+render();
+</script>
+</body>
+</html>

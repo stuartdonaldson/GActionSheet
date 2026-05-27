@@ -9,37 +9,74 @@ function buildHomepageCard(eventOrVerificationResult) {
   var verificationResult = _isVerificationResult(eventOrVerificationResult)
     ? eventOrVerificationResult
     : null;
-  var controls = _resolveCardControls(verificationResult ? null : eventOrVerificationResult);
-  var doc = DocumentApp.getActiveDocument();
-  var card = CardService.newCardBuilder()
-    .setHeader(_buildHomepageHeader(doc));
 
-  if (!doc) {
+  try {
+    var doc = _resolveActiveDocForRead(DocumentApp.getActiveDocument());
+    var card = CardService.newCardBuilder()
+      .setHeader(_buildHomepageHeader(doc));
+
+    if (!doc) {
+      card.addSection(
+        CardService.newCardSection().addWidget(
+          CardService.newTextParagraph().setText('Open a Google Doc to use Action Sync.')
+        )
+      );
+    } else {
+      var homepageState = _buildHomepageState(doc, verificationResult);
+      card
+        .addSection(_buildOverviewSection(homepageState))
+        .addSection(_buildActionButtonsSection(homepageState))
+        .addSection(_buildActionListSection(homepageState));
+    }
+
+    if (verificationResult) {
+      card.addSection(_buildVerificationSection(verificationResult));
+    }
+
     card.addSection(
       CardService.newCardSection().addWidget(
-        CardService.newTextParagraph().setText('Open a Google Doc to use Action Sync.')
+        CardService.newTextParagraph().setText(BUILD_INFO.version)
       )
     );
-  } else {
-    var homepageState = _buildHomepageState(doc, verificationResult, controls);
-    card
-      .addSection(_buildOverviewSection(homepageState))
-      .addSection(_buildActionButtonsSection(homepageState))
-      .addSection(_buildCardControlsSection(homepageState))
-      .addSection(_buildActionListSection(homepageState));
+
+    return card.build();
+  } catch (e) {
+    GasLogger.log('addon.homepage.error', { msg: e.message, stack: e.stack || '' });
+    GasLogger.flush();
+
+    return CardService.newCardBuilder()
+      .setHeader(
+        CardService.newCardHeader()
+          .setTitle('Action Sync')
+          .setImageUrl('https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-128.png')
+          .setImageAltText('Action Sync logo')
+      )
+      .addSection(
+        CardService.newCardSection().addWidget(
+          CardService.newTextParagraph().setText('Unable to load the document state right now.')
+        )
+      )
+      .addSection(
+        CardService.newCardSection().addWidget(
+          CardService.newTextParagraph().setText(BUILD_INFO.version)
+        )
+      )
+      .build();
+  }
+}
+
+function _resolveActiveDocForRead(doc) {
+  if (!doc) {
+    return null;
   }
 
-  if (verificationResult) {
-    card.addSection(_buildVerificationSection(verificationResult));
+  try {
+    return DocumentApp.openById(doc.getId());
+  } catch (e) {
+    GasLogger.log('addon.doc.reopen_failed', { msg: e.message });
+    GasLogger.flush();
+    return doc;
   }
-
-  card.addSection(
-    CardService.newCardSection().addWidget(
-      CardService.newTextParagraph().setText(BUILD_INFO.version)
-    )
-  );
-
-  return card.build();
 }
 
 function onOpenSidebar() {
@@ -97,19 +134,6 @@ function onInsertTrackerTable() {
   }
 }
 
-function onScanCard(e) {
-  return CardService.newActionResponseBuilder()
-    .setNotification(CardService.newNotification().setText('Card refreshed'))
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard(e)))
-    .build();
-}
-
-function onCardControlsChange(e) {
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard(e)))
-    .build();
-}
-
 function onSyncNow() {
   var doc = DocumentApp.getActiveDocument();
   if (!doc) {
@@ -118,7 +142,11 @@ function onSyncNow() {
       .build();
   }
   try {
+    var trackerPresent = _readTrackerTableState(doc).found;
     syncDocument(doc.getId());
+    if (trackerPresent) {
+      insertTrackerTable(doc.getId());
+    }
     return CardService.newActionResponseBuilder()
       .setNotification(CardService.newNotification().setText('Sync complete'))
       .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
@@ -194,17 +222,29 @@ function _buildHomepageHeader(doc) {
     .setImageAltText('Action Sync logo');
 
   if (doc) {
-    header.setSubtitle(doc.getName());
+    var docTitle = _safeGetDocTitle(doc);
+    if (docTitle) {
+      header.setSubtitle(docTitle);
+    }
   }
 
   return header;
 }
 
-function _buildHomepageState(doc, verificationResult, controls) {
+function _safeGetDocTitle(doc) {
+  try {
+    return doc.getName();
+  } catch (e) {
+    GasLogger.log('addon.header.doc_name_unavailable', { msg: e.message });
+    GasLogger.flush();
+    return '';
+  }
+}
+
+function _buildHomepageState(doc, verificationResult) {
   var floatingActions = _collectFloatingActionState(doc);
   var tracker = _readTrackerTableState(doc);
   var sheetRows = [];
-  var trackerState = tracker.found ? 'Tracker table present' : 'No tracker table yet';
   var syncState = 'No actions found';
   var syncMeta = 'Add a floating action and click Sync now.';
 
@@ -235,12 +275,9 @@ function _buildHomepageState(doc, verificationResult, controls) {
   }
 
   return {
-    docName: doc.getName(),
+    docName: _safeGetDocTitle(doc),
     floatingActions: floatingActions,
-    visibleActions: _applyCardControls(floatingActions, controls),
-    controls: controls,
     trackerFound: tracker.found,
-    trackerState: trackerState,
     sheetRowCount: sheetRows.length,
     syncState: syncState,
     syncMeta: syncMeta,
@@ -253,16 +290,8 @@ function _buildOverviewSection(homepageState) {
   section
     .addWidget(
       CardService.newDecoratedText()
-        .setTopLabel('Sync status')
-        .setText(homepageState.syncState)
+        .setText('Sync status: ' + homepageState.syncState)
         .setBottomLabel(homepageState.syncMeta)
-        .setWrapText(true)
-    )
-    .addWidget(
-      CardService.newDecoratedText()
-        .setTopLabel('Tracker')
-        .setText(homepageState.trackerState)
-        .setBottomLabel(homepageState.statusBreakdown)
         .setWrapText(true)
     );
   return section;
@@ -270,11 +299,6 @@ function _buildOverviewSection(homepageState) {
 
 function _buildActionButtonsSection(homepageState) {
   var buttonSet = CardService.newButtonSet()
-    .addButton(
-      CardService.newTextButton()
-        .setText('Scan card')
-        .setOnClickAction(_buildSidebarAction('onScanCard'))
-    )
     .addButton(
       CardService.newTextButton()
         .setText('Sync now')
@@ -285,51 +309,28 @@ function _buildActionButtonsSection(homepageState) {
       CardService.newTextButton()
         .setText('VerifySync')
         .setOnClickAction(_buildSidebarAction('onVerifySync'))
-    )
-    .addButton(
+    );
+
+  if (!homepageState.trackerFound) {
+    buttonSet.addButton(
       CardService.newTextButton()
-        .setText(homepageState.trackerFound ? 'Refresh tracker' : 'Insert tracker')
+        .setText('Insert tracker')
         .setOnClickAction(_buildSidebarAction('onInsertTrackerTable'))
     );
+  }
 
-  return CardService.newCardSection().addWidget(buttonSet);
-}
-
-function _buildCardControlsSection(homepageState) {
-  var section = CardService.newCardSection();
-
-  section
-    .addWidget(
-      CardService.newSelectionInput()
-        .setType(CardService.SelectionInputType.DROPDOWN)
-        .setFieldName('sortBy')
-        .setTitle('Sort')
-        .addItem('Document order', 'document-order', homepageState.controls.sortBy === 'document-order')
-        .addItem('Open first', 'open-first', homepageState.controls.sortBy === 'open-first')
-        .addItem('By assignee', 'assignee', homepageState.controls.sortBy === 'assignee')
-        .setOnChangeAction(_buildSidebarAction('onCardControlsChange'))
-    )
-    .addWidget(
-      CardService.newSelectionInput()
-        .setType(CardService.SelectionInputType.DROPDOWN)
-        .setFieldName('filterBy')
-        .setTitle('Filter')
-        .addItem('All', 'all', homepageState.controls.filterBy === 'all')
-        .addItem('Open', 'Open', homepageState.controls.filterBy === 'Open')
-        .addItem('In Progress', 'In Progress', homepageState.controls.filterBy === 'In Progress')
-        .addItem('Closed', 'Closed', homepageState.controls.filterBy === 'Closed')
-        .setOnChangeAction(_buildSidebarAction('onCardControlsChange'))
+  var section = CardService.newCardSection().addWidget(buttonSet);
+  if (homepageState.trackerFound) {
+    section.addWidget(
+      CardService.newTextParagraph().setText('Tracker already present in this document.')
     );
+  }
 
   return section;
 }
 
 function _buildActionListSection(homepageState) {
-  var header = 'Actions for this document (' + homepageState.visibleActions.length;
-  if (homepageState.visibleActions.length !== homepageState.floatingActions.length) {
-    header += ' shown of ' + homepageState.floatingActions.length;
-  }
-  header += ')';
+  var header = 'Actions for this document (' + homepageState.floatingActions.length + ')';
   var section = CardService.newCardSection().setHeader(header);
 
   if (homepageState.floatingActions.length === 0) {
@@ -339,15 +340,8 @@ function _buildActionListSection(homepageState) {
     return section;
   }
 
-  if (homepageState.visibleActions.length === 0) {
-    section.addWidget(
-      CardService.newTextParagraph().setText('No actions match the current filter.')
-    );
-    return section;
-  }
-
-  for (var i = 0; i < homepageState.visibleActions.length; i++) {
-    var action = homepageState.visibleActions[i];
+  for (var i = 0; i < homepageState.floatingActions.length; i++) {
+    var action = homepageState.floatingActions[i];
     var assignee = action.assigneeName || action.assigneeEmail || 'Unassigned';
     var anchorState = action.namedRangeId ? 'Anchored' : 'Needs sync';
     section.addWidget(
@@ -391,56 +385,6 @@ function _summarizeStatuses(floatingActions) {
   }
 
   return parts.join(' • ');
-}
-
-function _resolveCardControls(event) {
-  return {
-    sortBy: _readCardInput(event, 'sortBy') || 'document-order',
-    filterBy: _readCardInput(event, 'filterBy') || 'all'
-  };
-}
-
-function _readCardInput(event, fieldName) {
-  try {
-    return event.commonEventObject.formInputs[fieldName].stringInputs.value[0] || '';
-  } catch (e) {
-    return '';
-  }
-}
-
-function _applyCardControls(floatingActions, controls) {
-  var filtered = [];
-  for (var i = 0; i < floatingActions.length; i++) {
-    var action = floatingActions[i];
-    if (controls.filterBy !== 'all' && (action.status || 'Open') !== controls.filterBy) {
-      continue;
-    }
-    filtered.push(action);
-  }
-
-  filtered.sort(function(left, right) {
-    if (controls.sortBy === 'assignee') {
-      var leftAssignee = left.assigneeName || left.assigneeEmail || '';
-      var rightAssignee = right.assigneeName || right.assigneeEmail || '';
-      return leftAssignee.localeCompare(rightAssignee) || left.action.localeCompare(right.action);
-    }
-
-    if (controls.sortBy === 'open-first') {
-      return _statusSortWeight(left.status) - _statusSortWeight(right.status) || left.bodyChildIndex - right.bodyChildIndex;
-    }
-
-    return left.bodyChildIndex - right.bodyChildIndex;
-  });
-
-  return filtered;
-}
-
-function _statusSortWeight(status) {
-  if (status === 'Open') return 0;
-  if (status === 'In Progress') return 1;
-  if (status === 'Blocked') return 2;
-  if (status === 'Closed') return 3;
-  return 4;
 }
 
 function _limitVerificationLines(lines, maxLines) {
