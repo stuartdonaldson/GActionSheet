@@ -107,25 +107,16 @@ function _poc_submitCreateAction(e) {
       .build();
   }
 
-  // Build chip label: short action text + optional assignee handle
-  var truncated = actionText.length > 40 ? actionText.slice(0, 37) + '…' : actionText;
-  var chipTitle = truncated + (assigneeEmail ? ' (' + assigneeEmail.split('@')[0] + ')' : '');
-  var chipUrl   = _POC_ACTION_URL_BASE + namedRangeId;
-
-  // SmartChipConfig tells Google Docs to insert a native smart chip at the cursor.
-  // This is the correct createActionTrigger response — do NOT use DocumentApp to
-  // insert the chip manually; do NOT use setNavigation/setNotification here.
-  var smartChipConfig = CardService.newSmartChipConfig()
-    .setResourceUri(chipUrl)
-    .setTitle(chipTitle);
-
-  var renderAction = CardService.newRenderAction()
-    .setSmartChipConfig(smartChipConfig)
-    .setViewCard(_poc_buildMessageCard('Action created', actionText));
+  // Insert chip link at cursor via DocumentApp.
+  // NOTE: CardService.newSmartChipConfig / newRenderAction do NOT exist in the
+  // current GAS runtime (confirmed 2026-05-27 — TypeError). The DocumentApp
+  // cursor approach is the correct insertion method.
+  _poc_insertActionChip(doc, namedRangeId, actionText, assigneeEmail, status);
 
   GasLogger.log('CREATE_ACTION_TRIGGER.done', { namedRangeId: namedRangeId, upserted: result.upserted });
+  // updateCard is the only allowed response in createActionTriggers context.
   return CardService.newActionResponseBuilder()
-    .setRenderAction(renderAction)
+    .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Action created', actionText)))
     .build();
 }
 
