@@ -6,6 +6,9 @@
  */
 
 function onOpen() {
+  // Guard: onOpen is a Sheets simple trigger. When the script runs as a
+  // Docs/Slides/Forms add-on, SpreadsheetApp.getUi() throws — exit silently.
+  try { SpreadsheetApp.getActiveSpreadsheet(); } catch (e) { return; }
   SpreadsheetApp.getUi()
     .createMenu('Action Sync')
     .addItem('Sync', 'menuSync')
