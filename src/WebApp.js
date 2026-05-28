@@ -12,8 +12,18 @@ function doGet(e) {
   var url = ScriptApp.getService().getUrl();
   // Normalize org-specific URL to the canonical form stored in script properties
   url = url.replace(/https:\/\/script\.google\.com\/a\/[^\/]+\/macros\//, 'https://script.google.com/macros/');
-  PropertiesService.getScriptProperties().setProperty('WEBAPP_URL', url);
-  return ContentService.createTextOutput('WEBAPP_URL registered: ' + url);
+
+  var registered = '';
+  if (!BUILD_INFO.webappUrl) {
+    PropertiesService.getScriptProperties().setProperty('WEBAPP_URL', url);
+    registered = ' (registered to script properties)';
+  }
+
+  return ContentService.createTextOutput(
+    'GActionSheet ' + BUILD_INFO.version + '\n' +
+    'Build:   ' + BUILD_INFO.buildDate + '\n' +
+    'WebApp:  ' + url + registered
+  );
 }
 
 function doPost(e) {
@@ -34,6 +44,10 @@ function doPost(e) {
   var expected = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
   if (!expected || payload.secret !== expected) {
     return ContentService.createTextOutput('unauthorized').setMimeType(ContentService.MimeType.TEXT);
+  }
+
+  if (payload.clientVersion && payload.clientVersion !== BUILD_INFO.version) {
+    GasLogger.log('webapp.version.mismatch', { client: payload.clientVersion, server: BUILD_INFO.version });
   }
 
   if (payload.action === 'set_test_token') {
@@ -127,7 +141,6 @@ function _handleUpsertActionRows(payload) {
   var rows     = payload.rows     || [];
 
   var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
-  var maxId       = _findMaxId(existingMap);
 
   var upserted = 0;
   var now      = new Date();
@@ -137,11 +150,10 @@ function _handleUpsertActionRows(payload) {
       var row = rows[i];
       if (!row.namedRangeId || existingMap[row.namedRangeId]) continue;
 
-      maxId++;
       var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
       actionsSheet.appendRow([
         row.namedRangeId,
-        maxId,
+        _extractActionId(row.namedRangeId),
         row.assigneeEmail || '',
         row.assigneeName  || '',
         row.actionText    || '',
@@ -190,13 +202,14 @@ function _loadExistingRowsByNamedRangeId(actionsSheet) {
   return result;
 }
 
-function _findMaxId(existingMap) {
-  var max = 0;
-  for (var k in existingMap) {
-    var id = existingMap[k].id;
-    if (typeof id === 'number' && id > max) max = id;
-  }
-  return max;
+/**
+ * Extracts the human-readable action ID from a globalId.
+ * globalId format: {docFileId}/AI-{N}  →  returns 'AI-{N}'
+ * Falls back to the raw globalId if the format is unexpected.
+ */
+function _extractActionId(globalId) {
+  var parts = (globalId || '').split('/AI-');
+  return parts.length >= 2 ? 'AI-' + parts[1] : globalId || '';
 }
 
 function _rowIdentityKey(assigneeEmail, action, status) {
@@ -238,7 +251,6 @@ function _handleSyncActionRows(payload) {
   }
 
   var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
-  var maxId       = _findMaxId(existingMap);
   var now         = new Date();
   var upserted    = 0;
   var updated     = 0;
@@ -265,11 +277,10 @@ function _handleSyncActionRows(payload) {
       var existing = existingMap[row.namedRangeId];
 
       if (!existing) {
-        maxId++;
         var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
         actionsSheet.appendRow([
           row.namedRangeId,
-          maxId,
+          _extractActionId(row.namedRangeId),
           row.assigneeEmail || '',
           row.assigneeName  || '',
           row.actionText    || '',
@@ -519,6 +530,7 @@ function _escapeQuotes(s) {
 }
 
 function _jsonResponse(obj) {
+  obj.serverVersion = BUILD_INFO.version;
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);

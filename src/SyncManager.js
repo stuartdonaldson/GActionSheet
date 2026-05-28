@@ -28,6 +28,11 @@ function syncDocument(docId) {
       _markDocNotFound(docId);
       return;
     }
+    var assigned = _assignPlaceholderTokens(doc);
+    if (assigned > 0) {
+      GasLogger.log('sync.assigned', { docId: docId, count: assigned });
+    }
+
     var floatingActions = _scanFloatingActions(doc);
 
     GasLogger.log('sync.scanned', { docId: docId, count: floatingActions.length });
@@ -307,6 +312,47 @@ function _scanFloatingActions(doc) {
 }
 
 /**
+ * Finds paragraphs starting with the bare "AI:" placeholder (no number) and
+ * rewrites them as "AI-N:" using the next available N in the document.
+ * Called in syncDocument before _scanFloatingActions so the scanner always
+ * sees fully-formed AI-N: tokens.
+ *
+ * @param {GoogleAppsScript.Document.Document} doc
+ * @returns {number} count of placeholders assigned
+ */
+function _assignPlaceholderTokens(doc) {
+  var body = doc.getBody();
+  var n    = body.getNumChildren();
+
+  // First pass: find current max N
+  var maxN = 0;
+  for (var i = 0; i < n; i++) {
+    var child = body.getChild(i);
+    var t = child.getType();
+    if (t !== DocumentApp.ElementType.PARAGRAPH && t !== DocumentApp.ElementType.LIST_ITEM) continue;
+    var m = child.getText().replace(/\n$/, '').match(/^AI-(\d+):/);
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  }
+
+  // Second pass: assign next N to each bare "AI:" placeholder
+  var assigned = 0;
+  for (var j = 0; j < n; j++) {
+    var child2 = body.getChild(j);
+    var t2 = child2.getType();
+    if (t2 !== DocumentApp.ElementType.PARAGRAPH && t2 !== DocumentApp.ElementType.LIST_ITEM) continue;
+    var text = child2.getText().replace(/\n$/, '');
+    if (!/^AI:/.test(text)) continue;
+
+    maxN++;
+    // Insert '-N' at position 2 (between 'AI' and ':') → 'AI:' becomes 'AI-N:'
+    child2.editAsText().insertText(2, '-' + maxN);
+    assigned++;
+  }
+
+  return assigned;
+}
+
+/**
  * Derives a display name from an email address username.
  * Punctuation (. _ -) is treated as a word separator and each word is
  * title-cased.  e.g. "jane.smith@example.com" → "Jane Smith".
@@ -437,15 +483,8 @@ function _markDocNotFound(docId) {
 function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail) {
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
   var chipUrl = 'https://northlakeuu.org/GActionSheet/action/' + globalId;
-  var statusImages = {
-    'Open':        'https://stuartdonaldson.github.io/GActionSheet/assets/status-open.svg',
-    'In Progress': 'https://stuartdonaldson.github.io/GActionSheet/assets/status-inprogress.svg',
-    'In Review':   'https://stuartdonaldson.github.io/GActionSheet/assets/status-inreview.svg',
-    'Done':        'https://stuartdonaldson.github.io/GActionSheet/assets/status-done.svg',
-    'Closed':      'https://stuartdonaldson.github.io/GActionSheet/assets/status-closed.svg'
-  };
-  var imgUrl = statusImages[status] ||
-    'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
+  // Docs REST API insertInlineImage does not support SVG — use PNG until PNG status icons exist.
+  var imgUrl = 'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
 
   // GET to find paragraph indices. builtText is text-run content only;
   // inline images appear as inlineObjectElement (not textRun) so they are absent.

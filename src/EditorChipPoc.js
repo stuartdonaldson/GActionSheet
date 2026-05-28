@@ -25,14 +25,9 @@ var _POC_ACTION_URL_BASE = 'https://northlakeuu.org/GActionSheet/action/';
 /** Status values matching the ActionSheet dropdown. */
 var _POC_STATUSES = ['Open', 'In Progress', 'In Review', 'Done', 'Closed'];
 
-var _POC_STATUS_IMAGES = {
-  'Open':        'https://stuartdonaldson.github.io/GActionSheet/assets/status-open.svg',
-  'In Progress': 'https://stuartdonaldson.github.io/GActionSheet/assets/status-inprogress.svg',
-  'In Review':   'https://stuartdonaldson.github.io/GActionSheet/assets/status-inreview.svg',
-  'Done':        'https://stuartdonaldson.github.io/GActionSheet/assets/status-done.svg',
-  'Closed':      'https://stuartdonaldson.github.io/GActionSheet/assets/status-closed.svg'
-};
+// Docs REST API insertInlineImage does not support SVG — use PNG until PNG status icons exist.
 var _POC_DEFAULT_IMAGE = 'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
+var _POC_STATUS_IMAGES = {}; // empty: all statuses fall through to _POC_DEFAULT_IMAGE
 
 // ---------------------------------------------------------------------------
 // Entry points
@@ -139,7 +134,7 @@ function _poc_submitCreateAction(e) {
       .build();
   }
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Action created', actionText)))
+    .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText)))
     .build();
 }
 
@@ -203,12 +198,14 @@ function _poc_buildCreationCard() {
  * @returns {GoogleAppsScript.Card_Service.Card}
  */
 function _poc_buildPreviewCard(url) {
-  var namedRangeId = url.replace(_POC_ACTION_URL_BASE, '');
-  var action       = _poc_lookupAction(namedRangeId);
+  var globalId  = url.replace(_POC_ACTION_URL_BASE, '');
+  var idParts   = globalId.split('/AI-');
+  var actionId  = idParts.length >= 2 ? 'AI-' + idParts[1] : '';
+  var action    = _poc_lookupAction(globalId);
 
-  var title  = (action && action.action)        || namedRangeId || 'GActionSheet Action';
-  var status = (action && action.status)         || '';
-  var assignee = (action && action.assigneeEmail) || '';
+  var title    = (action && action.action)        || actionId || 'GActionSheet Action';
+  var status   = (action && action.status)         || '';
+  var assignee = (action && action.assigneeEmail)  || '';
 
   var header = CardService.newCardHeader()
     .setTitle(title)
@@ -216,13 +213,16 @@ function _poc_buildPreviewCard(url) {
     .setImageStyle(CardService.ImageStyle.SQUARE);
 
   var section = CardService.newCardSection();
+  if (actionId) {
+    section.addWidget(CardService.newDecoratedText().setTopLabel('ID').setText(actionId));
+  }
   if (status) {
     section.addWidget(CardService.newDecoratedText().setTopLabel('Status').setText(status));
   }
   if (assignee) {
     section.addWidget(CardService.newDecoratedText().setTopLabel('Assignee').setText(assignee));
   }
-  if (!status && !assignee) {
+  if (!actionId && !status && !assignee) {
     section.addWidget(CardService.newTextParagraph().setText('No details available.'));
   }
 

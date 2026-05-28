@@ -357,12 +357,19 @@ function _buildActionListSection(homepageState) {
   for (var i = 0; i < homepageState.floatingActions.length; i++) {
     var action = homepageState.floatingActions[i];
     var assignee = action.assigneeName || action.assigneeEmail || 'Unassigned';
-    var anchorState = action.namedRangeId ? 'Anchored' : 'Needs sync';
+    var actionId = '';
+    if (action.namedRangeId) {
+      var nrParts = action.namedRangeId.split('/AI-');
+      if (nrParts.length >= 2) actionId = 'AI-' + nrParts[1];
+    }
+    var bottomLabel = (actionId ? actionId + ' • ' : '') +
+      'Status: ' + (action.status || 'Open') +
+      (action.namedRangeId ? '' : ' • Needs sync');
     section.addWidget(
       CardService.newDecoratedText()
         .setTopLabel(assignee)
         .setText(_escapeAddonHtml(action.action || '(blank action)'))
-        .setBottomLabel('Status: ' + (action.status || 'Open') + ' • ' + anchorState)
+        .setBottomLabel(bottomLabel)
         .setWrapText(true)
     );
 
