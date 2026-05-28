@@ -70,10 +70,10 @@ function onLinkPreview(e) { // eslint-disable-line no-unused-vars
  * @returns {GoogleAppsScript.Card_Service.ActionResponse}
  */
 function _poc_submitCreateAction(e) {
-  var formInput    = (e && e.formInput) || {};
-  var actionText   = (formInput.poc_actionText  || '').trim();
-  var assigneeEmail = (formInput.poc_assignee   || '').trim();
-  var status       = formInput.poc_status || 'Open';
+  var formInput     = (e && e.formInput) || {};
+  var actionText    = (formInput.poc_actionText  || '').trim();
+  var assigneeEmail = (formInput.poc_assignee    || '').trim();
+  var status        = formInput.poc_status || 'Open';
 
   if (!actionText) {
     GasLogger.log('CREATE_ACTION_TRIGGER.validation', { msg: 'actionText required' });
@@ -107,14 +107,25 @@ function _poc_submitCreateAction(e) {
       .build();
   }
 
-  // Insert chip link at cursor
-  _poc_insertActionChip(doc, namedRangeId, actionText, assigneeEmail, status);
+  // Build chip label: short action text + optional assignee handle
+  var truncated = actionText.length > 40 ? actionText.slice(0, 37) + '…' : actionText;
+  var chipTitle = truncated + (assigneeEmail ? ' (' + assigneeEmail.split('@')[0] + ')' : '');
+  var chipUrl   = _POC_ACTION_URL_BASE + namedRangeId;
+
+  // SmartChipConfig tells Google Docs to insert a native smart chip at the cursor.
+  // This is the correct createActionTrigger response — do NOT use DocumentApp to
+  // insert the chip manually; do NOT use setNavigation/setNotification here.
+  var smartChipConfig = CardService.newSmartChipConfig()
+    .setResourceUri(chipUrl)
+    .setTitle(chipTitle);
+
+  var renderAction = CardService.newRenderAction()
+    .setSmartChipConfig(smartChipConfig)
+    .setViewCard(_poc_buildMessageCard('Action created', actionText));
 
   GasLogger.log('CREATE_ACTION_TRIGGER.done', { namedRangeId: namedRangeId, upserted: result.upserted });
-  // createActionTrigger context rejects notification, pushCard, popCard, setStateChanged.
-  // Try updateCard (replace in-place with a confirmation card) as the last option.
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Action created', actionText)))
+    .setRenderAction(renderAction)
     .build();
 }
 
