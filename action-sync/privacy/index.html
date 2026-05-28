@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Action Sync — Privacy Policy</title>
+  <style>
+    body { font-family: sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }
+    h1 { color: #1E3A5F; } h2 { color: #2563EB; margin-top: 2em; }
+    p, li { line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <h1>Action Sync — Privacy Policy</h1>
+  <p><em>Effective date: 2026-05-27</em></p>
+
+  <h2>1. Data Collected</h2>
+  <p>Action Sync collects only the data necessary to operate:</p>
+  <ul>
+    <li><strong>Google account email address</strong> — used to identify the action assignee.</li>
+    <li><strong>Document content</strong> — scanned locally to identify action items (checklist items with assignees). No document content is transmitted externally.</li>
+    <li><strong>Action item text, assignee, and status</strong> — stored in the ActionSheet (a Google Sheet in your Google Drive).</li>
+  </ul>
+
+  <h2>2. Data Storage</h2>
+  <p>All action data is stored in a Google Sheet within your own Google Drive account. No data is transmitted to third-party servers. The Add-on does not maintain its own database.</p>
+
+  <h2>3. Data Sharing</h2>
+  <p>Action Sync does not sell, share, or transmit your data to any third party. Data is accessible only within your Google Workspace environment to users with appropriate sharing permissions on the ActionSheet.</p>
+
+  <h2>4. Google API Scopes Used</h2>
+  <ul>
+    <li><code>drive</code> — to locate and access the ActionSheet in Google Drive.</li>
+    <li><code>spreadsheets</code> — to read and write action rows in the ActionSheet.</li>
+    <li><code>documents</code> — to scan the active document for action items and insert action chips.</li>
+    <li><code>userinfo.email</code> — to identify the current user for assignee matching.</li>
+    <li><code>workspace.linkcreate</code> — to enable the @-menu action chip creation in Google Docs.</li>
+    <li><code>workspace.linkpreview</code> — to display action details when hovering over an action chip.</li>
+  </ul>
+
+  <h2>5. Data Retention</h2>
+  <p>Data is retained in the ActionSheet until deleted by the user. Uninstalling the Add-on does not delete existing ActionSheet data.</p>
+
+  <h2>6. Contact</h2>
+  <p>Privacy questions: <a href="https://github.com/stuartdonaldson/GActionSheet/issues">github.com/stuartdonaldson/GActionSheet/issues</a></p>
+</body>
+</html>
