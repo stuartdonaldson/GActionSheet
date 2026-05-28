@@ -20,7 +20,7 @@
  */
 
 /** Base URL for action smart-chip links. Matches linkPreviewTriggers hostPattern. */
-var _POC_ACTION_URL_BASE = 'https://stuartdonaldson.github.io/GActionSheet/action/';
+var _POC_ACTION_URL_BASE = 'https://action-sync.io/GActionSheet/action/';
 
 /** Status values matching the ActionSheet dropdown. */
 var _POC_STATUSES = ['Open', 'In Progress', 'In Review', 'Done', 'Closed'];

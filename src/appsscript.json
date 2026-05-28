@@ -48,7 +48,7 @@
           "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png",
           "patterns": [
             {
-              "hostPattern": "stuartdonaldson.github.io",
+              "hostPattern": "action-sync.io",
               "pathPrefix": "/GActionSheet/action/"
             }
           ],
