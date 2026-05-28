@@ -76,13 +76,12 @@ function _verifyProgress(result, message) {
 
 function _collectFloatingActionState(doc) {
   var floatingActions = _scanFloatingActions(doc);
-  var anchoredMap = _buildAnchoredIndexMap(doc);
   var rows = [];
 
   for (var i = 0; i < floatingActions.length; i++) {
     var action = floatingActions[i];
     rows.push({
-      namedRangeId: anchoredMap[action.bodyChildIndex] || '',
+      namedRangeId: action.globalId || '',
       assigneeEmail: action.assigneeEmail || '',
       assigneeName: action.assigneeName || '',
       action: action.actionText || '',
@@ -179,12 +178,11 @@ function _fetchSheetRowsForVerification(docUrl) {
 }
 
 function _callVerifyWebApp(payload) {
-  var props = PropertiesService.getScriptProperties();
-  var webAppUrl = props.getProperty('WEBAPP_URL');
-  var secret = props.getProperty('WEBAPP_SECRET');
+  var webAppUrl = getWebAppUrl();
+  var secret = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
 
   if (!webAppUrl) {
-    throw new Error('WEBAPP_URL script property not set');
+    throw new Error('WEBAPP_URL not set');
   }
 
   var oauthToken = ScriptApp.getOAuthToken();
@@ -193,7 +191,7 @@ function _callVerifyWebApp(payload) {
     contentType: 'application/json',
     muteHttpExceptions: true,
     headers: { Authorization: 'Bearer ' + oauthToken },
-    payload: JSON.stringify(_mergeVerifyPayload(payload, { secret: secret || '' }))
+    payload: JSON.stringify(_mergeVerifyPayload(payload, { secret: secret || '', clientVersion: BUILD_INFO.version }))
   });
 
   if (resp.getResponseCode() !== 200) {
@@ -201,7 +199,9 @@ function _callVerifyWebApp(payload) {
   }
 
   try {
-    return JSON.parse(resp.getContentText());
+    var parsed = JSON.parse(resp.getContentText());
+    _logVersionMismatch(parsed, 'verify');
+    return parsed;
   } catch (e) {
     throw new Error('Verify request returned non-JSON response');
   }

@@ -45,11 +45,10 @@ function insertTrackerTable(docId) {
   try {
     var doc             = DocumentApp.openById(docId);
     var floatingActions = _scanFloatingActions(doc);
-    var anchoredMap     = _buildAnchoredIndexMap(doc);
 
     var ss        = _openActionSheetSpreadsheet();
     var sheetRows = _readTrackerSheetRows(ss, docId);
-    var dataRows  = _buildTrackerDataRows(floatingActions, anchoredMap, sheetRows);
+    var dataRows  = _buildTrackerDataRows(floatingActions, sheetRows);
 
     var insertIndex    = _removeTrackerSection(doc);
     var assigneeEmails = _insertTrackerSection(doc, dataRows, insertIndex);
@@ -124,16 +123,14 @@ function _readTrackerSheetRows(ss, docId) {
  * One row per floating action, in body order.
  *
  * @param {Array}  floatingActions  Output of _scanFloatingActions.
- * @param {Object} anchoredMap      Output of _buildAnchoredIndexMap.
- * @param {Object} sheetRows        Output of _readTrackerSheetRows.
+ * @param {Object} sheetRows        Output of _readTrackerSheetRows (keyed by globalId).
  * @returns {Array<{id, assigneeEmail, action, status}>}
  */
-function _buildTrackerDataRows(floatingActions, anchoredMap, sheetRows) {
+function _buildTrackerDataRows(floatingActions, sheetRows) {
   var rows = [];
   for (var i = 0; i < floatingActions.length; i++) {
     var fa    = floatingActions[i];
-    var nrId  = anchoredMap[fa.bodyChildIndex] || '';
-    var sheet = sheetRows[nrId] || {};
+    var sheet = sheetRows[fa.globalId] || {};
     rows.push({
       id:            sheet.id     || '',
       assigneeEmail: fa.assigneeEmail || '',

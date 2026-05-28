@@ -1,18 +1,12 @@
 /**
  * SyncManager.js
  *
- * UC-A: scan the doc for floating actions, anchor each with a named range,
+ * UC-A: scan the doc for floating actions (identified by AI-N: text token)
  * and upsert rows to the ActionSheet via the Web App proxy (doPost).
  *
- * Detection rules (either satisfies):
- *   1. PERSON chip — first child of the paragraph is a PERSON element.
- *   2. Email-at-start — first child is TEXT whose content begins with a
- *      valid email address (word@word.tld).  The assignee name is derived
- *      from the username portion (punctuation → spaces, title-cased).
- *
- * Identity: DocumentApp.Document.addNamedRange() creates a named range that
- * is also visible (and deletable) via the Docs REST API. getId() returns the
- * same namedRangeId stored in the ActionSheet.
+ * Identity: a doc-scoped sequential integer N embedded as "AI-N:" text in each
+ * floating action paragraph. Global ID = {docFileId}/AI-{N}, stored in sheet col 1.
+ * No DocumentApp named ranges are created or required.
  */
 
 // ---------------------------------------------------------------------------
@@ -26,8 +20,6 @@ function syncDocument(docId) {
       return;
     }
 
-    var props              = PropertiesService.getScriptProperties();
-
     var doc;
     try {
       doc = DocumentApp.openById(docId);
@@ -40,22 +32,14 @@ function syncDocument(docId) {
 
     GasLogger.log('sync.scanned', { docId: docId, count: floatingActions.length });
 
-    // Always capture docUrl and docTitle before closing the doc — needed even when
-    // floatingActions is empty so WebApp can run orphan detection on existing rows.
+    // Capture docUrl and docTitle before closing — needed even when empty
+    // so WebApp can run orphan detection on existing rows.
     var docUrl   = doc.getUrl();
     var docTitle = doc.getName();
 
     if (floatingActions.length === 0) {
-      // No floating actions remain.  Still call WebApp with an empty docState so
-      // the orphan-detection loop can mark any previously-synced rows as 'Deleted'.
-      // Skipping this call would leave stale rows with no Sync Status indefinitely.
-      var allDocNRsEmpty = doc.getNamedRanges();
-      var allDocNRIdsEmpty = [];
-      for (var ei = 0; ei < allDocNRsEmpty.length; ei++) {
-        allDocNRIdsEmpty.push(allDocNRsEmpty[ei].getId());
-      }
       doc.saveAndClose();
-      var emptySync = _syncActionRows([], docUrl, docTitle, docId, allDocNRIdsEmpty);
+      var emptySync = _syncActionRows([], docUrl, docTitle, docId, []);
       SpreadsheetApp.flush();
       GasLogger.log('sync.complete', {
         docId: docId, anchored: 0,
@@ -65,42 +49,46 @@ function syncDocument(docId) {
       return;
     }
 
-    // Normalize missing status tokens BEFORE building the anchor map.
-    // setText() on a LIST_ITEM paragraph shifts any named range anchored to it
-    // to the next paragraph; creating NRs after normalization avoids the shift.
-    _normalizeMissingFloatingActionStatuses(floatingActions);
+    // No named range anchoring needed — globalId IS the identity.
+    var allDocGlobalIds = floatingActions.map(function(a) { return a.globalId; });
+    var anchorResults   = floatingActions.map(function(a) {
+      return {
+        namedRangeId:  a.globalId,
+        wasNew:        false,
+        assigneeEmail: a.assigneeEmail,
+        assigneeName:  a.assigneeName,
+        actionText:    a.actionText,
+        status:        a.status
+      };
+    });
 
-    var anchoredMap  = _buildAnchoredIndexMap(doc);
-    var anchorResults = _anchorNewActions(doc, floatingActions, anchoredMap);
-
-    // Collect all named range IDs still present in the doc so the WebApp can
-    // detect orphaned sheet rows (named range deleted along with its paragraph).
-    var allNamedRanges = doc.getNamedRanges();
-    var allDocNamedRangeIds = [];
-    for (var nri = 0; nri < allNamedRanges.length; nri++) {
-      allDocNamedRangeIds.push(allNamedRanges[nri].getId());
-    }
-
-    // Keep doc open until sheetWins updates are applied.
-    var syncResult = _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocNamedRangeIds);
+    var syncResult = _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds);
 
     var sheetWins = syncResult.sheetWins || [];
-    for (var i = 0; i < sheetWins.length; i++) {
-      _applySheetWinToDoc(
-        doc,
-        sheetWins[i].namedRangeId,
-        sheetWins[i].action,
-        sheetWins[i].status,
-        sheetWins[i].assigneeEmail
-      );
+    if (sheetWins.length > 0) {
+      var floatingByGlobalId = {};
+      for (var fi = 0; fi < floatingActions.length; fi++) {
+        floatingByGlobalId[floatingActions[fi].globalId] = floatingActions[fi];
+      }
+      var docId2 = doc.getId();
+      doc.saveAndClose(); // close before REST calls
+      var token = ScriptApp.getOAuthToken();
+      for (var si = 0; si < sheetWins.length; si++) {
+        var win = sheetWins[si];
+        var fa  = floatingByGlobalId[win.namedRangeId];
+        if (!fa) continue;
+        _poc_flushActionParagraph(docId2, token, fa.N, win.namedRangeId,
+          win.action, win.status, win.assigneeEmail);
+      }
+    } else {
+      doc.saveAndClose();
     }
 
-    doc.saveAndClose();
     SpreadsheetApp.flush();
 
     GasLogger.log('sync.complete', {
       docId:    docId,
-      anchored: _countNew(anchorResults),
+      anchored: 0,
       upserted: syncResult.upserted || 0,
       updated:  syncResult.updated  || 0
     });
@@ -175,56 +163,51 @@ function onActionSheetEdit(e) {
 
   // Stamp Date Modified and mark Sync Status = 'Dirty' so the next bidirectional
   // sync knows this row was edited on the sheet side (sheet wins conflict resolution).
-  // The Dirty flag is cleared by _handleSyncActionRows after pushing the change to the doc.
   var dateModified = new Date();
   WriteGuard.wrap(function () {
     sheet.getRange(row, 9).setValue(dateModified);
     sheet.getRange(row, 10).setValue('Dirty');
   });
 
-  // Sheet→Doc sync: read the edited row and propagate to the floating action
   _syncSheetRowToDoc(sheet, row);
 }
 
 /**
  * Propagates a single ActionSheet row edit to the corresponding floating action
- * in the source document via the NamedRangeId.
+ * in the source document via REST batchUpdate.
  *
- * Reads: NamedRangeId (col 1), Action (col 5), Status (col 6), Document URL (col 7)
+ * Reads: NamedRangeId/globalId (col 1), Action (col 5), Status (col 6), Document URL (col 7)
  * Extracts docId from the Document hyperlink formula.
- * Finds the floating action paragraph by its named range and updates it.
+ * Extracts N from the globalId (format: {docId}/AI-{N}).
  *
  * @param {Sheet} sheet    The ActionSheet "Actions" tab
  * @param {number} row     1-based row number (guaranteed >= 2)
  */
 function _syncSheetRowToDoc(sheet, row) {
   try {
-    var rowData = sheet.getRange(row, 1, 1, SHEET_HEADERS.length).getValues()[0];
-    var namedRangeId = rowData[0];  // Col 1: NamedRangeId
-    var assigneeEmail = rowData[2]; // Col 3: Assignee Email
-    var action       = rowData[4];  // Col 5: Action
-    var status       = rowData[5];  // Col 6: Status
-    // getValues() returns the display text for HYPERLINK formulas; getFormula() returns the raw
-    // formula string which contains the URL we need to extract the docId.
-    var docFormula   = sheet.getRange(row, 7).getFormula();
+    var rowData       = sheet.getRange(row, 1, 1, SHEET_HEADERS.length).getValues()[0];
+    var namedRangeId  = rowData[0];  // Col 1: globalId (format: {docId}/AI-{N})
+    var assigneeEmail = rowData[2];  // Col 3: Assignee Email
+    var action        = rowData[4];  // Col 5: Action
+    var status        = rowData[5];  // Col 6: Status
+    var docFormula    = sheet.getRange(row, 7).getFormula();
 
-    if (!namedRangeId) return; // No anchor — can't sync
-    if (!docFormula) return;   // No document link
+    if (!namedRangeId) return;
+    if (!docFormula) return;
 
-    // Extract docId from =HYPERLINK("https://docs.google.com/document/d/DOCID/edit", "Title")
     var docIdMatch = docFormula.match(/\/d\/([a-zA-Z0-9_-]+)\//);
     if (!docIdMatch) return;
     var docId = docIdMatch[1];
 
-    // Open the doc and apply the sheet-side edits
-    var doc = DocumentApp.openById(docId);
-    _applySheetWinToDoc(doc, namedRangeId, action, status, assigneeEmail);
-    doc.saveAndClose();
+    var parts = namedRangeId.split('/AI-');
+    if (parts.length < 2) return;
+    var N = parseInt(parts[1], 10);
+    if (isNaN(N)) return;
+
+    var token = ScriptApp.getOAuthToken();
+    _poc_flushActionParagraph(docId, token, N, namedRangeId, action, status, assigneeEmail);
   } catch (err) {
-    GasLogger.log('sync.sheet-to-doc.error', {
-      row:    row,
-      msg:    err.message
-    });
+    GasLogger.log('sync.sheet-to-doc.error', { row: row, msg: err.message });
   }
 }
 
@@ -234,81 +217,92 @@ function _syncSheetRowToDoc(sheet, row) {
 
 /**
  * Walks the doc body and returns one entry per floating-action paragraph or
- * list item.  Two detection strategies are tried in order:
+ * list item that contains an AI-N: token.
  *
- *   1. PERSON chip — first child is a PERSON element.
- *   2. Email-at-start — first child is TEXT beginning with word@word.tld.
- *
- * Both PARAGRAPH and LIST_ITEM body elements are scanned.
+ * Detection: paragraph full text starts with "AI-N:" (optionally preceded by
+ * an inline image, which does not appear in DocumentApp getText()).
  *
  * @param {GoogleAppsScript.Document.Document} doc
- * @returns {Array<{bodyChildIndex, paragraph, assigneeEmail, assigneeName, actionText, status}>}
+ * @returns {Array<{bodyChildIndex, paragraph, globalId, N, assigneeEmail, assigneeName, actionText, status, hasExplicitStatus}>}
  */
 function _scanFloatingActions(doc) {
   var body    = doc.getBody();
+  var docId   = doc.getId();
   var n       = body.getNumChildren();
   var actions = [];
 
   for (var i = 0; i < n; i++) {
-    var child     = body.getChild(i);
-    var childType = child.getType();
+    var child      = body.getChild(i);
+    var childType  = child.getType();
     var isPara     = childType === DocumentApp.ElementType.PARAGRAPH;
     var isListItem = childType === DocumentApp.ElementType.LIST_ITEM;
     if (!isPara && !isListItem) continue;
 
     var para = isPara ? child.asParagraph() : child.asListItem();
-    if (para.getNumChildren() === 0) continue;
+    // getText() strips inline images; AI-N: token must be at start of text content
+    var fullText   = para.getText().replace(/\n$/, '');
+    var tokenMatch = fullText.match(/^AI-(\d+):\s*/);
+    if (!tokenMatch) continue;
 
-    var firstChild    = para.getChild(0);
-    var assigneeEmail = '';
-    var assigneeName  = '';
-    var rawText       = '';
-    var textStart     = 1;
+    var N        = parseInt(tokenMatch[1], 10);
+    var globalId = docId + '/AI-' + N;
+    var afterToken = fullText.slice(tokenMatch[0].length);
 
-    if (firstChild.getType() === DocumentApp.ElementType.PERSON) {
-      var chip      = firstChild.asPerson();
-      assigneeEmail = chip.getEmail() || '';
-      assigneeName  = chip.getName()  || '';
-    } else if (firstChild.getType() === DocumentApp.ElementType.TEXT) {
-      var leadText   = firstChild.asText().getText();
-      var emailMatch = leadText.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
-      if (!emailMatch) continue;
-      assigneeEmail = emailMatch[1];
-      assigneeName  = _nameFromEmail(assigneeEmail);
-      rawText       = leadText.slice(emailMatch[0].length);
-    } else {
-      continue;
-    }
-
-    for (var j = textStart; j < para.getNumChildren(); j++) {
-      var c = para.getChild(j);
-      if (c.getType() === DocumentApp.ElementType.TEXT) {
-        rawText += c.asText().getText();
+    // Walk children: skip leading INLINE_IMAGE, then find the AI-N: TEXT element,
+    // then look for an optional assignee chip or email-text after it.
+    var numChildren        = para.getNumChildren();
+    var assigneeEmail      = '';
+    var assigneeName       = '';
+    var assigneeSearchStart = 0;
+    for (var ci = 0; ci < numChildren; ci++) {
+      var ch = para.getChild(ci);
+      if (ch.getType() === DocumentApp.ElementType.INLINE_IMAGE) continue;
+      if (ch.getType() === DocumentApp.ElementType.TEXT) {
+        assigneeSearchStart = ci + 1;
+        break;
       }
     }
-    rawText = rawText.trim();
+    for (var ai = assigneeSearchStart; ai < numChildren; ai++) {
+      var ac = para.getChild(ai);
+      if (ac.getType() === DocumentApp.ElementType.PERSON) {
+        assigneeEmail = ac.asPerson().getEmail() || '';
+        assigneeName  = ac.asPerson().getName()  || '';
+        break;
+      }
+      if (ac.getType() === DocumentApp.ElementType.TEXT) {
+        var t  = ac.asText().getText();
+        var em = t.match(/^[\s]*([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
+        if (em) { assigneeEmail = em[1]; assigneeName = _nameFromEmail(assigneeEmail); }
+        break;
+      }
+    }
 
-    // Parse trailing (Status) token — any text inside parens at the end
+    // Strip leading assignee email from afterToken if present
+    var actionText = afterToken;
+    var assigneeStrip = afterToken.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
+    if (assigneeStrip) actionText = afterToken.slice(assigneeStrip[0].length);
+
+    // Parse trailing (status) token
     var status     = 'Open';
-    var actionText = rawText;
-    var m = rawText.match(/\(([^)]*)\)\s*$/);
-    var hasExplicitStatus = !!m;
-    if (m) {
-      status     = m[1].trim() || 'Open';
-      actionText = rawText.slice(0, rawText.length - m[0].length).trim();
+    var statusMatch = actionText.match(/\(([^)]*)\)\s*$/);
+    var hasExplicitStatus = !!statusMatch;
+    if (statusMatch) {
+      status     = statusMatch[1].trim() || 'Open';
+      actionText = actionText.slice(0, actionText.length - statusMatch[0].length).trim();
     }
 
     actions.push({
-      bodyChildIndex: i,
-      paragraph:      para,
-      assigneeEmail:  assigneeEmail,
-      assigneeName:   assigneeName,
-      actionText:     actionText,
-      status:         status,
+      bodyChildIndex:    i,
+      paragraph:         para,
+      globalId:          globalId,
+      N:                 N,
+      assigneeEmail:     assigneeEmail,
+      assigneeName:      assigneeName,
+      actionText:        actionText,
+      status:            status,
       hasExplicitStatus: hasExplicitStatus
     });
   }
-
   return actions;
 }
 
@@ -325,109 +319,6 @@ function _nameFromEmail(email) {
 }
 
 // ---------------------------------------------------------------------------
-// Named range management
-// ---------------------------------------------------------------------------
-
-/**
- * Returns a map of { bodyChildIndex: namedRangeId } for all existing named
- * ranges whose first covered element is a direct body paragraph.
- *
- * @param {GoogleAppsScript.Document.Document} doc
- * @returns {Object}
- */
-function _buildAnchoredIndexMap(doc) {
-  var body        = doc.getBody();
-  var namedRanges = doc.getNamedRanges();
-  var map         = {};
-
-  for (var i = 0; i < namedRanges.length; i++) {
-    var nr       = namedRanges[i];
-    var elements = nr.getRange().getRangeElements();
-    if (elements.length === 0) continue;
-
-    var el   = elements[0].getElement();
-    var para = null;
-
-    if (el.getType() === DocumentApp.ElementType.PARAGRAPH) {
-      para = el.asParagraph();
-    } else if (el.getType() === DocumentApp.ElementType.LIST_ITEM) {
-      para = el.asListItem();
-    } else if (el.getType() === DocumentApp.ElementType.TEXT) {
-      var parent = el.getParent();
-      if (parent && parent.getType() === DocumentApp.ElementType.PARAGRAPH) {
-        para = parent.asParagraph();
-      } else if (parent && parent.getType() === DocumentApp.ElementType.LIST_ITEM) {
-        para = parent.asListItem();
-      }
-    }
-
-    if (!para) continue;
-
-    try {
-      var idx = body.getChildIndex(para);
-      if (idx >= 0) map[idx] = nr.getId();
-    } catch (e) {
-      // paragraph no longer in body — skip
-    }
-  }
-
-  return map;
-}
-
-/**
- * For each floating action, either records the existing namedRangeId or
- * creates a new named range and records the new ID.
- *
- * @param {GoogleAppsScript.Document.Document} doc
- * @param {Array}  floatingActions  Output of _scanFloatingActions.
- * @param {Object} anchoredMap      Output of _buildAnchoredIndexMap.
- * @returns {Array<{namedRangeId, wasNew, assigneeEmail, assigneeName, actionText, status}>}
- */
-function _anchorNewActions(doc, floatingActions, anchoredMap) {
-  var results = [];
-
-  for (var i = 0; i < floatingActions.length; i++) {
-    var action = floatingActions[i];
-    var idx    = action.bodyChildIndex;
-
-    if (anchoredMap[idx]) {
-      results.push({
-        namedRangeId:  anchoredMap[idx],
-        wasNew:        false,
-        assigneeEmail: action.assigneeEmail,
-        assigneeName:  action.assigneeName,
-        actionText:    action.actionText,
-        status:        action.status
-      });
-    } else {
-      var range = doc.newRange().addElement(action.paragraph).build();
-      var nr    = doc.addNamedRange(
-        'gactionsheet-' + Utilities.getUuid(),
-        range
-      );
-      results.push({
-        namedRangeId:  nr.getId(),
-        wasNew:        true,
-        assigneeEmail: action.assigneeEmail,
-        assigneeName:  action.assigneeName,
-        actionText:    action.actionText,
-        status:        action.status
-      });
-    }
-  }
-
-  return results;
-}
-
-function _countNew(anchorResults) {
-  var count = 0;
-  for (var i = 0; i < anchorResults.length; i++) {
-    if (anchorResults[i].wasNew) count++;
-  }
-  return count;
-}
-
-// ---------------------------------------------------------------------------
 // ActionSheet proxy — bidirectional sync
 // ---------------------------------------------------------------------------
 
@@ -435,20 +326,19 @@ function _countNew(anchorResults) {
  * POSTs the doc state to the Web App for conflict resolution and sheet writes.
  * Returns { upserted, updated, sheetWins: [{ namedRangeId, action, status, assigneeEmail }] }.
  *
- * @param {Array}  anchorResults       Output of _anchorNewActions.
+ * @param {Array}  anchorResults       Each element: { namedRangeId (globalId), assigneeEmail, assigneeName, actionText, status }.
  * @param {string} docUrl
  * @param {string} docTitle
  * @param {string} docId               Document ID (for orphan detection).
- * @param {Array}  allDocNamedRangeIds All named range IDs currently in the doc.
+ * @param {Array}  allDocNamedRangeIds All globalIds currently in the doc.
  * @returns {{upserted: number, updated: number, sheetWins: Array}}
  */
 function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocNamedRangeIds) {
-  var props     = PropertiesService.getScriptProperties();
-  var webAppUrl = props.getProperty('WEBAPP_URL');
-  var secret    = props.getProperty('WEBAPP_SECRET');
+  var webAppUrl = getWebAppUrl();
+  var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
 
   if (!webAppUrl) {
-    GasLogger.log('sync.error', { msg: 'WEBAPP_URL script property not set' });
+    GasLogger.log('sync.error', { msg: 'WEBAPP_URL not set' });
     return { upserted: 0, updated: 0, sheetWins: [] };
   }
 
@@ -473,6 +363,7 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocNamedRang
     payload:            JSON.stringify({
       secret:             secret || '',
       action:             'sync_action_rows',
+      clientVersion:      BUILD_INFO.version,
       docUrl:             docUrl,
       docTitle:           docTitle,
       docId:              docId || '',
@@ -491,7 +382,9 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocNamedRang
   }
 
   try {
-    return JSON.parse(resp.getContentText());
+    var parsed = JSON.parse(resp.getContentText());
+    _logVersionMismatch(parsed, 'sync');
+    return parsed;
   } catch (e) {
     GasLogger.log('sync.warn', { msg: 'Non-JSON sync_action_rows response', body: resp.getContentText().substring(0, 100) });
     return { upserted: 0, updated: 0, sheetWins: [] };
@@ -505,9 +398,8 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocNamedRang
  * @param {string} docId
  */
 function _markDocNotFound(docId) {
-  var props     = PropertiesService.getScriptProperties();
-  var webAppUrl = props.getProperty('WEBAPP_URL');
-  var secret    = props.getProperty('WEBAPP_SECRET');
+  var webAppUrl = getWebAppUrl();
+  var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
   if (!webAppUrl) return;
   var oauthToken = ScriptApp.getOAuthToken();
   UrlFetchApp.fetch(webAppUrl, {
@@ -516,113 +408,130 @@ function _markDocNotFound(docId) {
     muteHttpExceptions: true,
     headers:            { 'Authorization': 'Bearer ' + oauthToken },
     payload:            JSON.stringify({
-      secret: secret || '',
-      action: 'mark_doc_not_found',
+      secret:        secret || '',
+      action:        'mark_doc_not_found',
+      clientVersion: BUILD_INFO.version,
       docId:  docId
     })
   });
   GasLogger.flush();
 }
 
-/**
- * Applies a sheet-wins update to the floating action paragraph in the doc.
- * Finds the paragraph via its named range ID and updates the TEXT child element,
- * preserving any leading email prefix or chip separator space.
- *
- * @param {GoogleAppsScript.Document.Document} doc
- * @param {string} namedRangeId
- * @param {string} newAction
- * @param {string} newStatus
- * @param {string} newAssigneeEmail
- */
-function _applySheetWinToDoc(doc, namedRangeId, newAction, newStatus, newAssigneeEmail) {
-  var namedRanges = doc.getNamedRanges();
-  for (var i = 0; i < namedRanges.length; i++) {
-    if (namedRanges[i].getId() !== namedRangeId) continue;
-    var elements = namedRanges[i].getRange().getRangeElements();
-    if (elements.length === 0) break;
-    var el   = elements[0].getElement();
-    var type = el.getType();
-    var para = null;
-    if (type === DocumentApp.ElementType.LIST_ITEM) {
-      para = el.asListItem();
-    } else if (type === DocumentApp.ElementType.PARAGRAPH) {
-      para = el.asParagraph();
-    } else if (type === DocumentApp.ElementType.TEXT) {
-      var parent = el.getParent();
-      var pType  = parent.getType();
-      if (pType === DocumentApp.ElementType.LIST_ITEM)  para = parent.asListItem();
-      else if (pType === DocumentApp.ElementType.PARAGRAPH) para = parent.asParagraph();
-    }
-    if (para) _updateParaTextFromSheet(para, newAction, newStatus, newAssigneeEmail);
-    break;
-  }
-}
-
-function _normalizeMissingFloatingActionStatuses(floatingActions) {
-  for (var i = 0; i < floatingActions.length; i++) {
-    var action = floatingActions[i];
-    if (action.hasExplicitStatus) {
-      continue;
-    }
-    _updateParaTextFromSheet(action.paragraph, action.actionText, action.status || 'Open');
-  }
-}
+// ---------------------------------------------------------------------------
+// REST flush — rewrites an AI-N: paragraph in place
+// ---------------------------------------------------------------------------
 
 /**
- * Replaces the text content of a floating action paragraph with updated values
- * from the ActionSheet.  Preserves the email prefix (email-led items) or the
- * leading space that follows a person chip (chip-led items).
+ * Rewrites the content of an AI-N: paragraph via REST API batchUpdate.
+ * Preserves the paragraph node (does not delete the trailing \n).
+ * Caller must have called doc.saveAndClose() before invoking this.
  *
- * Status is always written explicitly so the floating action text is fully
- * normalized after sync.
- *
- * @param {GoogleAppsScript.Document.Paragraph|ListItem} para
- * @param {string} newAction
- * @param {string} newStatus
- * @param {string} newAssigneeEmail
+ * @param {string} docId
+ * @param {string} token          OAuth token from ScriptApp.getOAuthToken()
+ * @param {number} N              The integer from the AI-N: token
+ * @param {string} globalId       {docId}/AI-{N}
+ * @param {string} actionText     Action text (no trailing status token)
+ * @param {string} status         Status string
+ * @param {string} assigneeEmail  May be empty
  */
-function _updateParaTextFromSheet(para, newAction, newStatus, newAssigneeEmail) {
-  var currentAssigneeEmail = '';
-  var firstChild = para.getNumChildren() > 0 ? para.getChild(0) : null;
-  if (firstChild && firstChild.getType() === DocumentApp.ElementType.PERSON) {
-    currentAssigneeEmail = firstChild.asPerson().getEmail() || '';
-  }
+function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail) {
+  var baseUrl = 'https://docs.googleapis.com/v1/documents/';
+  var chipUrl = 'https://northlakeuu.org/GActionSheet/action/' + globalId;
+  var statusImages = {
+    'Open':        'https://stuartdonaldson.github.io/GActionSheet/assets/status-open.svg',
+    'In Progress': 'https://stuartdonaldson.github.io/GActionSheet/assets/status-inprogress.svg',
+    'In Review':   'https://stuartdonaldson.github.io/GActionSheet/assets/status-inreview.svg',
+    'Done':        'https://stuartdonaldson.github.io/GActionSheet/assets/status-done.svg',
+    'Closed':      'https://stuartdonaldson.github.io/GActionSheet/assets/status-closed.svg'
+  };
+  var imgUrl = statusImages[status] ||
+    'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
 
-  var n = para.getNumChildren();
-  for (var i = 0; i < n; i++) {
-    var child = para.getChild(i);
-    if (child.getType() !== DocumentApp.ElementType.TEXT) continue;
-    var textEl  = child.asText();
-    var current = textEl.getText();
-
-    var emailMatch = current.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s+/i);
-    if (!currentAssigneeEmail && emailMatch) {
-      currentAssigneeEmail = emailMatch[1];
-    }
-
-    var normalizedAssigneeEmail = newAssigneeEmail || currentAssigneeEmail;
-    var assigneeChanged = normalizedAssigneeEmail && normalizedAssigneeEmail !== currentAssigneeEmail;
-    var prefix = '';
-
-    if (firstChild && firstChild.getType() === DocumentApp.ElementType.PERSON) {
-      if (assigneeChanged) {
-        para.removeChild(firstChild);
-        prefix = normalizedAssigneeEmail + ' ';
-      } else {
-        prefix = ' ';
-      }
-    } else if (normalizedAssigneeEmail) {
-      prefix = normalizedAssigneeEmail + ' ';
-    }
-
-    var normalizedStatus = newStatus || 'Open';
-    var newContent = newAction + ' (' + normalizedStatus + ')';
-    var replacement = prefix + newContent;
-    if (current.length > 0) {
-      textEl.deleteText(0, current.length - 1);
-    }
-    textEl.insertText(0, replacement);
+  // GET to find paragraph indices. builtText is text-run content only;
+  // inline images appear as inlineObjectElement (not textRun) so they are absent.
+  // Therefore builtText for [img][AI-N: ][chip] text starts with "AI-N: ".
+  var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=body.content',
+    { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+  if (getResp.getResponseCode() !== 200) {
+    GasLogger.log('flush.error', { msg: 'GET failed: HTTP ' + getResp.getResponseCode(), globalId: globalId });
     return;
+  }
+
+  var content   = (JSON.parse(getResp.getContentText()).body || {}).content || [];
+  var tokenStr  = 'AI-' + N + ':';
+  var pStart    = null;
+  var pEnd      = null;
+
+  for (var i = 0; i < content.length; i++) {
+    var para = content[i].paragraph;
+    if (!para) continue;
+    var runs = para.elements || [];
+    var builtText = '';
+    for (var j = 0; j < runs.length; j++) {
+      if (runs[j].textRun) builtText += runs[j].textRun.content || '';
+    }
+    var plainText = builtText.replace(/\n$/, '');
+    var m = plainText.match(/^AI-(\d+):/);
+    if (m && parseInt(m[1], 10) === N) {
+      pStart = content[i].startIndex;
+      pEnd   = content[i].endIndex; // includes \n
+      break;
+    }
+  }
+
+  if (pStart === null) {
+    GasLogger.log('flush.warn', { msg: 'Paragraph not found', globalId: globalId });
+    return;
+  }
+
+  var requests = [];
+
+  // 1. Delete paragraph content, preserve \n at pEnd-1
+  if (pEnd - 1 > pStart) {
+    requests.push({ deleteContentRange: { range: { startIndex: pStart, endIndex: pEnd - 1 } } });
+  }
+
+  // Re-insert in reverse order (each inserts at pStart, pushing prior inserts right):
+  // Order of final paragraph: [image][AI-N: text][optional person chip][action text (status)]
+
+  // 4. Trailing text (inserted first → pushed rightmost)
+  var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);
+  if (validEmail) {
+    requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: pStart } } });
+    requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: pStart } } });
+  } else {
+    requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: pStart } } });
+  }
+
+  // 2. AI-N: text (inserted before trailing content)
+  requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: pStart } } });
+
+  // 1. Status image (inserted last → ends up at pStart)
+  requests.push({ insertInlineImage: {
+    uri: imgUrl, location: { index: pStart },
+    objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
+  }});
+
+  // Link: image (1 char at pStart) + AI-N: text (tokenLen chars starting at pStart+1)
+  var tokenLen = ('AI-' + N + ': ').length;
+  requests.push({ updateTextStyle: {
+    range: { startIndex: pStart, endIndex: pStart + 1 + tokenLen },
+    textStyle: { link: { url: chipUrl } }, fields: 'link'
+  }});
+
+  var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
+    method: 'post', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    payload: JSON.stringify({ requests: requests })
+  });
+
+  if (batchResp.getResponseCode() !== 200) {
+    GasLogger.log('flush.error', {
+      msg:  'batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
+      body: batchResp.getContentText().substring(0, 300),
+      globalId: globalId
+    });
+  } else {
+    GasLogger.log('flush.done', { globalId: globalId, status: status });
   }
 }

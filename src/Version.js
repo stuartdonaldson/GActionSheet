@@ -1,4 +1,16 @@
 var BUILD_INFO = {
-  version: "v0.1.0 (Rev. May 27, 2026 14:55)",
-  buildDate: "2026-05-27T21:55:27.289Z"
+  version: "v0.1.0 (Rev. May 28, 2026 12:38) (DEV)",
+  buildDate: "2026-05-28T19:38:32.773Z",
+  webappUrl: ""
 };
+
+function getWebAppUrl() {
+  if (BUILD_INFO.webappUrl) return BUILD_INFO.webappUrl;
+  return PropertiesService.getScriptProperties().getProperty('WEBAPP_URL');
+}
+
+function _logVersionMismatch(parsed, logTag) {
+  if (parsed && parsed.serverVersion && parsed.serverVersion !== BUILD_INFO.version) {
+    GasLogger.log(logTag + '.version.mismatch', { client: BUILD_INFO.version, server: parsed.serverVersion });
+  }
+}
