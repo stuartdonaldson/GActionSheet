@@ -100,6 +100,8 @@ Card action callbacks within a `createActionTriggers` card are subject to a stri
 
 **Pattern to use**: `CardService.newActionResponseBuilder().setNavigation(CardService.newNavigation().updateCard(confirmationCard)).build()`
 
+**Non-existent APIs (do not use)**: `CardService.newSmartChipConfig()` and `CardService.newRenderAction()` are not present in the GAS runtime as of 2026-05-27. Attempts to call them throw `TypeError: CardService.newSmartChipConfig is not a function`. These appear in AI-generated code (confirmed Gemini hallucination) but are not in the CardService reference documentation.
+
 ### URL scheme and format
 
 - `https://` is the correct scheme — `linkPreviewTriggers` `hostPattern` implies HTTPS; custom schemes (e.g. `action://`) are not supported.
