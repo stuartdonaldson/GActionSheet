@@ -50,13 +50,16 @@ function insertTrackerTable(docId) {
     var sheetRows = _readTrackerSheetRows(ss, docId);
     var dataRows  = _buildTrackerDataRows(floatingActions, sheetRows);
 
-    var insertIndex    = _removeTrackerSection(doc);
-    var assigneeEmails = _insertTrackerSection(doc, dataRows, insertIndex);
+    var insertIndex = _removeTrackerSection(doc);
+    var sectionOut  = _insertTrackerSection(doc, dataRows, insertIndex);
 
     doc.saveAndClose();
 
-    if (assigneeEmails.length > 0) {
-      _insertTrackerAssigneeChips(docId, assigneeEmails);
+    if (sectionOut.assigneeEmails.length > 0) {
+      _insertTrackerAssigneeChips(docId, sectionOut.assigneeEmails);
+    }
+    if (sectionOut.globalIds.length > 0) {
+      _insertTrackerIdLinks(docId, sectionOut.globalIds);
     }
 
     GasLogger.log('tracker.insert.complete', { docId: docId, rowCount: dataRows.length });
@@ -131,8 +134,12 @@ function _buildTrackerDataRows(floatingActions, sheetRows) {
   for (var i = 0; i < floatingActions.length; i++) {
     var fa    = floatingActions[i];
     var sheet = sheetRows[fa.globalId] || {};
+    // AI-N is the user-facing ID; globalId is kept for hyperlink generation
+    var nParts = fa.globalId ? fa.globalId.split('/AI-') : [];
+    var aiN    = nParts.length >= 2 ? 'AI-' + nParts[1] : (sheet.id || '');
     rows.push({
-      id:            sheet.id     || '',
+      id:            aiN,
+      globalId:      fa.globalId || '',
       assigneeEmail: fa.assigneeEmail || '',
       action:        fa.actionText    || '',
       status:        sheet.status || fa.status || 'Open'
@@ -205,12 +212,12 @@ function _removeTrackerSection(doc) {
  * Inserts the tracker section (heading + notice + table) at insertIndex
  * (or appended if insertIndex is -1).
  *
- * Returns the ordered list of assignee email addresses for person-chip insertion.
+ * Returns { assigneeEmails, globalIds } for the REST API post-insert steps.
  *
  * @param {Document}  doc
  * @param {Array}     dataRows     Output of _buildTrackerDataRows.
  * @param {number}    insertIndex  Child index returned by _removeTrackerSection.
- * @returns {string[]}
+ * @returns {{ assigneeEmails: string[], globalIds: string[] }}
  */
 function _insertTrackerSection(doc, dataRows, insertIndex) {
   var body       = doc.getBody();
@@ -244,7 +251,10 @@ function _insertTrackerSection(doc, dataRows, insertIndex) {
 
   _setTrackerAnchorNamedRange(doc, headingPara);
 
-  return dataRows.map(function(r) { return r.assigneeEmail || ''; });
+  return {
+    assigneeEmails: dataRows.map(function(r) { return r.assigneeEmail || ''; }),
+    globalIds:      dataRows.map(function(r) { return r.globalId || ''; })
+  };
 }
 
 /**
@@ -359,6 +369,100 @@ function _insertTrackerAssigneeChips(docId, assigneeEmails) {
   if (batchResp.getResponseCode() !== 200) {
     GasLogger.log('tracker.warn', {
       msg:  'insertPerson batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
+      body: batchResp.getContentText().substring(0, 200)
+    });
+  }
+}
+
+/**
+ * Applies hyperlinks to the ID column cells of the tracker table via
+ * the Docs REST API batchUpdate.  Each cell's AI-N text becomes a link
+ * to the action chip URL so hovering opens the preview card.
+ *
+ * @param {string}   docId
+ * @param {string[]} globalIds  Ordered list matching tracker table data rows.
+ */
+function _insertTrackerIdLinks(docId, globalIds) {
+  var chipUrlBase = 'https://northlakeuu.org/GActionSheet/action/';
+  var token       = ScriptApp.getOAuthToken();
+  var baseUrl     = 'https://docs.googleapis.com/v1/documents/';
+
+  var getResp = UrlFetchApp.fetch(
+    baseUrl + docId + '?fields=body.content',
+    { headers: { 'Authorization': 'Bearer ' + token }, muteHttpExceptions: true }
+  );
+  if (getResp.getResponseCode() !== 200) {
+    GasLogger.log('tracker.warn', {
+      msg:   'insertIdLinks GET failed: HTTP ' + getResp.getResponseCode(),
+      docId: docId
+    });
+    return;
+  }
+
+  var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
+
+  // Find tracker table: first TABLE after the heading paragraph
+  var headingFound = false;
+  var trackerTable = null;
+  for (var i = 0; i < content.length; i++) {
+    var elem = content[i];
+    if (!headingFound && elem.paragraph) {
+      if (_extractParaText(elem.paragraph).trim() === _TRACKER_HEADING) {
+        headingFound = true;
+      }
+    } else if (headingFound && elem.table) {
+      trackerTable = elem.table;
+      break;
+    }
+  }
+
+  if (!trackerTable) {
+    GasLogger.log('tracker.warn', { msg: 'Tracker table not found for ID links', docId: docId });
+    return;
+  }
+
+  // Collect startIndex + text length for ID cell (column 0) in each data row
+  var requests  = [];
+  var tableRows = trackerTable.tableRows || [];
+  for (var r = 1; r < tableRows.length; r++) {
+    var cells       = tableRows[r].tableCells || [];
+    if (cells.length < 1) continue;
+    var globalId = globalIds[r - 1] || '';
+    if (!globalId) continue;
+    var cellContent = cells[0].content || [];
+    if (cellContent.length === 0 || !cellContent[0].paragraph) continue;
+    var paraElems = cellContent[0].paragraph.elements || [];
+    var cellText  = '';
+    for (var e2 = 0; e2 < paraElems.length; e2++) {
+      if (paraElems[e2].textRun) cellText += paraElems[e2].textRun.content || '';
+    }
+    cellText = cellText.replace(/\n$/, '');
+    if (!cellText) continue;
+    var cellStart = cellContent[0].startIndex;
+    var chipUrl   = chipUrlBase + globalId;
+    requests.push({
+      updateTextStyle: {
+        range:     { startIndex: cellStart, endIndex: cellStart + cellText.length },
+        textStyle: { link: { url: chipUrl } },
+        fields:    'link'
+      }
+    });
+  }
+
+  if (requests.length === 0) return;
+
+  var batchResp = UrlFetchApp.fetch(
+    baseUrl + docId + ':batchUpdate',
+    {
+      method:             'post',
+      headers:            { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      payload:            JSON.stringify({ requests: requests }),
+      muteHttpExceptions: true
+    }
+  );
+  if (batchResp.getResponseCode() !== 200) {
+    GasLogger.log('tracker.warn', {
+      msg:  'insertIdLinks batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
       body: batchResp.getContentText().substring(0, 200)
     });
   }

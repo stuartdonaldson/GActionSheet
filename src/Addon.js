@@ -362,12 +362,16 @@ function _buildActionListSection(homepageState) {
       var nrParts = action.namedRangeId.split('/AI-');
       if (nrParts.length >= 2) actionId = 'AI-' + nrParts[1];
     }
-    var bottomLabel = (actionId ? actionId + ' • ' : '') +
-      'Status: ' + (action.status || 'Open') +
-      (action.namedRangeId ? '' : ' • Needs sync');
+    // Compact: AI-N • Assignee • Status on the top label line
+    var topParts = [];
+    if (actionId) topParts.push(actionId);
+    topParts.push(assignee);
+    topParts.push(action.status || 'Open');
+    var topLabel = topParts.join(' • ');
+    var bottomLabel = action.namedRangeId ? '' : 'Needs sync';
     section.addWidget(
       CardService.newDecoratedText()
-        .setTopLabel(assignee)
+        .setTopLabel(topLabel)
         .setText(_escapeAddonHtml(action.action || '(blank action)'))
         .setBottomLabel(bottomLabel)
         .setWrapText(true)

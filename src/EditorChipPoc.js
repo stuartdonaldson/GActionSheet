@@ -203,33 +203,290 @@ function _poc_buildPreviewCard(url) {
   var actionId  = idParts.length >= 2 ? 'AI-' + idParts[1] : '';
   var action    = _poc_lookupAction(globalId);
 
-  var title    = (action && action.action)        || actionId || 'GActionSheet Action';
-  var status   = (action && action.status)         || '';
-  var assignee = (action && action.assigneeEmail)  || '';
+  var actionText = (action && action.action)        || '';
+  var status     = (action && action.status)         || '';
+  var assignee   = (action && action.assigneeEmail)  || '';
 
   var header = CardService.newCardHeader()
-    .setTitle(title)
+    .setTitle(actionId || 'Action')
     .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png')
     .setImageStyle(CardService.ImageStyle.SQUARE);
+  if (actionText) {
+    header.setSubtitle(actionText);
+  }
 
   var section = CardService.newCardSection();
+
+  // Link button — AI-N id that opens the chip URL in a browser
   if (actionId) {
-    section.addWidget(CardService.newDecoratedText().setTopLabel('ID').setText(actionId));
+    section.addWidget(
+      CardService.newTextButton()
+        .setText(actionId)
+        .setOpenLink(CardService.newOpenLink().setUrl(url))
+    );
   }
-  if (status) {
-    section.addWidget(CardService.newDecoratedText().setTopLabel('Status').setText(status));
+
+  // Status and assignee fields
+  var assigneeLabel = (status ? status : '') +
+    (status && assignee ? ' • ' : '') +
+    (assignee ? assignee : '');
+  if (assigneeLabel) {
+    section.addWidget(
+      CardService.newDecoratedText()
+        .setTopLabel('Assignee / Status')
+        .setText(assigneeLabel)
+    );
   }
-  if (assignee) {
-    section.addWidget(CardService.newDecoratedText().setTopLabel('Assignee').setText(assignee));
-  }
+
   if (!actionId && !status && !assignee) {
     section.addWidget(CardService.newTextParagraph().setText('No details available.'));
+  }
+
+  // Edit button — opens the edit card
+  if (globalId) {
+    section.addWidget(
+      CardService.newTextButton()
+        .setText('Edit')
+        .setOnClickAction(
+          CardService.newAction()
+            .setFunctionName('_poc_openEditCard')
+            .setParameters({ url: url })
+        )
+    );
   }
 
   return CardService.newCardBuilder()
     .setHeader(header)
     .addSection(section)
     .build();
+}
+
+// ---------------------------------------------------------------------------
+// Edit action flow
+// ---------------------------------------------------------------------------
+
+/**
+ * Card action handler: opens the edit card for an existing action.
+ * Called via CardService action with parameters.url set to the chip URL.
+ *
+ * @param {GoogleAppsScript.Addons.EventObject} e
+ * @returns {GoogleAppsScript.Card_Service.ActionResponse}
+ */
+function _poc_openEditCard(e) { // eslint-disable-line no-unused-vars
+  var url      = (e && e.parameters && e.parameters.url) || '';
+  var globalId = url.replace(_POC_ACTION_URL_BASE, '');
+  var idParts  = globalId.split('/AI-');
+  var actionId = idParts.length >= 2 ? 'AI-' + idParts[1] : '';
+  var action   = _poc_lookupAction(globalId);
+
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().pushCard(_poc_buildEditCard(url, action, actionId)))
+    .build();
+}
+
+/**
+ * Builds the edit-action card, pre-filled with current values.
+ *
+ * @param {string}      url       Chip URL (used as stable identity key)
+ * @param {Object|null} action    Current action row from lookup, or null
+ * @param {string}      actionId  AI-N display string
+ * @returns {GoogleAppsScript.Card_Service.Card}
+ */
+function _poc_buildEditCard(url, action, actionId) {
+  var currentText     = (action && action.action)       || '';
+  var currentAssignee = (action && action.assigneeEmail)|| '';
+  var currentStatus   = (action && action.status)       || 'Open';
+
+  var submitAction = CardService.newAction()
+    .setFunctionName('_poc_submitEditAction')
+    .setParameters({ url: url });
+
+  var section = CardService.newCardSection()
+    .addWidget(
+      CardService.newTextInput()
+        .setFieldName('poc_actionText')
+        .setTitle('Action')
+        .setValue(currentText)
+    )
+    .addWidget(
+      CardService.newTextInput()
+        .setFieldName('poc_assignee')
+        .setTitle('Assignee (optional)')
+        .setHint('email address')
+        .setValue(currentAssignee)
+    )
+    .addWidget(
+      CardService.newSelectionInput()
+        .setType(CardService.SelectionInputType.DROPDOWN)
+        .setFieldName('poc_status')
+        .setTitle('Status')
+        .addItem('Open',        'Open',        currentStatus === 'Open')
+        .addItem('In Progress', 'In Progress', currentStatus === 'In Progress')
+        .addItem('In Review',   'In Review',   currentStatus === 'In Review')
+        .addItem('Done',        'Done',        currentStatus === 'Done')
+        .addItem('Closed',      'Closed',      currentStatus === 'Closed')
+    )
+    .addWidget(
+      CardService.newTextButton()
+        .setText('Save')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setOnClickAction(submitAction)
+    )
+    .addWidget(
+      CardService.newTextButton()
+        .setText('Cancel')
+        .setOnClickAction(CardService.newAction().setFunctionName('_poc_cancelEdit'))
+    );
+
+  return CardService.newCardBuilder()
+    .setHeader(
+      CardService.newCardHeader()
+        .setTitle('Edit ' + (actionId || 'Action'))
+        .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png')
+    )
+    .addSection(section)
+    .build();
+}
+
+/**
+ * Handles the Edit Action card form submission.
+ * Updates the doc floating action paragraph, schedules async sheet upsert,
+ * refreshes tracker table if present.
+ * Log tag: POC_EDIT_ACTION.complete
+ *
+ * @param {GoogleAppsScript.Addons.EventObject} e
+ * @returns {GoogleAppsScript.Card_Service.ActionResponse}
+ */
+function _poc_submitEditAction(e) { // eslint-disable-line no-unused-vars
+  var url       = (e && e.parameters && e.parameters.url) || '';
+  var formInput = (e && e.formInput) || {};
+
+  var globalId      = url.replace(_POC_ACTION_URL_BASE, '');
+  var idParts       = globalId.split('/AI-');
+  var N             = idParts.length >= 2 ? parseInt(idParts[1], 10) : 0;
+  var actionText    = (formInput.poc_actionText || '').trim();
+  var assigneeEmail = (formInput.poc_assignee   || '').trim();
+  var status        = formInput.poc_status || 'Open';
+
+  if (!actionText) {
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().updateCard(
+        _poc_buildMessageCard('Required', 'Action text cannot be empty.')
+      ))
+      .build();
+  }
+
+  var doc    = DocumentApp.getActiveDocument();
+  var docId  = doc.getId();
+  var token  = ScriptApp.getOAuthToken();
+  var hasTracker = _readTrackerTableState(doc).found;
+
+  // 1. Update floating action paragraph in doc via REST
+  _poc_flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail);
+
+  // 2. Refresh tracker table synchronously so the doc is consistent
+  if (hasTracker) {
+    insertTrackerTable(docId);
+  }
+
+  // 3. Schedule async sheet upsert to avoid blocking the card response
+  var docUrl   = doc.getUrl();
+  var docTitle = doc.getName();
+  _poc_scheduleSheetUpdate({
+    docUrl:        docUrl,
+    docTitle:      docTitle,
+    namedRangeId:  globalId,
+    actionText:    actionText,
+    assigneeEmail: assigneeEmail,
+    assigneeName:  assigneeEmail,
+    status:        status
+  });
+
+  GasLogger.log('POC_EDIT_ACTION.complete', { globalId: globalId, status: status });
+  GasLogger.flush();
+
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().popCard())
+    .setNotification(CardService.newNotification().setText('Action updated'))
+    .build();
+}
+
+/**
+ * Cancel edit — pops the edit card without saving.
+ *
+ * @returns {GoogleAppsScript.Card_Service.ActionResponse}
+ */
+function _poc_cancelEdit() { // eslint-disable-line no-unused-vars
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().popCard())
+    .build();
+}
+
+// ---------------------------------------------------------------------------
+// Async sheet update via time-based trigger
+// ---------------------------------------------------------------------------
+
+/**
+ * Stores upsert params in ScriptProperties and schedules a 2-second-after
+ * trigger to process them.  Allows the card response to return before the
+ * sheet HTTP call completes.
+ *
+ * @param {Object} params  Fields: docUrl, docTitle, namedRangeId, actionText,
+ *                         assigneeEmail, assigneeName, status
+ */
+function _poc_scheduleSheetUpdate(params) {
+  var key = 'POC_PENDING_' + Date.now();
+  PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(params));
+  ScriptApp.newTrigger('_poc_processPendingSheetUpdates').timeBased().after(2000).create();
+  GasLogger.log('poc.asyncSheet.scheduled', { key: key });
+}
+
+/**
+ * Time-based trigger handler: processes all pending sheet upserts and cleans up.
+ * Log tag: POC_ASYNC_SHEET.complete
+ */
+function _poc_processPendingSheetUpdates() { // eslint-disable-line no-unused-vars
+  var props = PropertiesService.getScriptProperties();
+  var all   = props.getProperties();
+  var pendingKeys = [];
+
+  for (var k in all) {
+    if (Object.prototype.hasOwnProperty.call(all, k) && k.indexOf('POC_PENDING_') === 0) {
+      pendingKeys.push(k);
+    }
+  }
+
+  for (var i = 0; i < pendingKeys.length; i++) {
+    var key = pendingKeys[i];
+    try {
+      var p = JSON.parse(all[key]);
+      _poc_callWebApp('upsert_action_rows', {
+        docUrl:   p.docUrl,
+        docTitle: p.docTitle,
+        rows: [{
+          namedRangeId:  p.namedRangeId,
+          actionText:    p.actionText,
+          assigneeEmail: p.assigneeEmail,
+          assigneeName:  p.assigneeName,
+          status:        p.status
+        }]
+      });
+    } catch (err) {
+      GasLogger.log('poc.asyncSheet.error', { key: key, msg: String(err) });
+    }
+    props.deleteProperty(key);
+  }
+
+  // Clean up this trigger instance
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var j = 0; j < triggers.length; j++) {
+    if (triggers[j].getHandlerFunction() === '_poc_processPendingSheetUpdates') {
+      ScriptApp.deleteTrigger(triggers[j]);
+    }
+  }
+
+  GasLogger.log('POC_ASYNC_SHEET.complete', { processed: pendingKeys.length });
+  GasLogger.flush();
 }
 
 /**
