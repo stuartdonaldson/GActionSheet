@@ -236,13 +236,19 @@ function _loadExistingRowsByGlobalId(actionsSheet) {
 }
 
 /**
- * Extracts the human-readable action ID from a globalId.
- * globalId format: {docFileId}/AI-{N}  →  returns 'AI-{N}'
- * Falls back to the raw globalId if the format is unexpected.
+ * Parses a globalId into its components.
+ * globalId format: {docFileId}/AI-{N}
+ * Returns { docId, N, actionId } where actionId = 'AI-{N}'.
+ * If the format is unexpected, N is NaN and actionId/docId are empty.
  */
-function _extractActionId(globalId) {
+function parseGlobalId(globalId) {
   var parts = (globalId || '').split('/AI-');
-  return parts.length >= 2 ? 'AI-' + parts[1] : globalId || '';
+  if (parts.length < 2) return { docId: '', N: NaN, actionId: globalId || '' };
+  return { docId: parts[0], N: parseInt(parts[1], 10), actionId: 'AI-' + parts[1] };
+}
+
+function _extractActionId(globalId) {
+  return parseGlobalId(globalId).actionId;
 }
 
 function _rowIdentityKey(assigneeEmail, action, status) {

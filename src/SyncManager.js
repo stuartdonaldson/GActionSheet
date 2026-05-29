@@ -10,6 +10,27 @@
  */
 
 // ---------------------------------------------------------------------------
+// Shared config
+// ---------------------------------------------------------------------------
+
+/**
+ * Single source of truth for the action smart-chip link base. Used by the chip
+ * insert/flush paths (EditorAddonCard, SyncManager) and the tracker ID links
+ * (TrackerTable).
+ *
+ * Path is namespaced under `NUTS/` — the suite-level scope (Northlake Unitarian
+ * Tool Suite). `NUTS/action` is this tool; future tools take sibling paths (e.g.
+ * `NUTS/llm` for an @-menu LLM trigger), so each tool gets a distinct linkPreview
+ * pattern under one host. See knowledge-base/ROADMAP.md for the planned
+ * multi-tenant form `…/action/{sheetId}/{globalId}`.
+ *
+ * NOTE: the linkPreview `hostPattern` (`northlakeuu.org`) / `pathPrefix`
+ * (`NUTS/action`) in appsscript.json must be kept in sync with this value by
+ * hand — the manifest cannot read script globals.
+ */
+var ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUTS/action/';
+
+// ---------------------------------------------------------------------------
 // Public entry points
 // ---------------------------------------------------------------------------
 
@@ -154,7 +175,7 @@ function syncDocument(docId) {
       var token = ScriptApp.getOAuthToken();
       for (var ti = 0; ti < flushIds.length; ti++) {
         var f  = toFlush[flushIds[ti]];
-        var ok = _poc_flushActionParagraph(docId2, token, f.N, f.globalId,
+        var ok = _flushActionParagraph(docId2, token, f.N, f.globalId,
           f.action, f.status, f.assigneeEmail, f.assigneeName);
         if (!ok) _remarkRowDirty(f.globalId);
       }
@@ -291,13 +312,12 @@ function _syncSheetRowToDoc(sheet, row) {
     if (!docIdMatch) return;
     var docId = docIdMatch[1];
 
-    var parts = globalId.split('/AI-');
-    if (parts.length < 2) return;
-    var N = parseInt(parts[1], 10);
-    if (isNaN(N)) return;
+    var parsed = parseGlobalId(globalId);
+    if (isNaN(parsed.N)) return;
+    var N = parsed.N;
 
     var token = ScriptApp.getOAuthToken();
-    var ok = _poc_flushActionParagraph(docId, token, N, globalId, action, status, assigneeEmail, assigneeName || '');
+    var ok = _flushActionParagraph(docId, token, N, globalId, action, status, assigneeEmail, assigneeName || '');
     if (ok) {
       // Flush confirmed — clear Dirty immediately rather than waiting for WebApp round-trip.
       WriteGuard.wrap(function () { sheet.getRange(row, 10).setValue(''); });
@@ -311,13 +331,6 @@ function _syncSheetRowToDoc(sheet, row) {
         syncDocument(docId);
       } catch (syncErr) {
         GasLogger.log('sync.sheet-to-doc.sync-failed', { globalId: globalId, msg: syncErr.message });
-      }
-
-      // Refresh tracker table only if one already exists in the doc.
-      try {
-        insertTrackerTable(docId, { onlyIfExists: true });
-      } catch (trackerErr) {
-        GasLogger.log('sync.sheet-to-doc.tracker-failed', { globalId: globalId, msg: trackerErr.message });
       }
     } else {
       GasLogger.log('sync.sheet-to-doc.flush-failed', { globalId: globalId });
@@ -519,12 +532,10 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
     });
   }
 
-  var oauthToken = ScriptApp.getOAuthToken();
   var resp = UrlFetchApp.fetch(webAppUrl, {
     method:             'post',
     contentType:        'application/json',
     muteHttpExceptions: true,
-    headers:            { 'Authorization': 'Bearer ' + oauthToken },
     payload:            JSON.stringify({
       secret:             secret || '',
       action:             'sync_action_rows',
@@ -566,12 +577,10 @@ function _markDocNotFound(docId) {
   var webAppUrl = getWebAppUrl();
   var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
   if (!webAppUrl) return;
-  var oauthToken = ScriptApp.getOAuthToken();
   UrlFetchApp.fetch(webAppUrl, {
     method:             'post',
     contentType:        'application/json',
     muteHttpExceptions: true,
-    headers:            { 'Authorization': 'Bearer ' + oauthToken },
     payload:            JSON.stringify({
       secret:        secret || '',
       action:        'mark_doc_not_found',
@@ -584,7 +593,7 @@ function _markDocNotFound(docId) {
 
 /**
  * Re-marks an Actions sheet row as 'Dirty' so the next sync retries the
- * flush to doc.  Called when _poc_flushActionParagraph returns false.
+ * flush to doc.  Called when _flushActionParagraph returns false.
  * Searches column 1 (globalId) for the matching row.
  *
  * @param {string} globalId
@@ -610,6 +619,37 @@ function _remarkRowDirty(globalId) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared chip styling
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the updateTextStyle request that applies the AI-N chip badge style
+ * over [startIndex, endIndex): bold Comic Sans, purple text (#4C1D95), no
+ * hyperlink underline. No background is set — the badge is purple text only.
+ *
+ * Shared by _flushActionParagraph (sync flush), _insertActionChip (creation),
+ * and _insertTrackerIdLinks (tracker ID column) so the badge appearance is
+ * defined in exactly one place.
+ *
+ * @param {number} startIndex
+ * @param {number} endIndex
+ * @returns {Object} A Docs REST batchUpdate request object.
+ */
+function _chipBadgeStyleRequest(startIndex, endIndex) {
+  return {
+    updateTextStyle: {
+      range: { startIndex: startIndex, endIndex: endIndex },
+      textStyle: {
+        bold: true, underline: false,
+        foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
+        weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
+      },
+      fields: 'bold,underline,foregroundColor,weightedFontFamily'
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // REST flush — rewrites an AI-N: paragraph in place
 // ---------------------------------------------------------------------------
 
@@ -627,9 +667,9 @@ function _remarkRowDirty(globalId) {
  * @param {string} assigneeEmail  May be empty
  * @param {string=} assigneeName  Optional display name for person chip
  */
-function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail, assigneeName) {
+function _flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail, assigneeName) {
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
-  var chipUrl = 'https://northlakeuu.org/GActionSheet/action/' + globalId;
+  var chipUrl = ACTION_CHIP_URL_BASE + globalId;
   // Docs REST API insertInlineImage does not support SVG — use PNG until PNG status icons exist.
   var imgUrl = 'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
 
@@ -701,17 +741,7 @@ function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status
         range: { startIndex: pStart, endIndex: pStart + 1 + tokenLen },
         textStyle: { link: { url: chipUrl } }, fields: 'link'
       }});
-      // Chip badge: Comic Sans bold dark-purple, no background, no hyperlink underline
-      requests.push({ updateTextStyle: {
-        range: { startIndex: pStart + 1, endIndex: pStart + 1 + tokenLen },
-        textStyle: {
-          bold: true, underline: false,
-          foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
-          backgroundColor: { color: { rgbColor: { red: 1.0, green: 1.0, blue: 1.0 } } },
-          weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
-        },
-        fields: 'bold,underline,foregroundColor,backgroundColor,weightedFontFamily'
-      }});
+      requests.push(_chipBadgeStyleRequest(pStart + 1, pStart + 1 + tokenLen));
     }
 
     var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {

@@ -54,7 +54,7 @@
           "patterns": [
             {
               "hostPattern": "northlakeuu.org",
-              "pathPrefix": "GActionSheet/action"
+              "pathPrefix": "NUTS/action"
             }
           ],
           "runFunction": "onLinkPreview"

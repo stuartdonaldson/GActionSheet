@@ -2,7 +2,7 @@
  * SheetSetup.js
  *
  * Creates or validates the "Actions" and "Archive" sheet tabs with the
- * required 8-column header row, bold/frozen row 1, and a basic filter.
+ * required 10-column header row, bold/frozen row 1, and a basic filter.
  * Also resolves and persists the DOC_FOLDER_ID script property.
  */
 

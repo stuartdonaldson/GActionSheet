@@ -1,33 +1,27 @@
 /**
- * EditorChipPoc.js
+ * EditorAddonCard.js
  *
- * POC: Docs editor add-on action-chip (branch poc/editor-addon-action-chip).
+ * Google Docs editor add-on — CardService surface (surface ② in DESIGN.md).
+ * Registered in appsscript.json under addOns.docs. (The `Card` suffix marks the
+ * UI technology: CardService, as opposed to a future `…Html` HtmlService
+ * surface — see the naming-conventions note in the toolset-direction staging doc.)
  *
- * ISOLATION CONTRACT
- * ------------------
- * - All private helpers are prefixed `_poc_`.
- * - Entry-point globals (createActionTrigger, onLinkPreview) must be top-level
- *   GAS globals — they cannot be namespaced.
- * - No existing src/ file is modified by POC work. Shared utilities are called
- *   read-only; never altered.
- * - Remove this file and its appsscript.json entries before merging to master.
+ * Entry points:
+ *   createActionTrigger  → @-menu "Create action" card
+ *   onLinkPreview        → smart-chip hover preview card
  *
- * ISSUES
- * ------
- * createActionTrigger  → GTaskSheet-6ov.3 (IMP) / GTaskSheet-6ov.4 (TST)
- * onLinkPreview        → GTaskSheet-6ov.5 (IMP) / GTaskSheet-6ov.6 (TST)
- * insertActionChip     → GTaskSheet-6ov.7 (IMP) / GTaskSheet-6ov.8 (TST)
+ * Creates the canonical floating-action fragment at the cursor and keeps the
+ * ActionSheet in sync via an async time-based queue drain. The REST paragraph
+ * flush this surface shares with the sync engine lives in SyncManager.js
+ * (_flushActionParagraph); the chip URL base is ACTION_CHIP_URL_BASE (SyncManager.js).
  */
 
-/** Base URL for action smart-chip links. Matches linkPreviewTriggers hostPattern. */
-var _POC_ACTION_URL_BASE = 'https://northlakeuu.org/GActionSheet/action/';
-
 /** Status values matching the ActionSheet dropdown. */
-var _POC_STATUSES = ['Open', 'In Progress', 'In Review', 'Done', 'Closed'];
+var _ACTION_STATUSES = ['Open', 'In Progress', 'In Review', 'Done', 'Closed'];
 
 // Docs REST API insertInlineImage does not support SVG — use PNG until PNG status icons exist.
-var _POC_DEFAULT_IMAGE = 'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
-var _POC_STATUS_IMAGES = {}; // empty: all statuses fall through to _POC_DEFAULT_IMAGE
+var _ACTION_DEFAULT_IMAGE = 'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
+var _ACTION_STATUS_IMAGES = {}; // empty: all statuses fall through to _ACTION_DEFAULT_IMAGE
 
 // ---------------------------------------------------------------------------
 // Entry points
@@ -44,7 +38,7 @@ var _POC_STATUS_IMAGES = {}; // empty: all statuses fall through to _POC_DEFAULT
  */
 function createActionTrigger(e) { // eslint-disable-line no-unused-vars
   GasLogger.log('CREATE_ACTION_TRIGGER', { docId: e && e.docs && e.docs.id });
-  return _poc_buildCreationCard();
+  return _buildCreationCard();
 }
 
 /**
@@ -60,10 +54,10 @@ function onLinkPreview(e) { // eslint-disable-line no-unused-vars
   var url = (e && e.docs && e.docs.matchedUrl && e.docs.matchedUrl.url) || '';
   GasLogger.log('LINK_PREVIEW', { url: url });
   try {
-    return _poc_buildPreviewCard(url);
+    return _buildPreviewCard(url);
   } catch (err) {
     GasLogger.log('LINK_PREVIEW.error', { msg: String(err) });
-    return _poc_buildMessageCard('Preview error', 'Could not load action preview. Please report this to your administrator.\n\n' + String(err));
+    return _buildMessageCard('Preview error', 'Could not load action preview. Please report this to your administrator.\n\n' + String(err));
   }
 }
 
@@ -78,11 +72,11 @@ function onLinkPreview(e) { // eslint-disable-line no-unused-vars
  * @param {GoogleAppsScript.Addons.EventObject} e
  * @returns {GoogleAppsScript.Card_Service.ActionResponse}
  */
-function _poc_submitCreateAction(e) {
+function _submitCreateAction(e) {
   var formInput      = (e && e.formInput) || {};
-  var actionText     = (formInput.poc_actionText  || '').trim();
-  var assigneeRaw    = (formInput.poc_assignee    || '').trim();
-  var status         = formInput.poc_status || 'Open';
+  var actionText     = (formInput.actionText  || '').trim();
+  var assigneeRaw    = (formInput.assignee    || '').trim();
+  var status         = formInput.status || 'Open';
 
   // Parse "Display Name <email>" format produced by the suggestions lookup.
   // Falls back to treating the whole value as an email address.
@@ -97,12 +91,12 @@ function _poc_submitCreateAction(e) {
   if (!actionText) {
     GasLogger.log('CREATE_ACTION_TRIGGER.validation', { msg: 'actionText required' });
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Required', 'Action text cannot be empty.')))
+      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Required', 'Action text cannot be empty.')))
       .build();
   }
 
   var doc      = DocumentApp.getActiveDocument();
-  var N        = _poc_getNextActionN(doc);
+  var N        = _getNextActionN(doc);
   var globalId = doc.getId() + '/AI-' + N;
   var docUrl   = doc.getUrl();
   var docTitle = doc.getName();
@@ -111,19 +105,19 @@ function _poc_submitCreateAction(e) {
   // NOTE: CardService.newSmartChipConfig / newRenderAction do NOT exist in the
   // current GAS runtime (confirmed 2026-05-27 — TypeError). The REST approach
   // is the correct insertion method.
-  var insertError = _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName || assigneeEmail);
+  var insertError = _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName || assigneeEmail);
 
   if (insertError) {
     GasLogger.log('CREATE_ACTION_TRIGGER.error', { msg: 'chip insert failed', err: insertError });
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().updateCard(
-        _poc_buildMessageCard('Insert failed', 'Action could not be inserted at the cursor.\n\n' + insertError)
+        _buildMessageCard('Insert failed', 'Action could not be inserted at the cursor.\n\n' + insertError)
       ))
       .build();
   }
 
   // Write row to ActionSheet only after doc insertion succeeds.
-  var result = _poc_callWebApp('upsert_action_rows', {
+  var result = _callWebApp('upsert_action_rows', {
     docUrl:   docUrl,
     docTitle: docTitle,
     rows: [{
@@ -138,13 +132,13 @@ function _poc_submitCreateAction(e) {
   if (!result || result.error) {
     GasLogger.log('CREATE_ACTION_TRIGGER.error', { err: result && result.error });
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Error', 'Failed to create action: ' + ((result && result.error) || 'unknown error'))))
+      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Failed to create action: ' + ((result && result.error) || 'unknown error'))))
       .build();
   }
 
   GasLogger.log('CREATE_ACTION_TRIGGER.done', { globalId: globalId });
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText)))
+    .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText)))
     .build();
 }
 
@@ -157,29 +151,29 @@ function _poc_submitCreateAction(e) {
  *
  * @returns {GoogleAppsScript.Card_Service.Card}
  */
-function _poc_buildCreationCard() {
-  var submitAction = CardService.newAction().setFunctionName('_poc_submitCreateAction');
+function _buildCreationCard() {
+  var submitAction = CardService.newAction().setFunctionName('_submitCreateAction');
 
   var section = CardService.newCardSection()
     .addWidget(
       CardService.newTextInput()
-        .setFieldName('poc_actionText')
+        .setFieldName('actionText')
         .setTitle('Action')
         .setHint('What needs to be done?')
     )
     .addWidget(
       CardService.newTextInput()
-        .setFieldName('poc_assignee')
+        .setFieldName('assignee')
         .setTitle('Assignee (optional)')
         .setHint('name or email')
         .setSuggestionsAction(
-          CardService.newAction().setFunctionName('_poc_suggestAssignees')
+          CardService.newAction().setFunctionName('_suggestAssignees')
         )
     )
     .addWidget(
       CardService.newSelectionInput()
         .setType(CardService.SelectionInputType.DROPDOWN)
-        .setFieldName('poc_status')
+        .setFieldName('status')
         .setTitle('Status (optional)')
         .addItem('Open',        'Open',        true)
         .addItem('In Progress', 'In Progress', false)
@@ -213,9 +207,9 @@ function _poc_buildCreationCard() {
  * @param {GoogleAppsScript.Addons.EventObject} e
  * @returns {GoogleAppsScript.Card_Service.SuggestionsResponse}
  */
-function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
+function _suggestAssignees(e) { // eslint-disable-line no-unused-vars
   try {
-    var query = (e && e.formInput && e.formInput.poc_assignee) || '';
+    var query = (e && e.formInput && e.formInput.assignee) || '';
     GasLogger.log('poc.suggestAssignees', { query: query });
     GasLogger.flush();
 
@@ -238,7 +232,7 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
       GasLogger.flush();
 
       if (code === 200) {
-        _poc_addPeopleSuggestions(suggestions, JSON.parse(resp.getContentText()).people || [], query);
+        _addPeopleSuggestions(suggestions, JSON.parse(resp.getContentText()).people || [], query);
       } else {
         // Directory search failed (likely 403 — scope not granted or domain policy).
         // Fall back to personal contacts search which requires only contacts.readonly.
@@ -256,7 +250,7 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
         if (ccode === 200) {
           var cdata    = JSON.parse(cresp.getContentText());
           var cresults = (cdata.results || []).map(function(r) { return r.person; });
-          _poc_addPeopleSuggestions(suggestions, cresults, query);
+          _addPeopleSuggestions(suggestions, cresults, query);
         } else {
           GasLogger.log('poc.suggestAssignees.contacts_fail', { code: ccode });
         }
@@ -279,7 +273,7 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
 }
 
 /** Adds up to 4 People API person objects to a Suggestions instance. */
-function _poc_addPeopleSuggestions(suggestions, people, query) {
+function _addPeopleSuggestions(suggestions, people, query) {
   var added = 0;
   for (var i = 0; i < people.length && added < 4; i++) {
     var emails = (people[i] && people[i].emailAddresses) || [];
@@ -306,10 +300,9 @@ function _poc_addPeopleSuggestions(suggestions, people, query) {
  * @param {string} url  The matched action URL
  * @returns {GoogleAppsScript.Card_Service.Card}
  */
-function _poc_buildPreviewCard(url, statusOverride) {
-  var globalId  = url.replace(_POC_ACTION_URL_BASE, '');
-  var idParts   = globalId.split('/AI-');
-  var actionId  = idParts.length >= 2 ? 'AI-' + idParts[1] : '';
+function _buildPreviewCard(url, statusOverride) {
+  var globalId  = url.replace(ACTION_CHIP_URL_BASE, '');
+  var actionId  = parseGlobalId(globalId).actionId;
   GasLogger.log('PREVIEW_CARD.lookup', { globalId: globalId, actionId: actionId });
   var doc      = DocumentApp.getActiveDocument();
   var scanned  = _scanFloatingActions(doc);
@@ -376,7 +369,7 @@ function _poc_buildPreviewCard(url, statusOverride) {
           .setAltText(sIcon.alt)
           .setOnClickAction(
             CardService.newAction()
-              .setFunctionName('_poc_setStatusFromPreview')
+              .setFunctionName('_setStatusFromPreview')
               .setParameters({ url: url, newStatus: sIcon.status })
           )
       );
@@ -402,13 +395,12 @@ function _poc_buildPreviewCard(url, statusOverride) {
  * @param {GoogleAppsScript.Addons.EventObject} e
  * @returns {GoogleAppsScript.Card_Service.ActionResponse}
  */
-function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
+function _setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
   var url       = (e && e.parameters && e.parameters.url)       || '';
   var newStatus = (e && e.parameters && e.parameters.newStatus) || 'Open';
 
-  var globalId = url.replace(_POC_ACTION_URL_BASE, '');
-  var idParts  = globalId.split('/AI-');
-  var N        = idParts.length >= 2 ? parseInt(idParts[1], 10) : 0;
+  var globalId = url.replace(ACTION_CHIP_URL_BASE, '');
+  var N        = parseGlobalId(globalId).N || 0;
 
   // Use getActiveDocument() (already loaded, no network) instead of openById
   var doc    = DocumentApp.getActiveDocument();
@@ -426,17 +418,17 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
   var assigneeEmail = (match && match.assigneeEmail) || '';
   var assigneeName  = (match && match.assigneeName)  || '';
 
-  var flushed = _poc_flushActionParagraph(docId, token, N, globalId, actionText, newStatus, assigneeEmail, assigneeName);
+  var flushed = _flushActionParagraph(docId, token, N, globalId, actionText, newStatus, assigneeEmail, assigneeName);
 
   if (!flushed) {
     GasLogger.log('POC_EDIT_ACTION.flush_failed', { globalId: globalId });
     GasLogger.flush();
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Error', 'Failed to update action in document.')))
+      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Failed to update action in document.')))
       .build();
   }
 
-  _poc_scheduleSheetUpdate({
+  _scheduleSheetUpdate({
     docUrl:         doc.getUrl(),
     docTitle:       doc.getName(),
     globalId:       globalId,
@@ -451,7 +443,7 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
   GasLogger.log('POC_EDIT_ACTION.complete', { globalId: globalId, status: newStatus });
 
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(_poc_buildPreviewCard(url, newStatus)))
+    .setNavigation(CardService.newNavigation().updateCard(_buildPreviewCard(url, newStatus)))
     .build();
 }
 
@@ -460,21 +452,21 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
 // ---------------------------------------------------------------------------
 
 /**
- * Enqueues sheet upsert params into the POC_QUEUE script property (JSON array)
+ * Enqueues sheet upsert params into the ACTION_SHEET_QUEUE script property (JSON array)
  * under a script lock, then schedules a drain trigger if none is already pending.
  *
  * @param {Object} params  Fields: docUrl, docTitle, globalId, actionText,
  *                         assigneeEmail, assigneeName, status
  */
-function _poc_scheduleSheetUpdate(params) {
+function _scheduleSheetUpdate(params) {
   var props = PropertiesService.getScriptProperties();
   var lock  = LockService.getScriptLock();
   var queueLength;
   lock.waitLock(5000);
   try {
-    var queue = JSON.parse(props.getProperty('POC_QUEUE') || '[]');
+    var queue = JSON.parse(props.getProperty('ACTION_SHEET_QUEUE') || '[]');
     queue.push(params);
-    props.setProperty('POC_QUEUE', JSON.stringify(queue));
+    props.setProperty('ACTION_SHEET_QUEUE', JSON.stringify(queue));
     queueLength = queue.length;
   } finally {
     lock.releaseLock();
@@ -483,32 +475,32 @@ function _poc_scheduleSheetUpdate(params) {
   var existing = ScriptApp.getProjectTriggers();
   var hasTrigger = false;
   for (var i = 0; i < existing.length; i++) {
-    if (existing[i].getHandlerFunction() === '_poc_processPendingSheetUpdates') {
+    if (existing[i].getHandlerFunction() === '_processPendingSheetUpdates') {
       hasTrigger = true;
       break;
     }
   }
   if (!hasTrigger) {
-    ScriptApp.newTrigger('_poc_processPendingSheetUpdates').timeBased().after(2000).create();
+    ScriptApp.newTrigger('_processPendingSheetUpdates').timeBased().after(2000).create();
   }
   GasLogger.log('poc.asyncSheet.enqueued', { queueLength: queueLength });
 }
 
 /**
- * Time-based trigger handler: atomically drains POC_QUEUE under a lock,
+ * Time-based trigger handler: atomically drains ACTION_SHEET_QUEUE under a lock,
  * processes the snapshot, then deletes only this trigger instance.
  * Log tag: POC_ASYNC_SHEET.complete
  *
  * @param {Object} e  GAS trigger event — e.triggerUid used for self-cleanup
  */
-function _poc_processPendingSheetUpdates(e) { // eslint-disable-line no-unused-vars
+function _processPendingSheetUpdates(e) { // eslint-disable-line no-unused-vars
   var props = PropertiesService.getScriptProperties();
   var lock  = LockService.getScriptLock();
   var snapshot;
   lock.waitLock(10000);
   try {
-    snapshot = JSON.parse(props.getProperty('POC_QUEUE') || '[]');
-    props.setProperty('POC_QUEUE', '[]');
+    snapshot = JSON.parse(props.getProperty('ACTION_SHEET_QUEUE') || '[]');
+    props.setProperty('ACTION_SHEET_QUEUE', '[]');
   } finally {
     lock.releaseLock();
   }
@@ -517,7 +509,7 @@ function _poc_processPendingSheetUpdates(e) { // eslint-disable-line no-unused-v
   for (var i = 0; i < snapshot.length; i++) {
     var p = snapshot[i];
     try {
-      _poc_callWebApp('upsert_action_rows', {
+      _callWebApp('upsert_action_rows', {
         docUrl:   p.docUrl,
         docTitle: p.docTitle,
         rows: [{
@@ -570,70 +562,13 @@ function _poc_processPendingSheetUpdates(e) { // eslint-disable-line no-unused-v
  * @param {string} message
  * @returns {GoogleAppsScript.Card_Service.Card}
  */
-function _poc_buildMessageCard(title, message) {
+function _buildMessageCard(title, message) {
   return CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle(title)
       .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png'))
     .addSection(CardService.newCardSection()
       .addWidget(CardService.newTextParagraph().setText(message)))
     .build();
-}
-
-/**
- * Looks up a single action row from the ActionSheet by globalId.
- * Uses verify_action_rows with no docUrl filter (returns all rows) then finds match.
- *
- * @param {string} globalId
- * @returns {Object|null}  Row object {globalId, id, assigneeEmail, assigneeName, action, status} or null
- */
-/**
- * Looks up a single action from the source document by globalId.
- * The document (not the sheet) is source of truth; the sheet is downstream.
- *
- * @param {string} globalId  globalId format: {docId}/AI-{N}
- * @returns {{action, status, assigneeEmail, assigneeName}|null}
- */
-function _poc_lookupActionFromDoc(globalId) {
-  if (!globalId) return null;
-
-  var parts = globalId.split('/AI-');
-  if (parts.length < 2) return null;
-  var docId = parts[0];
-
-  try {
-    var doc     = DocumentApp.openById(docId);
-    var actions = _scanFloatingActions(doc);
-    GasLogger.log('poc.lookupFromDoc.scan', { globalId: globalId, docId: docId, count: actions.length });
-    for (var i = 0; i < actions.length; i++) {
-      if (actions[i].globalId === globalId) {
-        var a = actions[i];
-        return {
-          action:        a.actionText,
-          status:        a.status,
-          assigneeEmail: a.assigneeEmail,
-          assigneeName:  a.assigneeName
-        };
-      }
-    }
-    GasLogger.log('poc.lookupFromDoc.notfound', { globalId: globalId, scannedIds: actions.map(function(a) { return a.globalId; }) });
-  } catch (err) {
-    GasLogger.log('poc.lookupFromDoc.error', { globalId: globalId, msg: String(err) });
-  }
-  return null;
-}
-
-function _poc_lookupAction(globalId) {
-  if (!globalId) return null;
-
-  var result = _poc_callWebApp('verify_action_rows', { docUrl: '' });
-  if (!result || !result.rows) return null;
-
-  for (var i = 0; i < result.rows.length; i++) {
-    if (result.rows[i].globalId === globalId) {
-      return result.rows[i];
-    }
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -647,7 +582,7 @@ function _poc_lookupAction(globalId) {
  * @param {GoogleAppsScript.Document.Document} doc
  * @returns {number}
  */
-function _poc_getNextActionN(doc) {
+function _getNextActionN(doc) {
   var body = doc.getBody();
   var n    = body.getNumChildren();
   var maxN = 0;
@@ -681,7 +616,7 @@ function _poc_getNextActionN(doc) {
  * @param {string} status
  * @param {string=} assigneeName  Optional display name for person chip
  */
-function _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName) {
+function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName) {
   var cursor = doc.getCursor();
   if (!cursor) {
     GasLogger.log('POC_INSERT_CHIP.warn', { msg: 'no cursor' });
@@ -698,14 +633,11 @@ function _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, stat
     cursorPara = cursorPara.getParent();
   }
   // Offset within the paragraph accounting for preceding sibling text elements.
+  // Use element index to avoid false matches when two siblings have identical text.
   var paraOffset = cursorOffset;
-  var numSiblings = cursorPara.getNumChildren();
-  for (var s = 0; s < numSiblings; s++) {
+  var targetChildIdx = cursorPara.getChildIndex(cursorElement);
+  for (var s = 0; s < targetChildIdx; s++) {
     var sibling = cursorPara.getChild(s);
-    if (sibling === cursorElement || sibling.getType() === DocumentApp.ElementType.TEXT &&
-        sibling.asText().getText() === cursorElement.getText()) {
-      break;
-    }
     if (sibling.getType() === DocumentApp.ElementType.TEXT) {
       paraOffset += sibling.asText().getText().length;
     } else {
@@ -715,8 +647,8 @@ function _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, stat
   var paraText = cursorPara.getText();
 
   var docId   = doc.getId();
-  var chipUrl = _POC_ACTION_URL_BASE + globalId;
-  var imgUrl  = _POC_STATUS_IMAGES[status] || _POC_DEFAULT_IMAGE;
+  var chipUrl = ACTION_CHIP_URL_BASE + globalId;
+  var imgUrl  = _ACTION_STATUS_IMAGES[status] || _ACTION_DEFAULT_IMAGE;
   var token   = ScriptApp.getOAuthToken();
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
 
@@ -732,7 +664,7 @@ function _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, stat
   }
 
   var content     = (JSON.parse(getResp.getContentText()).body || {}).content || [];
-  var cursorIndex = _poc_findCursorIndex(content, paraText, paraOffset);
+  var cursorIndex = _findCursorIndex(content, paraText, paraOffset);
 
   if (cursorIndex === null) {
     var errMsg = 'cursor position not found in document';
@@ -775,19 +707,7 @@ function _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, stat
       fields:    'link'
     }
   });
-  // Chip badge: Comic Sans bold dark-purple, no background, no hyperlink underline
-  requests.push({
-    updateTextStyle: {
-      range:     { startIndex: cursorIndex + 1, endIndex: cursorIndex + 1 + tokenLen },
-      textStyle: {
-        bold: true, underline: false,
-        foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
-        backgroundColor: { color: { rgbColor: { red: 1.0, green: 1.0, blue: 1.0 } } },
-        weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
-      },
-      fields: 'bold,underline,foregroundColor,backgroundColor,weightedFontFamily'
-    }
-  });
+  requests.push(_chipBadgeStyleRequest(cursorIndex + 1, cursorIndex + 1 + tokenLen));
 
   var batchResp = UrlFetchApp.fetch(
     baseUrl + docId + ':batchUpdate',
@@ -821,7 +741,7 @@ function _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, stat
  * @param {number} offset     character offset within that paragraph
  * @returns {number|null}
  */
-function _poc_findCursorIndex(content, paraText, offset) {
+function _findCursorIndex(content, paraText, offset) {
   for (var i = 0; i < content.length; i++) {
     var para = content[i].paragraph;
     if (!para) continue;
@@ -863,13 +783,13 @@ function _poc_findCursorIndex(content, paraText, offset) {
 
 /**
  * POSTs to the project WebApp and returns parsed JSON.
- * Mirrors the pattern in _patchActionStatus (Addon.js) — read-only reuse.
+ * Mirrors the pattern in _patchActionStatus (WorkspaceAddonCard.js) — read-only reuse.
  *
  * @param {string} action  WebApp action name (e.g. 'upsert_action_rows')
  * @param {Object} payload  Additional payload fields
  * @returns {Object|null}  Parsed response JSON, or null on fetch error
  */
-function _poc_callWebApp(action, payload) {
+function _callWebApp(action, payload) {
   var webAppUrl = getWebAppUrl();
   var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
 

@@ -907,3 +907,121 @@ Design/code review of DESIGN.md + src/*.js, then reconciled the ADRs and rewrote
 - Code-side fixes (set 3): M1 (assignee email on upsert), M2 (idempotence guards), M3 (doc-wins token rewrite), M4 (docId matching), M10 (concurrency), plus the `namedRangeId`→`globalId` rename and deleting orphaned `onOpenSidebar`/`Sidebar.html`.
 - Pre-existing: ADR-0003 still reads `Proposed` though ADR-0006 retired it.
 - Nothing committed this session.
+
+## 2026-05-29 08:51:08
+
+### Summary
+Design review resolution set 3 — all five findings implemented and pushed (C1, M1, M2, M3, M4). Follow-up DESIGN.md cleanup for four missed `namedRangeId` references.
+
+### Details
+
+**C1 — `namedRangeId` → `globalId` rename**
+Renamed across all 7 source files (WebApp.js, SyncManager.js, Addon.js, EditorChipPoc.js, TrackerTable.js, VerifySync.js, TestFixtures.js). Function `_loadExistingRowsByNamedRangeId` → `_loadExistingRowsByGlobalId`. Payload key `allDocNamedRangeIds` → `allDocGlobalIds` (both send and receive sides). DESIGN.md erDiagram fields, sequence diagram, and UC table updated. `_TF_RESULT` fixture responses now return `globalId` — Python test assertions referencing `namedRangeId` in fixture results need updating per open TST tickets.
+
+**M1 — Assignee Email on upsert update path**
+`_handleUpsertActionRows` update branch now writes col 3 (Assignee Email), falling back to the existing email when the payload omits it. (Was only written on insert.)
+
+**M2 — Idempotence guards**
+Upsert update: all 5 cell writes consolidated behind a `changed` flag; col 9 (Date Modified) only stamped when values actually differ. Doc-wins sync: col 7 formula only rewritten when it differs from the stored formula (using the pre-loaded `formulasCol7`); col 10 only cleared when `syncStatus !== ''`.
+
+**M3 — Flush missing `(Open)` status token**
+`syncDocument` now has a fourth flush loop that iterates `canonicalByGlobalId` and adds any action where `!hasExplicitStatus` to the `toFlush` set. Next sync materialises `(Open)` in the paragraph, eliminating the permanent VerifySync "missing status token" failure.
+
+**M4 — Standardise doc matching on extracted docId**
+New `_extractDocIdFromString(s)` helper extracts docId from both URL strings and HYPERLINK formula strings using the same `/d/` or `?id=` regex already used in syncAll. `_loadRowsForDocUrl` now compares extracted docIds instead of raw URL substrings — robust to `open?id=` vs `/d/` format differences and prefix collisions.
+
+**DESIGN.md follow-up**
+Four references missed in the main commit: prose on line 300 (stale alias note), duplicate erDiagram callout on line 302, sequence diagram payload key `allDocNamedRangeIds`, UC-A test table. Two intentional `NamedRangeId` references remain as the sheet-column legacy-label note.
+
+### bd Issues
+Created 9 issues, closed 5 FIX issues:
+- GTaskSheet-2ia [FIX] C1 rename — closed
+- GTaskSheet-s5f [FIX] M1 assignee email — closed
+- GTaskSheet-feo [FIX] M2 idempotence — closed
+- GTaskSheet-xju [FIX] M3 flush (Open) token — closed
+- GTaskSheet-5mk [FIX] M4 docId matching — closed
+- GTaskSheet-45k [TST] M1 — open (Python tests needed)
+- GTaskSheet-ckj [TST] M2 — open (Python tests needed)
+- GTaskSheet-dm7 [TST] M3 — open (Python tests needed)
+- GTaskSheet-wpe1 [TST] M4 — open (Python tests needed)
+
+### Decisions
+- TestFixtures.js `_TF_RESULT` fields renamed to `globalId` even though it breaks Python test assertions — correct per the twin-ticket rule; TST issues capture the Python-side obligation.
+- Two DESIGN.md `NamedRangeId` occurrences intentionally retained as the sheet-column legacy-label note (not code field names).
+
+## 2026-05-29 09:29:50
+
+### Summary
+Design review resolution set 4: closed 7 findings (M5, M8, L1–L3, L6, L7), added Opus-directed guidance for 3 deferred findings (M6, M7, M10).
+
+### Changes
+- **M5** — Removed redundant trailing `insertTrackerTable` call from `_syncSheetRowToDoc`; `syncDocument` already refreshes the tracker.
+- **M8** — Closed the empty-`TEST_TOKEN_EXPIRES` loophole in `_handleRunFixture`; non-empty future timestamp is now required (`deploy:test` always sets it).
+- **L1** — Added `parseGlobalId(globalId) → {docId, N, actionId}` to `WebApp.js`; `_extractActionId` now delegates to it. Replaced all 8 inline `split('/AI-')` call sites across SyncManager, Addon, EditorChipPoc, TrackerTable.
+- **L2** — Fixed SheetSetup.js header comment "8-column" → "10-column"; replaced `requirements §13/§16` references in ArchiveManager.js with `DESIGN.md §Archive Manager`.
+- **L3** — Removed `Authorization: Bearer` header from the two WebApp proxy calls (`_syncActionRows`, `_markDocNotFound`); Docs REST API calls in `_poc_flushActionParagraph`/`_poc_insertActionChip` retain their headers (legitimate).
+- **L6** — Fixed cursor offset computation in `_poc_insertActionChip`: replaced text-equality sibling loop with `cursorPara.getChildIndex(cursorElement)`, eliminating false-match risk on duplicate text runs.
+- **L7** — Deleted `onOpenSidebar()` from Addon.js and removed `src/Sidebar.html` (HtmlService sidebar abandoned; `_buildSidebarAction` retained — it builds CardService button actions, not HtmlService; M7 should rename it to `_buildCardAction`).
+- **design-review-05-29.md** — Updated all 7 resolved findings with resolution notes; added structured Opus-direction notes for M6 (badge DRY + colour inversion), M7 (full `_poc_*` de-namespace plan), M10 (LockService vs re-fetch analysis); updated remediation order §4–5.
+
+### Deferred to Opus
+- **M6**: Chip-badge style extract + colour inversion fix (needs verification of Docs API `foregroundColor`/`backgroundColor` field semantics before flipping).
+- **M7**: Full `_poc_*` de-namespace pass + `_buildSidebarAction`→`_buildCardAction` rename + DESIGN §Module Map update. Do in same session as M6 (overlapping lines).
+- **M10**: Concurrency risk in `_poc_flushActionParagraph` GET→batchUpdate; LockService vs re-fetch trade-off analysis.
+
+## 2026-05-29 (Opus) — M6 + M7 resolution
+
+### Summary
+Resolved the two Opus-deferred merge-blockers from design-review-05-29.md in one pass: M6 (chip-badge DRY + colour) and M7 (full `_poc_*` de-namespace + file split by add-on type). All static checks pass; runtime verification deferred to the existing editor-addon `[TST]` suite post-deploy.
+
+### M6 — DRY + colour
+- **Colour:** verified Docs API field semantics — `foregroundColor` = glyph colour, `backgroundColor` = highlight. The work-log prose ("white text on purple bg") was the inaccurate record; code's purple foreground was correct. Per user decision the badge is **bold Comic Sans, purple text (#4C1D95), no background** — so the explicit white `backgroundColor` was *dropped* (not flipped) at all 3 sites and removed from the `fields` mask.
+- Extracted `_chipBadgeStyleRequest(start, end)` → `SyncManager.js` (1 def, 3 call sites: `_flushActionParagraph`, `_insertActionChip`, `_insertTrackerIdLinks`).
+- Extracted `_findTrackerTable(content) → {table, startIndex}` → `TrackerTable.js`, replacing the two duplicated GET→locate loops.
+
+### M7 — de-namespace + file split
+- **File layout (user decision):** split by Google add-on type — `EditorChipPoc.js`→`EditorAddon.js` (Docs editor add-on, surface ②); `Addon.js`→`WorkspaceAddon.js` (Workspace add-on, surface ①), both via `git mv`. No `CommonAddon.js` (only `_buildCardAction` qualifies as shared and is currently Workspace-only — YAGNI).
+- Isolation banner replaced with production header.
+- 15 surviving `_poc_*` functions de-namespaced (`_poc_X`→`_X`), including `setFunctionName(...)` and trigger-handler string refs. `_POC_*` constants, `poc_*` form-field names, and `POC_QUEUE`→`ACTION_SHEET_QUEUE` property key all de-namespaced.
+- `_buildSidebarAction`→`_buildCardAction`.
+- **Dead code deleted:** `_poc_lookupAction` + `_poc_lookupActionFromDoc` (defined, never called).
+- DESIGN.md §Module Map, §Script Properties, execution-context diagram, and sequence diagrams updated to the new names/files.
+
+### Decisions
+- **Scope boundary:** `GasLogger` log-tag string literals (`POC_*`, `poc.*`) left unchanged — they are an observability surface referenced in work-log history, no test depends on them, and they are not code-structure namespace. Trivial follow-up if a full scrub is wanted.
+- `_ACTION_STATUSES` (was `_POC_STATUSES`) is unused but retained as a documented canonical status list (dead-constant removal is out of M6/M7 scope).
+
+### Verification
+- `node --check` clean on `EditorAddon.js`, `WorkspaceAddon.js`, `SyncManager.js`, `TrackerTable.js`.
+- Full call graph verified: every renamed/extracted helper has exactly one def and all call sites resolve; zero `_poc_`/`_POC_`/`_buildSidebarAction`/`POC_QUEUE` remain in `src/`.
+- **Runtime not yet exercised** — renamed `setFunctionName`/trigger-handler strings validate only at runtime. Merge gate: `npm run deploy:test` + editor-addon `[TST]` suite green (GTaskSheet-rwz preview/tracker, GTaskSheet-0n3 edit propagation).
+
+### Issues
+- GTaskSheet-y8rb [IMP] M6 — closed
+- GTaskSheet-jyyf [IMP] M7 — closed
+
+### M6/M7 follow-on — naming convention + chip-URL consolidation (2026-05-29)
+Triggered by the toolset-direction discussion (HtmlService LLM side-chat expected as future work).
+- **Naming convention decided:** add-on surface files use `{Surface}Addon{UITech}.js`, organized by UI tech first — `…Card.js` (CardService/Workspace Add-on) vs `…Html.js` (HtmlService/Editor add-on, reserved for the future LLM side-chat). Host-agnostic engine stays unsuffixed.
+- **Renamed:** `EditorAddon.js`→`EditorAddonCard.js`, `WorkspaceAddon.js`→`WorkspaceAddonCard.js` (frees `…Html` for the real HtmlService editor surface; the old `EditorAddon` name had pre-claimed it for CardService code).
+- **Chip-URL consolidation:** single source of truth `ACTION_CHIP_URL_BASE` (SyncManager.js) replaces 1 constant + 2 literals (EditorAddonCard/SyncManager/TrackerTable). Eases the multi-tenant ROADMAP move; manifest linkPreview pattern noted as hand-synced.
+- **Convention recorded in 3 places:** bd memory `addon-file-naming-convention` (surfaces at `bd prime`), `staging/2026-05-29-workspace-addon-toolset-direction.md` §Naming Conventions (the doc that evolves into the toolset plan), and DESIGN.md §Module Map note.
+- Deferred to product-framing ADR (explicitly NOT built): `core/` layer, tool command-contract, audit-log schema, AI-module scaffolding, repo/product rename.
+- `node --check` clean on all 4 touched files.
+
+## 2026-05-29 (Opus) — ADRs for toolset structural direction
+
+### Summary
+Promoted the session's structural decisions into two ADRs and finished the NUTS URL-namespace change. Headline: **ADR-0010** (organize add-on surface files by UI technology — `…Card.js` / `…Html.js`, host-agnostic engine unsuffixed) and **ADR-0011** (Northlake Unitarian Tool Suite identity + `NUTS/<tool>` URL namespace). Split into two records rather than one because the file-layout and URL-namespace conventions are independently supersedable (adr-quality-check single-decision rule).
+
+### Changes
+- **ADR-0010** `knowledge-base/adr/0010-addon-surface-files-by-ui-technology.md` (Accepted) — UI-tech file-organization convention; relates to ADR-0007.
+- **ADR-0011** `knowledge-base/adr/0011-nuts-suite-url-namespace.md` (Accepted) — NUTS suite name + `NUTS/<tool>` URL scheme; **refines ADR-0008's chip-URL consequence** (identity decision unchanged, not superseded).
+- **NUTS URL migration** — `ACTION_CHIP_URL_BASE` → `https://northlakeuu.org/NUTS/action/` (SyncManager.js); `appsscript.json` linkPreview `pathPrefix` → `NUTS/action` (hostPattern unchanged). JSON validated; script↔manifest sync confirmed; no `GActionSheet/action` chip paths remain.
+
+### Key Learnings
+- adr-quality-check's single-decision rule is best applied via the **independent-supersedability** test: if two conventions could change separately, they are two ADRs. File layout and URL namespace failed that test together, so they became ADR-0010 + ADR-0011 despite sharing one driver (single tool → NUTS suite).
+- An accepted ADR's *peripheral consequence* (ADR-0008's chip-URL string) can be updated by a new "Refines:" ADR without superseding the host ADR's core decision — avoids wrongly retiring the token-identity decision.
+
+### Migration / deploy note
+Chips on the old `GActionSheet/action` path won't fire `onLinkPreview` until re-flushed by a sync; manifest change takes effect only after `npm run deploy:test`. Pre-production, so no live impact (GTaskSheet-erc not yet done).

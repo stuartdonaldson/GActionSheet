@@ -1,8 +1,10 @@
 /**
- * Addon.js
+ * WorkspaceAddonCard.js
  *
- * Workspace Add-on card builder and button handlers.
- * Entry point: buildHomepageCard() — registered as homepageTrigger in appsscript.json.
+ * Google Workspace add-on: homepage card builder and button/mutation handlers
+ * (surface ① in DESIGN.md). Entry point: buildHomepageCard() — registered as
+ * homepageTrigger in appsscript.json. Status/delete handlers rewrite the doc
+ * via the shared REST flush in SyncManager.js (_flushActionParagraph).
  */
 
 /**
@@ -87,37 +89,6 @@ function _resolveActiveDocForRead(doc) {
   }
 }
 
-function onOpenSidebar() {
-  var doc = DocumentApp.getActiveDocument();
-  if (!doc) {
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('No active document'))
-      .build();
-  }
-
-  try {
-    var template = HtmlService.createTemplateFromFile('Sidebar');
-    template.docName = doc.getName();
-    template.buildVersion = BUILD_INFO.version;
-
-    DocumentApp.getUi().showSidebar(
-      template.evaluate().setTitle('Action Sync')
-    );
-
-    GasLogger.log('sidebar.open.complete', { docId: doc.getId() });
-    GasLogger.flush();
-
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Sidebar opened'))
-      .build();
-  } catch (e) {
-    GasLogger.log('addon.sidebar.error', { msg: e.message });
-    GasLogger.flush();
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Open Sidebar failed: ' + e.message))
-      .build();
-  }
-}
 
 function onInsertTrackerTable() {
   var doc = DocumentApp.getActiveDocument();
@@ -317,19 +288,19 @@ function _buildActionButtonsSection(homepageState) {
       CardService.newTextButton()
         .setText('Sync now')
         .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-        .setOnClickAction(_buildSidebarAction('onSyncNow'))
+        .setOnClickAction(_buildCardAction('onSyncNow'))
     )
     .addButton(
       CardService.newTextButton()
         .setText('VerifySync')
-        .setOnClickAction(_buildSidebarAction('onVerifySync'))
+        .setOnClickAction(_buildCardAction('onVerifySync'))
     );
 
   if (!homepageState.trackerFound) {
     buttonSet.addButton(
       CardService.newTextButton()
         .setText('Insert tracker')
-        .setOnClickAction(_buildSidebarAction('onInsertTrackerTable'))
+        .setOnClickAction(_buildCardAction('onInsertTrackerTable'))
     );
   }
 
@@ -357,11 +328,7 @@ function _buildActionListSection(homepageState) {
   for (var i = 0; i < homepageState.floatingActions.length; i++) {
     var action = homepageState.floatingActions[i];
     var assignee = action.assigneeName || action.assigneeEmail || 'Unassigned';
-    var actionId = '';
-    if (action.globalId) {
-      var nrParts = action.globalId.split('/AI-');
-      if (nrParts.length >= 2) actionId = 'AI-' + nrParts[1];
-    }
+    var actionId = action.globalId ? parseGlobalId(action.globalId).actionId : '';
     // Compact: AI-N • Assignee • Status on the top label line
     var topParts = [];
     if (actionId) topParts.push(actionId);
@@ -486,7 +453,7 @@ function _isVerificationResult(value) {
   );
 }
 
-function _buildSidebarAction(functionName) {
+function _buildCardAction(functionName) {
   var action = CardService.newAction().setFunctionName(functionName);
   if (action.setLoadIndicator && CardService.LoadIndicator) {
     action.setLoadIndicator(CardService.LoadIndicator.SPINNER);
@@ -506,10 +473,10 @@ function _buildSidebarAction(functionName) {
  * @param {string} globalId
  * @returns {GoogleAppsScript.Document.Paragraph|GoogleAppsScript.Document.ListItem|null}
  */
-function _poc_findParaByGlobalId(doc, globalId) {
-  var parts = globalId.split('/AI-');
-  if (parts.length < 2) return null;
-  var tokenPrefix = 'AI-' + parts[1] + ':';
+function _findParaByGlobalId(doc, globalId) {
+  var parsed = parseGlobalId(globalId);
+  if (isNaN(parsed.N)) return null;
+  var tokenPrefix = parsed.actionId + ':';
   var body = doc.getBody();
   for (var i = 0; i < body.getNumChildren(); i++) {
     var child = body.getChild(i);
@@ -555,10 +522,9 @@ function sidebarSetStatus(globalId, newStatus, docId) {
   var t2 = Date.now();
 
   if (currentAction) {
-    var parts = globalId.split('/AI-');
-    var N     = parseInt(parts[1], 10);
+    var N     = parseGlobalId(globalId).N;
     var token = ScriptApp.getOAuthToken();
-    _poc_flushActionParagraph(docId, token, N, globalId,
+    _flushActionParagraph(docId, token, N, globalId,
       currentAction.actionText, newStatus, currentAction.assigneeEmail, currentAction.assigneeName);
     var t3 = Date.now();
 
@@ -602,7 +568,7 @@ function sidebarDeleteAction(globalId, docId) {
     docId = activeDoc ? activeDoc.getId() : '';
   }
   var doc  = DocumentApp.openById(docId);
-  var para = _poc_findParaByGlobalId(doc, globalId);
+  var para = _findParaByGlobalId(doc, globalId);
 
   var deleted = false;
   if (para) {

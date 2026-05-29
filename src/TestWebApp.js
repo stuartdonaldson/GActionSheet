@@ -50,8 +50,8 @@ function _handleRunFixture(payload) {
       .setMimeType(ContentService.MimeType.TEXT);
   }
 
-  // Expiry check (empty expiresAt = no expiry enforced, for local dev convenience).
-  if (expiresAt && new Date() > new Date(expiresAt)) {
+  // TEST_TOKEN_EXPIRES must be set and in the future; deploy:test always writes it.
+  if (!expiresAt || new Date() > new Date(expiresAt)) {
     return ContentService
       .createTextOutput('test-token-expired')
       .setMimeType(ContentService.MimeType.TEXT);

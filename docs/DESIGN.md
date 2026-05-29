@@ -6,7 +6,7 @@ GActionSheet is **one** GAS project (`scriptId 12EKX…`), container-bound to th
 - The **Workspace Add-on surface** renders the homepage sidebar card in the active document using **CardService** (not HtmlService). It lists the doc's actions and offers Sync, VerifySync, tracker insert/refresh, per-action status, and delete. Runs as the **active user**.
 - The **Docs editor add-on surface** adds an `@`-menu **Create action** entry and a **smart-chip link-preview** card with inline status controls. It shares the same `addOns.docs` manifest section as the Workspace surface (they coexist; no mode switch) and also runs as the **active user**.
 - The **Web App** (`doPost`) is a proxy endpoint. Because the add-on surfaces run as the active user — who may not have edit access to the restricted ActionSheet — all sheet writes are routed through `doPost`, which runs as the **deployer** (`executeAs: USER_DEPLOYING`) and holds sheet-write authority.
-- The **container-bound automation** (`onActionSheetEdit` installable trigger, 30-minute `syncAll` sweep, archive job, async `POC_QUEUE` drain) runs as the **sheet owner** via installable/time-based triggers on the ActionSheet.
+- The **container-bound automation** (`onActionSheetEdit` installable trigger, 30-minute `syncAll` sweep, archive job, async `ACTION_SHEET_QUEUE` drain) runs as the **sheet owner** via installable/time-based triggers on the ActionSheet.
 
 Stable action identity is an **in-text `AI-N:` token** at the start of each floating-action paragraph; the cross-document key is `globalId = {docFileId}/AI-{N}`, stored in ActionSheet column 1. DocumentApp is used for read-side traversal (the token is visible to `getText()`, and PERSON chips are exposed ergonomically); the Docs REST API `batchUpdate` is used for write-side paragraph rewrites and tracker-table mutation. **No named ranges are created for actions** — the only named range in a document is the tracker-table heading anchor.
 
@@ -59,9 +59,9 @@ Context column refers to the execution contexts defined in §Runtime Architectur
 
 | File | Role | Context |
 |------|------|---------|
-| `src/Addon.js` | Workspace homepage card builder + button/mutation handlers (Sync, VerifySync, status, delete) | ① |
-| `src/EditorChipPoc.js` | Editor add-on: `@`-menu create-action card, smart-chip `onLinkPreview`, preview status taps, `POC_QUEUE` enqueue (being de-namespaced out of `_poc_` on promotion — see CLAUDE.md) | ② |
-| `src/SyncManager.js` | Scanner (`_scanFloatingActions`), token assignment, `syncDocument` / `syncAll`, REST paragraph flush (`_poc_flushActionParagraph`), `onActionSheetEdit` | ① ② ④ |
+| `src/WorkspaceAddonCard.js` | Workspace homepage card builder + button/mutation handlers (Sync, VerifySync, status, delete) — CardService | ① |
+| `src/EditorAddonCard.js` | Docs editor add-on: `@`-menu create-action card, smart-chip `onLinkPreview`, preview status taps, `ACTION_SHEET_QUEUE` enqueue — CardService | ② |
+| `src/SyncManager.js` | Scanner (`_scanFloatingActions`), token assignment, `syncDocument` / `syncAll`, REST paragraph flush (`_flushActionParagraph`), shared chip-badge style (`_chipBadgeStyleRequest`), chip URL base (`ACTION_CHIP_URL_BASE`), `onActionSheetEdit` | ① ② ④ |
 | `src/WebApp.js` | `doGet` (self-register URL), `doPost` router + all sheet writes | ③ |
 | `src/TrackerTable.js` | Insert/refresh the in-doc tracker table (DocumentApp + REST) | ① ② ④ |
 | `src/VerifySync.js` | Non-mutating doc ↔ tracker ↔ sheet verification | ① |
@@ -72,6 +72,8 @@ Context column refers to the execution contexts defined in §Runtime Architectur
 | `src/Version.js` | `BUILD_INFO` + `getWebAppUrl`; stamped by `update-revision.js` | all |
 | `src/appsscript.json` | Manifest — `addOns.docs` (homepage + createAction + linkPreview), webapp, oauthScopes, urlFetchWhitelist | — |
 | `src/TestWebApp.js` · `src/TestFixtures.js` | HTTP fixture dispatcher + GAS test fixtures (test-only) | ③ |
+
+**Add-on surface file naming.** Surface files use the convention `{Surface}Addon{UITech}.js`, where the suffix marks the rendering technology: `…Card.js` = CardService (Workspace Add-on), `…Html.js` = HtmlService (Editor add-on / menu-launched sidebar, reserved for future rich UIs such as an LLM side-chat). Host-agnostic logic (sync engine, Web App proxy, tracker, verify, logger) stays unsuffixed in the shared core. See the naming-conventions section of `staging/2026-05-29-workspace-addon-toolset-direction.md` for the rationale and the forward plan.
 
 ### Deployment Pipeline
 
@@ -94,7 +96,7 @@ Release pipeline (`npm run release:patch`) additionally runs `commit-deploy-stam
 | `WEBAPP_SECRET` | Manual (script editor) | Shared secret for doPost authentication |
 | `ACTION_SHEET_ID` | Manual / `bootstrap()` | Fallback ActionSheet ID when `getActiveSpreadsheet()` is unavailable (e.g. tracker refresh from the add-on context) |
 | `DOC_FOLDER_ID` | `ensureSheetStructure` (auto) | Parent folder of the bound spreadsheet (resolved + cached) |
-| `POC_QUEUE` | Editor add-on (auto) | JSON array of pending sheet updates, drained by the time-based trigger (cross-context async hand-off) |
+| `ACTION_SHEET_QUEUE` | Editor add-on (auto) | JSON array of pending sheet updates, drained by the time-based trigger (cross-context async hand-off) |
 | `GAS_LOGGER_FOLDER_ID` | Manual | Drive folder for GasLogger output (TDD phase) |
 | `TEST_DOC_ID` | Manual / `bootstrap()` | Test Google Doc ID for smoke tests |
 | `TEST_SHEET_ID` | Manual / `bootstrap()` | Test Sheet ID for smoke tests |
@@ -126,7 +128,7 @@ Omitting `urlFetchWhitelist` produces a hard error at call time, not a manifest 
 
 ### Execution contexts
 
-The single project runs in **four execution contexts**. A context is one GAS execution defined by *what triggers it* and *whose identity it runs as* — **not** a separate project or OS thread. GAS executions are isolated and share no memory; the only cross-context channels are HTTP (`UrlFetchApp` → `doPost`), the `POC_QUEUE` script property (async hand-off), and the ActionSheet rows.
+The single project runs in **four execution contexts**. A context is one GAS execution defined by *what triggers it* and *whose identity it runs as* — **not** a separate project or OS thread. GAS executions are isolated and share no memory; the only cross-context channels are HTTP (`UrlFetchApp` → `doPost`), the `ACTION_SHEET_QUEUE` script property (async hand-off), and the ActionSheet rows.
 
 ```mermaid
 graph TB
@@ -134,7 +136,7 @@ graph TB
         direction TB
         subgraph user["Contexts ① + ② — run as the ACTIVE USER (Docs add-on runtime)"]
             WS["① Workspace Add-on surface — homepage sidebar card (CardService)<br/>buildHomepageCard · onSyncNow · onVerifySync · onSetActionStatus · onDeleteAction"]
-            ED["② Docs editor add-on surface — @-menu + smart-chip preview<br/>createActionTrigger · onLinkPreview · _poc_submitCreateAction · _poc_setStatusFromPreview"]
+            ED["② Docs editor add-on surface — @-menu + smart-chip preview<br/>createActionTrigger · onLinkPreview · _submitCreateAction · _setStatusFromPreview"]
         end
         subgraph deployer["Context ③ — Web App — runs as the DEPLOYER (USER_DEPLOYING)"]
             WEB["doPost router · all ActionSheet writes<br/>sync/upsert/patch/delete/verify_action_rows · mark_doc_not_found"]
@@ -142,7 +144,7 @@ graph TB
         subgraph owner["Context ④ — container-bound triggers — run as the SHEET OWNER"]
             OE["onActionSheetEdit — installable onEdit"]
             SA["syncAll — time-based, 30 min"]
-            DRAIN["_poc_processPendingSheetUpdates — time-based queue drain"]
+            DRAIN["_processPendingSheetUpdates — time-based queue drain"]
             ARCH["ArchiveManager.archive — menu / sweep"]
             OO["onOpen — simple trigger: builds the Sheets menu only (no authorized services)"]
         end
@@ -150,7 +152,7 @@ graph TB
 
     Doc[(Active Google Doc)]
     Sheet[(ActionSheet + Archive)]
-    Q{{POC_QUEUE<br/>script property}}
+    Q{{ACTION_SHEET_QUEUE<br/>script property}}
 
     WS -->|DocumentApp + Docs REST| Doc
     ED -->|DocumentApp + Docs REST| Doc
@@ -177,7 +179,7 @@ graph LR
     subgraph docside["Document — active-user contexts ① ②"]
         FA["Floating action paragraph<br/>[img] AI-N: [chip] text (Status)"]
         SCAN["_scanFloatingActions<br/>→ globalId · assignee · text · status"]
-        FLUSH["_poc_flushActionParagraph<br/>REST batchUpdate rewrite"]
+        FLUSH["_flushActionParagraph<br/>REST batchUpdate rewrite"]
         TRK["Tracker table<br/>(rendered view — overwritten on refresh)"]
     end
     subgraph webapp["Web App — deployer ③"]
@@ -219,7 +221,7 @@ Grouped by execution context (see §Runtime Architecture).
 | Component | Responsibility |
 |-----------|---------------|
 | Create-action card | `@`-menu entry (`createActionTrigger`); form for action text, optional assignee (People-API suggestions), and status. On submit, inserts the branded `AI-N:` fragment at the cursor via REST, then upserts the row through the Web App |
-| Smart-chip preview | `onLinkPreview` matches the action URL pattern and renders a card with the action's current state plus status icon buttons; a tap rewrites the doc paragraph and enqueues the sheet update on `POC_QUEUE`, drained asynchronously by context ④ |
+| Smart-chip preview | `onLinkPreview` matches the action URL pattern and renders a card with the action's current state plus status icon buttons; a tap rewrites the doc paragraph and enqueues the sheet update on `ACTION_SHEET_QUEUE`, drained asynchronously by context ④ |
 
 ### Shared sync engine (used by ①, ②, ④)
 
@@ -227,7 +229,7 @@ Grouped by execution context (see §Runtime Architecture).
 |-----------|---------------|
 | Action Scanner | `_scanFloatingActions` walks the doc body; a floating action is any paragraph/list-item whose text starts with the token `AI-N:` (an optional leading inline image is ignored). After the token it extracts an optional assignee (PERSON chip, or a leading email whose name is derived from the local-part), the action text, and the trailing `(Status)` token. Duplicate `AI-N` paragraphs (copy/paste) are flagged `isDuplicate` |
 | Token Manager | `_assignPlaceholderTokens` finds bare `AI:` placeholders and assigns the next free `N`. The global key `globalId = {docId}/AI-{N}` is the durable identity; there is **no** named-range bookkeeping for actions |
-| Paragraph flush | `_poc_flushActionParagraph` rewrites every occurrence of an `AI-N:` paragraph in place via one REST `batchUpdate` (image → token → optional chip → text → status badge), keeping copies consistent with the canonical row |
+| Paragraph flush | `_flushActionParagraph` rewrites every occurrence of an `AI-N:` paragraph in place via one REST `batchUpdate` (image → token → optional chip → text → status badge), keeping copies consistent with the canonical row |
 | Tracker Table Renderer | Inserts/refreshes the in-doc tracker table anchored by its heading named range (`gactionsheet-tracker-anchor`), preceded by a read-only-notice paragraph; uses REST `batchUpdate` for in-place replacement |
 
 ### ③ Web App — `doPost` (deployer)
@@ -309,7 +311,7 @@ The cross-doc key is `globalId = {docId}/AI-{N}`, stored in ActionSheet column 1
 
 ## Dependency Rules
 - The Scanner reads the active doc only; it never touches the ActionSheet directly — the Web App (`doPost`, context ③) owns all sheet I/O.
-- Add-on surfaces never reach into each other's internals; they call the shared engine functions (`syncDocument`, `insertTrackerTable`, `verifyDocumentSync`, `_poc_flushActionParagraph`) and the Web App proxy.
+- Add-on surfaces never reach into each other's internals; they call the shared engine functions (`syncDocument`, `insertTrackerTable`, `verifyDocumentSync`, `_flushActionParagraph`) and the Web App proxy.
 - The container-bound sweep (`syncAll`, context ④) performs the same reconciliation as the sidebar's **Sync now** by calling the **same** `syncDocument` code — there is no separate automation codebase. (This consolidated a prior stub; see the entry-point coverage rule in CLAUDE.md.)
 - Archive reads/writes the ActionSheet only; it never opens documents.
 - All four contexts live in one project and share code freely. The only boundary is an **identity** one: active-user contexts (① ②) must write the sheet via the deployer-context Web App (③); they never call `SpreadsheetApp` on the ActionSheet directly.
@@ -391,14 +393,14 @@ A user taps an action chip's status link in the preview card. The doc executes s
 sequenceDiagram
     participant User
     participant DocCard as Doc card handler
-    participant Queue as POC_QUEUE (script prop)
+    participant Queue as ACTION_SHEET_QUEUE (script prop)
     participant Trigger as Time-based trigger
     participant WebApp as WebApp doPost
     participant Sheet as ActionSheet
 
     User->>DocCard: tap status link in preview card
     DocCard->>Queue: enqueue {globalId, status, refreshTracker, ...}
-    DocCard->>Trigger: schedule _poc_processPendingSheetUpdates (.after 2s)
+    DocCard->>Trigger: schedule _processPendingSheetUpdates (.after 2s)
     Note over Trigger: fires 13–60 s later (GAS minimum)
     Trigger->>Queue: read + dedup by globalId (keep last per action)
     loop each deduplicated item
@@ -431,7 +433,7 @@ sequenceDiagram
     Sheet->>Trigger: fires (separate execution)
     Trigger->>Trigger: WriteGuard.isActive()? → false → continue
     Trigger->>Sheet: stamp col9=DateModified, col10=Dirty (WriteGuard in-process)
-    Trigger->>REST: _poc_flushActionParagraph (batchUpdate floating action)
+    Trigger->>REST: _flushActionParagraph (batchUpdate floating action)
     REST-->>Trigger: ok=true
     Trigger->>Sheet: col10='' (clear Dirty, WriteGuard in-process)
     Trigger->>WebApp: syncDocument(docId) → sync_action_rows
@@ -468,7 +470,7 @@ sequenceDiagram
     Note over WebApp,Sheet: Dirty → sheetWins list (clear col10); not Dirty → docWins (update cols 3–6,9,10)
     WebApp-->>Addon: {upserted, updated, sheetWins:[...]}
     loop each sheetWins item
-        Addon->>REST: _poc_flushActionParagraph (push sheet values to doc)
+        Addon->>REST: _flushActionParagraph (push sheet values to doc)
     end
     Addon->>Doc: saveAndClose
 ```

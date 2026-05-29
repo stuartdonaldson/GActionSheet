@@ -146,8 +146,7 @@ function _buildTrackerDataRows(floatingActions, sheetRows) {
     var fa    = floatingActions[i];
     var sheet = sheetRows[fa.globalId] || {};
     // AI-N is the user-facing ID; globalId is kept for hyperlink generation
-    var nParts = fa.globalId ? fa.globalId.split('/AI-') : [];
-    var aiN    = nParts.length >= 2 ? 'AI-' + nParts[1] : (sheet.id || '');
+    var aiN = fa.globalId ? parseGlobalId(fa.globalId).actionId : (sheet.id || '');
     rows.push({
       id:            aiN,
       globalId:      fa.globalId || '',
@@ -336,6 +335,27 @@ function _setTrackerAnchorNamedRange(doc, headingPara) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Locates the tracker table within a Docs REST body.content array: scans for
+ * the tracker heading paragraph, then returns the first table element after it.
+ *
+ * @param {Array} content  body.content from a documents.get REST response
+ * @returns {{table: Object, startIndex: number}|null}
+ */
+function _findTrackerTable(content) {
+  var headingFound = false;
+  for (var i = 0; i < content.length; i++) {
+    var elem = content[i];
+    if (!headingFound && elem.paragraph) {
+      var pt = _extractParaText(elem.paragraph).trim();
+      if (pt === _TRACKER_HEADING || pt === _TRACKER_HEADING_OLD) headingFound = true;
+    } else if (headingFound && elem.table) {
+      return { table: elem.table, startIndex: elem.startIndex };
+    }
+  }
+  return null;
+}
+
+/**
  * Inserts person chips into the Assignee column of the tracker table via
  * the Docs REST API batchUpdate.
  *
@@ -364,23 +384,12 @@ function _insertTrackerAssigneeChips(docId, assigneeEmails, assigneeNames) {
 
   var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
 
-  var headingFound = false;
-  var trackerTable = null;
-  for (var i = 0; i < content.length; i++) {
-    var elem = content[i];
-    if (!headingFound && elem.paragraph) {
-      var pt = _extractParaText(elem.paragraph).trim();
-      if (pt === _TRACKER_HEADING || pt === _TRACKER_HEADING_OLD) headingFound = true;
-    } else if (headingFound && elem.table) {
-      trackerTable = elem.table;
-      break;
-    }
-  }
-
-  if (!trackerTable) {
+  var found = _findTrackerTable(content);
+  if (!found) {
     GasLogger.log('tracker.warn', { msg: 'Tracker table not found in REST response', docId: docId });
     return;
   }
+  var trackerTable = found.table;
 
   var cellIndices = [];
   var tableRows   = trackerTable.tableRows || [];
@@ -416,7 +425,7 @@ function _insertTrackerAssigneeChips(docId, assigneeEmails, assigneeNames) {
 }
 
 function _insertTrackerIdLinks(docId, globalIds) {
-  var chipUrlBase = 'https://northlakeuu.org/GActionSheet/action/';
+  var chipUrlBase = ACTION_CHIP_URL_BASE;
   var token       = ScriptApp.getOAuthToken();
   var baseUrl     = 'https://docs.googleapis.com/v1/documents/';
 
@@ -431,25 +440,13 @@ function _insertTrackerIdLinks(docId, globalIds) {
 
   var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
 
-  var headingFound    = false;
-  var trackerTable    = null;
-  var tableStartIndex = null;
-  for (var i = 0; i < content.length; i++) {
-    var elem = content[i];
-    if (!headingFound && elem.paragraph) {
-      var pt2 = _extractParaText(elem.paragraph).trim();
-      if (pt2 === _TRACKER_HEADING || pt2 === _TRACKER_HEADING_OLD) headingFound = true;
-    } else if (headingFound && elem.table) {
-      trackerTable    = elem.table;
-      tableStartIndex = elem.startIndex;
-      break;
-    }
-  }
-
-  if (!trackerTable) {
+  var found = _findTrackerTable(content);
+  if (!found) {
     GasLogger.log('tracker.warn', { msg: 'Tracker table not found for ID links', docId: docId });
     return;
   }
+  var trackerTable    = found.table;
+  var tableStartIndex = found.startIndex;
 
   var requests = [];
   if (tableStartIndex !== null) {
@@ -483,15 +480,7 @@ function _insertTrackerIdLinks(docId, globalIds) {
     var cellStart = cellContent[0].startIndex;
     var chipUrl   = chipUrlBase + globalId;
     requests.push({ updateTextStyle: { range: { startIndex: cellStart, endIndex: cellStart + cellText.length }, textStyle: { link: { url: chipUrl } }, fields: 'link' } });
-    requests.push({ updateTextStyle: {
-      range: { startIndex: cellStart, endIndex: cellStart + cellText.length },
-      textStyle: { bold: true, underline: false,
-        foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
-        backgroundColor: { color: { rgbColor: { red: 1.0,   green: 1.0,   blue: 1.0   } } },
-        weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
-      },
-      fields: 'bold,underline,foregroundColor,backgroundColor,weightedFontFamily'
-    }});
+    requests.push(_chipBadgeStyleRequest(cellStart, cellStart + cellText.length));
   }
 
   if (requests.length === 0) return;
