@@ -319,7 +319,6 @@ function _poc_buildPreviewCard(url, statusOverride) {
   }
   var action = match ? { action: match.actionText, status: statusOverride || match.status, assigneeEmail: match.assigneeEmail, assigneeName: match.assigneeName } : null;
   GasLogger.log('PREVIEW_CARD.result', { found: !!action, action: action ? action.action : null, status: action ? action.status : null });
-  GasLogger.flush();
 
   var actionText = (action && action.action)        || '';
   var status     = (action && action.status)         || '';
@@ -450,7 +449,6 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
   });
 
   GasLogger.log('POC_EDIT_ACTION.complete', { globalId: globalId, status: newStatus });
-  GasLogger.flush();
 
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().updateCard(_poc_buildPreviewCard(url, newStatus)))
