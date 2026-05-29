@@ -297,9 +297,9 @@ erDiagram
     Action ||--o| TrackerTableRow : "summarised by"
 ```
 
-The cross-doc key is `globalId = {docId}/AI-{N}`, stored in ActionSheet column 1 (the column and the in-code field are still labelled `NamedRangeId` — a retained alias). The doc-scoped `id` (column 2) is the human-facing `AI-N` derived from that key; `N` is assigned once per document by the Token Manager and then persists in the paragraph text — it is stable, not recomputed from document order.
+The cross-doc key is `globalId = {docId}/AI-{N}`, stored in ActionSheet column 1. The doc-scoped `id` (column 2) is the human-facing `AI-N` derived from that key; `N` is assigned once per document by the Token Manager and then persists in the paragraph text — it is stable, not recomputed from document order.
 
-> The field in all three entities is `globalId` — the in-text identity token `{docId}/AI-{N}`. The ActionSheet column heading still reads `NamedRangeId` as a legacy alias pending a sheet rename.
+> The field in all three entities is `globalId`. The ActionSheet column heading still reads `NamedRangeId` as a legacy label pending a sheet rename.
 
 **Field notes:**
 - `assigneeChip` — compound value extracted from the PERSON chip, canonical form `name <email>`. The ActionSheet stores this in two separate columns (`Assignee Name`, `Assignee Email`); `DocChecklistItem` and `TrackerTableRow` hold it as a single parsed unit.
@@ -463,7 +463,7 @@ sequenceDiagram
 
     User->>Addon: Sync Now or menu Sync
     Addon->>Doc: openById, scan floating actions
-    Addon->>WebApp: POST sync_action_rows {docState, allDocNamedRangeIds}
+    Addon->>WebApp: POST sync_action_rows {docState, allDocGlobalIds}
     WebApp->>Sheet: for each row (WriteGuard in-process):
     Note over WebApp,Sheet: Dirty → sheetWins list (clear col10); not Dirty → docWins (update cols 3–6,9,10)
     WebApp-->>Addon: {upserted, updated, sheetWins:[...]}
@@ -503,7 +503,7 @@ Each Use Case has **one** end-to-end test that asserts the user-visible outcome 
 
 | UC | What the test does | What it asserts |
 |---|---|---|
-| **UC-A** | Insert one `AI-N:` item with a person-chip assignee AND one with a bare-email assignee in the same doc, click Sync, then click Sync again with no changes | Both items appear in ActionSheet with correct email, name, action text, and status (AC1); second Sync produces no new rows, all `NamedRangeId` (globalId) values unchanged, sheet and doc content byte-for-byte identical (AC2) |
+| **UC-A** | Insert one `AI-N:` item with a person-chip assignee AND one with a bare-email assignee in the same doc, click Sync, then click Sync again with no changes | Both items appear in ActionSheet with correct email, name, action text, and status (AC1); second Sync produces no new rows, all `globalId` values unchanged, sheet and doc content byte-for-byte identical (AC2) |
 | **UC-B** | Four flows: (1) edit the sheet row's Status/Action/Assignee, then Sync; (2) edit the floating action's trailing `(Status)`, then Sync; (3) edit the floating action's text after the chip, then Sync; (4) replace the chip with a different person, then Sync. Plus a negative case (5): type into the tracker table cell, then Sync | (1)–(4) the *other* authoritative side reflects the edit, no duplicate ActionSheet row, the `AI-N` token / `globalId` preserved across all four; (5) the ActionSheet is unchanged and the next tracker refresh restores the rendered values |
 | **UC-C** | Click **Insert / refresh tracker** twice, with intervening action changes; include a refresh after a tracker-cell edit | First click produces instructional paragraph + N-row table; second click reflects added/removed/closed actions in place; no stale rows remain; tracker-cell edits are overwritten on refresh |
 | **UC-D** | Seed a Closed row with `Last Modified > 30d`, invoke the sweep | The row appears in the archive sheet with `Last Modified` preserved; no doc content changed |
