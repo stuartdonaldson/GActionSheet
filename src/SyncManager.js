@@ -148,6 +148,19 @@ function syncDocument(docId) {
 
     SpreadsheetApp.flush();
 
+    // Refresh tracker table if the doc has one and anything changed during this sync.
+    // "Changed" means: sheetWins flushed to doc, docWins updated the sheet, or new rows inserted.
+    var hadChanges = flushIds.length > 0 ||
+                     (syncResult.updated || 0) > 0 ||
+                     (syncResult.upserted || 0) > 0;
+    if (hadChanges) {
+      try {
+        insertTrackerTable(docId, { onlyIfExists: true });
+      } catch (trackerErr) {
+        GasLogger.log('sync.tracker-failed', { docId: docId, msg: trackerErr.message });
+      }
+    }
+
     GasLogger.log('sync.complete', {
       docId:    docId,
       anchored: 0,
