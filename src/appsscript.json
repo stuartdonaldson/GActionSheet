@@ -12,13 +12,15 @@
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/workspace.linkpreview",
     "https://www.googleapis.com/auth/workspace.linkcreate",
+    "https://www.googleapis.com/auth/directory.readonly",
     "openid"
   ],
   "urlFetchWhitelist": [
     "https://script.google.com/a/macros/northlakeuu.org/s/",
     "https://script.google.com/a/northlakeuu.org/macros/s/",
     "https://script.google.com/macros/s/",
-    "https://docs.googleapis.com/"
+    "https://docs.googleapis.com/",
+    "https://people.googleapis.com/"
   ],
   "webapp": {
     "access": "ANYONE_ANONYMOUS",

@@ -79,10 +79,20 @@ function onLinkPreview(e) { // eslint-disable-line no-unused-vars
  * @returns {GoogleAppsScript.Card_Service.ActionResponse}
  */
 function _poc_submitCreateAction(e) {
-  var formInput     = (e && e.formInput) || {};
-  var actionText    = (formInput.poc_actionText  || '').trim();
-  var assigneeEmail = (formInput.poc_assignee    || '').trim();
-  var status        = formInput.poc_status || 'Open';
+  var formInput      = (e && e.formInput) || {};
+  var actionText     = (formInput.poc_actionText  || '').trim();
+  var assigneeRaw    = (formInput.poc_assignee    || '').trim();
+  var status         = formInput.poc_status || 'Open';
+
+  // Parse "Display Name <email>" format produced by the suggestions lookup.
+  // Falls back to treating the whole value as an email address.
+  var assigneeEmail  = assigneeRaw;
+  var assigneeName   = '';
+  var nameEmailMatch = assigneeRaw.match(/^(.*?)\s*<([^>]+)>\s*$/);
+  if (nameEmailMatch) {
+    assigneeName  = nameEmailMatch[1].trim();
+    assigneeEmail = nameEmailMatch[2].trim();
+  }
 
   if (!actionText) {
     GasLogger.log('CREATE_ACTION_TRIGGER.validation', { msg: 'actionText required' });
@@ -105,7 +115,7 @@ function _poc_submitCreateAction(e) {
       namedRangeId:  globalId,
       actionText:    actionText,
       assigneeEmail: assigneeEmail,
-      assigneeName:  assigneeEmail,
+      assigneeName:  assigneeName || assigneeEmail,
       status:        status
     }]
   });
@@ -121,7 +131,7 @@ function _poc_submitCreateAction(e) {
   // NOTE: CardService.newSmartChipConfig / newRenderAction do NOT exist in the
   // current GAS runtime (confirmed 2026-05-27 — TypeError). The REST approach
   // is the correct insertion method.
-  var insertError = _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeEmail);
+  var insertError = _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName || assigneeEmail);
 
   GasLogger.log('CREATE_ACTION_TRIGGER.done', { globalId: globalId, upserted: result.upserted });
   // updateCard is the only allowed response in createActionTriggers context.
@@ -161,7 +171,10 @@ function _poc_buildCreationCard() {
       CardService.newTextInput()
         .setFieldName('poc_assignee')
         .setTitle('Assignee (optional)')
-        .setHint('email address')
+        .setHint('name or email')
+        .setSuggestionsAction(
+          CardService.newAction().setFunctionName('_poc_suggestAssignees')
+        )
     )
     .addWidget(
       CardService.newSelectionInput()
@@ -187,6 +200,56 @@ function _poc_buildCreationCard() {
         .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png')
     )
     .addSection(section)
+    .build();
+}
+
+/**
+ * SuggestionsAction for the Assignee field on the Create Action card.
+ * Queries the Google People API directory for matching users as the field changes.
+ * Returns suggestions in "Display Name <email>" format; submit handler parses this.
+ *
+ * Requires scope: https://www.googleapis.com/auth/directory.readonly
+ *
+ * @param {GoogleAppsScript.Addons.EventObject} e
+ * @returns {GoogleAppsScript.Card_Service.SuggestionsResponse}
+ */
+function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
+  var query = (e && e.formInputs && e.formInputs.poc_assignee &&
+               e.formInputs.poc_assignee[0]) || '';
+  var suggestions = CardService.newSuggestions();
+
+  if (query.length >= 2) {
+    try {
+      var token = ScriptApp.getOAuthToken();
+      var url   = 'https://people.googleapis.com/v1/people:searchDirectoryPeople'
+        + '?query='    + encodeURIComponent(query)
+        + '&readMask=' + encodeURIComponent('emailAddresses,names')
+        + '&sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE';
+
+      var resp = UrlFetchApp.fetch(url, {
+        headers:            { Authorization: 'Bearer ' + token },
+        muteHttpExceptions: true
+      });
+
+      if (resp.getResponseCode() === 200) {
+        var people = JSON.parse(resp.getContentText()).people || [];
+        for (var i = 0; i < people.length && i < 8; i++) {
+          var emails = people[i].emailAddresses || [];
+          var names  = people[i].names          || [];
+          var email  = emails.length ? emails[0].value       : '';
+          var name   = names.length  ? names[0].displayName  : '';
+          if (email) {
+            suggestions.addSuggestion(name ? name + ' <' + email + '>' : email);
+          }
+        }
+      }
+    } catch (err) {
+      GasLogger.log('poc.suggestAssignees.error', { msg: String(err) });
+    }
+  }
+
+  return CardService.newSuggestionsResponseBuilder()
+    .setSuggestions(suggestions)
     .build();
 }
 
