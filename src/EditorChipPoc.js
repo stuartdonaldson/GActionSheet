@@ -311,7 +311,13 @@ function _poc_buildPreviewCard(url) {
   var idParts   = globalId.split('/AI-');
   var actionId  = idParts.length >= 2 ? 'AI-' + idParts[1] : '';
   GasLogger.log('PREVIEW_CARD.lookup', { globalId: globalId, actionId: actionId });
-  var action    = _poc_lookupActionFromDoc(globalId);
+  var doc      = DocumentApp.getActiveDocument();
+  var scanned  = _scanFloatingActions(doc);
+  var match    = null;
+  for (var fi = 0; fi < scanned.length; fi++) {
+    if (scanned[fi].globalId === globalId) { match = scanned[fi]; break; }
+  }
+  var action = match ? { action: match.actionText, status: match.status, assigneeEmail: match.assigneeEmail, assigneeName: match.assigneeName } : null;
   GasLogger.log('PREVIEW_CARD.result', { found: !!action, action: action ? action.action : null, status: action ? action.status : null });
   GasLogger.flush();
 
