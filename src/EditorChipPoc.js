@@ -515,6 +515,7 @@ function _poc_processPendingSheetUpdates(e) { // eslint-disable-line no-unused-v
     lock.releaseLock();
   }
 
+  var trackerDocIds = {};
   for (var i = 0; i < snapshot.length; i++) {
     var p = snapshot[i];
     try {
@@ -533,11 +534,17 @@ function _poc_processPendingSheetUpdates(e) { // eslint-disable-line no-unused-v
       GasLogger.log('poc.asyncSheet.error', { namedRangeId: p.namedRangeId, msg: String(err) });
     }
     if (p.refreshTracker && p.docId) {
-      try {
-        insertTrackerTable(p.docId);
-      } catch (err) {
-        GasLogger.log('poc.asyncTracker.error', { docId: p.docId, msg: String(err) });
-      }
+      trackerDocIds[p.docId] = true;
+    }
+  }
+
+  // Refresh each affected doc's tracker table once, after all sheet updates complete
+  var trackerDocs = Object.keys(trackerDocIds);
+  for (var j = 0; j < trackerDocs.length; j++) {
+    try {
+      insertTrackerTable(trackerDocs[j]);
+    } catch (err) {
+      GasLogger.log('poc.asyncTracker.error', { docId: trackerDocs[j], msg: String(err) });
     }
   }
 
