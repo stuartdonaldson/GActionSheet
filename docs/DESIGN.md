@@ -272,10 +272,113 @@ DocumentApp returns `null` for `isChecked()` on every task / checklist item, and
 A trailing parenthesized token at the end of the action paragraph. If the paragraph omits the token, Sync rewrites the floating action with an explicit `(Open)` token. `Closed` is recognized for archiving. Any other value (e.g. `(In Review)`, `(Blocked)`) is preserved verbatim and round-trips to the ActionSheet `Status` column. Whitespace inside the parens is trimmed on read; the canonical written form has no leading/trailing whitespace.
 
 ### Programmatic Write Suppression
-Both the add-on's per-doc Sync and the automation's Sweep / Archive set the automation project's `SYNC_IN_PROGRESS` script property on the ActionSheet before any programmatic sheet write, and clear it in a `finally` block. The `onEdit Handler` reads this flag and returns immediately when set, preventing false `Last Modified` updates from automated writes.
+`WriteGuard` suppresses `onActionSheetEdit` during programmatic sheet writes. It has two layers:
+
+- **In-process** (`WriteGuard._active`) — covers writes within the same GAS execution (add-on Sync Now, sweep, archive). Callers wrap writes with `WriteGuard.wrap(fn)`.
+- **Cross-execution** (`SYNC_IN_PROGRESS_UNTIL_MS` script property) — covers writes from the Web App `doPost`, which runs in a separate execution from the `onActionSheetEdit` trigger. `WriteGuard.activate()` sets this property to `Date.now() + 20000`; `WriteGuard.isActive()` reads it. The property is not deleted on deactivate — it expires naturally after 20 seconds, covering the typical trigger fire delay. During the 20-second window any legitimate user edit is suppressed; this is an accepted POC tradeoff.
+
+`onActionSheetEdit` calls `WriteGuard.isActive()` at entry; either layer returning true causes an immediate return.
 
 ### Idempotence
 A Sync or Sweep that finds no differences shall make no writes to any doc or sheet. Enforced by comparing normalized values before writing.
+
+---
+
+## Sync Scenarios
+
+Three distinct entry points trigger synchronisation. Each has a different initiating actor, write direction, and authority resolution.
+
+### Scenario A — Status chip click (async, doc-initiated)
+
+A user taps an action chip's status link in the preview card. The doc executes synchronously through the card handler, then a time-based trigger drains the queue asynchronously.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant DocCard as Doc card handler
+    participant Queue as POC_QUEUE (script prop)
+    participant Trigger as Time-based trigger
+    participant WebApp as WebApp doPost
+    participant Sheet as ActionSheet
+
+    User->>DocCard: tap status link in preview card
+    DocCard->>Queue: enqueue {namedRangeId, status, refreshTracker, ...}
+    DocCard->>Trigger: schedule _poc_processPendingSheetUpdates (.after 2s)
+    Note over Trigger: fires 13–60 s later (GAS minimum)
+    Trigger->>Queue: read + dedup by namedRangeId (keep last per action)
+    loop each deduplicated item
+        Trigger->>WebApp: POST upsert_action_rows
+        WebApp->>Sheet: write cols 2,4,5,6,9,10 (WriteGuard sets SYNC_IN_PROGRESS_UNTIL_MS)
+    end
+    opt doc has tracker (refreshTracker=true)
+        Trigger->>WebApp: insertTrackerTable(docId)
+    end
+```
+
+**Field authority:** Web App write is the source of truth. Sheet wins because the action originated in the doc (user intent captured at click time); no conflict resolution needed.
+
+---
+
+### Scenario B — Sheet edit (synchronous, sheet-initiated)
+
+A user edits col 3/4/5/6 of an ActionSheet row. `onActionSheetEdit` fires immediately in the same execution, marking the row Dirty and pushing the change to the doc, then running a full scan to write corrections (including chip-resolved name) back to the sheet.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Trigger as onActionSheetEdit
+    participant Sheet as ActionSheet
+    participant REST as Docs REST API
+    participant WebApp as WebApp doPost
+    participant Tracker as insertTrackerTable
+
+    User->>Sheet: edit col 3/4/5/6
+    Sheet->>Trigger: fires (separate execution)
+    Trigger->>Trigger: WriteGuard.isActive()? → false → continue
+    Trigger->>Sheet: stamp col9=DateModified, col10=Dirty (WriteGuard in-process)
+    Trigger->>REST: _poc_flushActionParagraph (batchUpdate floating action)
+    REST-->>Trigger: ok=true
+    Trigger->>Sheet: col10='' (clear Dirty, WriteGuard in-process)
+    Trigger->>WebApp: syncDocument(docId) → sync_action_rows
+    Note over WebApp: syncStatus='' → docWins branch
+    WebApp->>Sheet: write col4=assigneeName (chip-resolved), col10='' (WriteGuard sets SYNC_IN_PROGRESS_UNTIL_MS)
+    Note over Sheet: onActionSheetEdit fires for col4 write → WriteGuard.isActive()=true → suppressed
+    opt doc has tracker (onlyIfExists=true)
+        Trigger->>Tracker: insertTrackerTable(docId, onlyIfExists)
+        Tracker->>REST: rebuild tracker table
+    end
+```
+
+**Field authority:** Sheet wins for status/action/email (user's edit intent). Doc wins for assigneeName (chip-resolved display name not available from sheet alone). `syncDocument` after flush reads the doc's canonical chip state and propagates the resolved name back.
+
+---
+
+### Scenario C — Sync Now / menu sync (bidirectional, full reconcile)
+
+User clicks **Sync Now** in the sidebar, or **Action Sync → Sync** in the sheet menu. Full bidirectional reconcile via `syncDocument`.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Addon as Add-on / MenuHandler
+    participant Doc as DocumentApp
+    participant WebApp as WebApp doPost
+    participant Sheet as ActionSheet
+    participant REST as Docs REST API
+
+    User->>Addon: Sync Now or menu Sync
+    Addon->>Doc: openById, scan floating actions
+    Addon->>WebApp: POST sync_action_rows {docState, allDocNamedRangeIds}
+    WebApp->>Sheet: for each row (WriteGuard sets SYNC_IN_PROGRESS_UNTIL_MS):
+    Note over WebApp,Sheet: Dirty → sheetWins list (clear col10); not Dirty → docWins (update cols 3–6,9,10)
+    WebApp-->>Addon: {upserted, updated, sheetWins:[...]}
+    loop each sheetWins item
+        Addon->>REST: _poc_flushActionParagraph (push sheet values to doc)
+    end
+    Addon->>Doc: saveAndClose
+```
+
+**Field authority:** `Last Modified` (col 9) determines winner per row. If `SyncStatus = 'Dirty'`, sheet wins and its values are flushed to the doc. Otherwise the doc's scanned state overwrites the sheet row. Tracker refresh is a separate user action (Insert / refresh tracker button).
 
 ---
 

@@ -194,7 +194,7 @@ function syncAll() {
     var docIdSet     = {};
     for (var i = 0; i < formulasCol7.length; i++) {
       var formula = formulasCol7[i][0] || '';
-      var m = formula.match(/\/d\/([a-zA-Z0-9_-]+)\//);
+      var m = formula.match(/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]+)/);
       if (m) docIdSet[m[1]] = true;
     }
 
@@ -258,7 +258,7 @@ function _syncSheetRowToDoc(sheet, row) {
     if (!namedRangeId) return;
     if (!docFormula) return;
 
-    var docIdMatch = docFormula.match(/\/d\/([a-zA-Z0-9_-]+)\//);
+    var docIdMatch = docFormula.match(/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]+)/);
     if (!docIdMatch) return;
     var docId = docIdMatch[1];
 
@@ -270,9 +270,26 @@ function _syncSheetRowToDoc(sheet, row) {
     var token = ScriptApp.getOAuthToken();
     var ok = _poc_flushActionParagraph(docId, token, N, namedRangeId, action, status, assigneeEmail, assigneeName || '');
     if (ok) {
-      // Flush confirmed — clear Dirty immediately rather than waiting for MenuSync WebApp round-trip.
+      // Flush confirmed — clear Dirty immediately rather than waiting for WebApp round-trip.
       WriteGuard.wrap(function () { sheet.getRange(row, 10).setValue(''); });
       GasLogger.log('sync.sheet-to-doc.done', { namedRangeId: namedRangeId });
+
+      // Full doc scan: writes chip-resolved assigneeName back to sheet (docWins branch),
+      // clears any residual Dirty, and keeps the sheet consistent with the doc's canonical
+      // floating action state. WriteGuard cross-execution property suppresses the
+      // onActionSheetEdit trigger that would otherwise re-set Dirty on these writes.
+      try {
+        syncDocument(docId);
+      } catch (syncErr) {
+        GasLogger.log('sync.sheet-to-doc.sync-failed', { namedRangeId: namedRangeId, msg: syncErr.message });
+      }
+
+      // Refresh tracker table only if one already exists in the doc.
+      try {
+        insertTrackerTable(docId, { onlyIfExists: true });
+      } catch (trackerErr) {
+        GasLogger.log('sync.sheet-to-doc.tracker-failed', { namedRangeId: namedRangeId, msg: trackerErr.message });
+      }
     } else {
       GasLogger.log('sync.sheet-to-doc.flush-failed', { namedRangeId: namedRangeId });
     }
@@ -589,25 +606,20 @@ function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status
 
   var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);
   var tokenLen   = ('AI-' + N + ': ').length;
-  var delays     = [0, 500, 1000];
 
-  for (var attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) Utilities.sleep(delays[attempt]);
+  // GET to find paragraph indices.
+  // builtText is text-run content only — inline images appear as inlineObjectElement.
+  var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=body.content(startIndex,endIndex,paragraph/elements(textRun/content))',
+    { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+  if (getResp.getResponseCode() !== 200) {
+    GasLogger.log('flush.error', { msg: 'GET failed: HTTP ' + getResp.getResponseCode(), globalId: globalId });
+    return false;
+  }
 
-    // GET to find paragraph indices and capture revisionId for conflict detection.
-    // builtText is text-run content only — inline images appear as inlineObjectElement.
-    var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=revisionId,body.content',
-      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
-    if (getResp.getResponseCode() !== 200) {
-      GasLogger.log('flush.error', { msg: 'GET failed: HTTP ' + getResp.getResponseCode(), globalId: globalId, attempt: attempt });
-      return false;
-    }
+  var getBody = JSON.parse(getResp.getContentText());
+  var content = (getBody.body || {}).content || [];
 
-    var getBody    = JSON.parse(getResp.getContentText());
-    var revisionId = getBody.revisionId || '';
-    var content    = (getBody.body || {}).content || [];
-
-    // Collect ALL occurrences of this AI-N: token (handles copy-pasted paragraphs).
+  // Collect ALL occurrences of this AI-N: token (handles copy-pasted paragraphs).
     // Process descending so lower-index paragraphs are unaffected by higher-index changes.
     var occurrences = [];
     for (var i = 0; i < content.length; i++) {
@@ -676,23 +688,14 @@ function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status
     var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
       method: 'post', muteHttpExceptions: true,
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-      payload: JSON.stringify({ requests: requests, requiredRevisionId: revisionId })
+      payload: JSON.stringify({ requests: requests })
     });
 
     if (batchResp.getResponseCode() === 200) {
-      GasLogger.log('flush.done', { globalId: globalId, status: status, copies: occurrences.length, attempt: attempt });
+      GasLogger.log('flush.done', { globalId: globalId, status: status, copies: occurrences.length });
       return true;
     }
 
-    var respBody  = batchResp.getContentText();
-    var isAborted = respBody.indexOf('ABORTED') !== -1 || respBody.indexOf('requiredRevisionId') !== -1;
-    if (!isAborted) {
-      GasLogger.log('flush.error', { msg: 'batchUpdate failed: HTTP ' + batchResp.getResponseCode(), body: respBody.substring(0, 300), globalId: globalId, copies: occurrences.length });
-      return false;
-    }
-    GasLogger.log('flush.retry', { msg: 'revision conflict', attempt: attempt, globalId: globalId });
-  }
-
-  GasLogger.log('flush.error', { msg: 'batchUpdate failed after 3 attempts', globalId: globalId });
+  GasLogger.log('flush.error', { msg: 'batchUpdate failed: HTTP ' + batchResp.getResponseCode(), body: batchResp.getContentText().substring(0, 300), globalId: globalId });
   return false;
 }

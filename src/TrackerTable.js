@@ -36,12 +36,14 @@ var _TRACKER_COL_HEADERS   = ['ID', 'Assignee', 'Action', 'Status'];
  *
  * @param {string} docId
  */
-function insertTrackerTable(docId) {
+function insertTrackerTable(docId, options) {
   if (!docId) {
     GasLogger.log('tracker.error', { msg: 'docId is required' });
     GasLogger.flush();
     return;
   }
+
+  var onlyIfExists = options && options.onlyIfExists;
 
   try {
     var doc             = DocumentApp.openById(docId);
@@ -51,7 +53,15 @@ function insertTrackerTable(docId) {
     var sheetRows = _readTrackerSheetRows(ss, docId);
     var dataRows  = _buildTrackerDataRows(floatingActions, sheetRows);
 
-    var removed    = _removeTrackerSection(doc);
+    var removed = _removeTrackerSection(doc);
+
+    if (onlyIfExists && removed.index === -1) {
+      doc.saveAndClose();
+      GasLogger.log('tracker.skip', { msg: 'no existing tracker, onlyIfExists=true', docId: docId });
+      GasLogger.flush();
+      return;
+    }
+
     var sectionOut = _insertTrackerSection(doc, dataRows, removed.index, removed.headingKept);
 
     doc.saveAndClose();
@@ -348,25 +358,19 @@ function _insertTrackerAssigneeChips(docId, assigneeEmails, assigneeNames) {
     { headers: { 'Authorization': 'Bearer ' + token }, muteHttpExceptions: true }
   );
   if (getResp.getResponseCode() !== 200) {
-    GasLogger.log('tracker.warn', {
-      msg:   'insertPerson GET failed: HTTP ' + getResp.getResponseCode(),
-      docId: docId
-    });
+    GasLogger.log('tracker.warn', { msg: 'insertPerson GET failed: HTTP ' + getResp.getResponseCode(), docId: docId });
     return;
   }
 
   var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
 
-  // Find tracker table: first TABLE element after the heading paragraph
   var headingFound = false;
   var trackerTable = null;
   for (var i = 0; i < content.length; i++) {
     var elem = content[i];
     if (!headingFound && elem.paragraph) {
       var pt = _extractParaText(elem.paragraph).trim();
-      if (pt === _TRACKER_HEADING || pt === _TRACKER_HEADING_OLD) {
-        headingFound = true;
-      }
+      if (pt === _TRACKER_HEADING || pt === _TRACKER_HEADING_OLD) headingFound = true;
     } else if (headingFound && elem.table) {
       trackerTable = elem.table;
       break;
@@ -378,13 +382,12 @@ function _insertTrackerAssigneeChips(docId, assigneeEmails, assigneeNames) {
     return;
   }
 
-  // Collect Assignee cell startIndex for each data row (skip header row at index 0)
   var cellIndices = [];
   var tableRows   = trackerTable.tableRows || [];
   for (var r = 1; r < tableRows.length; r++) {
     var cells = tableRows[r].tableCells || [];
     if (cells.length < 2) continue;
-    var cellContent = cells[1].content || [];  // column 1 = Assignee
+    var cellContent = cells[1].content || [];
     if (cellContent.length > 0 && cellContent[0].paragraph) {
       cellIndices.push(cellContent[0].startIndex);
     } else {
@@ -392,49 +395,26 @@ function _insertTrackerAssigneeChips(docId, assigneeEmails, assigneeNames) {
     }
   }
 
-  // Build insertPerson requests in reverse order
   var requests = [];
   for (var k = cellIndices.length - 1; k >= 0; k--) {
     var email = assigneeEmails[k] || '';
-    var name  = (assigneeNames && assigneeNames[k]) || '';
     var idx   = cellIndices[k];
     if (!email || idx === null) continue;
-    // insertPerson rejects any name field in personProperties — email only
-    requests.push({
-      insertPerson: {
-        personProperties: { email: email },
-        location:         { index: idx }
-      }
-    });
+    requests.push({ insertPerson: { personProperties: { email: email }, location: { index: idx } } });
   }
 
   if (requests.length === 0) return;
 
-  var batchResp = UrlFetchApp.fetch(
-    baseUrl + docId + ':batchUpdate',
-    {
-      method:             'post',
-      headers:            { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      payload:            JSON.stringify({ requests: requests }),
-      muteHttpExceptions: true
-    }
-  );
+  var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
+    method: 'post', muteHttpExceptions: true,
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    payload: JSON.stringify({ requests: requests })
+  });
   if (batchResp.getResponseCode() !== 200) {
-    GasLogger.log('tracker.warn', {
-      msg:  'insertPerson batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
-      body: batchResp.getContentText().substring(0, 200)
-    });
+    GasLogger.log('tracker.warn', { msg: 'insertPerson batchUpdate failed: HTTP ' + batchResp.getResponseCode(), body: batchResp.getContentText().substring(0, 200) });
   }
 }
 
-/**
- * Applies hyperlinks to the ID column cells of the tracker table via
- * the Docs REST API batchUpdate.  Each cell's AI-N text becomes a link
- * to the action chip URL so hovering opens the preview card.
- *
- * @param {string}   docId
- * @param {string[]} globalIds  Ordered list matching tracker table data rows.
- */
 function _insertTrackerIdLinks(docId, globalIds) {
   var chipUrlBase = 'https://northlakeuu.org/GActionSheet/action/';
   var token       = ScriptApp.getOAuthToken();
@@ -445,26 +425,20 @@ function _insertTrackerIdLinks(docId, globalIds) {
     { headers: { 'Authorization': 'Bearer ' + token }, muteHttpExceptions: true }
   );
   if (getResp.getResponseCode() !== 200) {
-    GasLogger.log('tracker.warn', {
-      msg:   'insertIdLinks GET failed: HTTP ' + getResp.getResponseCode(),
-      docId: docId
-    });
+    GasLogger.log('tracker.warn', { msg: 'insertIdLinks GET failed: HTTP ' + getResp.getResponseCode(), docId: docId });
     return;
   }
 
   var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
 
-  // Find tracker table: first TABLE after the heading paragraph
-  var headingFound     = false;
-  var trackerTable     = null;
-  var tableStartIndex  = null;
+  var headingFound    = false;
+  var trackerTable    = null;
+  var tableStartIndex = null;
   for (var i = 0; i < content.length; i++) {
     var elem = content[i];
     if (!headingFound && elem.paragraph) {
       var pt2 = _extractParaText(elem.paragraph).trim();
-      if (pt2 === _TRACKER_HEADING || pt2 === _TRACKER_HEADING_OLD) {
-        headingFound = true;
-      }
+      if (pt2 === _TRACKER_HEADING || pt2 === _TRACKER_HEADING_OLD) headingFound = true;
     } else if (headingFound && elem.table) {
       trackerTable    = elem.table;
       tableStartIndex = elem.startIndex;
@@ -477,14 +451,9 @@ function _insertTrackerIdLinks(docId, globalIds) {
     return;
   }
 
-  // Column widths: ID 0.75 in, Assignee 2 in, Status 1 in (72 pt/in)
   var requests = [];
   if (tableStartIndex !== null) {
-    var colWidths = [
-      { col: 0, pt: 54  },
-      { col: 1, pt: 144 },
-      { col: 3, pt: 72  }
-    ];
+    var colWidths = [{ col: 0, pt: 54 }, { col: 1, pt: 144 }, { col: 3, pt: 72 }];
     for (var wi = 0; wi < colWidths.length; wi++) {
       requests.push({
         updateTableColumnProperties: {
@@ -497,15 +466,13 @@ function _insertTrackerIdLinks(docId, globalIds) {
     }
   }
 
-  // Collect startIndex + text length for ID cell (column 0) in each data row
   var tableRows = trackerTable.tableRows || [];
   for (var r = 1; r < tableRows.length; r++) {
-    var cells       = tableRows[r].tableCells || [];
-    if (cells.length < 1) continue;
+    var cells    = tableRows[r].tableCells || [];
     var globalId = globalIds[r - 1] || '';
-    if (!globalId) continue;
+    if (!globalId || cells.length < 1) continue;
     var cellContent = cells[0].content || [];
-    if (cellContent.length === 0 || !cellContent[0].paragraph) continue;
+    if (!cellContent.length || !cellContent[0].paragraph) continue;
     var paraElems = cellContent[0].paragraph.elements || [];
     var cellText  = '';
     for (var e2 = 0; e2 < paraElems.length; e2++) {
@@ -515,44 +482,27 @@ function _insertTrackerIdLinks(docId, globalIds) {
     if (!cellText) continue;
     var cellStart = cellContent[0].startIndex;
     var chipUrl   = chipUrlBase + globalId;
-    requests.push({
-      updateTextStyle: {
-        range:     { startIndex: cellStart, endIndex: cellStart + cellText.length },
-        textStyle: { link: { url: chipUrl } },
-        fields:    'link'
-      }
-    });
-    // Chip badge: Comic Sans bold dark-purple, no background, no hyperlink underline
-    requests.push({
-      updateTextStyle: {
-        range:     { startIndex: cellStart, endIndex: cellStart + cellText.length },
-        textStyle: {
-          bold: true, underline: false,
-          foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
-          backgroundColor: { color: { rgbColor: { red: 1.0, green: 1.0, blue: 1.0 } } },
-          weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
-        },
-        fields: 'bold,underline,foregroundColor,backgroundColor,weightedFontFamily'
-      }
-    });
+    requests.push({ updateTextStyle: { range: { startIndex: cellStart, endIndex: cellStart + cellText.length }, textStyle: { link: { url: chipUrl } }, fields: 'link' } });
+    requests.push({ updateTextStyle: {
+      range: { startIndex: cellStart, endIndex: cellStart + cellText.length },
+      textStyle: { bold: true, underline: false,
+        foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
+        backgroundColor: { color: { rgbColor: { red: 1.0,   green: 1.0,   blue: 1.0   } } },
+        weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
+      },
+      fields: 'bold,underline,foregroundColor,backgroundColor,weightedFontFamily'
+    }});
   }
 
   if (requests.length === 0) return;
 
-  var batchResp = UrlFetchApp.fetch(
-    baseUrl + docId + ':batchUpdate',
-    {
-      method:             'post',
-      headers:            { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      payload:            JSON.stringify({ requests: requests }),
-      muteHttpExceptions: true
-    }
-  );
+  var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
+    method: 'post', muteHttpExceptions: true,
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    payload: JSON.stringify({ requests: requests })
+  });
   if (batchResp.getResponseCode() !== 200) {
-    GasLogger.log('tracker.warn', {
-      msg:  'insertIdLinks batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
-      body: batchResp.getContentText().substring(0, 200)
-    });
+    GasLogger.log('tracker.warn', { msg: 'insertIdLinks batchUpdate failed: HTTP ' + batchResp.getResponseCode(), body: batchResp.getContentText().substring(0, 200) });
   }
 }
 
