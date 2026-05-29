@@ -559,7 +559,7 @@ function sidebarSetStatus(namedRangeId, newStatus, docId) {
     var N     = parseInt(parts[1], 10);
     var token = ScriptApp.getOAuthToken();
     _poc_flushActionParagraph(docId, token, N, namedRangeId,
-      currentAction.actionText, newStatus, currentAction.assigneeEmail);
+      currentAction.actionText, newStatus, currentAction.assigneeEmail, currentAction.assigneeName);
     var t3 = Date.now();
 
     _patchActionStatus(namedRangeId, newStatus);

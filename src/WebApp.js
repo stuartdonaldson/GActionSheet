@@ -191,7 +191,7 @@ function _loadExistingRowsByNamedRangeId(actionsSheet) {
       rowIndex:      i + 2,
       id:            data[i][1],
       assigneeEmail: data[i][2],
-      assigneeName:  data[i][3],
+      assigneeName:  data[i][3] || '',
       action:        data[i][4],
       status:        data[i][5],
       dateModified:  data[i][8] instanceof Date ? data[i][8] : null,
@@ -295,10 +295,11 @@ function _handleSyncActionRows(payload) {
         // Sheet was edited (onActionSheetEdit set Sync Status = 'Dirty') — sheet wins.
         // SyncManager will apply the sheet values back to the doc floating action.
         sheetWins.push({
-          namedRangeId: row.namedRangeId,
+          namedRangeId:  row.namedRangeId,
           assigneeEmail: existing.assigneeEmail,
-          action:       existing.action,
-          status:       existing.status
+          assigneeName:  existing.assigneeName,
+          action:        existing.action,
+          status:        existing.status
         });
         // Row synced successfully — clear any prior Sync Status.
         actionsSheet.getRange(existing.rowIndex, 10).setValue('');
@@ -306,6 +307,10 @@ function _handleSyncActionRows(payload) {
         // Doc is authoritative — update sheet row only when content values differ.
         var rowIdx     = existing.rowIndex;
         var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
+        var correctId = _extractActionId(row.namedRangeId);
+        if (existing.id !== correctId) {
+          actionsSheet.getRange(rowIdx, 2).setValue(correctId);
+        }
         if (existing.assigneeEmail !== row.assigneeEmail ||
             existing.assigneeName !== row.assigneeName ||
             existing.action !== row.actionText ||

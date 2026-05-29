@@ -56,7 +56,7 @@ function insertTrackerTable(docId) {
     doc.saveAndClose();
 
     if (sectionOut.assigneeEmails.length > 0) {
-      _insertTrackerAssigneeChips(docId, sectionOut.assigneeEmails);
+      _insertTrackerAssigneeChips(docId, sectionOut.assigneeEmails, sectionOut.assigneeNames);
     }
     if (sectionOut.globalIds.length > 0) {
       _insertTrackerIdLinks(docId, sectionOut.globalIds);
@@ -141,6 +141,7 @@ function _buildTrackerDataRows(floatingActions, sheetRows) {
       id:            aiN,
       globalId:      fa.globalId || '',
       assigneeEmail: fa.assigneeEmail || '',
+      assigneeName:  fa.assigneeName  || '',
       action:        fa.actionText    || '',
       status:        sheet.status || fa.status || 'Open'
     });
@@ -243,16 +244,37 @@ function _insertTrackerSection(doc, dataRows, insertIndex) {
     ]);
   }
 
+  var table;
   if (appending) {
-    body.appendTable(cells);
+    table = body.appendTable(cells);
   } else {
-    body.insertTable(insertIndex + 2, cells);
+    table = body.insertTable(insertIndex + 2, cells);
+  }
+
+  // Column alignment (ID, Assignee, Status centered; Action left as-is) + bold header row
+  var centeredCols = [0, 1, 3];
+  var numRows      = table.getNumRows();
+  for (var ri = 0; ri < numRows; ri++) {
+    var trow = table.getRow(ri);
+    for (var ci = 0; ci < centeredCols.length; ci++) {
+      var col = centeredCols[ci];
+      if (col < trow.getNumCells()) {
+        trow.getCell(col).getChild(0).asParagraph()
+          .setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+      }
+    }
+    if (ri === 0) {
+      for (var hci = 0; hci < trow.getNumCells(); hci++) {
+        trow.getCell(hci).editAsText().setBold(true);
+      }
+    }
   }
 
   _setTrackerAnchorNamedRange(doc, headingPara);
 
   return {
     assigneeEmails: dataRows.map(function(r) { return r.assigneeEmail || ''; }),
+    assigneeNames:  dataRows.map(function(r) { return r.assigneeName  || ''; }),
     globalIds:      dataRows.map(function(r) { return r.globalId || ''; })
   };
 }
@@ -288,8 +310,9 @@ function _setTrackerAnchorNamedRange(doc, headingPara) {
  *
  * @param {string}   docId
  * @param {string[]} assigneeEmails  Ordered list matching tracker table data rows.
+ * @param {string[]} assigneeNames   Parallel list of display names (may be empty strings).
  */
-function _insertTrackerAssigneeChips(docId, assigneeEmails) {
+function _insertTrackerAssigneeChips(docId, assigneeEmails, assigneeNames) {
   var token   = ScriptApp.getOAuthToken();
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
 
@@ -345,8 +368,10 @@ function _insertTrackerAssigneeChips(docId, assigneeEmails) {
   var requests = [];
   for (var k = cellIndices.length - 1; k >= 0; k--) {
     var email = assigneeEmails[k] || '';
+    var name  = (assigneeNames && assigneeNames[k]) || '';
     var idx   = cellIndices[k];
     if (!email || idx === null) continue;
+    // insertPerson rejects any name field in personProperties — email only
     requests.push({
       insertPerson: {
         personProperties: { email: email },
@@ -402,8 +427,9 @@ function _insertTrackerIdLinks(docId, globalIds) {
   var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
 
   // Find tracker table: first TABLE after the heading paragraph
-  var headingFound = false;
-  var trackerTable = null;
+  var headingFound     = false;
+  var trackerTable     = null;
+  var tableStartIndex  = null;
   for (var i = 0; i < content.length; i++) {
     var elem = content[i];
     if (!headingFound && elem.paragraph) {
@@ -411,7 +437,8 @@ function _insertTrackerIdLinks(docId, globalIds) {
         headingFound = true;
       }
     } else if (headingFound && elem.table) {
-      trackerTable = elem.table;
+      trackerTable    = elem.table;
+      tableStartIndex = elem.startIndex;
       break;
     }
   }
@@ -421,8 +448,27 @@ function _insertTrackerIdLinks(docId, globalIds) {
     return;
   }
 
+  // Column widths: ID 0.75 in, Assignee 2 in, Status 1 in (72 pt/in)
+  var requests = [];
+  if (tableStartIndex !== null) {
+    var colWidths = [
+      { col: 0, pt: 54  },
+      { col: 1, pt: 144 },
+      { col: 3, pt: 72  }
+    ];
+    for (var wi = 0; wi < colWidths.length; wi++) {
+      requests.push({
+        updateTableColumnProperties: {
+          tableStartLocation: { index: tableStartIndex },
+          columnIndices: [colWidths[wi].col],
+          tableColumnProperties: { widthType: 'FIXED_WIDTH', width: { magnitude: colWidths[wi].pt, unit: 'PT' } },
+          fields: 'widthType,width'
+        }
+      });
+    }
+  }
+
   // Collect startIndex + text length for ID cell (column 0) in each data row
-  var requests  = [];
   var tableRows = trackerTable.tableRows || [];
   for (var r = 1; r < tableRows.length; r++) {
     var cells       = tableRows[r].tableCells || [];
@@ -445,6 +491,19 @@ function _insertTrackerIdLinks(docId, globalIds) {
         range:     { startIndex: cellStart, endIndex: cellStart + cellText.length },
         textStyle: { link: { url: chipUrl } },
         fields:    'link'
+      }
+    });
+    // Chip badge: Comic Sans bold dark-purple, no background, no hyperlink underline
+    requests.push({
+      updateTextStyle: {
+        range:     { startIndex: cellStart, endIndex: cellStart + cellText.length },
+        textStyle: {
+          bold: true, underline: false,
+          foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
+          backgroundColor: { color: { rgbColor: { red: 1.0, green: 1.0, blue: 1.0 } } },
+          weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
+        },
+        fields: 'bold,underline,foregroundColor,backgroundColor,weightedFontFamily'
       }
     });
   }

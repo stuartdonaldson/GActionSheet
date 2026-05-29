@@ -11,7 +11,8 @@
     "https://www.googleapis.com/auth/script.external_request",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/workspace.linkpreview",
-    "https://www.googleapis.com/auth/workspace.linkcreate"
+    "https://www.googleapis.com/auth/workspace.linkcreate",
+    "openid"
   ],
   "urlFetchWhitelist": [
     "https://script.google.com/a/macros/northlakeuu.org/s/",
@@ -25,7 +26,7 @@
   },
   "addOns": {
     "common": {
-      "name": "Action Sync",
+      "name": "Northlake Doc Tools",
       "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-128.png",
       "homepageTrigger": {
         "runFunction": "buildHomepageCard"
@@ -37,6 +38,7 @@
       },
       "createActionTriggers": [
         {
+          "id": "createAction",
           "runFunction": "createActionTrigger",
           "labelText": "Create action",
           "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png"
@@ -48,8 +50,7 @@
           "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png",
           "patterns": [
             {
-              "hostPattern": "action-sync.io",
-              "pathPrefix": "/GActionSheet/action/"
+              "hostPattern": "northlakeuu.org"
             }
           ],
           "runFunction": "onLinkPreview"

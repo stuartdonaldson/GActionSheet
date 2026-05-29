@@ -615,3 +615,192 @@ Implemented sidebar mutation workflows (cw5.6, cw5.7, cw5.1) — status dropdown
 - GAS "Can't remove the last paragraph in a document section" fires on `removeFromParent()` even when other paragraphs exist — the fix is `body.appendParagraph('')` guard before removal; this is the same pattern already used in `sync_status_deleted` fixture
 - CardService `SelectionInput.setOnChangeAction()` fires immediately on dropdown change, eliminating the need for a separate submit button; fieldName must be unique per action instance when multiple dropdowns appear in the same card
 - `floating_actions()` helper in `doc_inspect.py` returns snake_case keys (`assignee_email`); test assertions must use snake_case — camelCase silently returns `None` from `.get()`
+
+## 2026-05-28 09:55:00
+
+### Summary:
+POC: Editor add-on action chip (6ov) — continued Marketplace publish and link preview debugging on branch `poc/editor-addon-action-chip`. Root cause of link preview failure identified and documented. WEBAPP_URL self-discovery via identity token investigated and documented.
+
+### Work Done:
+- Deployed versions @104–@109 iteratively while debugging linkPreviewTriggers
+- Changed chip URL host from `stuartdonaldson.github.io` → `action-sync.io` → `northlakeuu.org` (real org domain)
+- Added `"id": "createAction"` to `createActionTriggers` manifest entry (per Google reference sample)
+- Tested `pathPrefix` with and without leading slash — neither confirmed as the root cause
+- Removed `pathPrefix` entirely (version @109) to isolate hostPattern matching — still no trigger
+- Confirmed via GCP logs: `onLinkPreview` was never called — pattern matching failing client-side
+- Root cause found: `WEBAPP_URL` script property was stale (pointing to old test WebApp) after switching to Marketplace PROD deployment — backend calls were failing silently
+- Documented that Marketplace listing script version must be updated manually after every deploy for `linkPreviewTriggers` to pick up new manifest patterns
+- Investigated `ScriptApp.getService().getUrl()` — confirmed it only works in WebApp execution context, not add-on trigger context
+- Investigated `ScriptApp.getIdentityToken()` JWT — `deployment_id` claim present in alternate-runtime add-ons; unconfirmed for GAS-native add-ons; test pending (`openid` scope needed)
+- Updated `docs/poc-editor-addon-migration.md` with: URL format update, WEBAPP_URL registration bug, identity token investigation, Marketplace version update requirement, pathPrefix findings
+
+### Key Learnings:
+- `linkPreviewTriggers` pattern matching is client-side in the Docs JS — if the Marketplace-installed version has a stale manifest, no network call to the add-on is ever made; GCP logs show zero `LINK_PREVIEW` entries
+- `createActionTriggers` and `linkPreviewTriggers` are dispatched differently: the former runs from the PROD deployment (always current); the latter uses the manifest of the Marketplace-installed version — updating the deployment without updating the Marketplace listing breaks link preview while leaving chip creation working
+- `ScriptApp.getService()` is web app execution context only — returns null in add-on trigger context even if the same deployment is also a WebApp
+- If `ScriptApp.getIdentityToken()` JWT contains `deployment_id`, the WebApp URL can be constructed as `https://script.google.com/macros/s/{deploymentId}/exec` with zero config — eliminates the WEBAPP_URL registration step entirely
+- Browser restart is required (not just refresh) after updating Marketplace listing version before the new manifest patterns take effect in the Docs client
+
+## 2026-05-28 12:40:00
+
+### Summary
+Implemented AI-N token floating action identity (GTaskSheet-s4m). Replaced UUID named-range identity with doc-scoped `AI-N:` text token; global ID is `{docFileId}/AI-{N}` stored in sheet col 1. Six files changed across GAS project.
+
+### Changes
+- **SyncManager.js**: rewrote `_scanFloatingActions` to detect by `AI-N:` prefix; deleted `_buildAnchoredIndexMap`, `_anchorNewActions`, `_applySheetWinToDoc`, `_normalizeMissingFloatingActionStatuses`, `_updateParaTextFromSheet`; updated `syncDocument` sheetWins path to use `_poc_flushActionParagraph`; rewrote `_syncSheetRowToDoc` to extract N from globalId and call REST flush directly
+- **SyncManager.js — new**: `_poc_flushActionParagraph` — REST GET-then-batchUpdate that deletes paragraph content and rewrites `[status image][AI-N: text][optional person chip][action text (status)]` in one call
+- **EditorChipPoc.js**: added `_POC_STATUS_IMAGES` / `_POC_DEFAULT_IMAGE`; added `_poc_getNextActionN` (scans body for max AI-N, returns N+1); updated `_poc_submitCreateAction` to compute globalId; rewrote `_poc_insertActionChip` signature and request sequence to include AI-N: token text + link
+- **Addon.js**: added `_poc_findParaByGlobalId` (scans body for `AI-N:` prefix); rewrote `sidebarSetStatus` to scan + REST flush; rewrote `sidebarDeleteAction` to use token scan; removed `_readActionTextFromPara`
+- **VerifySync.js**: `_collectFloatingActionState` uses `action.globalId` directly — no named range map
+- **TrackerTable.js**: `_buildTrackerDataRows` uses `fa.globalId` — removed `anchoredMap` parameter
+- **TestFixtures.js**: `sidebar_set_status` and `sidebar_delete_action` resolve identity via `globalId` from scanner
+
+### Key Learnings
+- REST API `builtText` (textRun only) naturally excludes inline images (inlineObjectElement) and person chips (richLinkElement). So `^AI-N:` matching on builtText is clean — the image at position 0 is invisible to text-run content and does not interfere with the token prefix check.
+- The batchUpdate reverse-insertion pattern (insert at same index, each pushes prior right) requires the trailing text to be inserted first and the image last to achieve `[img][token][chip][text]` order.
+
+### Pending
+- GTaskSheet-sjj: `[TST]` regression + integration test coverage for AI-N token format — open, not yet started
+- Manual verification cycle: reinstall test deployment, run Verification steps 1–8 from plan
+
+## 2026-05-28 13:15:00
+
+### Summary
+Extended AI-N token format with three UX changes (GTaskSheet-ar4): AI: placeholder auto-assignment on sync, AI-N identifier in ActionSheet ID column, and AI-N display in sidebar/creation/preview cards. Also fixed SVG rejection by Docs REST API insertInlineImage.
+
+### Changes
+- **SVG fix**: Docs REST API rejects SVG for `insertInlineImage` — changed `_POC_STATUS_IMAGES` to empty map and `imgUrl` in `_poc_flushActionParagraph` to always use PNG fallback (`action-logo-t-32.png`)
+- **AI: placeholder** (`SyncManager.js`): added `_assignPlaceholderTokens(doc)` — pre-pass before `_scanFloatingActions` that finds paragraphs starting with bare `AI:` (no number), finds current max N, assigns N+1 per placeholder by inserting `-N` at text position 2 (`AI:` → `AI-N:`)
+- **ID column** (`WebApp.js`): replaced `_findMaxId` sequential integer with `_extractActionId(globalId)` helper that splits `{docId}/AI-{N}` → `'AI-N'`; both `_handleUpsertActionRows` and `_handleSyncActionRows` now write `AI-N` string to col 2
+- **Sidebar action list** (`Addon.js`): bottom label now shows `AI-N • Status: Open` (extracted from `namedRangeId` globalId)
+- **Creation success card** (`EditorChipPoc.js`): confirmation message shows `AI-N: action text`
+- **Link-preview card** (`EditorChipPoc.js`): `_poc_buildPreviewCard` adds `ID: AI-N` as first widget; uses `globalId` variable (renamed from `namedRangeId`)
+
+### Design decisions
+- `AI:` (no number) is the manual-authoring placeholder; `AI-N:` (with number) is the scanner trigger. Both forms never coexist after sync runs.
+- The N in `AI-N` is both the doc identity token and the human-readable ID — single source of truth with no separate counter needed.
+
+### Pending
+- GTaskSheet-sjj: `[TST]` regression + integration test coverage — still open
+- Manual verification cycle still needed: reinstall test deployment, run plan Verification steps 1–8
+- PNG status icons needed to replace the fallback logo for status-specific images
+
+## 2026-05-28 13:32:14
+
+### Summary
+POC editor add-on UI polish and edit-action flow: preview card shows AI-N id as header, sidebar action list compacted to one line, tracker table ID column hyperlinked, full edit-action card with async sheet update.
+
+### Changes
+
+**Preview card (`EditorChipPoc.js`)**
+- Header title changed from action text to AI-N id (e.g., "AI-3"); action text moved to subtitle
+- Added TextButton labeled "AI-N" that opens chip URL in browser
+- Added "Edit" button that opens a pre-filled edit card (`_poc_openEditCard`)
+
+**Edit action flow (`EditorChipPoc.js`)** — new functions
+- `_poc_openEditCard(e)`: card action handler; looks up action, navigates to edit card
+- `_poc_buildEditCard(url, action, actionId)`: pre-filled form (action text, assignee, status)
+- `_poc_submitEditAction(e)`: flushes updated paragraph to doc via REST API, refreshes tracker if present, schedules async sheet update
+- `_poc_cancelEdit()`: pops card without saving
+
+**Async sheet update (`EditorChipPoc.js`)** — new functions
+- `_poc_scheduleSheetUpdate(params)`: stores upsert params in ScriptProperties (`POC_PENDING_<ts>`), creates 2-second time-based trigger
+- `_poc_processPendingSheetUpdates()`: processes all pending keys, calls `upsert_action_rows`, cleans up properties and trigger; log tag: `POC_ASYNC_SHEET.complete`
+
+**Sidebar (`Addon.js`)**
+- `_buildActionListSection`: top label compacted to "AI-N • Assignee • Status"; bottom label only shows "Needs sync" when unanchored
+
+**Tracker table (`TrackerTable.js`)**
+- `_buildTrackerDataRows`: ID field now set to AI-N string ("AI-3"); `globalId` added to row
+- `_insertTrackerSection`: returns `{ assigneeEmails, globalIds }` instead of bare array
+- `insertTrackerTable`: calls new `_insertTrackerIdLinks` after assignee chip step
+- `_insertTrackerIdLinks(docId, globalIds)`: REST `updateTextStyle` applies hyperlink to each ID cell pointing to chip URL
+
+### Issues
+- Created and closed `GTaskSheet-7js` [IMP] UI display changes
+- Created and closed `GTaskSheet-j8y` [IMP] edit action + async sheet update
+- Created (open) `GTaskSheet-rwz` [TST] verify UI display changes
+- Created (open) `GTaskSheet-0n3` [TST] verify edit action propagation
+
+### Key Learnings
+- `DecoratedText.setTopLabel` is the right place to pack AI-N + assignee + status for compact sidebar rows — avoids two lines of metadata below each action
+- Async sheet updates in GAS CardService context require `ScriptApp.newTrigger(...).timeBased().after(ms)` + ScriptProperties for params; the card function cannot defer execution otherwise
+- `_insertTrackerSection` needed to return a structured object (`{ assigneeEmails, globalIds }`) instead of a bare array to support two independent REST post-steps (person chips + id links)
+
+## 2026-05-28 13:45:24
+
+### Summary
+Fixed two bugs introduced in the preview card + edit action work: duplicate AI-N display in preview card, and runtime error when clicking Edit ("Disallowed elements for link preview: [push_card_item]").
+
+### Changes
+
+**Preview card (`EditorChipPoc.js`)**
+- Header title reverted to action text — AI-N now appears only once (the button/link)
+- Removed subtitle (was redundant with header)
+
+**Navigation fixes (`EditorChipPoc.js`)**
+- Link preview triggers forbid `pushCard` and `popCard`; replaced all three with `updateCard`
+- `_poc_openEditCard`: `updateCard` instead of `pushCard`
+- `_poc_cancelEdit`: now reads `url` from `e.parameters`, rebuilds preview card, returns `updateCard`
+- `_poc_submitEditAction`: returns `updateCard` with rebuilt preview instead of `popCard`
+- Cancel button in `_poc_buildEditCard` now passes `url` through action parameters
+
+### Key Learnings
+- Google link preview trigger cards (linkPreviewTriggers) only allow `updateCard` navigation — `pushCard` and `popCard` throw "Disallowed elements for link preview: [push_card_item]" at runtime; there is no compile-time warning
+- Any cancel/back action in a link preview card must reconstruct the target card from parameters — there is no navigation stack to pop back to
+
+## 2026-05-28 15:09:48
+
+### Summary
+Continued refining POC preview card: fixed subtitle AI-N duplication, replaced Edit→status-card flow with direct status icons on the preview card, switched all action lookups to read from the document (not the sheet), and documented link preview widget constraints in the POC doc.
+
+### Changes
+
+**Preview card — doc-first lookup (`EditorChipPoc.js`)**
+- New `_poc_lookupActionFromDoc(namedRangeId)`: opens doc by docId from globalId, calls `_scanFloatingActions`, returns matching action data — doc is source of truth, sheet is downstream
+- All call sites (`_poc_buildPreviewCard`, `_poc_openEditCard`, `_poc_setStatusFromPreview`) switched from `_poc_lookupAction` (sheet) to `_poc_lookupActionFromDoc`
+
+**Preview card — direct status icons (`EditorChipPoc.js`)**
+- Removed Edit button and the two-step intermediate status card
+- Removed `_poc_openEditCard`, `_poc_buildStatusCard`, `_poc_cancelEdit` (all dead)
+- Added `ButtonSet` with five `ImageButton` status icons directly on the preview card (same SVGs as sidebar: `status-open.svg`, `status-inprogress.svg`, etc.)
+- Each icon fires `_poc_setStatusFromPreview` in one step: flushes doc paragraph, refreshes tracker if present, schedules async sheet update, returns refreshed preview card
+
+**Preview card — subtitle fix (`EditorChipPoc.js`)**
+- Added defensive strip of any leading `AI-N:` prefix from `actionText` before rendering subtitle
+
+**POC doc (`docs/poc-editor-addon-migration.md`)**
+- Documented that card header title renders in two places (top link + body repeat) — platform behaviour, not a code bug; do not add section widgets that repeat the header value
+- Documented full list of allowed/forbidden widgets in link preview context: `TextInput` and `SelectionInput`/DROPDOWN are forbidden; `TextButton`, `ImageButton`, `DecoratedText`, static content, and `updateCard` navigation are allowed
+
+### Key Learnings
+- In link preview cards, `ImageButton` is allowed (unlike `TextInput`/DROPDOWN) — direct status icon rows are both simpler and more compliant than any form-based approach
+- Source-of-truth discipline: preview card should always reflect the document state, not the sheet state; the sheet may lag by up to ~2s due to async update scheduling
+
+## 2026-05-28 17:32:58
+
+### Summary
+Fixed three bugs in the editor add-on sync and flush pipeline; added duplicate AI-N detection; applied AI-N chip badge styling; improved tracker table layout.
+
+### Bug Fixes
+
+- **`insertPerson` HTTP 400** — removed invalid `name` field from `personProperties` in `_poc_flushActionParagraph` (SyncManager.js), `_insertTrackerAssigneeChips` (TrackerTable.js), and `_poc_insertActionChip` (EditorChipPoc.js). Saved constraint as `bd remember` key `docs-api-insertperson-email-only`: Docs API only accepts `{ email }` in `personProperties`; name field causes INVALID_ARGUMENT.
+- **Dirty column not clearing** — `_syncSheetRowToDoc` now clears Sync Status = 'Dirty' immediately after a confirmed successful flush to doc (uses `WriteGuard.wrap`), rather than deferring to the WebApp round-trip on next MenuSync. If flush fails, Dirty stays set for retry.
+- **Flush failure losing data** — `_poc_flushActionParagraph` now returns `true`/`false`. Added `_remarkRowDirty(globalId)` helper: if a sheetWin flush fails during MenuSync, re-marks the row Dirty so the next sync retries.
+
+### New Features
+
+- **Duplicate AI-N detection** — `_scanFloatingActions` tracks `seenN` set; marks second+ occurrences of the same N as `isDuplicate: true`. `syncDocument` only sends canonical (first) actions to the sheet; copy paragraphs are queued for flush with canonical data.
+- **All-occurrences flush** — `_poc_flushActionParagraph` now collects ALL paragraphs matching AI-N: via the REST GET, sorts descending by startIndex, and processes all in a single batchUpdate — so copy paragraphs are rewritten to match canonical on every flush.
+- **AI-N chip badge styling** — Comic Sans MS bold, white text, dark purple (`#4C1D95`) background, `underline: false` applied to the AI-N: text token. Applied in: `_poc_flushActionParagraph` (sync flush), `_poc_insertActionChip` (creation), `_insertTrackerIdLinks` (tracker table ID column).
+- **Tracker table layout** — Column widths set via REST `updateTableColumnProperties`: ID 54 pt (0.75 in), Assignee 144 pt (2 in), Status 72 pt (1 in); Action column takes remaining width. Columns 0/1/3 center-aligned; header row bold — applied in `_insertTrackerSection` via DocumentApp before saveAndClose.
+
+### Decisions / Research
+
+- **Smart chip pill (insertRichLink) rejected** — Rich link elements do not appear in `para.getText()`, which would break the `_scanFloatingActions` text-based `^AI-(\d+):` scanner. Also: the pill's logo icon is mandatory and static (from manifest `logoUrl`), cannot be suppressed or varied per chip. Hyperlink + badge styling is the adopted approach.
+- Scanner cost: `_scanFloatingActions` walk is cheap (in-process DocumentApp API); expensive operations are in `_poc_flushActionParagraph` (REST GET + batchUpdate).
+
+### Key Learnings
+- Google Docs `insertPerson` → `personProperties` only accepts `{ email }`. API resolves display name from email automatically. Adding `name` causes HTTP 400 INVALID_ARGUMENT.
+- `insertRichLink` creates visual chip pills but elements are absent from `getText()` — incompatible with text-token identity model without a full scanner refactor.
+- `updateTableColumnProperties` requires `tableStartLocation.index` (from REST GET); GAS DocumentApp `Table` has no `setColumnWidth` method.

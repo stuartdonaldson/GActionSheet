@@ -55,8 +55,23 @@ function syncDocument(docId) {
     }
 
     // No named range anchoring needed — globalId IS the identity.
-    var allDocGlobalIds = floatingActions.map(function(a) { return a.globalId; });
-    var anchorResults   = floatingActions.map(function(a) {
+    // Duplicates (same AI-N copied) are excluded from the sheet sync to avoid
+    // duplicate rows; they are flushed to doc separately so the copy paragraph
+    // matches the canonical content.
+    var canonicalByGlobalId = {};
+    var hasDuplicateN       = {};
+    for (var fi = 0; fi < floatingActions.length; fi++) {
+      var fai = floatingActions[fi];
+      if (!fai.isDuplicate) {
+        canonicalByGlobalId[fai.globalId] = fai;
+      } else {
+        hasDuplicateN[fai.globalId] = true;
+      }
+    }
+
+    var allDocGlobalIds = Object.keys(canonicalByGlobalId);
+    var anchorResults   = allDocGlobalIds.map(function(gId) {
+      var a = canonicalByGlobalId[gId];
       return {
         namedRangeId:  a.globalId,
         wasNew:        false,
@@ -69,21 +84,48 @@ function syncDocument(docId) {
 
     var syncResult = _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds);
 
+    // Build the set of globalIds that need a REST flush:
+    //   - sheetWins: sheet edited → push sheet data back to doc (all occurrences)
+    //   - duplicates without a sheetWin: copy paragraphs → sync to canonical doc data
+    var toFlush = {};
     var sheetWins = syncResult.sheetWins || [];
-    if (sheetWins.length > 0) {
-      var floatingByGlobalId = {};
-      for (var fi = 0; fi < floatingActions.length; fi++) {
-        floatingByGlobalId[floatingActions[fi].globalId] = floatingActions[fi];
-      }
+    for (var si = 0; si < sheetWins.length; si++) {
+      var win = sheetWins[si];
+      var cf  = canonicalByGlobalId[win.namedRangeId];
+      if (!cf) continue;
+      toFlush[win.namedRangeId] = {
+        N:            cf.N,
+        namedRangeId: win.namedRangeId,
+        action:       win.action,
+        status:       win.status,
+        assigneeEmail: win.assigneeEmail,
+        assigneeName:  win.assigneeName
+      };
+    }
+    for (var gId in hasDuplicateN) {
+      if (toFlush[gId]) continue; // sheetWin already covers it
+      var cf2 = canonicalByGlobalId[gId];
+      if (!cf2) continue;
+      toFlush[gId] = {
+        N:            cf2.N,
+        namedRangeId: gId,
+        action:       cf2.actionText,
+        status:       cf2.status,
+        assigneeEmail: cf2.assigneeEmail,
+        assigneeName:  cf2.assigneeName
+      };
+    }
+
+    var flushIds = Object.keys(toFlush);
+    if (flushIds.length > 0) {
       var docId2 = doc.getId();
       doc.saveAndClose(); // close before REST calls
       var token = ScriptApp.getOAuthToken();
-      for (var si = 0; si < sheetWins.length; si++) {
-        var win = sheetWins[si];
-        var fa  = floatingByGlobalId[win.namedRangeId];
-        if (!fa) continue;
-        _poc_flushActionParagraph(docId2, token, fa.N, win.namedRangeId,
-          win.action, win.status, win.assigneeEmail);
+      for (var ti = 0; ti < flushIds.length; ti++) {
+        var f  = toFlush[flushIds[ti]];
+        var ok = _poc_flushActionParagraph(docId2, token, f.N, f.namedRangeId,
+          f.action, f.status, f.assigneeEmail, f.assigneeName);
+        if (!ok) _remarkRowDirty(f.namedRangeId);
       }
     } else {
       doc.saveAndClose();
@@ -193,6 +235,7 @@ function _syncSheetRowToDoc(sheet, row) {
     var rowData       = sheet.getRange(row, 1, 1, SHEET_HEADERS.length).getValues()[0];
     var namedRangeId  = rowData[0];  // Col 1: globalId (format: {docId}/AI-{N})
     var assigneeEmail = rowData[2];  // Col 3: Assignee Email
+    var assigneeName  = rowData[3];  // Col 4: Assignee Name
     var action        = rowData[4];  // Col 5: Action
     var status        = rowData[5];  // Col 6: Status
     var docFormula    = sheet.getRange(row, 7).getFormula();
@@ -210,9 +253,18 @@ function _syncSheetRowToDoc(sheet, row) {
     if (isNaN(N)) return;
 
     var token = ScriptApp.getOAuthToken();
-    _poc_flushActionParagraph(docId, token, N, namedRangeId, action, status, assigneeEmail);
+    var ok = _poc_flushActionParagraph(docId, token, N, namedRangeId, action, status, assigneeEmail, assigneeName || '');
+    if (ok) {
+      // Flush confirmed — clear Dirty immediately rather than waiting for MenuSync WebApp round-trip.
+      WriteGuard.wrap(function () { sheet.getRange(row, 10).setValue(''); });
+      GasLogger.log('sync.sheet-to-doc.done', { namedRangeId: namedRangeId });
+    } else {
+      GasLogger.log('sync.sheet-to-doc.flush-failed', { namedRangeId: namedRangeId });
+    }
   } catch (err) {
     GasLogger.log('sync.sheet-to-doc.error', { row: row, msg: err.message });
+  } finally {
+    GasLogger.flush();
   }
 }
 
@@ -235,6 +287,7 @@ function _scanFloatingActions(doc) {
   var docId   = doc.getId();
   var n       = body.getNumChildren();
   var actions = [];
+  var seenN   = {};
 
   for (var i = 0; i < n; i++) {
     var child      = body.getChild(i);
@@ -305,8 +358,10 @@ function _scanFloatingActions(doc) {
       assigneeName:      assigneeName,
       actionText:        actionText,
       status:            status,
-      hasExplicitStatus: hasExplicitStatus
+      hasExplicitStatus: hasExplicitStatus,
+      isDuplicate:       seenN[N] === true
     });
+    seenN[N] = true;
   }
   return actions;
 }
@@ -463,6 +518,33 @@ function _markDocNotFound(docId) {
   GasLogger.flush();
 }
 
+/**
+ * Re-marks an Actions sheet row as 'Dirty' so the next sync retries the
+ * flush to doc.  Called when _poc_flushActionParagraph returns false.
+ * Searches column 1 (globalId) for the matching row.
+ *
+ * @param {string} globalId
+ */
+function _remarkRowDirty(globalId) {
+  try {
+    var ss    = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Actions');
+    if (!sheet) return;
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return;
+    var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (ids[i][0] === globalId) {
+        sheet.getRange(i + 2, 10).setValue('Dirty');
+        GasLogger.log('flush.remarked-dirty', { globalId: globalId });
+        return;
+      }
+    }
+  } catch (e) {
+    GasLogger.log('flush.remark-dirty.error', { globalId: globalId, msg: e.message });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // REST flush — rewrites an AI-N: paragraph in place
 // ---------------------------------------------------------------------------
@@ -479,8 +561,9 @@ function _markDocNotFound(docId) {
  * @param {string} actionText     Action text (no trailing status token)
  * @param {string} status         Status string
  * @param {string} assigneeEmail  May be empty
+ * @param {string=} assigneeName  Optional display name for person chip
  */
-function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail) {
+function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail, assigneeName) {
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
   var chipUrl = 'https://northlakeuu.org/GActionSheet/action/' + globalId;
   // Docs REST API insertInlineImage does not support SVG — use PNG until PNG status icons exist.
@@ -497,10 +580,10 @@ function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status
   }
 
   var content   = (JSON.parse(getResp.getContentText()).body || {}).content || [];
-  var tokenStr  = 'AI-' + N + ':';
-  var pStart    = null;
-  var pEnd      = null;
 
+  // Collect ALL occurrences of this AI-N: token (handles copy-pasted paragraphs).
+  // Process descending so lower-index paragraphs are unaffected by higher-index changes.
+  var occurrences = [];
   for (var i = 0; i < content.length; i++) {
     var para = content[i].paragraph;
     if (!para) continue;
@@ -512,51 +595,60 @@ function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status
     var plainText = builtText.replace(/\n$/, '');
     var m = plainText.match(/^AI-(\d+):/);
     if (m && parseInt(m[1], 10) === N) {
-      pStart = content[i].startIndex;
-      pEnd   = content[i].endIndex; // includes \n
-      break;
+      occurrences.push({ pStart: content[i].startIndex, pEnd: content[i].endIndex });
     }
   }
 
-  if (pStart === null) {
+  if (occurrences.length === 0) {
     GasLogger.log('flush.warn', { msg: 'Paragraph not found', globalId: globalId });
-    return;
+    return false;
   }
 
-  var requests = [];
+  occurrences.sort(function(a, b) { return b.pStart - a.pStart; });
 
-  // 1. Delete paragraph content, preserve \n at pEnd-1
-  if (pEnd - 1 > pStart) {
-    requests.push({ deleteContentRange: { range: { startIndex: pStart, endIndex: pEnd - 1 } } });
-  }
-
-  // Re-insert in reverse order (each inserts at pStart, pushing prior inserts right):
-  // Order of final paragraph: [image][AI-N: text][optional person chip][action text (status)]
-
-  // 4. Trailing text (inserted first → pushed rightmost)
   var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);
-  if (validEmail) {
-    requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: pStart } } });
-    requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: pStart } } });
-  } else {
-    requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: pStart } } });
+  var tokenLen   = ('AI-' + N + ': ').length;
+  var requests   = [];
+
+  for (var oi = 0; oi < occurrences.length; oi++) {
+    var pStart = occurrences[oi].pStart;
+    var pEnd   = occurrences[oi].pEnd;
+
+    // Delete existing paragraph content, preserving the trailing \n at pEnd-1.
+    if (pEnd - 1 > pStart) {
+      requests.push({ deleteContentRange: { range: { startIndex: pStart, endIndex: pEnd - 1 } } });
+    }
+
+    // Re-insert in reverse order (each inserts at pStart, pushing prior content right).
+    // Final paragraph order: [image][AI-N: text][optional person chip][action text (status)]
+    if (validEmail) {
+      requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: pStart } } });
+      // insertPerson rejects any name field in personProperties — email only
+      requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: pStart } } });
+    } else {
+      requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: pStart } } });
+    }
+    requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: pStart } } });
+    requests.push({ insertInlineImage: {
+      uri: imgUrl, location: { index: pStart },
+      objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
+    }});
+    requests.push({ updateTextStyle: {
+      range: { startIndex: pStart, endIndex: pStart + 1 + tokenLen },
+      textStyle: { link: { url: chipUrl } }, fields: 'link'
+    }});
+    // Chip badge: Comic Sans bold white on dark-purple, no hyperlink underline
+    requests.push({ updateTextStyle: {
+      range: { startIndex: pStart + 1, endIndex: pStart + 1 + tokenLen },
+      textStyle: {
+        bold: true, underline: false,
+        foregroundColor: { color: { rgbColor: { red: 1.0, green: 1.0, blue: 1.0 } } },
+        backgroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
+        weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
+      },
+      fields: 'bold,underline,foregroundColor,backgroundColor,weightedFontFamily'
+    }});
   }
-
-  // 2. AI-N: text (inserted before trailing content)
-  requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: pStart } } });
-
-  // 1. Status image (inserted last → ends up at pStart)
-  requests.push({ insertInlineImage: {
-    uri: imgUrl, location: { index: pStart },
-    objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
-  }});
-
-  // Link: image (1 char at pStart) + AI-N: text (tokenLen chars starting at pStart+1)
-  var tokenLen = ('AI-' + N + ': ').length;
-  requests.push({ updateTextStyle: {
-    range: { startIndex: pStart, endIndex: pStart + 1 + tokenLen },
-    textStyle: { link: { url: chipUrl } }, fields: 'link'
-  }});
 
   var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
     method: 'post', muteHttpExceptions: true,
@@ -566,11 +658,13 @@ function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status
 
   if (batchResp.getResponseCode() !== 200) {
     GasLogger.log('flush.error', {
-      msg:  'batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
-      body: batchResp.getContentText().substring(0, 300),
-      globalId: globalId
+      msg:      'batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
+      body:     batchResp.getContentText().substring(0, 300),
+      globalId: globalId,
+      copies:   occurrences.length
     });
-  } else {
-    GasLogger.log('flush.done', { globalId: globalId, status: status });
+    return false;
   }
+  GasLogger.log('flush.done', { globalId: globalId, status: status, copies: occurrences.length });
+  return true;
 }
