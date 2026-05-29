@@ -306,7 +306,7 @@ function _poc_addPeopleSuggestions(suggestions, people, query) {
  * @param {string} url  The matched action URL
  * @returns {GoogleAppsScript.Card_Service.Card}
  */
-function _poc_buildPreviewCard(url) {
+function _poc_buildPreviewCard(url, statusOverride) {
   var globalId  = url.replace(_POC_ACTION_URL_BASE, '');
   var idParts   = globalId.split('/AI-');
   var actionId  = idParts.length >= 2 ? 'AI-' + idParts[1] : '';
@@ -317,7 +317,7 @@ function _poc_buildPreviewCard(url) {
   for (var fi = 0; fi < scanned.length; fi++) {
     if (scanned[fi].globalId === globalId) { match = scanned[fi]; break; }
   }
-  var action = match ? { action: match.actionText, status: match.status, assigneeEmail: match.assigneeEmail, assigneeName: match.assigneeName } : null;
+  var action = match ? { action: match.actionText, status: statusOverride || match.status, assigneeEmail: match.assigneeEmail, assigneeName: match.assigneeName } : null;
   GasLogger.log('PREVIEW_CARD.result', { found: !!action, action: action ? action.action : null, status: action ? action.status : null });
   GasLogger.flush();
 
@@ -453,7 +453,7 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
   GasLogger.flush();
 
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(_poc_buildPreviewCard(url)))
+    .setNavigation(CardService.newNavigation().updateCard(_poc_buildPreviewCard(url, newStatus)))
     .build();
 }
 
