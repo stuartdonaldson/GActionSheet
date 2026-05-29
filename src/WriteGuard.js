@@ -2,45 +2,54 @@
  * WriteGuard.js
  *
  * Suppresses onActionSheetEdit during programmatic writes to the sheet.
- * Two layers:
  *
- *   In-process  — _active flag; covers same-execution callers (Sync Now, sweep,
- *                 archive, onActionSheetEdit's own Dirty stamp).
- *                 Use: WriteGuard.wrap(fn)
+ * TESTED 2026-05-29: WebApp doPost writes do NOT trigger the installable
+ * onActionSheetEdit trigger. A chip-tap queued a sheet write; after
+ * upsert.complete logged the write, no trigger execution appeared. GAS
+ * installable onEdit triggers appear to fire only on user-initiated edits,
+ * not programmatic sheet writes from a separate execution context.
  *
- *   Cross-execution — SYNC_IN_PROGRESS_UNTIL_MS script property; covers WebApp
- *                     doPost, which runs in a separate execution from the
- *                     onActionSheetEdit trigger. The property is not deleted on
- *                     deactivate — it expires naturally after WINDOW_MS.
- *                     Any user edit within WINDOW_MS of a WebApp write is
- *                     suppressed; accepted POC tradeoff.
- *                     Use: WriteGuard.wrapPersistent(fn)  — WebApp.js only.
+ * As a result the cross-execution layer (SYNC_IN_PROGRESS_UNTIL_MS script
+ * property) is DISABLED. wrapPersistent() is kept as an alias for wrap() so
+ * call sites in WebApp.js compile unchanged. If Dirty re-set symptoms
+ * reappear, re-enable wrapPersistent() by restoring the property write and
+ * updating isActive() to check it.
  *
- * isActive() checks both layers; onActionSheetEdit calls it at entry.
+ * The in-process layer (_active flag) remains active — it still suppresses
+ * onActionSheetEdit when the trigger fires within the same execution as the
+ * write (e.g. onActionSheetEdit's own Dirty stamp calling _syncSheetRowToDoc,
+ * which wraps its return writes).
  */
 var WriteGuard = (function () {
-  var _active   = false;
-  var _PROP     = 'SYNC_IN_PROGRESS_UNTIL_MS';
-  var WINDOW_MS = 20000;
+  var _active = false;
+
+  // --- Cross-execution layer (DISABLED) -----------------------------------
+  // var _PROP     = 'SYNC_IN_PROGRESS_UNTIL_MS';
+  // var WINDOW_MS = 20000;
+  //
+  // To re-enable: uncomment _PROP and WINDOW_MS, restore the setProperty call
+  // in wrapPersistent(), and restore the property check in isActive().
+  // Also update DESIGN.md §Programmatic Write Suppression accordingly.
+  // -------------------------------------------------------------------------
 
   return {
-    activate: function () { _active = true; },
-
+    activate:   function () { _active = true; },
     deactivate: function () { _active = false; },
 
     isActive: function () {
-      if (_active) return true;
-      try {
-        var until = PropertiesService.getScriptProperties().getProperty(_PROP);
-        if (!until) return false;
-        if (Date.now() < parseInt(until, 10)) return true;
-        // Expired — clean up so stale entries don't accumulate.
-        PropertiesService.getScriptProperties().deleteProperty(_PROP);
-      } catch (e) { /* treat read failure as inactive */ }
-      return false;
+      return _active;
+      // Cross-execution check (disabled — see header comment):
+      // if (_active) return true;
+      // try {
+      //   var until = PropertiesService.getScriptProperties().getProperty(_PROP);
+      //   if (!until) return false;
+      //   if (Date.now() < parseInt(until, 10)) return true;
+      //   PropertiesService.getScriptProperties().deleteProperty(_PROP);
+      // } catch (e) {}
+      // return false;
     },
 
-    /** In-process only. Use for trigger-context writes (sweep, archive, onEdit stamp). */
+    /** In-process guard. Use for all programmatic sheet writes. */
     wrap: function (fn) {
       WriteGuard.activate();
       try {
@@ -51,23 +60,14 @@ var WriteGuard = (function () {
     },
 
     /**
-     * Cross-execution variant. Sets SYNC_IN_PROGRESS_UNTIL_MS before running fn
-     * so the onActionSheetEdit trigger (separate execution) sees the guard.
-     * Use only from WebApp doPost context.
+     * Alias for wrap(). Originally implemented a cross-execution guard via
+     * SYNC_IN_PROGRESS_UNTIL_MS script property, but testing confirmed WebApp
+     * doPost writes do not trigger onActionSheetEdit — the property write was
+     * unnecessary and caused false suppression of user edits. Kept as an alias
+     * so WebApp.js call sites remain unchanged if the guard needs re-enabling.
      */
     wrapPersistent: function (fn) {
-      try {
-        PropertiesService.getScriptProperties()
-          .setProperty(_PROP, String(Date.now() + WINDOW_MS));
-      } catch (e) { /* non-fatal */ }
-      WriteGuard.activate();
-      try {
-        fn();
-      } finally {
-        WriteGuard.deactivate();
-        // Intentionally does not delete the property — lets the window remain
-        // active so triggers firing after this execution ends are still suppressed.
-      }
+      WriteGuard.wrap(fn);
     }
   };
 })();
