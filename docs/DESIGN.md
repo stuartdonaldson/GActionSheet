@@ -274,10 +274,130 @@ A trailing parenthesized token at the end of the action paragraph. If the paragr
 ### Programmatic Write Suppression
 `WriteGuard` suppresses `onActionSheetEdit` during programmatic sheet writes. It has two layers:
 
-- **In-process** (`WriteGuard._active`) — covers writes within the same GAS execution (add-on Sync Now, sweep, archive). Callers wrap writes with `WriteGuard.wrap(fn)`.
-- **Cross-execution** (`SYNC_IN_PROGRESS_UNTIL_MS` script property) — covers writes from the Web App `doPost`, which runs in a separate execution from the `onActionSheetEdit` trigger. `WriteGuard.activate()` sets this property to `Date.now() + 20000`; `WriteGuard.isActive()` reads it. The property is not deleted on deactivate — it expires naturally after 20 seconds, covering the typical trigger fire delay. During the 20-second window any legitimate user edit is suppressed; this is an accepted POC tradeoff.
+- **In-process** (`WriteGuard._active`) — covers writes within the same GAS execution (Sync Now, sweep, archive, `onActionSheetEdit`'s own Dirty stamp). Callers use `WriteGuard.wrap(fn)`.
+- **Cross-execution** (`SYNC_IN_PROGRESS_UNTIL_MS` script property) — covers Web App `doPost` writes, which run in a separate execution from the `onActionSheetEdit` trigger. Callers use `WriteGuard.wrapPersistent(fn)` (WebApp.js only). The property is set to `Date.now() + 20000` before the write and not deleted on deactivate — it expires naturally after 20 seconds. During the window any user edit is suppressed; accepted POC tradeoff. `WriteGuard.wrap()` must not be used in WebApp context, as it would not set the property and the trigger would fire unguarded.
 
 `onActionSheetEdit` calls `WriteGuard.isActive()` at entry; either layer returning true causes an immediate return.
+
+---
+
+## Proposed Tracker Sheet Resolution Architecture
+
+This section is a design proposal for moving from one organization-wide ActionSheet to a locator model that supports multiple teams and folder-local tracking sheets without splitting the codebase.
+
+### Goal
+
+Keep the current single GAS project and dual deployment model, but allow each document to resolve its action-tracking spreadsheet independently. The active document should normally sync to a team-local tracking sheet rather than always to the container-bound spreadsheet.
+
+### Resolution Order
+
+Tracker-sheet resolution should be deterministic and use a strict precedence order:
+
+1. **Document custom property** — if the document stores a tracker spreadsheet ID and that spreadsheet is reachable, use it.
+2. **Document folder discovery** — if no property is set, inspect the active document's parent folder for a spreadsheet with a reserved identity such as `ActionTrackingSheet`.
+3. **Bound fallback sheet** — if no folder-local tracker exists, use the container-bound ActionSheet spreadsheet.
+4. **Persist the result** — whenever steps 2 or 3 succeed, write the chosen spreadsheet ID back to the document custom property so subsequent syncs do not need to rediscover it.
+
+This makes the document property the authoritative locator, while folder discovery and the bound sheet remain bootstrap and recovery paths.
+
+### Why this shape is sound
+
+- It avoids a single shared spreadsheet becoming a cross-team bottleneck.
+- It keeps routing document-local, so a doc continues to point at the intended tracker even if it is moved out of its original folder later.
+- It preserves a safe fallback path for documents that have not yet been initialized.
+- It keeps the add-on UX simple: users normally do not choose a tracker on every sync; they only inspect or change the resolved location in Settings.
+
+### Recommended metadata model
+
+Store the tracker spreadsheet ID in document-scoped metadata. The minimum record should include:
+
+| Field | Purpose |
+|-------|---------|
+| `trackerSpreadsheetId` | Authoritative target sheet for this document |
+| `trackerResolutionSource` | `property`, `folder-discovery`, or `bound-fallback` for diagnostics |
+| `trackerResolvedAt` | Last time the locator was written or confirmed |
+
+If the implementation surface only supports string values, store simple scalar properties rather than a composite JSON blob.
+
+### Folder discovery contract
+
+Folder discovery should use an explicit marker, not a loose name-only search.
+
+Preferred contract:
+
+- Spreadsheet name begins as `ActionTrackingSheet`
+- The spreadsheet carries a marker in document or script properties indicating it is a valid team tracker
+- If multiple matching spreadsheets exist in the folder, resolution must fail as ambiguous rather than choosing one arbitrarily
+
+Name-only discovery is acceptable for bootstrap, but it should be treated as provisional because duplicate human-readable names are likely across teams.
+
+### Settings surface
+
+Adding a document menu item for **Settings** is a good fit. The settings surface should expose:
+
+- the currently resolved tracker spreadsheet
+- how it was resolved
+- whether the tracker is folder-local or the bound fallback
+- an action to initialize a local tracker in the document folder
+- an action to rebind the current document to a different tracker intentionally
+
+This keeps troubleshooting explicit and reduces hidden routing behavior.
+
+### Local-folder initialization flow
+
+Your proposed initialization flow is broadly right, but it should be constrained carefully:
+
+1. Resolve the active document's parent folder.
+2. Create or validate one folder-local tracking spreadsheet for that folder.
+3. Enumerate only supported documents in that same folder.
+4. For each eligible document, set its tracker document property to the folder-local spreadsheet ID.
+5. Run a per-document sync into that tracker.
+
+Two important guardrails:
+
+- Do not rewrite properties for documents that already point at a different valid tracker unless the user explicitly confirms reassignment.
+- Treat initialization as an administrative action; it changes routing for multiple documents and should produce a summary report.
+
+### Bound-sheet registry for troubleshooting
+
+Keeping a worksheet on the bound spreadsheet as a registry is a good operational idea, but it should be a **registry/index**, not a routing authority.
+
+Recommended columns:
+
+| Column | Purpose |
+|--------|---------|
+| Document ID | Document being tracked |
+| Document Title | Human-readable reference |
+| Tracker Spreadsheet ID | Current resolved destination |
+| Tracker Spreadsheet Name | Human-readable tracker reference |
+| Resolution Source | Property / folder discovery / bound fallback |
+| Last Sync | Latest successful sync time |
+| Last Verification | Latest successful verification time |
+| Last Error | Most recent routing or sync error |
+
+This sheet should help answer "where is this doc supposed to sync?" without becoming the primary locator. The source of truth remains the document property.
+
+### Failure handling
+
+Resolution failures should be explicit:
+
+- **Property points to missing or inaccessible spreadsheet** — surface an error and offer repair; do not silently choose a different tracker unless the user explicitly requests fallback repair.
+- **Multiple candidate spreadsheets in folder** — mark as ambiguous and require user choice.
+- **No folder-local spreadsheet found** — use the bound fallback only if allowed by policy, then persist that result.
+- **Document has no parent folder or multiple parents** — use deterministic handling and record the reason in diagnostics.
+
+The main design rule is to avoid silently moving a document's authority from one tracker to another once it has been explicitly bound.
+
+### Architectural recommendation
+
+The overall architecture is good if framed as:
+
+- **Primary authority:** document property
+- **Bootstrap discovery:** folder-local tracker lookup
+- **Operational safety net:** bound spreadsheet fallback
+- **Troubleshooting index:** registry worksheet on the bound spreadsheet
+
+That separation keeps the system understandable and avoids accidental re-routing across teams.
 
 ### Idempotence
 A Sync or Sweep that finds no differences shall make no writes to any doc or sheet. Enforced by comparing normalized values before writing.
