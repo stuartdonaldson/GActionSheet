@@ -118,8 +118,9 @@ function _handleSetTestToken(payload) {
 // ---------------------------------------------------------------------------
 
 /**
- * Inserts new action rows into the "Actions" sheet.
- * Rows whose namedRangeId already exists are silently skipped (idempotent).
+ * Inserts or updates action rows in the "Actions" sheet.
+ * Existing rows (matched by namedRangeId) have actionText, assigneeName, status,
+ * and dateModified updated in place. Absent rows are appended.
  *
  * Payload shape:
  *   { secret, action: 'upsert_action_rows', docUrl, docTitle, rows: [
@@ -127,7 +128,7 @@ function _handleSetTestToken(payload) {
  *   ] }
  *
  * Response shape:
- *   { upserted: <count> }
+ *   { inserted: <count>, updated: <count> }
  */
 function _handleUpsertActionRows(payload) {
   var ss           = SpreadsheetApp.getActiveSpreadsheet();
@@ -142,32 +143,43 @@ function _handleUpsertActionRows(payload) {
 
   var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
 
-  var upserted = 0;
+  var inserted = 0;
+  var updated  = 0;
   var now      = new Date();
 
   WriteGuard.wrap(function () {
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
-      if (!row.namedRangeId || existingMap[row.namedRangeId]) continue;
+      if (!row.namedRangeId) continue;
 
-      var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
-      actionsSheet.appendRow([
-        row.namedRangeId,
-        _extractActionId(row.namedRangeId),
-        row.assigneeEmail || '',
-        row.assigneeName  || '',
-        row.actionText    || '',
-        row.status        || 'Open',
-        docFormula,
-        now,
-        now,
-        ''  // Sync Status — blank on insert
-      ]);
-      upserted++;
+      var existing = existingMap[row.namedRangeId];
+      if (existing) {
+        var r = existing.rowIndex;
+        actionsSheet.getRange(r, 4).setValue(row.assigneeName || existing.assigneeName);
+        actionsSheet.getRange(r, 5).setValue(row.actionText   || existing.action);
+        actionsSheet.getRange(r, 6).setValue(row.status       || existing.status);
+        actionsSheet.getRange(r, 9).setValue(now);
+        updated++;
+      } else {
+        var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
+        actionsSheet.appendRow([
+          row.namedRangeId,
+          _extractActionId(row.namedRangeId),
+          row.assigneeEmail || '',
+          row.assigneeName  || '',
+          row.actionText    || '',
+          row.status        || 'Open',
+          docFormula,
+          now,
+          now,
+          ''  // Sync Status — blank on insert
+        ]);
+        inserted++;
+      }
     }
   });
 
-  return _jsonResponse({ upserted: upserted });
+  return _jsonResponse({ inserted: inserted, updated: updated });
 }
 
 // ---------------------------------------------------------------------------

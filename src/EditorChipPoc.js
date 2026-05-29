@@ -438,39 +438,62 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
 // ---------------------------------------------------------------------------
 
 /**
- * Stores upsert params in ScriptProperties and schedules a 2-second-after
- * trigger to process them.  Allows the card response to return before the
- * sheet HTTP call completes.
+ * Enqueues sheet upsert params into the POC_QUEUE script property (JSON array)
+ * under a script lock, then schedules a drain trigger if none is already pending.
  *
  * @param {Object} params  Fields: docUrl, docTitle, namedRangeId, actionText,
  *                         assigneeEmail, assigneeName, status
  */
 function _poc_scheduleSheetUpdate(params) {
-  var key = 'POC_PENDING_' + Date.now();
-  PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(params));
-  ScriptApp.newTrigger('_poc_processPendingSheetUpdates').timeBased().after(2000).create();
-  GasLogger.log('poc.asyncSheet.scheduled', { key: key });
+  var props = PropertiesService.getScriptProperties();
+  var lock  = LockService.getScriptLock();
+  var queueLength;
+  lock.waitLock(5000);
+  try {
+    var queue = JSON.parse(props.getProperty('POC_QUEUE') || '[]');
+    queue.push(params);
+    props.setProperty('POC_QUEUE', JSON.stringify(queue));
+    queueLength = queue.length;
+  } finally {
+    lock.releaseLock();
+  }
+
+  var existing = ScriptApp.getProjectTriggers();
+  var hasTrigger = false;
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].getHandlerFunction() === '_poc_processPendingSheetUpdates') {
+      hasTrigger = true;
+      break;
+    }
+  }
+  if (!hasTrigger) {
+    ScriptApp.newTrigger('_poc_processPendingSheetUpdates').timeBased().after(2000).create();
+  }
+  GasLogger.log('poc.asyncSheet.enqueued', { queueLength: queueLength });
 }
 
 /**
- * Time-based trigger handler: processes all pending sheet upserts and cleans up.
+ * Time-based trigger handler: atomically drains POC_QUEUE under a lock,
+ * processes the snapshot, then deletes only this trigger instance.
  * Log tag: POC_ASYNC_SHEET.complete
+ *
+ * @param {Object} e  GAS trigger event — e.triggerUid used for self-cleanup
  */
-function _poc_processPendingSheetUpdates() { // eslint-disable-line no-unused-vars
+function _poc_processPendingSheetUpdates(e) { // eslint-disable-line no-unused-vars
   var props = PropertiesService.getScriptProperties();
-  var all   = props.getProperties();
-  var pendingKeys = [];
-
-  for (var k in all) {
-    if (Object.prototype.hasOwnProperty.call(all, k) && k.indexOf('POC_PENDING_') === 0) {
-      pendingKeys.push(k);
-    }
+  var lock  = LockService.getScriptLock();
+  var snapshot;
+  lock.waitLock(10000);
+  try {
+    snapshot = JSON.parse(props.getProperty('POC_QUEUE') || '[]');
+    props.setProperty('POC_QUEUE', '[]');
+  } finally {
+    lock.releaseLock();
   }
 
-  for (var i = 0; i < pendingKeys.length; i++) {
-    var key = pendingKeys[i];
+  for (var i = 0; i < snapshot.length; i++) {
+    var p = snapshot[i];
     try {
-      var p = JSON.parse(all[key]);
       _poc_callWebApp('upsert_action_rows', {
         docUrl:   p.docUrl,
         docTitle: p.docTitle,
@@ -483,20 +506,23 @@ function _poc_processPendingSheetUpdates() { // eslint-disable-line no-unused-va
         }]
       });
     } catch (err) {
-      GasLogger.log('poc.asyncSheet.error', { key: key, msg: String(err) });
-    }
-    props.deleteProperty(key);
-  }
-
-  // Clean up this trigger instance
-  var triggers = ScriptApp.getProjectTriggers();
-  for (var j = 0; j < triggers.length; j++) {
-    if (triggers[j].getHandlerFunction() === '_poc_processPendingSheetUpdates') {
-      ScriptApp.deleteTrigger(triggers[j]);
+      GasLogger.log('poc.asyncSheet.error', { namedRangeId: p.namedRangeId, msg: String(err) });
     }
   }
 
-  GasLogger.log('POC_ASYNC_SHEET.complete', { processed: pendingKeys.length });
+  // Delete only this trigger instance, not all pending instances of the handler
+  var triggerUid = e && e.triggerUid;
+  if (triggerUid) {
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var j = 0; j < triggers.length; j++) {
+      if (triggers[j].getUniqueId() === triggerUid) {
+        ScriptApp.deleteTrigger(triggers[j]);
+        break;
+      }
+    }
+  }
+
+  GasLogger.log('POC_ASYNC_SHEET.complete', { processed: snapshot.length });
   GasLogger.flush();
 }
 
