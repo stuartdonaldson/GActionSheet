@@ -214,8 +214,8 @@ function _poc_buildCreationCard() {
  * @returns {GoogleAppsScript.Card_Service.SuggestionsResponse}
  */
 function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
-  var query = (e && e.formInputs && e.formInputs.poc_assignee &&
-               e.formInputs.poc_assignee[0]) || '';
+  var query = (e && e.formInput && e.formInput.poc_assignee) || '';
+  GasLogger.log('poc.suggestAssignees', { query: query });
   var suggestions = CardService.newSuggestions();
 
   if (query.length >= 2) {
