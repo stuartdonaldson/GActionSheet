@@ -13,16 +13,28 @@ function doGet(e) {
   // Normalize org-specific URL to the canonical form stored in script properties
   url = url.replace(/https:\/\/script\.google\.com\/a\/[^\/]+\/macros\//, 'https://script.google.com/macros/');
 
-  var registered = '';
-  if (!BUILD_INFO.webappUrl) {
-    PropertiesService.getScriptProperties().setProperty('WEBAPP_URL', url);
-    registered = ' (registered to script properties)';
+  var props      = PropertiesService.getScriptProperties();
+  var storedUrl  = props.getProperty('WEBAPP_URL') || '';
+  var urlStatus;
+
+  if (!storedUrl) {
+    props.setProperty('WEBAPP_URL', url);
+    urlStatus = 'registered (was unset)';
+  } else if (storedUrl !== url) {
+    props.setProperty('WEBAPP_URL', url);
+    urlStatus = 'updated (was: ' + storedUrl + ')';
+  } else {
+    urlStatus = 'unchanged';
   }
+
+  GasLogger.log('webapp.doGet', { url: url, urlStatus: urlStatus, version: BUILD_INFO.version });
+  GasLogger.flush();
 
   return ContentService.createTextOutput(
     'GActionSheet ' + BUILD_INFO.version + '\n' +
     'Build:   ' + BUILD_INFO.buildDate + '\n' +
-    'WebApp:  ' + url + registered
+    'WebApp:  ' + url + '\n' +
+    'URL:     ' + urlStatus
   );
 }
 
@@ -54,34 +66,28 @@ function doPost(e) {
     return _handleSetTestToken(payload);
   }
 
+  var result;
   if (payload.action === 'upsert_action_rows') {
-    return _handleUpsertActionRows(payload);
+    result = _handleUpsertActionRows(payload);
+  } else if (payload.action === 'sync_action_rows') {
+    result = _handleSyncActionRows(payload);
+  } else if (payload.action === 'verify_action_rows') {
+    result = _handleVerifyActionRows(payload);
+  } else if (payload.action === 'mark_doc_not_found') {
+    result = _handleMarkDocNotFound(payload);
+  } else if (payload.action === 'delete_action_row') {
+    result = _handleDeleteActionRow(payload);
+  } else if (payload.action === 'patch_action_status') {
+    result = _handlePatchActionStatus(payload);
+  } else {
+    // Legacy POC — retained for diagnostics
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
+    result = ContentService.createTextOutput('ok');
   }
 
-  if (payload.action === 'sync_action_rows') {
-    return _handleSyncActionRows(payload);
-  }
-
-  if (payload.action === 'verify_action_rows') {
-    return _handleVerifyActionRows(payload);
-  }
-
-  if (payload.action === 'mark_doc_not_found') {
-    return _handleMarkDocNotFound(payload);
-  }
-
-  if (payload.action === 'delete_action_row') {
-    return _handleDeleteActionRow(payload);
-  }
-
-  if (payload.action === 'patch_action_status') {
-    return _handlePatchActionStatus(payload);
-  }
-
-  // Legacy POC — retained for diagnostics
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
-  return ContentService.createTextOutput('ok');
+  GasLogger.flush();
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +153,7 @@ function _handleUpsertActionRows(payload) {
   var updated  = 0;
   var now      = new Date();
 
-  WriteGuard.wrap(function () {
+  WriteGuard.wrapPersistent(function () {
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       if (!row.namedRangeId) continue;
@@ -155,6 +161,7 @@ function _handleUpsertActionRows(payload) {
       var existing = existingMap[row.namedRangeId];
       if (existing) {
         var r = existing.rowIndex;
+        actionsSheet.getRange(r, 2).setValue(_extractActionId(row.namedRangeId));
         actionsSheet.getRange(r, 4).setValue(row.assigneeName || existing.assigneeName);
         actionsSheet.getRange(r, 5).setValue(row.actionText   || existing.action);
         actionsSheet.getRange(r, 6).setValue(row.status       || existing.status);
@@ -179,6 +186,7 @@ function _handleUpsertActionRows(payload) {
     }
   });
 
+  GasLogger.log('upsert.complete', { inserted: inserted, updated: updated, rows: rows.map(function(r) { return { namedRangeId: r.namedRangeId, status: r.status }; }) });
   return _jsonResponse({ inserted: inserted, updated: updated });
 }
 
@@ -283,7 +291,7 @@ function _handleSyncActionRows(payload) {
     : [];
   var duplicateRowIndexes = [];
 
-  WriteGuard.wrap(function () {
+  WriteGuard.wrapPersistent(function () {
     for (var i = 0; i < docState.length; i++) {
       var row      = docState[i];
       var existing = existingMap[row.namedRangeId];
@@ -447,7 +455,7 @@ function _handleMarkDocNotFound(payload) {
   var formulasCol7 = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
   var marked       = 0;
 
-  WriteGuard.wrap(function () {
+  WriteGuard.wrapPersistent(function () {
     for (var i = 0; i < formulasCol7.length; i++) {
       var formula = formulasCol7[i][0] || '';
       if (formula.indexOf(docId) === -1) continue;
@@ -489,7 +497,7 @@ function _handleDeleteActionRow(payload) {
     return _jsonResponse({ deleted: 0 });
   }
 
-  WriteGuard.wrap(function () {
+  WriteGuard.wrapPersistent(function () {
     actionsSheet.deleteRow(entry.rowIndex);
   });
 
@@ -531,7 +539,7 @@ function _handlePatchActionStatus(payload) {
   }
 
   var now = new Date();
-  WriteGuard.wrap(function () {
+  WriteGuard.wrapPersistent(function () {
     actionsSheet.getRange(entry.rowIndex, 6).setValue(newStatus); // Status
     actionsSheet.getRange(entry.rowIndex, 9).setValue(now);       // Date Modified
     actionsSheet.getRange(entry.rowIndex, 10).setValue('');       // clear Sync Status
