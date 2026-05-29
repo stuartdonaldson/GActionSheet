@@ -52,7 +52,8 @@
           "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png",
           "patterns": [
             {
-              "hostPattern": "northlakeuu.org"
+              "hostPattern": "northlakeuu.org",
+              "pathPrefix": "/GActionSheet/action/"
             }
           ],
           "runFunction": "onLinkPreview"
