@@ -1,7 +1,12 @@
-# ADR-001: Single-script dual-deployment architecture
+# ADR-0007: Single-script dual-deployment architecture
 
 **Status:** Accepted
 **Date:** 2026-05-22
+
+> Renumbered from ADR-001 → ADR-0007 on 2026-05-29 to resolve a numbering collision with
+> ADR-0001 (container-bound). This is the **live architecture record**: the two-project
+> "automation sidecar" of ADR-0005 was never adopted. ADR-0008 supersedes ADR-0005 and confirms
+> the single-project model described here.
 
 ## Context
 

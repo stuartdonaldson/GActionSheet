@@ -1,13 +1,16 @@
 # DESIGN — GActionSheet
 
 ## Solution Strategy
-GActionSheet is a single GAS project, container-bound to the ActionSheet spreadsheet, deployed simultaneously as a Workspace Add-on and a Web App. All action-sync logic lives in one codebase; the two deployment modes serve different runtime roles.
+GActionSheet is **one** GAS project (`scriptId 12EKX…`), container-bound to the ActionSheet spreadsheet, deployed simultaneously as a **Workspace Add-on**, a **Docs editor add-on**, and a **Web App**. All logic lives in one codebase; the same source runs in several distinct **execution contexts** (see §Runtime Architecture → Execution contexts) that differ by *what triggers them* and *whose identity they run as*.
 
-- The **Workspace Add-on deployment** provides the sidebar UI in the active document. It scans the doc for chip-led checklist items, anchors each action with a named range (via the Docs REST API `batchUpdate`), and reconciles the doc's actions with rows in the ActionSheet via a `doPost` proxy call to the Web App deployment.
-- The **Web App deployment** acts as a proxy endpoint. Because the add-on runs as the active user (who may not have edit access to the ActionSheet), all sheet writes are routed through `doPost`, which runs as the deployer (`executeAs: USER_DEPLOYING`) and has sheet-write authority.
-- The **Automation feature set** (timed sweep trigger, `onEdit` timestamp stamper, archive job) is implemented within the same script and activated by installable triggers on the ActionSheet container.
+- The **Workspace Add-on surface** renders the homepage sidebar card in the active document using **CardService** (not HtmlService). It lists the doc's actions and offers Sync, VerifySync, tracker insert/refresh, per-action status, and delete. Runs as the **active user**.
+- The **Docs editor add-on surface** adds an `@`-menu **Create action** entry and a **smart-chip link-preview** card with inline status controls. It shares the same `addOns.docs` manifest section as the Workspace surface (they coexist; no mode switch) and also runs as the **active user**.
+- The **Web App** (`doPost`) is a proxy endpoint. Because the add-on surfaces run as the active user — who may not have edit access to the restricted ActionSheet — all sheet writes are routed through `doPost`, which runs as the **deployer** (`executeAs: USER_DEPLOYING`) and holds sheet-write authority.
+- The **container-bound automation** (`onActionSheetEdit` installable trigger, 30-minute `syncAll` sweep, archive job, async `POC_QUEUE` drain) runs as the **sheet owner** via installable/time-based triggers on the ActionSheet.
 
-Stable action identity comes from a named range whose `namedRangeId` is recorded on the ActionSheet row. DocumentApp is used for read-side traversal because it exposes PERSON chips ergonomically; the Docs REST API is used for write-side anchoring and tracker-table mutation because it supports named ranges and atomic batch updates.
+Stable action identity is an **in-text `AI-N:` token** at the start of each floating-action paragraph; the cross-document key is `globalId = {docFileId}/AI-{N}`, stored in ActionSheet column 1. DocumentApp is used for read-side traversal (the token is visible to `getText()`, and PERSON chips are exposed ergonomically); the Docs REST API `batchUpdate` is used for write-side paragraph rewrites and tracker-table mutation. **No named ranges are created for actions** — the only named range in a document is the tracker-table heading anchor.
+
+> **Identity history.** Earlier designs anchored actions with Docs REST *named ranges* (ADR-0005); this was abandoned because smart-chip / rich-link pill elements are invisible to `getText()`, forcing a text-token scanner. The current model is recorded in **ADR-0008**, the single-project architecture in **ADR-0007**, and conflict resolution in **ADR-0009**. The ActionSheet column and the in-code field are still named `NamedRangeId`/`namedRangeId` — a retained alias for `globalId`, pending rename.
 
 ---
 
@@ -52,12 +55,23 @@ and stored in the `WEBAPP_URL` script property so a single `urlFetchWhitelist` e
 
 ### Module Map
 
-| File | Role |
-|------|------|
-| `src/Addon.js` | Card builder, button handlers, UrlFetchApp proxy call |
-| `src/WebApp.js` | `doGet` (self-register URL), `doPost` (verify secret, write to sheet) |
-| `src/Version.js` | `BUILD_INFO` — stamped by `update-revision.js` before each deploy |
-| `src/appsscript.json` | Manifest — addOns, webapp, oauthScopes, urlFetchWhitelist |
+Context column refers to the execution contexts defined in §Runtime Architecture (① Workspace add-on, ② editor add-on, ③ Web App, ④ container-bound triggers).
+
+| File | Role | Context |
+|------|------|---------|
+| `src/Addon.js` | Workspace homepage card builder + button/mutation handlers (Sync, VerifySync, status, delete) | ① |
+| `src/EditorChipPoc.js` | Editor add-on: `@`-menu create-action card, smart-chip `onLinkPreview`, preview status taps, `POC_QUEUE` enqueue (being de-namespaced out of `_poc_` on promotion — see CLAUDE.md) | ② |
+| `src/SyncManager.js` | Scanner (`_scanFloatingActions`), token assignment, `syncDocument` / `syncAll`, REST paragraph flush (`_poc_flushActionParagraph`), `onActionSheetEdit` | ① ② ④ |
+| `src/WebApp.js` | `doGet` (self-register URL), `doPost` router + all sheet writes | ③ |
+| `src/TrackerTable.js` | Insert/refresh the in-doc tracker table (DocumentApp + REST) | ① ② ④ |
+| `src/VerifySync.js` | Non-mutating doc ↔ tracker ↔ sheet verification | ① |
+| `src/WriteGuard.js` | In-process suppression of `onActionSheetEdit` during programmatic writes | ④ |
+| `src/SheetSetup.js` · `src/TriggerManager.js` · `src/ArchiveManager.js` | Sheet structure, installable-trigger install, archive job | ④ |
+| `src/MenuHandler.js` | `onOpen` Sheets menu (simple trigger) + test menu items | ④ |
+| `src/GasLogger.js` | Buffered NDJSON logger to Drive | all |
+| `src/Version.js` | `BUILD_INFO` + `getWebAppUrl`; stamped by `update-revision.js` | all |
+| `src/appsscript.json` | Manifest — `addOns.docs` (homepage + createAction + linkPreview), webapp, oauthScopes, urlFetchWhitelist | — |
+| `src/TestWebApp.js` · `src/TestFixtures.js` | HTTP fixture dispatcher + GAS test fixtures (test-only) | ③ |
 
 ### Deployment Pipeline
 
@@ -78,9 +92,13 @@ Release pipeline (`npm run release:patch`) additionally runs `commit-deploy-stam
 |----------|--------|---------|
 | `WEBAPP_URL` | `doGet` (auto) | Normalized Web App URL for UrlFetchApp calls |
 | `WEBAPP_SECRET` | Manual (script editor) | Shared secret for doPost authentication |
+| `ACTION_SHEET_ID` | Manual / `bootstrap()` | Fallback ActionSheet ID when `getActiveSpreadsheet()` is unavailable (e.g. tracker refresh from the add-on context) |
+| `DOC_FOLDER_ID` | `ensureSheetStructure` (auto) | Parent folder of the bound spreadsheet (resolved + cached) |
+| `POC_QUEUE` | Editor add-on (auto) | JSON array of pending sheet updates, drained by the time-based trigger (cross-context async hand-off) |
 | `GAS_LOGGER_FOLDER_ID` | Manual | Drive folder for GasLogger output (TDD phase) |
 | `TEST_DOC_ID` | Manual / `bootstrap()` | Test Google Doc ID for smoke tests |
 | `TEST_SHEET_ID` | Manual / `bootstrap()` | Test Sheet ID for smoke tests |
+| `TEST_TOKEN` · `TEST_TOKEN_EXPIRES` | `set_test_token` (deploy) | Per-deployment token + expiry gating the `run_fixture` test route |
 
 ### urlFetchWhitelist
 
@@ -106,76 +124,127 @@ Omitting `urlFetchWhitelist` produces a hard error at call time, not a manifest 
 
 ## Runtime Architecture
 
+### Execution contexts
+
+The single project runs in **four execution contexts**. A context is one GAS execution defined by *what triggers it* and *whose identity it runs as* — **not** a separate project or OS thread. GAS executions are isolated and share no memory; the only cross-context channels are HTTP (`UrlFetchApp` → `doPost`), the `POC_QUEUE` script property (async hand-off), and the ActionSheet rows.
+
 ```mermaid
-graph LR
-    subgraph AddOn["Add-on project (standalone, Workspace Add-on for Docs)"]
-        Sidebar["Homepage Card UI<br/>(CardService)"]
-        Scanner["Action Scanner<br/>(DocumentApp + REST namedRanges)"]
-        NRM["Named Range Manager<br/>(REST batchUpdate)"]
-        Tracker["Tracker Table Renderer<br/>(REST batchUpdate)"]
-        DocSync["ActionSheet Sync<br/>(per-doc push/pull)"]
-        WebApp["Web App<br/>(doPost proxy — runs as deployer)"]
-
-        Sidebar --> Scanner
-        Sidebar --> Tracker
-        Sidebar --> DocSync
-        Scanner --> NRM
-        DocSync --> Scanner
-        DocSync --> WebApp
-    end
-
-    subgraph Automation["Automation project (container-bound to ActionSheet)"]
-        OnEdit["onEdit Handler<br/>(stamp Last Modified)"]
-        Sweep["Sweep Trigger<br/>(time-based reconcile)"]
-        Archive["Archive Manager<br/>(Closed + 30d)"]
-        Guard["Write Guard<br/>(SYNC_IN_PROGRESS flag)"]
-
-        Sweep --> Guard
-        Archive --> Guard
-        OnEdit -. reads .-> Guard
+graph TB
+    subgraph proj["ONE GAS project — scriptId 12EKX… — container-bound to the ActionSheet"]
+        direction TB
+        subgraph user["Contexts ① + ② — run as the ACTIVE USER (Docs add-on runtime)"]
+            WS["① Workspace Add-on surface — homepage sidebar card (CardService)<br/>buildHomepageCard · onSyncNow · onVerifySync · onSetActionStatus · onDeleteAction"]
+            ED["② Docs editor add-on surface — @-menu + smart-chip preview<br/>createActionTrigger · onLinkPreview · _poc_submitCreateAction · _poc_setStatusFromPreview"]
+        end
+        subgraph deployer["Context ③ — Web App — runs as the DEPLOYER (USER_DEPLOYING)"]
+            WEB["doPost router · all ActionSheet writes<br/>sync/upsert/patch/delete/verify_action_rows · mark_doc_not_found"]
+        end
+        subgraph owner["Context ④ — container-bound triggers — run as the SHEET OWNER"]
+            OE["onActionSheetEdit — installable onEdit"]
+            SA["syncAll — time-based, 30 min"]
+            DRAIN["_poc_processPendingSheetUpdates — time-based queue drain"]
+            ARCH["ArchiveManager.archive — menu / sweep"]
+            OO["onOpen — simple trigger: builds the Sheets menu only (no authorized services)"]
+        end
     end
 
     Doc[(Active Google Doc)]
-    ActionSheet[(ActionSheet)]
-    ArchiveSheet[(Archive Sheet)]
-    OtherDocs[(Other Google Docs<br/>referenced by ActionSheet rows)]
+    Sheet[(ActionSheet + Archive)]
+    Q{{POC_QUEUE<br/>script property}}
 
-    Scanner --> Doc
-    NRM --> Doc
-    Tracker --> Doc
-    WebApp --> ActionSheet
-    Sweep --> ActionSheet
-    Sweep --> OtherDocs
-    Archive --> ActionSheet
-    Archive --> ArchiveSheet
-    OnEdit --> ActionSheet
+    WS -->|DocumentApp + Docs REST| Doc
+    ED -->|DocumentApp + Docs REST| Doc
+    WS -->|UrlFetchApp POST + shared secret| WEB
+    ED -->|enqueue| Q
+    Q -->|drained by| DRAIN
+    DRAIN -->|UrlFetchApp POST| WEB
+    SA -->|DocumentApp + REST| Doc
+    SA -->|UrlFetchApp POST| WEB
+    OE -->|flush + UrlFetchApp POST| WEB
+    WEB -->|SpreadsheetApp writes| Sheet
+    OE --> Sheet
+    ARCH --> Sheet
 ```
 
-The two subgraphs share no arrow; communication is solely through `ActionSheet` rows.
+**Identity boundary.** Contexts ① and ② run as the active user: they can read the active Doc but may **not** write the restricted ActionSheet directly — every sheet write is proxied to context ③ (the deployer). Context ④ runs as the sheet owner and writes the sheet directly, calling ③ only to reuse the same doc-flush path. ① and ② share one identity and one manifest section (`addOns.docs`) but are distinct *surfaces* with different entry triggers. `onOpen` is a **simple** trigger and must not call authorized services (so `GasLogger.flush()` — a `DriveApp` write — is omitted there).
+
+### Data flow
+
+An action's data lives on three surfaces but only **two are authoritative** (the doc paragraph and the ActionSheet row); the tracker table is a rendered, non-authoritative view. This shows how a change on either authoritative side propagates.
+
+```mermaid
+graph LR
+    subgraph docside["Document — active-user contexts ① ②"]
+        FA["Floating action paragraph<br/>[img] AI-N: [chip] text (Status)"]
+        SCAN["_scanFloatingActions<br/>→ globalId · assignee · text · status"]
+        FLUSH["_poc_flushActionParagraph<br/>REST batchUpdate rewrite"]
+        TRK["Tracker table<br/>(rendered view — overwritten on refresh)"]
+    end
+    subgraph webapp["Web App — deployer ③"]
+        SYNC["_handleSyncActionRows<br/>conflict resolution + sheet writes"]
+    end
+    subgraph sheetside["ActionSheet — sheet-owner context ④"]
+        ROW["Action row<br/>col1 globalId … col6 Status … col10 Sync Status"]
+        EDIT["onActionSheetEdit<br/>sets Sync Status = 'Dirty'"]
+    end
+
+    FA --> SCAN
+    SCAN -->|docState POST| SYNC
+    SYNC -->|insert / doc-wins update| ROW
+    SYNC -->|sheetWins list| FLUSH
+    FLUSH --> FA
+    ROW --> EDIT
+    EDIT -->|flush sheet→doc| FLUSH
+    SCAN -. renders .-> TRK
+    ROW -. renders .-> TRK
+```
+
+There is no shared in-memory state between the doc-side contexts and the sheet — communication is **only** `doPost` (HTTP) and the ActionSheet rows.
 
 ---
 
 ## Building Block View
 
-### Add-on project
+Grouped by execution context (see §Runtime Architecture).
+
+### ① Workspace Add-on surface (active user)
 
 | Component | Responsibility |
 |-----------|---------------|
-| Sidebar UI | Renders the homepage card for the active doc using CardService. Sections: (1) overview — sync state and record count; (2) action buttons — **Sync now**, **VerifySync**, **Insert tracker** (hidden when tracker already present); (3) action list — each anchored action shows a status dropdown (Open / In Progress / In Review / Done / Closed) that fires `onSetActionStatus` on change, and a **Delete** button that fires `onDeleteAction`. Mutations complete a full doc+sheet round-trip before returning the refreshed card. |
-| Action Scanner | Reads the active doc via DocumentApp: walks paragraphs and list items, identifies floating actions by two rules — (1) first inline child is a PERSON chip, or (2) first text content begins with a valid email address (`word@word.tld`); extracts assignee email/name, action text, and trailing `(Status)` token; reads existing named ranges via the REST API to resolve identity |
-| Named Range Manager | Creates a named range over a newly seen action paragraph; deletes a range when its action is no longer present; re-anchors when an existing row's range is missing but its action+assignee still match a paragraph |
-| Tracker Table Renderer | Inserts or refreshes the in-doc tracker table at its own named-range anchor, preceded by the instructional paragraph summarizing the sync rules; uses REST `batchUpdate` for atomic in-place replacement |
-| ActionSheet Sync | Reads ActionSheet rows for the active doc, compares with scanner output by `namedRangeId`, applies `Last Modified` precedence, writes diffs to either side; sets the automation project's `SYNC_IN_PROGRESS` script property on the ActionSheet before sheet writes |
-| VerifySync | Reads floating actions from the doc, reads ActionSheet rows for the same doc through a non-mutating Web App call, parses the in-doc tracker table when present, and reports progress plus mismatches in the verification result card; a floating action without an explicit trailing status token is itself a verification failure |
+| Homepage card | Renders the homepage card for the active doc using CardService. Sections: (1) overview — sync state and record count; (2) action buttons — **Sync now**, **VerifySync**, **Insert tracker** (hidden when a tracker is already present); (3) action list — each action shows status icon buttons (Open / In Progress / In Review / Done / Closed) firing `onSetActionStatus`, and a **Delete** button firing `onDeleteAction`. Mutations complete a full doc+sheet round-trip before returning the refreshed card |
+| VerifySync | Reads floating actions from the doc, reads ActionSheet rows for the same doc via a non-mutating Web App call, parses the in-doc tracker table when present, and reports progress plus mismatches; a floating action without an explicit trailing `(Status)` token is itself a verification failure |
 
-### Automation project
+### ② Docs editor add-on surface (active user)
 
 | Component | Responsibility |
 |-----------|---------------|
-| onEdit Handler | Installable trigger on the ActionSheet; stamps `Last Modified` on the edited row unless `SYNC_IN_PROGRESS` is set |
-| Sweep Trigger | Time-based; groups ActionSheet rows by document URL, opens each doc, performs the same reconcile the sidebar's **Sync now** would have done; bounded by GAS execution-time budget; subsequent runs resume where the previous left off |
-| Archive Manager | Identifies ActionSheet rows with `Status = Closed` and `Last Modified > 30 days`; moves them to the archive sheet without altering timestamps |
-| Write Guard | Manages the `SYNC_IN_PROGRESS` flag (a script property on the ActionSheet's container script); set before any programmatic sheet write, cleared in `finally`; read by `onEdit Handler` to skip stamp updates during automated writes |
+| Create-action card | `@`-menu entry (`createActionTrigger`); form for action text, optional assignee (People-API suggestions), and status. On submit, inserts the branded `AI-N:` fragment at the cursor via REST, then upserts the row through the Web App |
+| Smart-chip preview | `onLinkPreview` matches the action URL pattern and renders a card with the action's current state plus status icon buttons; a tap rewrites the doc paragraph and enqueues the sheet update on `POC_QUEUE`, drained asynchronously by context ④ |
+
+### Shared sync engine (used by ①, ②, ④)
+
+| Component | Responsibility |
+|-----------|---------------|
+| Action Scanner | `_scanFloatingActions` walks the doc body; a floating action is any paragraph/list-item whose text starts with the token `AI-N:` (an optional leading inline image is ignored). After the token it extracts an optional assignee (PERSON chip, or a leading email whose name is derived from the local-part), the action text, and the trailing `(Status)` token. Duplicate `AI-N` paragraphs (copy/paste) are flagged `isDuplicate` |
+| Token Manager | `_assignPlaceholderTokens` finds bare `AI:` placeholders and assigns the next free `N`. The global key `globalId = {docId}/AI-{N}` is the durable identity; there is **no** named-range bookkeeping for actions |
+| Paragraph flush | `_poc_flushActionParagraph` rewrites every occurrence of an `AI-N:` paragraph in place via one REST `batchUpdate` (image → token → optional chip → text → status badge), keeping copies consistent with the canonical row |
+| Tracker Table Renderer | Inserts/refreshes the in-doc tracker table anchored by its heading named range (`gactionsheet-tracker-anchor`), preceded by a read-only-notice paragraph; uses REST `batchUpdate` for in-place replacement |
+
+### ③ Web App — `doPost` (deployer)
+
+| Component | Responsibility |
+|-----------|---------------|
+| Sync handler | `_handleSyncActionRows`: for each scanned action, inserts a new row, or (row exists) applies **Dirty-flag conflict resolution** — `Sync Status = 'Dirty'` → sheet wins (returned in `sheetWins` for the caller to flush doc-ward); otherwise doc wins (overwrite changed cells). Also removes stale duplicate rows and stamps orphans `Deleted` / `Doc Not Found`. All writes wrapped by the in-process `WriteGuard` |
+| Other routes | `upsert_action_rows` (editor create + async drain), `patch_action_status` / `delete_action_row` (sidebar fast paths), `verify_action_rows` (read-only), `mark_doc_not_found`, `set_test_token` / `run_fixture` (test-only) |
+
+### ④ Container-bound automation (sheet owner)
+
+| Component | Responsibility |
+|-----------|---------------|
+| onActionSheetEdit | Installable `onEdit`; on a user edit to cols 3–6 it stamps `Date Modified` (col 9) and `Sync Status = 'Dirty'` (col 10), then flushes the row to the doc and re-syncs. Returns immediately if `WriteGuard.isActive()` (a programmatic write is in progress) |
+| Sweep (`syncAll`) | Time-based (30 min); enumerates unique doc IDs from the column-7 hyperlink formulas and calls the **same** `syncDocument` the sidebar uses — no separate reconcile code |
+| Archive Manager | Moves rows with `Status = Closed` and `Date Modified > 30 days` to the Archive sheet without altering timestamps; bottom-to-top deletion; writes wrapped by `WriteGuard` |
+| Write Guard | In-process flag (`WriteGuard._active`) set around every programmatic sheet write and read by `onActionSheetEdit` to skip re-stamping. The cross-execution variant is disabled — see §Programmatic Write Suppression |
 
 ---
 
@@ -228,7 +297,9 @@ erDiagram
     Action ||--o| TrackerTableRow : "summarised by"
 ```
 
-The cross-doc key is `namedRangeId`. The doc-scoped `id` is a human-facing integer recomputed at sync time from document order; it is not a stable identifier.
+The cross-doc key is `globalId = {docId}/AI-{N}`, stored in ActionSheet column 1 (the column and the in-code field are still labelled `NamedRangeId` — a retained alias). The doc-scoped `id` (column 2) is the human-facing `AI-N` derived from that key; `N` is assigned once per document by the Token Manager and then persists in the paragraph text — it is stable, not recomputed from document order.
+
+> In the diagrams below the field is named `namedRangeId` to match the current code and sheet column; its value is a `globalId` string, not a Docs named-range ID.
 
 **Field notes:**
 - `assigneeChip` — compound value extracted from the PERSON chip, canonical form `name <email>`. The ActionSheet stores this in two separate columns (`Assignee Name`, `Assignee Email`); `DocChecklistItem` and `TrackerTableRow` hold it as a single parsed unit.
@@ -237,11 +308,11 @@ The cross-doc key is `namedRangeId`. The doc-scoped `id` is a human-facing integ
 ---
 
 ## Dependency Rules
-- Add-on Scanner reads docs only; it never touches the ActionSheet directly — the Sync component owns sheet I/O
-- Sidebar UI never imports another component's internals; it calls a thin façade in the add-on script that fans out to Scanner / NRM / Tracker / Sync
-- Automation Sweep performs the same reconciliation as Sidebar Sync but uses its own script identity; the two share no code (the schema is the contract)
-- Archive Manager reads from and writes to the ActionSheet only; it does not open documents
-- No cross-project calls between add-on and automation
+- The Scanner reads the active doc only; it never touches the ActionSheet directly — the Web App (`doPost`, context ③) owns all sheet I/O.
+- Add-on surfaces never reach into each other's internals; they call the shared engine functions (`syncDocument`, `insertTrackerTable`, `verifyDocumentSync`, `_poc_flushActionParagraph`) and the Web App proxy.
+- The container-bound sweep (`syncAll`, context ④) performs the same reconciliation as the sidebar's **Sync now** by calling the **same** `syncDocument` code — there is no separate automation codebase. (This consolidated a prior stub; see the entry-point coverage rule in CLAUDE.md.)
+- Archive reads/writes the ActionSheet only; it never opens documents.
+- All four contexts live in one project and share code freely. The only boundary is an **identity** one: active-user contexts (① ②) must write the sheet via the deployer-context Web App (③); they never call `SpreadsheetApp` on the ActionSheet directly.
 
 ---
 
@@ -256,14 +327,32 @@ An action exists on **three** surfaces, but only **two** are authoritative:
 | ActionSheet row | Cross-doc authority | Yes — propagated to floating action on Sync |
 | In-doc tracker table row | Rendered view of the doc's actions | **No** — overwritten on next **Insert / refresh tracker** |
 
-Conflict resolution applies only between the two authoritative surfaces using `Last Modified`. The renderer does not read tracker-table cell contents to decide anything; it always re-renders from the floating actions and ActionSheet row pair.
+Conflict resolution applies only between the two authoritative surfaces, using the per-row **`Sync Status` (Dirty) flag** — see §Conflict Resolution. The renderer never reads tracker-table cell contents to decide anything; it always re-renders from the floating actions and the ActionSheet row pair.
 
-The per-document script property `LAST_RECONCILED_AT_<docId>` is the reconciliation watermark used during Sync. It records the last successful doc-vs-sheet comparison for that document, not the last time a row's data changed.
+### Conflict Resolution
+
+A row may exist on both authoritative surfaces with differing values. The winner is decided **per row by the `Sync Status` flag**, not by comparing timestamps — `Date Modified` (col 9) is retained for archival age only. This realises **ADR-0009** and supersedes the timestamp scheme of ADR-0002.
+
+```mermaid
+flowchart TD
+    Start["Sync now / sweep:<br/>scan doc → docState[] → POST sync_action_rows"] --> Each{"for each scanned action"}
+    Each -->|no matching row| Insert["INSERT new row<br/>globalId · assignee · text · status"]
+    Each -->|row exists| Dirty{"row Sync Status<br/>== 'Dirty' ?"}
+    Dirty -->|"yes — sheet was edited"| SheetWins["SHEET WINS:<br/>clear Sync Status; return in sheetWins[];<br/>caller flushes sheet values → doc paragraph"]
+    Dirty -->|"no"| DocWins["DOC WINS:<br/>overwrite changed cells from scanned doc state<br/>(skip write when values already equal)"]
+
+    OrphanScan["orphan pass: row for this doc<br/>whose globalId is no longer in the doc"] --> Orphan{"same action text+assignee<br/>under a different globalId?"}
+    Orphan -->|yes| Dedup["DELETE stale duplicate row<br/>(left by a re-token event)"]
+    Orphan -->|no| Mark["stamp Sync Status = 'Deleted'"]
+    Doc404["doc cannot be opened"] --> NotFound["stamp Sync Status = 'Doc Not Found'<br/>on every row for that docId"]
+```
+
+The async chip-tap path (Scenario A) and the editor **Create action** path do **not** enter conflict resolution: the click/submit captures user intent at one instant, so the sheet write is an unconditional upsert (the sheet follows the doc).
 
 ### Identity
-`namedRangeId` is the durable identity. The ActionSheet stores it on every row. During scan, the add-on resolves each chip-led checklist paragraph to a `namedRangeId` by intersecting paragraph indices with the doc's existing named ranges. A paragraph with no covering named range becomes a new action; a named range whose covered paragraph is no longer chip-led becomes a candidate orphan and is offered for re-anchoring (if a paragraph with matching action text and assignee still exists) or surfaced in the sidebar for human resolution.
+`globalId = {docId}/AI-{N}` is the durable identity, stored on every ActionSheet row (column 1) and embedded as the literal `AI-N:` token at the start of the action paragraph. During scan the engine reads the token straight from `getText()` — there is **no** index intersection and no named-range lookup. A paragraph bearing a token not yet in the sheet becomes a new row; a sheet row whose `globalId` is no longer present in the doc becomes a candidate orphan — deleted as a duplicate if the same action text + assignee now appears under a different token, otherwise stamped `Deleted`.
 
-During reconciliation, the Web App also removes stale duplicate ActionSheet rows when the current doc still contains the same action state under a newer anchor. This keeps UC-B's sheet-wins path at a 1:1 doc-row pairing even after a re-anchor event.
+Bare `AI:` placeholders are upgraded to `AI-N:` on the next sync (Token Manager). Copy/pasted duplicates of a token are detected (`isDuplicate`) and rewritten to the canonical content on flush, keeping a 1:1 row-per-action pairing.
 
 ### Checked state is unreadable
 DocumentApp returns `null` for `isChecked()` on every task / checklist item, and the REST API exposes no equivalent field. The visual checkbox is **decorative only**. The truthful status is the trailing `(Status)` parenthesized token on the action paragraph. Components must never branch on visual checked state.
@@ -272,135 +361,21 @@ DocumentApp returns `null` for `isChecked()` on every task / checklist item, and
 A trailing parenthesized token at the end of the action paragraph. If the paragraph omits the token, Sync rewrites the floating action with an explicit `(Open)` token. `Closed` is recognized for archiving. Any other value (e.g. `(In Review)`, `(Blocked)`) is preserved verbatim and round-trips to the ActionSheet `Status` column. Whitespace inside the parens is trimmed on read; the canonical written form has no leading/trailing whitespace.
 
 ### Programmatic Write Suppression
-`WriteGuard` suppresses `onActionSheetEdit` during programmatic sheet writes. It has two layers:
+`WriteGuard` suppresses `onActionSheetEdit` during programmatic sheet writes using a single **in-process** layer (`WriteGuard._active`), set around every programmatic write via `WriteGuard.wrap(fn)`. `onActionSheetEdit` calls `WriteGuard.isActive()` at entry and returns immediately when it is set. This covers writes that run in the **same** execution as the trigger — e.g. `onActionSheetEdit`'s own `Date Modified` + `Dirty` stamp and the corrections it writes back.
 
-- **In-process** (`WriteGuard._active`) — covers writes within the same GAS execution (Sync Now, sweep, archive, `onActionSheetEdit`'s own Dirty stamp). Callers use `WriteGuard.wrap(fn)`.
-- **Cross-execution** (`SYNC_IN_PROGRESS_UNTIL_MS` script property) — covers Web App `doPost` writes, which run in a separate execution from the `onActionSheetEdit` trigger. Callers use `WriteGuard.wrapPersistent(fn)` (WebApp.js only). The property is set to `Date.now() + 20000` before the write and not deleted on deactivate — it expires naturally after 20 seconds. During the window any user edit is suppressed; accepted POC tradeoff. `WriteGuard.wrap()` must not be used in WebApp context, as it would not set the property and the trigger would fire unguarded.
-
-`onActionSheetEdit` calls `WriteGuard.isActive()` at entry; either layer returning true causes an immediate return.
+Web App `doPost` writes run as the deployer in a **separate** execution and were found **not** to fire the installable `onActionSheetEdit` trigger at all (verified 2026-05-29). The earlier cross-execution layer (a `SYNC_IN_PROGRESS_UNTIL_MS` script property with a 20 s window) is therefore **disabled**; `WriteGuard.wrapPersistent(fn)` remains as a no-op alias of `wrap(fn)` so WebApp.js call sites compile unchanged and the layer can be re-enabled if that runtime behaviour ever changes. See **ADR-0008** and the `WriteGuard.js` header.
 
 ---
 
-## Proposed Tracker Sheet Resolution Architecture
+## Idempotence
+A Sync or Sweep that finds no differences shall make no writes to any doc or sheet, enforced by comparing normalized values before writing. (See the review note in `docs/design-review-05-29.md` §M2 for currently-known violations of this invariant in the update/formula write paths.)
 
-This section is a design proposal for moving from one organization-wide ActionSheet to a locator model that supports multiple teams and folder-local tracking sheets without splitting the codebase.
-
-### Goal
-
-Keep the current single GAS project and dual deployment model, but allow each document to resolve its action-tracking spreadsheet independently. The active document should normally sync to a team-local tracking sheet rather than always to the container-bound spreadsheet.
-
-### Resolution Order
-
-Tracker-sheet resolution should be deterministic and use a strict precedence order:
-
-1. **Document custom property** — if the document stores a tracker spreadsheet ID and that spreadsheet is reachable, use it.
-2. **Document folder discovery** — if no property is set, inspect the active document's parent folder for a spreadsheet with a reserved identity such as `ActionTrackingSheet`.
-3. **Bound fallback sheet** — if no folder-local tracker exists, use the container-bound ActionSheet spreadsheet.
-4. **Persist the result** — whenever steps 2 or 3 succeed, write the chosen spreadsheet ID back to the document custom property so subsequent syncs do not need to rediscover it.
-
-This makes the document property the authoritative locator, while folder discovery and the bound sheet remain bootstrap and recovery paths.
-
-### Why this shape is sound
-
-- It avoids a single shared spreadsheet becoming a cross-team bottleneck.
-- It keeps routing document-local, so a doc continues to point at the intended tracker even if it is moved out of its original folder later.
-- It preserves a safe fallback path for documents that have not yet been initialized.
-- It keeps the add-on UX simple: users normally do not choose a tracker on every sync; they only inspect or change the resolved location in Settings.
-
-### Recommended metadata model
-
-Store the tracker spreadsheet ID in document-scoped metadata. The minimum record should include:
-
-| Field | Purpose |
-|-------|---------|
-| `trackerSpreadsheetId` | Authoritative target sheet for this document |
-| `trackerResolutionSource` | `property`, `folder-discovery`, or `bound-fallback` for diagnostics |
-| `trackerResolvedAt` | Last time the locator was written or confirmed |
-
-If the implementation surface only supports string values, store simple scalar properties rather than a composite JSON blob.
-
-### Folder discovery contract
-
-Folder discovery should use an explicit marker, not a loose name-only search.
-
-Preferred contract:
-
-- Spreadsheet name begins as `ActionTrackingSheet`
-- The spreadsheet carries a marker in document or script properties indicating it is a valid team tracker
-- If multiple matching spreadsheets exist in the folder, resolution must fail as ambiguous rather than choosing one arbitrarily
-
-Name-only discovery is acceptable for bootstrap, but it should be treated as provisional because duplicate human-readable names are likely across teams.
-
-### Settings surface
-
-Adding a document menu item for **Settings** is a good fit. The settings surface should expose:
-
-- the currently resolved tracker spreadsheet
-- how it was resolved
-- whether the tracker is folder-local or the bound fallback
-- an action to initialize a local tracker in the document folder
-- an action to rebind the current document to a different tracker intentionally
-
-This keeps troubleshooting explicit and reduces hidden routing behavior.
-
-### Local-folder initialization flow
-
-Your proposed initialization flow is broadly right, but it should be constrained carefully:
-
-1. Resolve the active document's parent folder.
-2. Create or validate one folder-local tracking spreadsheet for that folder.
-3. Enumerate only supported documents in that same folder.
-4. For each eligible document, set its tracker document property to the folder-local spreadsheet ID.
-5. Run a per-document sync into that tracker.
-
-Two important guardrails:
-
-- Do not rewrite properties for documents that already point at a different valid tracker unless the user explicitly confirms reassignment.
-- Treat initialization as an administrative action; it changes routing for multiple documents and should produce a summary report.
-
-### Bound-sheet registry for troubleshooting
-
-Keeping a worksheet on the bound spreadsheet as a registry is a good operational idea, but it should be a **registry/index**, not a routing authority.
-
-Recommended columns:
-
-| Column | Purpose |
-|--------|---------|
-| Document ID | Document being tracked |
-| Document Title | Human-readable reference |
-| Tracker Spreadsheet ID | Current resolved destination |
-| Tracker Spreadsheet Name | Human-readable tracker reference |
-| Resolution Source | Property / folder discovery / bound fallback |
-| Last Sync | Latest successful sync time |
-| Last Verification | Latest successful verification time |
-| Last Error | Most recent routing or sync error |
-
-This sheet should help answer "where is this doc supposed to sync?" without becoming the primary locator. The source of truth remains the document property.
-
-### Failure handling
-
-Resolution failures should be explicit:
-
-- **Property points to missing or inaccessible spreadsheet** — surface an error and offer repair; do not silently choose a different tracker unless the user explicitly requests fallback repair.
-- **Multiple candidate spreadsheets in folder** — mark as ambiguous and require user choice.
-- **No folder-local spreadsheet found** — use the bound fallback only if allowed by policy, then persist that result.
-- **Document has no parent folder or multiple parents** — use deterministic handling and record the reason in diagnostics.
-
-The main design rule is to avoid silently moving a document's authority from one tracker to another once it has been explicitly bound.
-
-### Architectural recommendation
-
-The overall architecture is good if framed as:
-
-- **Primary authority:** document property
-- **Bootstrap discovery:** folder-local tracker lookup
-- **Operational safety net:** bound spreadsheet fallback
-- **Troubleshooting index:** registry worksheet on the bound spreadsheet
-
-That separation keeps the system understandable and avoids accidental re-routing across teams.
-
-### Idempotence
-A Sync or Sweep that finds no differences shall make no writes to any doc or sheet. Enforced by comparing normalized values before writing.
+## Future work
+Per-document **tracker-sheet resolution** (a locator model letting each document resolve its own
+tracking spreadsheet, instead of the single container-bound ActionSheet) is an unimplemented
+proposal. It has been moved out of this as-built design to `knowledge-base/ROADMAP.md`
+§"Future design: per-document tracker-sheet resolution". The related multi-tenant chip URL
+(`…/action/{sheetId}/{globalId}`) is tracked there too.
 
 ---
 
@@ -428,7 +403,7 @@ sequenceDiagram
     Trigger->>Queue: read + dedup by namedRangeId (keep last per action)
     loop each deduplicated item
         Trigger->>WebApp: POST upsert_action_rows
-        WebApp->>Sheet: write cols 2,4,5,6,9,10 (WriteGuard sets SYNC_IN_PROGRESS_UNTIL_MS)
+        WebApp->>Sheet: upsert row cols 2,4,5,6,9 (WriteGuard in-process; doPost write does not fire onActionSheetEdit)
     end
     opt doc has tracker (refreshTracker=true)
         Trigger->>WebApp: insertTrackerTable(docId)
@@ -461,8 +436,8 @@ sequenceDiagram
     Trigger->>Sheet: col10='' (clear Dirty, WriteGuard in-process)
     Trigger->>WebApp: syncDocument(docId) → sync_action_rows
     Note over WebApp: syncStatus='' → docWins branch
-    WebApp->>Sheet: write col4=assigneeName (chip-resolved), col10='' (WriteGuard sets SYNC_IN_PROGRESS_UNTIL_MS)
-    Note over Sheet: onActionSheetEdit fires for col4 write → WriteGuard.isActive()=true → suppressed
+    WebApp->>Sheet: write col4=assigneeName (chip-resolved), col10='' (WriteGuard in-process)
+    Note over Sheet: doPost runs as deployer in a separate execution → onActionSheetEdit does not fire for these writes
     opt doc has tracker (onlyIfExists=true)
         Trigger->>Tracker: insertTrackerTable(docId, onlyIfExists)
         Tracker->>REST: rebuild tracker table
@@ -489,7 +464,7 @@ sequenceDiagram
     User->>Addon: Sync Now or menu Sync
     Addon->>Doc: openById, scan floating actions
     Addon->>WebApp: POST sync_action_rows {docState, allDocNamedRangeIds}
-    WebApp->>Sheet: for each row (WriteGuard sets SYNC_IN_PROGRESS_UNTIL_MS):
+    WebApp->>Sheet: for each row (WriteGuard in-process):
     Note over WebApp,Sheet: Dirty → sheetWins list (clear col10); not Dirty → docWins (update cols 3–6,9,10)
     WebApp-->>Addon: {upserted, updated, sheetWins:[...]}
     loop each sheetWins item
@@ -498,7 +473,7 @@ sequenceDiagram
     Addon->>Doc: saveAndClose
 ```
 
-**Field authority:** `Last Modified` (col 9) determines winner per row. If `SyncStatus = 'Dirty'`, sheet wins and its values are flushed to the doc. Otherwise the doc's scanned state overwrites the sheet row. Tracker refresh is a separate user action (Insert / refresh tracker button).
+**Field authority:** the `Sync Status` flag determines the winner per row (see §Conflict Resolution; `Last Modified` is **not** compared). If `Sync Status = 'Dirty'`, sheet wins and its values are flushed to the doc. Otherwise the doc's scanned state overwrites the sheet row when values differ. Tracker refresh follows automatically when anything changed, and is also available as a separate user action (Insert / refresh tracker).
 
 ---
 
@@ -528,8 +503,8 @@ Each Use Case has **one** end-to-end test that asserts the user-visible outcome 
 
 | UC | What the test does | What it asserts |
 |---|---|---|
-| **UC-A** | Insert a chip-led list item AND an email-led list item in the same doc, click Sync, then click Sync again with no changes | Both items appear in ActionSheet with correct email, name, action text, and status (AC1); second Sync produces no new rows, all `NamedRangeId` values unchanged, sheet and doc content byte-for-byte identical (AC2) |
-| **UC-B** | Four flows: (1) edit the sheet row's Status/Action/Assignee, then Sync; (2) edit the floating action's trailing `(Status)`, then Sync; (3) edit the floating action's text after the chip, then Sync; (4) replace the chip with a different person, then Sync. Plus a negative case (5): type into the tracker table cell, then Sync | (1)–(4) the *other* authoritative side reflects the edit, no duplicate ActionSheet row, named-range anchor preserved across all four; (5) the ActionSheet is unchanged and the next tracker refresh restores the rendered values |
+| **UC-A** | Insert one `AI-N:` item with a person-chip assignee AND one with a bare-email assignee in the same doc, click Sync, then click Sync again with no changes | Both items appear in ActionSheet with correct email, name, action text, and status (AC1); second Sync produces no new rows, all `NamedRangeId` (globalId) values unchanged, sheet and doc content byte-for-byte identical (AC2) |
+| **UC-B** | Four flows: (1) edit the sheet row's Status/Action/Assignee, then Sync; (2) edit the floating action's trailing `(Status)`, then Sync; (3) edit the floating action's text after the chip, then Sync; (4) replace the chip with a different person, then Sync. Plus a negative case (5): type into the tracker table cell, then Sync | (1)–(4) the *other* authoritative side reflects the edit, no duplicate ActionSheet row, the `AI-N` token / `globalId` preserved across all four; (5) the ActionSheet is unchanged and the next tracker refresh restores the rendered values |
 | **UC-C** | Click **Insert / refresh tracker** twice, with intervening action changes; include a refresh after a tracker-cell edit | First click produces instructional paragraph + N-row table; second click reflects added/removed/closed actions in place; no stale rows remain; tracker-cell edits are overwritten on refresh |
 | **UC-D** | Seed a Closed row with `Last Modified > 30d`, invoke the sweep | The row appears in the archive sheet with `Last Modified` preserved; no doc content changed |
 
@@ -541,9 +516,9 @@ Atomic tests run with `-x` fail-fast and are owned per concern. They isolate roo
 |---|---|
 | Chip extraction | A PERSON chip as the first inline child resolves to `(email, name)`; a paragraph without a chip is correctly rejected |
 | Status token parsing | `... (Open)`, `... (In Review)`, `...   (  Closed  )`, missing token, multiple parens — all parse to the right `(status, actionText)` pair |
-| Named range survival | After an edit inserts text above an anchored action, the named range still covers the same paragraph and resolves to the same `namedRangeId` |
+| Token survival | After an edit inserts text above an action, the `AI-N:` token is still scanned from the paragraph and resolves to the same `globalId` |
 | Free-form status preservation | `(In Review)` round-trips through Sync without normalization to `Open` or `Closed` |
-| Re-anchor logic | An orphan ActionSheet row matches an unanchored chip-led paragraph by `(assigneeEmail, actionText)` and re-anchors instead of duplicating |
+| Duplicate / orphan reconciliation | A row whose `globalId` is gone from the doc but whose `(assigneeEmail, actionText)` reappears under a different `AI-N` is removed as a stale duplicate, not left orphaned; a genuinely removed action is stamped `Deleted` |
 | Write Guard | A programmatic ActionSheet write performed with `SYNC_IN_PROGRESS` set does not bump `Last Modified` |
 
 ### Anti-Patterns

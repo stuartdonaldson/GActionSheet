@@ -804,3 +804,106 @@ Fixed three bugs in the editor add-on sync and flush pipeline; added duplicate A
 - Google Docs `insertPerson` → `personProperties` only accepts `{ email }`. API resolves display name from email automatically. Adding `name` causes HTTP 400 INVALID_ARGUMENT.
 - `insertRichLink` creates visual chip pills but elements are absent from `getText()` — incompatible with text-token identity model without a full scanner refactor.
 - `updateTableColumnProperties` requires `tableStartLocation.index` (from REST GET); GAS DocumentApp `Table` has no `setColumnWidth` method.
+
+## 2026-05-28 21:20:00
+
+### Summary
+Worked PR #1 review comments end-to-end: addressed all Copilot findings, replied to and resolved all review threads, and pushed two follow-on fix commits. Then continued live testing the POC editor add-on, diagnosing and fixing a series of runtime issues found during manual use.
+
+### PR Review Work
+- **Trigger cleanup (race condition)** — replaced per-update `POC_PENDING_*` properties + per-trigger approach with a single `POC_QUEUE` JSON array guarded by `LockService`; drain trigger now atomically swaps queue to `[]` and deletes only the executing trigger via `e.triggerUid`
+- **`upsert_action_rows` insert-only** — fixed `_handleUpsertActionRows` in `WebApp.js` to be a true upsert: updates existing rows (actionText, assigneeName, status, dateModified) in place; inserts when absent
+- **Sheet before doc insertion (#113)** — `_poc_insertActionChip` now runs first; sheet row only written after successful doc insertion
+- **Flush result ignored (#418)** — `_poc_flushActionParagraph` return value now checked; tracker refresh and sheet update gated on flush success; error card returned on failure
+- **Substring vs anchored delete (#518)** — `_poc_findParaByGlobalId` changed from `indexOf !== -1` to `indexOf === 0` to match scanner's anchored `^AI-N:` pattern
+- **Bonus fix** — `assigneeName` field was copying `assigneeEmail` value; corrected
+- Replied to all 8 Copilot PR comments; resolved all 6 open threads via GraphQL API
+
+### Runtime Fixes (Live Testing)
+- **`linkPreviewTriggers` pathPrefix** — removing leading/trailing slash (`"GActionSheet/action"` not `"/GActionSheet/action/"`) required for `onLinkPreview` to fire; recorded in `bd remember`
+- **Preview card lookup logging** — replaced `Logger.log` with `GasLogger` in `_poc_buildPreviewCard` and `_poc_lookupActionFromDoc`; added `PREVIEW_CARD.lookup`, `PREVIEW_CARD.result`, `poc.lookupFromDoc.scan`, `poc.lookupFromDoc.notfound` tags
+- **`openById` eliminated from preview hot path** — both `_poc_buildPreviewCard` and `_poc_setStatusFromPreview` now use `getActiveDocument()` + direct `_scanFloatingActions` call; removes one full network round-trip per status tap
+- **Tracker refresh moved to async queue** — `insertTrackerTable` no longer runs synchronously on the status-tap hot path; enqueued with `refreshTracker: true` and `docId`; drain trigger refreshes each affected doc once after all sheet upserts complete
+- **Stale status in rebuilt preview** — `_poc_buildPreviewCard` accepts `statusOverride`; `_poc_setStatusFromPreview` passes `newStatus` so the returned card immediately shows the new status without waiting for DocumentApp cache to catch up
+- **`GasLogger.flush()` removed from hot path** — two Drive-write flush calls before card return removed; GAS flushes automatically on function exit; saves ~1s per status tap
+- **`requiredRevisionId` added to batchUpdate** — prevents silent document corruption when concurrent edits (or async tracker rewrite) shift character offsets between GET and batchUpdate; ABORTED response now logged
+- **Retry on revision conflict** — `_poc_flushActionParagraph` retries up to 3 times (delays: 0 / 500ms / 1000ms) on ABORTED; re-GETs fresh indices and revisionId on each attempt; non-conflict errors exit immediately
+- **`suggestAssignees` autocompletion** — changed suggestion format from `Name <email>` to `Name (email)` (angle brackets may cause `addSuggestion` to reject); added per-item error logging and result count tag
+
+### Key Learnings
+- `linkPreviewTriggers.patterns.pathPrefix` must NOT have leading or trailing slash — GAS silently skips `onLinkPreview` if the slash is present
+- `DocumentApp.getActiveDocument()` is cached within an execution; REST batchUpdate writes are not reflected in the DocumentApp view until the next execution — always use `statusOverride` pattern when rebuilding a card immediately after a REST write
+- `GasLogger.flush()` is a Drive write (~0.5–1s); avoid on any synchronous card-response hot path
+- `requiredRevisionId` in batchUpdate is the correct GAS/Docs API pattern for optimistic concurrency; ABORTED is the expected response on conflict, not a hard failure
+
+## 2026-05-28 21:45:00
+
+### Summary
+Diagnosed and fixed status-tap failure in preview card: `_poc_flushActionParagraph` was always failing with HTTP 400 because `requiredRevisionId` is not supported by the Docs REST API version in use. Every batchUpdate was rejected before reaching the document.
+
+### Details
+- **Symptom:** Clicking status on a preview card showed "error trying to update document"; subsequent card hover appeared to hang after showing header.
+- **Investigation:** Added `revisionId`, `httpStatus`, and raw `body` to `flush.retry` log; reproduced the error; confirmed HTTP 400 `INVALID_ARGUMENT: Unknown name "requiredRevisionId": Cannot find field.`
+- **False positive in detection:** `isAborted` checked for the string `"requiredRevisionId"` anywhere in the response body — it matched inside the API's own error message, causing all failures to be treated as retriable revision conflicts instead of hard errors.
+- **Hang was not a hang:** AI-2 preview card returned a result 317ms after lookup; Docs shows the chip header immediately while waiting for `onLinkPreview` — normal behavior.
+
+### Changes
+- `SyncManager.js _poc_flushActionParagraph`: removed `requiredRevisionId` from batchUpdate payload; removed retry loop and `isAborted` detection; tightened GET fields mask to `body.content(startIndex,endIndex,paragraph/elements(textRun/content))`.
+
+## 2026-05-28 23:30:00
+
+### Summary
+Diagnosed and fixed four distinct bugs blocking the POC sheet-doc sync flow; enhanced WebApp diagnostics; added troubleshooting doc.
+
+### Changes
+- **`src/SyncManager.js`** — Fixed URL regex in `syncAll` and `_syncSheetRowToDoc` from `/\/d\/([a-zA-Z0-9_-]+)\//` to `/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]+)/`; hyperlink formulas use `open?id=DOCID` format so `syncAll` was logging `docCount:0` for every menu sync and `_syncSheetRowToDoc` was silently skipping all doc flushes, leaving Dirty permanently set
+- **`src/SyncManager.js`** — Removed `requiredRevisionId` from `_poc_flushActionParagraph` batchUpdate payload and deleted the retry loop; field is not supported by the API version in use (HTTP 400 `INVALID_ARGUMENT`); the `isAborted` string-match detection was firing on the error body itself as a false positive
+- **`src/SyncManager.js`** — Tightened GET fields mask in `_poc_flushActionParagraph` to fetch only paragraph content, reducing response payload
+- **`src/EditorChipPoc.js`** — Fixed dedup key in `_poc_processPendingSheetUpdates` from `snapshot[i].globalId` (field does not exist in queue entries) to `snapshot[i].namedRangeId`; multiple status clicks on the same action now collapse to one WebApp call
+- **`src/WebApp.js`** — Added `GasLogger.flush()` before all `doPost` return paths; all WebApp-side logs were silently buffered and never written to Drive
+- **`src/WebApp.js`** — Added col 2 (ID) refresh in `_handleUpsertActionRows` UPDATE path; ID was never written on updates
+- **`src/WebApp.js`** — Added `upsert.complete` diagnostic log showing inserted/updated counts and row details
+- **`src/WebApp.js`** — Enhanced `doGet` to report URL registration status (`unchanged` / `registered (was unset)` / `updated (was: <old>)`) in plain-text response and `webapp.doGet` log entry
+- **`docs/OPERATIONS.md`** — Added Troubleshooting section with `doGet` URL verification procedure
+
+### Key Learnings
+- Google Docs REST API batchUpdate does NOT support `requiredRevisionId` — causes HTTP 400; revision conflict detection must use a different strategy if needed
+- GAS time-based triggers have 13–60s+ actual fire delay regardless of `.after(2000)` hint — deduplicate the queue before processing to avoid redundant WebApp calls
+- `GasLogger.flush()` is required explicitly in every WebApp execution path — there is no automatic flush on execution end
+- Hyperlink formulas inserted by Google Sheets use `open?id=DOCID` format, not `/d/DOCID/edit` — URL regex must handle both formats
+
+### Open Issues
+- Assignee Name not written back to sheet: sheetWins path in `_handleSyncActionRows` sends sheet→doc but never writes the chip-resolved name (e.g. "Northlake Minister") back to sheet col 4
+- Dirty re-set after sync: WriteGuard cross-execution gap — WebApp WriteGuard doesn't suppress `onActionSheetEdit` trigger running in a separate GAS execution
+
+## 2026-05-29 02:40:00
+
+### Summary
+Design/code review of DESIGN.md + src/*.js, then reconciled the ADRs and rewrote DESIGN.md to match the code (code-first). No source code changed this session — docs/ADRs only.
+
+### Review
+- Produced `docs/design-review-05-29.md`: 22 findings (1 Critical, 5 High, 9 Medium, 7 Low) in a priority-ordered table with file:line evidence, a Source/provenance column, and a Supporting-context section drawn from the ADRs, bd memories, work-log, and `poc-editor-addon-migration.md`.
+- Headline: DESIGN.md and the ADRs had diverged from the as-built code (named-range identity + two-project sidecar vs. the actual `AI-N:` token + single project), and the ADR set was self-contradictory.
+
+### ADR reconciliation (recommendation set 1, code-first)
+- Fixed numbering collision: renamed `001-single-script-dual-deployment.md` → `0007-…`.
+- Marked **ADR-0005 Superseded by ADR-0008** and **ADR-0002 Superseded by ADR-0009** (status-line + note only; immutable bodies preserved).
+- New **ADR-0008** (in-text `AI-N:` token identity, single project, in-process-only WriteGuard) and **ADR-0009** (Dirty-flag conflict resolution).
+- Validated with the `adr-quality-check` skill: single-decision, status consistency, immutability, supersede-chain integrity all pass.
+
+### DESIGN.md rewrite (recommendation set 2, code-first)
+- New **Execution-contexts diagram** separating the four contexts (Workspace add-on ①, Docs editor add-on ②, Web App ③ deployer, container-bound triggers ④ sheet owner) with identities and cross-context channels.
+- New **Data-flow diagram** and **Conflict-Resolution flowchart** (Dirty-flag).
+- Corrected identity model (C1), scanner detection rule (H1), WriteGuard in-process-only (H2), single-project framing (H3), conflict model (M9); expanded Module Map + Script Properties (L5); sidebar = CardService (L7 doc side); removed non-existent `LAST_RECONCILED_AT`; fixed stale Test-Model "named range" descriptions.
+- Relocated the unimplemented tracker-resolution proposal to `knowledge-base/ROADMAP.md` (L4).
+- Updated the `action-identification-strategy` bd memory to the token model.
+
+### Key Learnings
+- When code and docs disagree, reconcile **code-first**: bend the ADRs/DESIGN to the implementation, recording the reversal in a superseding ADR rather than editing accepted ones.
+- The `AI-N:` token model exists because smart-chip / `insertRichLink` pill elements are invisible to `getText()` — a real constraint that forced abandoning the named-range design (now in ADR-0008).
+- "Execution context" (trigger + identity), not "thread", is the correct term for GAS's isolated executions.
+
+### Remaining
+- Code-side fixes (set 3): M1 (assignee email on upsert), M2 (idempotence guards), M3 (doc-wins token rewrite), M4 (docId matching), M10 (concurrency), plus the `namedRangeId`→`globalId` rename and deleting orphaned `onOpenSidebar`/`Sidebar.html`.
+- Pre-existing: ADR-0003 still reads `Proposed` though ADR-0006 retired it.
+- Nothing committed this session.
