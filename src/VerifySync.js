@@ -82,7 +82,7 @@ function _collectFloatingActionState(doc) {
   for (var i = 0; i < floatingActions.length; i++) {
     var action = floatingActions[i];
     rows.push({
-      namedRangeId: action.globalId || '',
+      globalId: action.globalId || '',
       assigneeEmail: action.assigneeEmail || '',
       assigneeName: action.assigneeName || '',
       action: action.actionText || '',
@@ -229,23 +229,23 @@ function _mergeVerifyPayload(left, right) {
 }
 
 function _compareVerificationState(result, floatingActions, tracker, sheetRows) {
-  var floatingByNamedRangeId = {};
-  var sheetByNamedRangeId = {};
-  var sheetById = {};
-  var trackerById = {};
+  var floatingByGlobalId = {};
+  var sheetByGlobalId    = {};
+  var sheetById          = {};
+  var trackerById        = {};
   var i;
 
   for (i = 0; i < floatingActions.length; i++) {
     var floating = floatingActions[i];
-    if (!floating.namedRangeId) {
+    if (!floating.globalId) {
       _verifyIssue(
         result,
-        'Floating action is missing a named-range anchor: ' + _formatActionLabel(floating.action, floating.status)
+        'Floating action is missing a globalId: ' + _formatActionLabel(floating.action, floating.status)
       );
       continue;
     }
-    if (floatingByNamedRangeId[floating.namedRangeId]) {
-      _verifyIssue(result, 'Duplicate floating action anchor found: ' + floating.namedRangeId);
+    if (floatingByGlobalId[floating.globalId]) {
+      _verifyIssue(result, 'Duplicate floating action globalId found: ' + floating.globalId);
       continue;
     }
     if (!floating.hasExplicitStatus) {
@@ -254,20 +254,20 @@ function _compareVerificationState(result, floatingActions, tracker, sheetRows) 
         'Floating action is missing an explicit status token: ' + _formatActionLabel(floating.action, floating.status)
       );
     }
-    floatingByNamedRangeId[floating.namedRangeId] = floating;
+    floatingByGlobalId[floating.globalId] = floating;
   }
 
   for (i = 0; i < sheetRows.length; i++) {
     var sheetRow = sheetRows[i];
-    if (!sheetRow.namedRangeId) {
-      _verifyIssue(result, 'ActionSheet row ID ' + (sheetRow.id || '?') + ' is missing NamedRangeId');
+    if (!sheetRow.globalId) {
+      _verifyIssue(result, 'ActionSheet row ID ' + (sheetRow.id || '?') + ' is missing globalId');
       continue;
     }
-    if (sheetByNamedRangeId[sheetRow.namedRangeId]) {
-      _verifyIssue(result, 'Duplicate ActionSheet NamedRangeId found: ' + sheetRow.namedRangeId);
+    if (sheetByGlobalId[sheetRow.globalId]) {
+      _verifyIssue(result, 'Duplicate ActionSheet globalId found: ' + sheetRow.globalId);
       continue;
     }
-    sheetByNamedRangeId[sheetRow.namedRangeId] = sheetRow;
+    sheetByGlobalId[sheetRow.globalId] = sheetRow;
     if (sheetRow.id) {
       sheetById[String(sheetRow.id)] = sheetRow;
     }
@@ -288,12 +288,12 @@ function _compareVerificationState(result, floatingActions, tracker, sheetRows) 
     }
   }
 
-  for (var namedRangeId in floatingByNamedRangeId) {
-    if (!Object.prototype.hasOwnProperty.call(floatingByNamedRangeId, namedRangeId)) {
+  for (var gId in floatingByGlobalId) {
+    if (!Object.prototype.hasOwnProperty.call(floatingByGlobalId, gId)) {
       continue;
     }
-    var floatingRow = floatingByNamedRangeId[namedRangeId];
-    var matchingSheetRow = sheetByNamedRangeId[namedRangeId];
+    var floatingRow = floatingByGlobalId[gId];
+    var matchingSheetRow = sheetByGlobalId[gId];
     if (!matchingSheetRow) {
       _verifyIssue(
         result,
@@ -344,12 +344,12 @@ function _compareVerificationState(result, floatingActions, tracker, sheetRows) 
     result.counts.matched++;
   }
 
-  for (var sheetNamedRangeId in sheetByNamedRangeId) {
-    if (!Object.prototype.hasOwnProperty.call(sheetByNamedRangeId, sheetNamedRangeId)) {
+  for (var sheetGlobalId in sheetByGlobalId) {
+    if (!Object.prototype.hasOwnProperty.call(sheetByGlobalId, sheetGlobalId)) {
       continue;
     }
-    if (!floatingByNamedRangeId[sheetNamedRangeId]) {
-      var extraSheetRow = sheetByNamedRangeId[sheetNamedRangeId];
+    if (!floatingByGlobalId[sheetGlobalId]) {
+      var extraSheetRow = sheetByGlobalId[sheetGlobalId];
       _verifyIssue(
         result,
         'ActionSheet row ID ' + extraSheetRow.id + ' is not listed in the document: ' + _formatActionLabel(extraSheetRow.action, extraSheetRow.status)

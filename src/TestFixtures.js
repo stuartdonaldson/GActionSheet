@@ -351,7 +351,7 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
  *                  Status, Document, Date Created, Date Modified]
  *
  * @param {object} opts
- * @param {string}  opts.namedRangeId  Named range anchor ID (empty until anchor written).
+ * @param {string}  opts.globalId  globalId (format: {docId}/AI-{N}); empty until first sync.
  * @param {string|number} opts.id
  * @param {string}  opts.assigneeEmail
  * @param {string}  opts.assigneeName
@@ -364,7 +364,7 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
  */
 function _tfSheetRow(opts) {
   return [
-    opts.namedRangeId || '',
+    opts.globalId || '',
     opts.id,
     opts.assigneeEmail || '',
     opts.assigneeName || '',
@@ -1527,7 +1527,7 @@ function setupTestFixtures(scenario) {
         doc.saveAndClose();
         docAlreadyClosed = true;
         sidebarSetStatus(sssNrId, sssNewStatus, testDocId);
-        _TF_RESULT = { tag: 'fixture.sidebar_set_status', data: { namedRangeId: sssNrId, newStatus: sssNewStatus } };
+        _TF_RESULT = { tag: 'fixture.sidebar_set_status', data: { globalId: sssNrId, newStatus: sssNewStatus } };
         break;
       }
 
@@ -1554,7 +1554,7 @@ function setupTestFixtures(scenario) {
         doc.saveAndClose();
         docAlreadyClosed = true;
         sidebarDeleteAction(sdaNrId, testDocId);
-        _TF_RESULT = { tag: 'fixture.sidebar_delete_action', data: { namedRangeId: sdaNrId } };
+        _TF_RESULT = { tag: 'fixture.sidebar_delete_action', data: { globalId: sdaNrId } };
         break;
       }
 
@@ -1656,7 +1656,7 @@ function setupAndSync(scenario) {
  * so all nine ActionSheet columns (including dates and Document formula) are
  * available without going through the WebApp.
  *
- * Checked invariants (floating action ↔ ActionSheet row, keyed by namedRangeId):
+ * Checked invariants (floating action ↔ ActionSheet row, keyed by globalId):
  *   assigneeEmail, assigneeName — exact match
  *   action                      — exact text match
  *   status                      — exact match (default 'Open' on both sides)
@@ -1703,7 +1703,7 @@ function verifyConsistencyForTest(docId) {
     var doc = DocumentApp.openById(resolvedDocId);
     result.docTitle = doc.getName();
 
-    // Collect floating actions with namedRangeIds (reuses VerifySync.js helpers).
+    // Collect floating actions with globalIds (reuses VerifySync.js helpers).
     var floatingActions = _collectFloatingActionState(doc);
     result.counts.floating = floatingActions.length;
 
@@ -1723,7 +1723,7 @@ function verifyConsistencyForTest(docId) {
         // Extract display name from =HYPERLINK("url","title")
         var titleMatch = formula.match(/HYPERLINK\s*\(\s*"[^"]*"\s*,\s*"([^"]*)"\s*\)/i);
         sheetRows.push({
-          namedRangeId: data[i][0] || '',
+          globalId: data[i][0] || '',
           id:           data[i][1] || '',
           assigneeEmail: data[i][2] || '',
           assigneeName:  data[i][3] || '',
@@ -1770,21 +1770,21 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
 
   for (i = 0; i < floatingActions.length; i++) {
     var f = floatingActions[i];
-    if (!f.namedRangeId) {
-      result.issues.push('Floating action without namedRangeId: ' + (f.action || '(blank)'));
+    if (!f.globalId) {
+      result.issues.push('Floating action without globalId: ' + (f.action || '(blank)'));
       continue;
     }
-    floatingByNrId[f.namedRangeId] = f;
+    floatingByNrId[f.globalId] = f;
   }
 
   for (i = 0; i < sheetRows.length; i++) {
     var s = sheetRows[i];
-    if (!s.namedRangeId) continue;
-    if (sheetByNrId[s.namedRangeId]) {
-      result.issues.push('Duplicate namedRangeId in ActionSheet: ' + s.namedRangeId);
+    if (!s.globalId) continue;
+    if (sheetByNrId[s.globalId]) {
+      result.issues.push('Duplicate globalId in ActionSheet: ' + s.globalId);
       continue;
     }
-    sheetByNrId[s.namedRangeId] = s;
+    sheetByNrId[s.globalId] = s;
     if (s.id) sheetById[String(s.id)] = s;
   }
 

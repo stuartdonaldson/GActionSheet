@@ -127,7 +127,7 @@ function _poc_submitCreateAction(e) {
     docUrl:   docUrl,
     docTitle: docTitle,
     rows: [{
-      namedRangeId:  globalId,
+      globalId:      globalId,
       actionText:    actionText,
       assigneeEmail: assigneeEmail,
       assigneeName:  assigneeName || assigneeEmail,
@@ -301,7 +301,7 @@ function _poc_addPeopleSuggestions(suggestions, people, query) {
 
 /**
  * Builds the smart-chip hover preview card for an action URL.
- * Looks up the action in the ActionSheet by namedRangeId.
+ * Looks up the action in the ActionSheet by globalId.
  *
  * @param {string} url  The matched action URL
  * @returns {GoogleAppsScript.Card_Service.Card}
@@ -439,7 +439,7 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
   _poc_scheduleSheetUpdate({
     docUrl:         doc.getUrl(),
     docTitle:       doc.getName(),
-    namedRangeId:   globalId,
+    globalId:       globalId,
     actionText:     actionText,
     assigneeEmail:  assigneeEmail,
     assigneeName:   assigneeName,
@@ -463,7 +463,7 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
  * Enqueues sheet upsert params into the POC_QUEUE script property (JSON array)
  * under a script lock, then schedules a drain trigger if none is already pending.
  *
- * @param {Object} params  Fields: docUrl, docTitle, namedRangeId, actionText,
+ * @param {Object} params  Fields: docUrl, docTitle, globalId, actionText,
  *                         assigneeEmail, assigneeName, status
  */
 function _poc_scheduleSheetUpdate(params) {
@@ -521,7 +521,7 @@ function _poc_processPendingSheetUpdates(e) { // eslint-disable-line no-unused-v
         docUrl:   p.docUrl,
         docTitle: p.docTitle,
         rows: [{
-          namedRangeId:  p.namedRangeId,
+          globalId:      p.globalId,
           actionText:    p.actionText,
           assigneeEmail: p.assigneeEmail,
           assigneeName:  p.assigneeName,
@@ -529,7 +529,7 @@ function _poc_processPendingSheetUpdates(e) { // eslint-disable-line no-unused-v
         }]
       });
     } catch (err) {
-      GasLogger.log('poc.asyncSheet.error', { namedRangeId: p.namedRangeId, msg: String(err) });
+      GasLogger.log('poc.asyncSheet.error', { globalId: p.globalId, msg: String(err) });
     }
     if (p.refreshTracker && p.docId) {
       trackerDocIds[p.docId] = true;
@@ -580,32 +580,32 @@ function _poc_buildMessageCard(title, message) {
 }
 
 /**
- * Looks up a single action row from the ActionSheet by namedRangeId.
+ * Looks up a single action row from the ActionSheet by globalId.
  * Uses verify_action_rows with no docUrl filter (returns all rows) then finds match.
  *
- * @param {string} namedRangeId
- * @returns {Object|null}  Row object {namedRangeId, id, assigneeEmail, assigneeName, action, status} or null
+ * @param {string} globalId
+ * @returns {Object|null}  Row object {globalId, id, assigneeEmail, assigneeName, action, status} or null
  */
 /**
- * Looks up a single action from the source document by namedRangeId.
+ * Looks up a single action from the source document by globalId.
  * The document (not the sheet) is source of truth; the sheet is downstream.
  *
- * @param {string} namedRangeId  globalId format: {docId}/AI-{N}
+ * @param {string} globalId  globalId format: {docId}/AI-{N}
  * @returns {{action, status, assigneeEmail, assigneeName}|null}
  */
-function _poc_lookupActionFromDoc(namedRangeId) {
-  if (!namedRangeId) return null;
+function _poc_lookupActionFromDoc(globalId) {
+  if (!globalId) return null;
 
-  var parts = namedRangeId.split('/AI-');
+  var parts = globalId.split('/AI-');
   if (parts.length < 2) return null;
   var docId = parts[0];
 
   try {
     var doc     = DocumentApp.openById(docId);
     var actions = _scanFloatingActions(doc);
-    GasLogger.log('poc.lookupFromDoc.scan', { namedRangeId: namedRangeId, docId: docId, count: actions.length });
+    GasLogger.log('poc.lookupFromDoc.scan', { globalId: globalId, docId: docId, count: actions.length });
     for (var i = 0; i < actions.length; i++) {
-      if (actions[i].globalId === namedRangeId) {
+      if (actions[i].globalId === globalId) {
         var a = actions[i];
         return {
           action:        a.actionText,
@@ -615,21 +615,21 @@ function _poc_lookupActionFromDoc(namedRangeId) {
         };
       }
     }
-    GasLogger.log('poc.lookupFromDoc.notfound', { namedRangeId: namedRangeId, scannedIds: actions.map(function(a) { return a.globalId; }) });
+    GasLogger.log('poc.lookupFromDoc.notfound', { globalId: globalId, scannedIds: actions.map(function(a) { return a.globalId; }) });
   } catch (err) {
-    GasLogger.log('poc.lookupFromDoc.error', { namedRangeId: namedRangeId, msg: String(err) });
+    GasLogger.log('poc.lookupFromDoc.error', { globalId: globalId, msg: String(err) });
   }
   return null;
 }
 
-function _poc_lookupAction(namedRangeId) {
-  if (!namedRangeId) return null;
+function _poc_lookupAction(globalId) {
+  if (!globalId) return null;
 
   var result = _poc_callWebApp('verify_action_rows', { docUrl: '' });
   if (!result || !result.rows) return null;
 
   for (var i = 0; i < result.rows.length; i++) {
-    if (result.rows[i].namedRangeId === namedRangeId) {
+    if (result.rows[i].globalId === globalId) {
       return result.rows[i];
     }
   }

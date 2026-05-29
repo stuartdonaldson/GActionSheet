@@ -73,7 +73,7 @@ function syncDocument(docId) {
     var anchorResults   = allDocGlobalIds.map(function(gId) {
       var a = canonicalByGlobalId[gId];
       return {
-        namedRangeId:  a.globalId,
+        globalId:      a.globalId,
         wasNew:        false,
         assigneeEmail: a.assigneeEmail,
         assigneeName:  a.assigneeName,
@@ -92,13 +92,13 @@ function syncDocument(docId) {
     var sheetWins = syncResult.sheetWins || [];
     for (var si = 0; si < sheetWins.length; si++) {
       var win = sheetWins[si];
-      var cf  = canonicalByGlobalId[win.namedRangeId];
+      var cf  = canonicalByGlobalId[win.globalId];
       if (!cf) continue;
-      toFlush[win.namedRangeId] = {
-        N:            cf.N,
-        namedRangeId: win.namedRangeId,
-        action:       win.action,
-        status:       win.status,
+      toFlush[win.globalId] = {
+        N:             cf.N,
+        globalId:      win.globalId,
+        action:        win.action,
+        status:        win.status,
         assigneeEmail: win.assigneeEmail,
         assigneeName:  win.assigneeName
       };
@@ -109,10 +109,10 @@ function syncDocument(docId) {
       var cfn = canonicalByGlobalId[ngId];
       if (!cfn) continue;
       toFlush[ngId] = {
-        N:            cfn.N,
-        namedRangeId: ngId,
-        action:       cfn.actionText,
-        status:       cfn.status,
+        N:             cfn.N,
+        globalId:      ngId,
+        action:        cfn.actionText,
+        status:        cfn.status,
         assigneeEmail: cfn.assigneeEmail,
         assigneeName:  cfn.assigneeName
       };
@@ -122,13 +122,29 @@ function syncDocument(docId) {
       var cf2 = canonicalByGlobalId[gId];
       if (!cf2) continue;
       toFlush[gId] = {
-        N:            cf2.N,
-        namedRangeId: gId,
-        action:       cf2.actionText,
-        status:       cf2.status,
+        N:             cf2.N,
+        globalId:      gId,
+        action:        cf2.actionText,
+        status:        cf2.status,
         assigneeEmail: cf2.assigneeEmail,
         assigneeName:  cf2.assigneeName
       };
+    }
+
+    // Materialize missing explicit status tokens as '(Open)' in the doc.
+    for (var gId3 in canonicalByGlobalId) {
+      if (toFlush[gId3]) continue;
+      var cfm = canonicalByGlobalId[gId3];
+      if (!cfm.hasExplicitStatus) {
+        toFlush[gId3] = {
+          N:             cfm.N,
+          globalId:      gId3,
+          action:        cfm.actionText,
+          status:        cfm.status,
+          assigneeEmail: cfm.assigneeEmail,
+          assigneeName:  cfm.assigneeName
+        };
+      }
     }
 
     var flushIds = Object.keys(toFlush);
@@ -138,9 +154,9 @@ function syncDocument(docId) {
       var token = ScriptApp.getOAuthToken();
       for (var ti = 0; ti < flushIds.length; ti++) {
         var f  = toFlush[flushIds[ti]];
-        var ok = _poc_flushActionParagraph(docId2, token, f.N, f.namedRangeId,
+        var ok = _poc_flushActionParagraph(docId2, token, f.N, f.globalId,
           f.action, f.status, f.assigneeEmail, f.assigneeName);
-        if (!ok) _remarkRowDirty(f.namedRangeId);
+        if (!ok) _remarkRowDirty(f.globalId);
       }
     } else {
       doc.saveAndClose();
@@ -261,31 +277,31 @@ function onActionSheetEdit(e) {
 function _syncSheetRowToDoc(sheet, row) {
   try {
     var rowData       = sheet.getRange(row, 1, 1, SHEET_HEADERS.length).getValues()[0];
-    var namedRangeId  = rowData[0];  // Col 1: globalId (format: {docId}/AI-{N})
+    var globalId      = rowData[0];  // Col 1: globalId (format: {docId}/AI-{N})
     var assigneeEmail = rowData[2];  // Col 3: Assignee Email
     var assigneeName  = rowData[3];  // Col 4: Assignee Name
     var action        = rowData[4];  // Col 5: Action
     var status        = rowData[5];  // Col 6: Status
     var docFormula    = sheet.getRange(row, 7).getFormula();
 
-    if (!namedRangeId) return;
+    if (!globalId) return;
     if (!docFormula) return;
 
     var docIdMatch = docFormula.match(/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]+)/);
     if (!docIdMatch) return;
     var docId = docIdMatch[1];
 
-    var parts = namedRangeId.split('/AI-');
+    var parts = globalId.split('/AI-');
     if (parts.length < 2) return;
     var N = parseInt(parts[1], 10);
     if (isNaN(N)) return;
 
     var token = ScriptApp.getOAuthToken();
-    var ok = _poc_flushActionParagraph(docId, token, N, namedRangeId, action, status, assigneeEmail, assigneeName || '');
+    var ok = _poc_flushActionParagraph(docId, token, N, globalId, action, status, assigneeEmail, assigneeName || '');
     if (ok) {
       // Flush confirmed — clear Dirty immediately rather than waiting for WebApp round-trip.
       WriteGuard.wrap(function () { sheet.getRange(row, 10).setValue(''); });
-      GasLogger.log('sync.sheet-to-doc.done', { namedRangeId: namedRangeId });
+      GasLogger.log('sync.sheet-to-doc.done', { globalId: globalId });
 
       // Full doc scan: writes chip-resolved assigneeName back to sheet (docWins branch),
       // clears any residual Dirty, and keeps the sheet consistent with the doc's canonical
@@ -294,17 +310,17 @@ function _syncSheetRowToDoc(sheet, row) {
       try {
         syncDocument(docId);
       } catch (syncErr) {
-        GasLogger.log('sync.sheet-to-doc.sync-failed', { namedRangeId: namedRangeId, msg: syncErr.message });
+        GasLogger.log('sync.sheet-to-doc.sync-failed', { globalId: globalId, msg: syncErr.message });
       }
 
       // Refresh tracker table only if one already exists in the doc.
       try {
         insertTrackerTable(docId, { onlyIfExists: true });
       } catch (trackerErr) {
-        GasLogger.log('sync.sheet-to-doc.tracker-failed', { namedRangeId: namedRangeId, msg: trackerErr.message });
+        GasLogger.log('sync.sheet-to-doc.tracker-failed', { globalId: globalId, msg: trackerErr.message });
       }
     } else {
-      GasLogger.log('sync.sheet-to-doc.flush-failed', { namedRangeId: namedRangeId });
+      GasLogger.log('sync.sheet-to-doc.flush-failed', { globalId: globalId });
     }
   } catch (err) {
     GasLogger.log('sync.sheet-to-doc.error', { row: row, msg: err.message });
@@ -473,16 +489,16 @@ function _nameFromEmail(email) {
 
 /**
  * POSTs the doc state to the Web App for conflict resolution and sheet writes.
- * Returns { upserted, updated, sheetWins: [{ namedRangeId, action, status, assigneeEmail }] }.
+ * Returns { upserted, updated, sheetWins: [{ globalId, action, status, assigneeEmail }] }.
  *
- * @param {Array}  anchorResults       Each element: { namedRangeId (globalId), assigneeEmail, assigneeName, actionText, status }.
+ * @param {Array}  anchorResults  Each element: { globalId, assigneeEmail, assigneeName, actionText, status }.
  * @param {string} docUrl
  * @param {string} docTitle
- * @param {string} docId               Document ID (for orphan detection).
- * @param {Array}  allDocNamedRangeIds All globalIds currently in the doc.
+ * @param {string} docId          Document ID (for orphan detection).
+ * @param {Array}  allDocGlobalIds All globalIds currently in the doc.
  * @returns {{upserted: number, updated: number, sheetWins: Array}}
  */
-function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocNamedRangeIds) {
+function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds) {
   var webAppUrl = getWebAppUrl();
   var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
 
@@ -495,7 +511,7 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocNamedRang
   for (var i = 0; i < anchorResults.length; i++) {
     var a = anchorResults[i];
     docState.push({
-      namedRangeId:  a.namedRangeId,
+      globalId:      a.globalId,
       assigneeEmail: a.assigneeEmail,
       assigneeName:  a.assigneeName,
       actionText:    a.actionText,
@@ -517,7 +533,7 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocNamedRang
       docTitle:           docTitle,
       docId:              docId || '',
       docState:           docState,
-      allDocNamedRangeIds: allDocNamedRangeIds || []
+      allDocGlobalIds: allDocGlobalIds || []
     })
   });
 

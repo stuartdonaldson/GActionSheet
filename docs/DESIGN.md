@@ -10,7 +10,7 @@ GActionSheet is **one** GAS project (`scriptId 12EKX…`), container-bound to th
 
 Stable action identity is an **in-text `AI-N:` token** at the start of each floating-action paragraph; the cross-document key is `globalId = {docFileId}/AI-{N}`, stored in ActionSheet column 1. DocumentApp is used for read-side traversal (the token is visible to `getText()`, and PERSON chips are exposed ergonomically); the Docs REST API `batchUpdate` is used for write-side paragraph rewrites and tracker-table mutation. **No named ranges are created for actions** — the only named range in a document is the tracker-table heading anchor.
 
-> **Identity history.** Earlier designs anchored actions with Docs REST *named ranges* (ADR-0005); this was abandoned because smart-chip / rich-link pill elements are invisible to `getText()`, forcing a text-token scanner. The current model is recorded in **ADR-0008**, the single-project architecture in **ADR-0007**, and conflict resolution in **ADR-0009**. The ActionSheet column and the in-code field are still named `NamedRangeId`/`namedRangeId` — a retained alias for `globalId`, pending rename.
+> **Identity history.** Earlier designs anchored actions with Docs REST *named ranges* (ADR-0005); this was abandoned because smart-chip / rich-link pill elements are invisible to `getText()`, forcing a text-token scanner. The current model is recorded in **ADR-0008**, the single-project architecture in **ADR-0007**, and conflict resolution in **ADR-0009**. The in-code field has been renamed `globalId` (set 3 reconciliation, 2026-05-29). The ActionSheet column heading still reads `NamedRangeId` as a legacy label pending a sheet header rename.
 
 ---
 
@@ -253,7 +253,7 @@ Grouped by execution context (see §Runtime Architecture).
 ```mermaid
 erDiagram
     Action {
-        string  namedRangeId
+        string  globalId
         int     id
         string  assigneeEmail
         string  assigneeName
@@ -265,7 +265,7 @@ erDiagram
         string  documentTitle
     }
     ActionSheetRow {
-        string  namedRangeId
+        string  globalId
         int     id
         string  assigneeEmail
         string  assigneeName
@@ -277,7 +277,7 @@ erDiagram
         string  lastModified
     }
     DocChecklistItem {
-        string  namedRangeId
+        string  globalId
         int     paragraphIndex
         string  assigneeChip
         string  actionText
@@ -299,7 +299,7 @@ erDiagram
 
 The cross-doc key is `globalId = {docId}/AI-{N}`, stored in ActionSheet column 1 (the column and the in-code field are still labelled `NamedRangeId` — a retained alias). The doc-scoped `id` (column 2) is the human-facing `AI-N` derived from that key; `N` is assigned once per document by the Token Manager and then persists in the paragraph text — it is stable, not recomputed from document order.
 
-> In the diagrams below the field is named `namedRangeId` to match the current code and sheet column; its value is a `globalId` string, not a Docs named-range ID.
+> The field in all three entities is `globalId` — the in-text identity token `{docId}/AI-{N}`. The ActionSheet column heading still reads `NamedRangeId` as a legacy alias pending a sheet rename.
 
 **Field notes:**
 - `assigneeChip` — compound value extracted from the PERSON chip, canonical form `name <email>`. The ActionSheet stores this in two separate columns (`Assignee Name`, `Assignee Email`); `DocChecklistItem` and `TrackerTableRow` hold it as a single parsed unit.
@@ -397,10 +397,10 @@ sequenceDiagram
     participant Sheet as ActionSheet
 
     User->>DocCard: tap status link in preview card
-    DocCard->>Queue: enqueue {namedRangeId, status, refreshTracker, ...}
+    DocCard->>Queue: enqueue {globalId, status, refreshTracker, ...}
     DocCard->>Trigger: schedule _poc_processPendingSheetUpdates (.after 2s)
     Note over Trigger: fires 13–60 s later (GAS minimum)
-    Trigger->>Queue: read + dedup by namedRangeId (keep last per action)
+    Trigger->>Queue: read + dedup by globalId (keep last per action)
     loop each deduplicated item
         Trigger->>WebApp: POST upsert_action_rows
         WebApp->>Sheet: upsert row cols 2,4,5,6,9 (WriteGuard in-process; doPost write does not fire onActionSheetEdit)

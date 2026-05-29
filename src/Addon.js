@@ -358,8 +358,8 @@ function _buildActionListSection(homepageState) {
     var action = homepageState.floatingActions[i];
     var assignee = action.assigneeName || action.assigneeEmail || 'Unassigned';
     var actionId = '';
-    if (action.namedRangeId) {
-      var nrParts = action.namedRangeId.split('/AI-');
+    if (action.globalId) {
+      var nrParts = action.globalId.split('/AI-');
       if (nrParts.length >= 2) actionId = 'AI-' + nrParts[1];
     }
     // Compact: AI-N • Assignee • Status on the top label line
@@ -368,7 +368,7 @@ function _buildActionListSection(homepageState) {
     topParts.push(assignee);
     topParts.push(action.status || 'Open');
     var topLabel = topParts.join(' • ');
-    var bottomLabel = action.namedRangeId ? '' : 'Needs sync';
+    var bottomLabel = action.globalId ? '' : 'Needs sync';
     section.addWidget(
       CardService.newDecoratedText()
         .setTopLabel(topLabel)
@@ -378,7 +378,7 @@ function _buildActionListSection(homepageState) {
     );
 
     // Per-action mutations — only shown when the action is anchored.
-    if (action.namedRangeId) {
+    if (action.globalId) {
       // One ImageButton per status + one delete button, all in a single row.
       var _ICON_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/';
       var _STATUS_ICONS = [
@@ -398,7 +398,7 @@ function _buildActionListSection(homepageState) {
             .setOnClickAction(
               CardService.newAction()
                 .setFunctionName('onSetActionStatus')
-                .setParameters({ namedRangeId: action.namedRangeId, newStatus: sIcon.status })
+                .setParameters({ globalId: action.globalId, newStatus: sIcon.status })
             )
         );
       }
@@ -409,7 +409,7 @@ function _buildActionListSection(homepageState) {
           .setOnClickAction(
             CardService.newAction()
               .setFunctionName('onDeleteAction')
-              .setParameters({ namedRangeId: action.namedRangeId })
+              .setParameters({ globalId: action.globalId })
           )
       );
       section.addWidget(mutationRow);
@@ -422,7 +422,7 @@ function _buildActionListSection(homepageState) {
 function _countMissingAnchors(floatingActions) {
   var count = 0;
   for (var i = 0; i < floatingActions.length; i++) {
-    if (!floatingActions[i].namedRangeId) {
+    if (!floatingActions[i].globalId) {
       count++;
     }
   }
@@ -526,11 +526,11 @@ function _poc_findParaByGlobalId(doc, globalId) {
  *
  * Log tag: sidebar.status-set.complete
  *
- * @param {string} namedRangeId  globalId (format: {docId}/AI-{N})
+ * @param {string} globalId  globalId (format: {docId}/AI-{N})
  * @param {string} newStatus
  * @param {string=} docId  Optional — resolved from getActiveDocument() when omitted.
  */
-function sidebarSetStatus(namedRangeId, newStatus, docId) {
+function sidebarSetStatus(globalId, newStatus, docId) {
   var t0 = Date.now();
   if (!docId) {
     var activeDoc = DocumentApp.getActiveDocument();
@@ -544,7 +544,7 @@ function sidebarSetStatus(namedRangeId, newStatus, docId) {
   var floatingActions = _scanFloatingActions(doc);
   var currentAction   = null;
   for (var i = 0; i < floatingActions.length; i++) {
-    if (floatingActions[i].globalId === namedRangeId) {
+    if (floatingActions[i].globalId === globalId) {
       currentAction = floatingActions[i];
       break;
     }
@@ -555,21 +555,21 @@ function sidebarSetStatus(namedRangeId, newStatus, docId) {
   var t2 = Date.now();
 
   if (currentAction) {
-    var parts = namedRangeId.split('/AI-');
+    var parts = globalId.split('/AI-');
     var N     = parseInt(parts[1], 10);
     var token = ScriptApp.getOAuthToken();
-    _poc_flushActionParagraph(docId, token, N, namedRangeId,
+    _poc_flushActionParagraph(docId, token, N, globalId,
       currentAction.actionText, newStatus, currentAction.assigneeEmail, currentAction.assigneeName);
     var t3 = Date.now();
 
-    _patchActionStatus(namedRangeId, newStatus);
+    _patchActionStatus(globalId, newStatus);
     var t4 = Date.now();
 
     if (hasTracker) insertTrackerTable(docId);
     var t5 = Date.now();
 
     GasLogger.log('sidebar.status-set.complete', {
-      namedRangeId: namedRangeId,
+      globalId: globalId,
       newStatus:    newStatus,
       hasTracker:   hasTracker,
       ms: {
@@ -582,7 +582,7 @@ function sidebarSetStatus(namedRangeId, newStatus, docId) {
       }
     });
   } else {
-    GasLogger.log('sidebar.status-set.warn', { msg: 'Action not found', namedRangeId: namedRangeId });
+    GasLogger.log('sidebar.status-set.warn', { msg: 'Action not found', globalId: globalId });
   }
   GasLogger.flush();
 }
@@ -593,16 +593,16 @@ function sidebarSetStatus(namedRangeId, newStatus, docId) {
  *
  * Log tag: sidebar.delete.complete
  *
- * @param {string} namedRangeId  globalId (format: {docId}/AI-{N})
+ * @param {string} globalId  globalId (format: {docId}/AI-{N})
  * @param {string=} docId  Optional — resolved from getActiveDocument() when omitted.
  */
-function sidebarDeleteAction(namedRangeId, docId) {
+function sidebarDeleteAction(globalId, docId) {
   if (!docId) {
     var activeDoc = DocumentApp.getActiveDocument();
     docId = activeDoc ? activeDoc.getId() : '';
   }
   var doc  = DocumentApp.openById(docId);
-  var para = _poc_findParaByGlobalId(doc, namedRangeId);
+  var para = _poc_findParaByGlobalId(doc, globalId);
 
   var deleted = false;
   if (para) {
@@ -616,10 +616,10 @@ function sidebarDeleteAction(namedRangeId, docId) {
   doc.saveAndClose();
 
   if (deleted) {
-    _deleteActionRowFromSheet(namedRangeId);
-    GasLogger.log('sidebar.delete.complete', { namedRangeId: namedRangeId });
+    _deleteActionRowFromSheet(globalId);
+    GasLogger.log('sidebar.delete.complete', { globalId: globalId });
   } else {
-    GasLogger.log('sidebar.delete.warn', { msg: 'Action not found', namedRangeId: namedRangeId });
+    GasLogger.log('sidebar.delete.warn', { msg: 'Action not found', globalId: globalId });
   }
   GasLogger.flush();
 }
@@ -629,7 +629,7 @@ function sidebarDeleteAction(namedRangeId, docId) {
  * row, and clears any stale 'Dirty' Sync Status flag.  Used by sidebarSetStatus in
  * place of the full syncDocument round-trip.
  */
-function _patchActionStatus(namedRangeId, newStatus) {
+function _patchActionStatus(globalId, newStatus) {
   var webAppUrl = getWebAppUrl();
   var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
 
@@ -648,7 +648,7 @@ function _patchActionStatus(namedRangeId, newStatus) {
       secret:        secret || '',
       action:        'patch_action_status',
       clientVersion: BUILD_INFO.version,
-      namedRangeId:  namedRangeId,
+      globalId:      globalId,
       newStatus:     newStatus
     })
   });
@@ -659,9 +659,9 @@ function _patchActionStatus(namedRangeId, newStatus) {
 }
 
 /**
- * Calls the Web App proxy to permanently delete an ActionSheet row by namedRangeId.
+ * Calls the Web App proxy to permanently delete an ActionSheet row by globalId.
  */
-function _deleteActionRowFromSheet(namedRangeId) {
+function _deleteActionRowFromSheet(globalId) {
   var webAppUrl = getWebAppUrl();
   var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
 
@@ -680,7 +680,7 @@ function _deleteActionRowFromSheet(namedRangeId) {
       secret:        secret || '',
       action:        'delete_action_row',
       clientVersion: BUILD_INFO.version,
-      namedRangeId:  namedRangeId
+      globalId:      globalId
     })
   });
 
@@ -699,8 +699,8 @@ function _deleteActionRowFromSheet(namedRangeId) {
  * the button's action parameters at render time.
  */
 function onSetActionStatus(e) {
-  var namedRangeId = e.parameters.namedRangeId;
-  var newStatus    = e.parameters.newStatus;
+  var globalId  = e.parameters.globalId;
+  var newStatus = e.parameters.newStatus;
 
   if (!newStatus) {
     return CardService.newActionResponseBuilder()
@@ -710,7 +710,7 @@ function onSetActionStatus(e) {
 
   try {
     var tA = Date.now();
-    sidebarSetStatus(namedRangeId, newStatus);
+    sidebarSetStatus(globalId, newStatus);
     var tB = Date.now();
     var card = buildHomepageCard(null, { skipSheetFetch: true });
     var tC = Date.now();
@@ -733,11 +733,11 @@ function onSetActionStatus(e) {
 
 /**
  * Card button handler: delete the action from doc and ActionSheet.
- * Called with e.parameters.namedRangeId.
+ * Called with e.parameters.globalId.
  */
 function onDeleteAction(e) {
-  var namedRangeId = e.parameters.namedRangeId;
-  sidebarDeleteAction(namedRangeId);
+  var globalId = e.parameters.globalId;
+  sidebarDeleteAction(globalId);
   return CardService.newActionResponseBuilder()
     .setNotification(CardService.newNotification().setText('Action deleted'))
     .setNavigation(CardService.newNavigation().updateCard(

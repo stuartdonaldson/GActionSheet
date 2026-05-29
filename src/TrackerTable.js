@@ -102,8 +102,8 @@ function _openActionSheetSpreadsheet() {
 // ---------------------------------------------------------------------------
 
 /**
- * Reads ActionSheet rows for the given document, keyed by namedRangeId.
- * Returns { [namedRangeId]: { id, status } }.
+ * Reads ActionSheet rows for the given document, keyed by globalId.
+ * Returns { [globalId]: { id, status } }.
  *
  * @param {Spreadsheet} ss
  * @param {string}      docId
@@ -121,9 +121,9 @@ function _readTrackerSheetRows(ss, docId) {
   for (var i = 0; i < data.length; i++) {
     var formula = formulas[i][0] || '';
     if (formula.indexOf(docId) === -1) continue;
-    var nrId = data[i][0];
-    if (!nrId) continue;
-    result[nrId] = {
+    var globalId = data[i][0];
+    if (!globalId) continue;
+    result[globalId] = {
       id:     data[i][1],
       status: data[i][5] || 'Open'
     };
