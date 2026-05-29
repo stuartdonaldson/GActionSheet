@@ -107,7 +107,22 @@ function _poc_submitCreateAction(e) {
   var docUrl   = doc.getUrl();
   var docTitle = doc.getName();
 
-  // Write row to ActionSheet via WebApp
+  // Insert chip at cursor first — doc is source of truth; sheet is downstream.
+  // NOTE: CardService.newSmartChipConfig / newRenderAction do NOT exist in the
+  // current GAS runtime (confirmed 2026-05-27 — TypeError). The REST approach
+  // is the correct insertion method.
+  var insertError = _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName || assigneeEmail);
+
+  if (insertError) {
+    GasLogger.log('CREATE_ACTION_TRIGGER.error', { msg: 'chip insert failed', err: insertError });
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().updateCard(
+        _poc_buildMessageCard('Insert failed', 'Action could not be inserted at the cursor.\n\n' + insertError)
+      ))
+      .build();
+  }
+
+  // Write row to ActionSheet only after doc insertion succeeds.
   var result = _poc_callWebApp('upsert_action_rows', {
     docUrl:   docUrl,
     docTitle: docTitle,
@@ -127,22 +142,7 @@ function _poc_submitCreateAction(e) {
       .build();
   }
 
-  // Insert chip at cursor via REST API batchUpdate.
-  // NOTE: CardService.newSmartChipConfig / newRenderAction do NOT exist in the
-  // current GAS runtime (confirmed 2026-05-27 — TypeError). The REST approach
-  // is the correct insertion method.
-  var insertError = _poc_insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName || assigneeEmail);
-
-  GasLogger.log('CREATE_ACTION_TRIGGER.done', { globalId: globalId, upserted: result.upserted });
-  // updateCard is the only allowed response in createActionTriggers context.
-  if (insertError) {
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(
-        _poc_buildMessageCard('Action saved — insert failed',
-          'Action was saved to the sheet but could not be inserted at the cursor.\n\n' + insertError)
-      ))
-      .build();
-  }
+  GasLogger.log('CREATE_ACTION_TRIGGER.done', { globalId: globalId });
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText)))
     .build();
@@ -409,7 +409,15 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
   var token  = ScriptApp.getOAuthToken();
   var hasTracker = _readTrackerTableState(doc).found;
 
-  _poc_flushActionParagraph(docId, token, N, globalId, actionText, newStatus, assigneeEmail, assigneeName);
+  var flushed = _poc_flushActionParagraph(docId, token, N, globalId, actionText, newStatus, assigneeEmail, assigneeName);
+
+  if (!flushed) {
+    GasLogger.log('POC_EDIT_ACTION.flush_failed', { globalId: globalId });
+    GasLogger.flush();
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().updateCard(_poc_buildMessageCard('Error', 'Failed to update action in document.')))
+      .build();
+  }
 
   if (hasTracker) {
     insertTrackerTable(docId);
@@ -421,7 +429,7 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
     namedRangeId:  globalId,
     actionText:    actionText,
     assigneeEmail: assigneeEmail,
-    assigneeName:  assigneeEmail,
+    assigneeName:  assigneeName,
     status:        newStatus
   });
 

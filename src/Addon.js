@@ -515,7 +515,7 @@ function _poc_findParaByGlobalId(doc, globalId) {
     var child = body.getChild(i);
     var t = child.getType();
     if (t !== DocumentApp.ElementType.PARAGRAPH && t !== DocumentApp.ElementType.LIST_ITEM) continue;
-    if (child.getText().replace(/\n$/, '').indexOf(tokenPrefix) !== -1) return child;
+    if (child.getText().replace(/\n$/, '').indexOf(tokenPrefix) === 0) return child;
   }
   return null;
 }
