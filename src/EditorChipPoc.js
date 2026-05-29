@@ -214,12 +214,14 @@ function _poc_buildCreationCard() {
  * @returns {GoogleAppsScript.Card_Service.SuggestionsResponse}
  */
 function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
-  var query = (e && e.formInput && e.formInput.poc_assignee) || '';
-  GasLogger.log('poc.suggestAssignees', { query: query });
-  var suggestions = CardService.newSuggestions();
+  try {
+    var query = (e && e.formInput && e.formInput.poc_assignee) || '';
+    GasLogger.log('poc.suggestAssignees', { query: query });
+    GasLogger.flush();
 
-  if (query.length >= 2) {
-    try {
+    var suggestions = CardService.newSuggestions();
+
+    if (query.length >= 2) {
       var token = ScriptApp.getOAuthToken();
       var url   = 'https://people.googleapis.com/v1/people:searchDirectoryPeople'
         + '?query='    + encodeURIComponent(query)
@@ -231,26 +233,37 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
         muteHttpExceptions: true
       });
 
-      if (resp.getResponseCode() === 200) {
+      var code = resp.getResponseCode();
+      GasLogger.log('poc.suggestAssignees.resp', { code: code });
+      GasLogger.flush();
+
+      if (code === 200) {
         var people = JSON.parse(resp.getContentText()).people || [];
         for (var i = 0; i < people.length && i < 8; i++) {
           var emails = people[i].emailAddresses || [];
           var names  = people[i].names          || [];
-          var email  = emails.length ? emails[0].value       : '';
-          var name   = names.length  ? names[0].displayName  : '';
+          var email  = emails.length ? emails[0].value      : '';
+          var name   = names.length  ? names[0].displayName : '';
           if (email) {
             suggestions.addSuggestion(name ? name + ' <' + email + '>' : email);
           }
         }
+      } else {
+        GasLogger.log('poc.suggestAssignees.apiError', { code: code, body: resp.getContentText().substring(0, 300) });
+        GasLogger.flush();
       }
-    } catch (err) {
-      GasLogger.log('poc.suggestAssignees.error', { msg: String(err) });
     }
-  }
 
-  return CardService.newSuggestionsResponseBuilder()
-    .setSuggestions(suggestions)
-    .build();
+    return CardService.newSuggestionsResponseBuilder()
+      .setSuggestions(suggestions)
+      .build();
+  } catch (err) {
+    GasLogger.log('poc.suggestAssignees.fatal', { msg: String(err) });
+    GasLogger.flush();
+    return CardService.newSuggestionsResponseBuilder()
+      .setSuggestions(CardService.newSuggestions())
+      .build();
+  }
 }
 
 /**
