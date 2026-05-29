@@ -405,21 +405,21 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
   var idParts  = globalId.split('/AI-');
   var N        = idParts.length >= 2 ? parseInt(idParts[1], 10) : 0;
 
-  var action        = _poc_lookupActionFromDoc(globalId);
-  var actionText    = (action && action.action)        || '';
-  var assigneeEmail = (action && action.assigneeEmail) || '';
-  var assigneeName  = (action && action.assigneeName)  || '';
-
-  // Strip any stored AI-N prefix from the sheet value
-  var prefixToStrip = 'AI-' + N + ':';
-  if (actionText.indexOf(prefixToStrip) === 0) {
-    actionText = actionText.slice(prefixToStrip.length).trim();
-  }
-
+  // Use getActiveDocument() (already loaded, no network) instead of openById
   var doc    = DocumentApp.getActiveDocument();
   var docId  = doc.getId();
   var token  = ScriptApp.getOAuthToken();
   var hasTracker = _readTrackerTableState(doc).found;
+
+  // Scan the already-open doc directly — avoids a second openById round-trip
+  var scanned = _scanFloatingActions(doc);
+  var match = null;
+  for (var si = 0; si < scanned.length; si++) {
+    if (scanned[si].globalId === globalId) { match = scanned[si]; break; }
+  }
+  var actionText    = (match && match.actionText)    || '';
+  var assigneeEmail = (match && match.assigneeEmail) || '';
+  var assigneeName  = (match && match.assigneeName)  || '';
 
   var flushed = _poc_flushActionParagraph(docId, token, N, globalId, actionText, newStatus, assigneeEmail, assigneeName);
 
