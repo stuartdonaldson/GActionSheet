@@ -221,7 +221,7 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
 
     var suggestions = CardService.newSuggestions();
 
-    if (query.length >= 3) {
+    if (query.length >= 4) {
       var token = ScriptApp.getOAuthToken();
       var url   = 'https://people.googleapis.com/v1/people:searchDirectoryPeople'
         + '?query='    + encodeURIComponent(query)
