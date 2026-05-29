@@ -128,7 +128,7 @@ The **card header title** returned by `onLinkPreview` becomes the chip's visible
 
 This means `_poc_buildPreviewCard` should set the card header title to a clean, short action label (e.g. the action text truncated to ~40 chars), not a full sentence or URL fragment.
 
-**Current implementation**: the card header title is set to the AI-N id (e.g. `AI-3`); the card subtitle is set to the action text. This produces the intended display at the top of the card.
+**Current implementation**: the card header title is set to `AI-N: action text` (combined, e.g. `AI-3: Finish launch checklist`). No subtitle is set. This keeps the chip label short and the preview card unambiguous.
 
 ### Card header title appears twice in the rendered preview card
 
@@ -136,7 +136,7 @@ Google renders the card header title in two places within the preview card:
 1. As the clickable chip-link at the very top of the card (the "title" region)
 2. Again inside the card body as a repeated title element
 
-This is a platform rendering behaviour — not a code duplication bug. Setting `CardHeader.setTitle(actionId)` and `CardHeader.setSubtitle(actionText)` results in the AI-N id appearing at the top as a link **and** again in the body. The subtitle (action text) appears only once.
+This is a platform rendering behaviour — not a code duplication bug.
 
 **Implication for `_poc_buildPreviewCard`**: do not add any widget in the card section that repeats the header title value — the platform already renders it. Only add section widgets for data not already shown in the header (status, assignee, actions).
 
@@ -148,6 +148,23 @@ Google's `linkPreviewTriggers` context enforces strict limits on which CardServi
 - **Allowed**: `TextButton`, `ImageButton`, `DecoratedText`, `TextParagraph`, static section content, `updateCard` navigation
 
 This means full edit forms cannot live in the link preview card. Status changes via `ImageButton` are the correct approach for quick mutations from the preview card.
+
+### Status icon buttons — direct mutation from preview card (implemented 2026-05-28)
+
+Status is changed from the preview card via a `ButtonSet` of `ImageButton`s, one per status value. Each button fires `_poc_setStatusFromPreview` which:
+1. Looks up the current action from the doc (source of truth)
+2. Updates the floating action paragraph in the doc via REST batchUpdate
+3. Refreshes the tracker table synchronously
+4. Schedules an async sheet upsert (non-blocking)
+5. Returns `updateCard` to refresh the preview card in place
+
+No edit card or intermediate navigation step is used. This is the only pattern that works within `linkPreviewTriggers` widget restrictions.
+
+### Doc is source of truth for preview card lookup
+
+The preview card populates its fields by scanning the source document (`_poc_lookupActionFromDoc`), not by querying the ActionSheet. Rationale: the sheet may be stale or unavailable; the doc is always the authoritative record for the action's current state. The sheet is a downstream cache that is updated asynchronously after any mutation.
+
+**Pattern**: `namedRangeId` encodes `{docId}/AI-{N}`. The lookup opens the doc by its embedded ID and scans floating actions — it never reads the sheet. This also means preview cards work correctly even before the first sheet sync.
 
 ### `createActionTriggers` manifest `id` field
 
