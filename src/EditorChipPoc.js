@@ -238,11 +238,11 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
       GasLogger.flush();
 
       if (code === 200) {
-        _poc_addPeopleSuggestions(suggestions, JSON.parse(resp.getContentText()).people || []);
+        _poc_addPeopleSuggestions(suggestions, JSON.parse(resp.getContentText()).people || [], query);
       } else {
         // Directory search failed (likely 403 — scope not granted or domain policy).
         // Fall back to personal contacts search which requires only contacts.readonly.
-        console.log('suggestAssignees: directory 403, body=' + resp.getContentText().substring(0, 300));
+        GasLogger.log('poc.suggestAssignees.dir_fail', { code: code });
         var contactsUrl = 'https://people.googleapis.com/v1/people:searchContacts'
           + '?query='    + encodeURIComponent(query)
           + '&readMask=' + encodeURIComponent('emailAddresses,names');
@@ -256,18 +256,21 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
         if (ccode === 200) {
           var cdata    = JSON.parse(cresp.getContentText());
           var cresults = (cdata.results || []).map(function(r) { return r.person; });
-          _poc_addPeopleSuggestions(suggestions, cresults);
+          _poc_addPeopleSuggestions(suggestions, cresults, query);
         } else {
-          console.log('suggestAssignees: contacts also failed, code=' + ccode + ' body=' + cresp.getContentText().substring(0, 300));
+          GasLogger.log('poc.suggestAssignees.contacts_fail', { code: ccode });
         }
       }
     }
 
-    return CardService.newSuggestionsResponseBuilder()
+    var built = CardService.newSuggestionsResponseBuilder()
       .setSuggestions(suggestions)
       .build();
+    GasLogger.log('poc.suggestAssignees.built', { query: query });
+    GasLogger.flush();
+    return built;
   } catch (err) {
-    GasLogger.log('poc.suggestAssignees.fatal', { msg: String(err) });
+    GasLogger.log('poc.suggestAssignees.fatal', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
     GasLogger.flush();
     return CardService.newSuggestionsResponseBuilder()
       .setSuggestions(CardService.newSuggestions())
@@ -275,17 +278,25 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
   }
 }
 
-/** Adds up to 8 People API person objects to a Suggestions instance. */
-function _poc_addPeopleSuggestions(suggestions, people) {
-  for (var i = 0; i < people.length && i < 4; i++) {
+/** Adds up to 4 People API person objects to a Suggestions instance. */
+function _poc_addPeopleSuggestions(suggestions, people, query) {
+  var added = 0;
+  for (var i = 0; i < people.length && added < 4; i++) {
     var emails = (people[i] && people[i].emailAddresses) || [];
     var names  = (people[i] && people[i].names)          || [];
     var email  = emails.length ? emails[0].value      : '';
     var name   = names.length  ? names[0].displayName : '';
-    if (email) {
-      suggestions.addSuggestion(name ? name + ' <' + email + '>' : email);
+    if (!email) continue;
+    // Avoid angle brackets — addSuggestion may reject them on some runtimes
+    var label = name ? name + ' (' + email + ')' : email;
+    try {
+      suggestions.addSuggestion(label);
+      added++;
+    } catch (e) {
+      GasLogger.log('poc.suggestAssignees.addSuggestion.err', { label: label, msg: String(e) });
     }
   }
+  GasLogger.log('poc.suggestAssignees.results', { query: query, peopleCount: people.length, added: added });
 }
 
 /**
@@ -299,9 +310,10 @@ function _poc_buildPreviewCard(url) {
   var globalId  = url.replace(_POC_ACTION_URL_BASE, '');
   var idParts   = globalId.split('/AI-');
   var actionId  = idParts.length >= 2 ? 'AI-' + idParts[1] : '';
-  Logger.log('Building preview card for globalId:', globalId, 'actionId:', actionId);
+  GasLogger.log('PREVIEW_CARD.lookup', { globalId: globalId, actionId: actionId });
   var action    = _poc_lookupActionFromDoc(globalId);
-  Logger.log('Lookup action result:', action);
+  GasLogger.log('PREVIEW_CARD.result', { found: !!action, action: action ? action.action : null, status: action ? action.status : null });
+  GasLogger.flush();
 
   var actionText = (action && action.action)        || '';
   var status     = (action && action.status)         || '';
@@ -575,6 +587,7 @@ function _poc_lookupActionFromDoc(namedRangeId) {
   try {
     var doc     = DocumentApp.openById(docId);
     var actions = _scanFloatingActions(doc);
+    GasLogger.log('poc.lookupFromDoc.scan', { namedRangeId: namedRangeId, docId: docId, count: actions.length });
     for (var i = 0; i < actions.length; i++) {
       if (actions[i].globalId === namedRangeId) {
         var a = actions[i];
@@ -586,6 +599,7 @@ function _poc_lookupActionFromDoc(namedRangeId) {
         };
       }
     }
+    GasLogger.log('poc.lookupFromDoc.notfound', { namedRangeId: namedRangeId, scannedIds: actions.map(function(a) { return a.globalId; }) });
   } catch (err) {
     GasLogger.log('poc.lookupFromDoc.error', { namedRangeId: namedRangeId, msg: String(err) });
   }
