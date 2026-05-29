@@ -28,9 +28,9 @@ function syncDocument(docId) {
       _markDocNotFound(docId);
       return;
     }
-    var assigned = _assignPlaceholderTokens(doc);
-    if (assigned > 0) {
-      GasLogger.log('sync.assigned', { docId: docId, count: assigned });
+    var assignResult = _assignPlaceholderTokens(doc);
+    if (assignResult.count > 0) {
+      GasLogger.log('sync.assigned', { docId: docId, count: assignResult.count });
     }
 
     var floatingActions = _scanFloatingActions(doc);
@@ -86,6 +86,7 @@ function syncDocument(docId) {
 
     // Build the set of globalIds that need a REST flush:
     //   - sheetWins: sheet edited → push sheet data back to doc (all occurrences)
+    //   - newly assigned: AI: → AI-N: just created → need chip link + badge applied
     //   - duplicates without a sheetWin: copy paragraphs → sync to canonical doc data
     var toFlush = {};
     var sheetWins = syncResult.sheetWins || [];
@@ -102,8 +103,22 @@ function syncDocument(docId) {
         assigneeName:  win.assigneeName
       };
     }
+    for (var ni = 0; ni < assignResult.newGlobalIds.length; ni++) {
+      var ngId = assignResult.newGlobalIds[ni];
+      if (toFlush[ngId]) continue; // sheetWin already covers it
+      var cfn = canonicalByGlobalId[ngId];
+      if (!cfn) continue;
+      toFlush[ngId] = {
+        N:            cfn.N,
+        namedRangeId: ngId,
+        action:       cfn.actionText,
+        status:       cfn.status,
+        assigneeEmail: cfn.assigneeEmail,
+        assigneeName:  cfn.assigneeName
+      };
+    }
     for (var gId in hasDuplicateN) {
-      if (toFlush[gId]) continue; // sheetWin already covers it
+      if (toFlush[gId]) continue; // sheetWin or new-assign already covers it
       var cf2 = canonicalByGlobalId[gId];
       if (!cf2) continue;
       toFlush[gId] = {
@@ -373,11 +388,12 @@ function _scanFloatingActions(doc) {
  * sees fully-formed AI-N: tokens.
  *
  * @param {GoogleAppsScript.Document.Document} doc
- * @returns {number} count of placeholders assigned
+ * @returns {{ count: number, newGlobalIds: string[] }}
  */
 function _assignPlaceholderTokens(doc) {
-  var body = doc.getBody();
-  var n    = body.getNumChildren();
+  var docId = doc.getId();
+  var body  = doc.getBody();
+  var n     = body.getNumChildren();
 
   // First pass: find current max N
   var maxN = 0;
@@ -390,7 +406,8 @@ function _assignPlaceholderTokens(doc) {
   }
 
   // Second pass: assign next N to each bare "AI:" placeholder
-  var assigned = 0;
+  var assigned     = 0;
+  var newGlobalIds = [];
   for (var j = 0; j < n; j++) {
     var child2 = body.getChild(j);
     var t2 = child2.getType();
@@ -401,10 +418,11 @@ function _assignPlaceholderTokens(doc) {
     maxN++;
     // Insert '-N' at position 2 (between 'AI' and ':') → 'AI:' becomes 'AI-N:'
     child2.editAsText().insertText(2, '-' + maxN);
+    newGlobalIds.push(docId + '/AI-' + maxN);
     assigned++;
   }
 
-  return assigned;
+  return { count: assigned, newGlobalIds: newGlobalIds };
 }
 
 /**
@@ -637,13 +655,13 @@ function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status
       range: { startIndex: pStart, endIndex: pStart + 1 + tokenLen },
       textStyle: { link: { url: chipUrl } }, fields: 'link'
     }});
-    // Chip badge: Comic Sans bold white on dark-purple, no hyperlink underline
+    // Chip badge: Comic Sans bold dark-purple, no background, no hyperlink underline
     requests.push({ updateTextStyle: {
       range: { startIndex: pStart + 1, endIndex: pStart + 1 + tokenLen },
       textStyle: {
         bold: true, underline: false,
-        foregroundColor: { color: { rgbColor: { red: 1.0, green: 1.0, blue: 1.0 } } },
-        backgroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
+        foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
+        backgroundColor: { color: { rgbColor: { red: 1.0, green: 1.0, blue: 1.0 } } },
         weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
       },
       fields: 'bold,underline,foregroundColor,backgroundColor,weightedFontFamily'
