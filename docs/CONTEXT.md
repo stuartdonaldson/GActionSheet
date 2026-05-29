@@ -122,19 +122,19 @@ Actor: Document author
 
 Preconditions:
 - The add-on is installed and the user has the doc open.
-- The doc contains at least one floating action: either a chip-led checklist item (PERSON chip as the first inline child of a paragraph or list item) or an email-at-start item (first text content begins with a valid email address).
+- The doc contains at least one floating action: a checklist item or paragraph beginning with `AI:` (auto-ID) or `AI-N:` (explicit ID), followed by an optional assignee email and action text.
 
 Primary Flow:
-1. Author writes a checklist item that begins with a person chip or an email address, with optional action text and an optional trailing `(Status)` token.
+1. Author writes a checklist item that begins with `AI:` or `AI-N:`, optionally followed by an assignee email and action text, with an optional trailing `(Status)` token.
 2. Author opens the homepage card and clicks **Sync now**.
-3. The add-on scans the doc, detects each floating action by chip or email-at-start, creates a named range anchoring each one, and writes a row to the ActionSheet with the resolved assignee and `Status = Open` (or the trailing token value if present).
+3. The add-on scans the doc, detects each floating action by `AI-N:` token at paragraph start (bare `AI:` is first promoted to `AI-N:`), creates a named range anchoring each one, and writes a row to the ActionSheet with the resolved assignee and `Status = Open` (or the trailing token value if present).
 4. The homepage card refreshes and shows the new actions.
 
 Postconditions:
 - Every floating action in the document has exactly one corresponding ActionSheet row, and the pair agrees on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `NamedRangeId` (non-empty). The ActionSheet `Document` column display text equals the current document title. No ActionSheet rows for this document exist beyond those with a corresponding floating action.
 
 Acceptance Criteria:
-- AC1: After Sync, both chip-led and email-led list items appear in the ActionSheet with correct `Assignee Email`, `Assignee Name`, action text, status, and a non-empty `NamedRangeId`. For email-led items, `Assignee Name` is derived from the username portion of the email.
+- AC1: After Sync, AI-token items — bare `AI:` (auto-ID) and explicit `AI-N:`, with and without an assignee email — appear in the ActionSheet with correct `Assignee Email`, `Assignee Name`, action text, status, and a non-empty `NamedRangeId`. For email assignees, `Assignee Name` is derived from the username portion of the email.
 - AC2: A second Sync with no edits produces no new rows and no lost rows. All `NamedRangeId` values are unchanged. Every floating action has exactly one ActionSheet row; the pair is consistent on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `NamedRangeId`. The `Document` column display text equals the current document title.
 
 ---

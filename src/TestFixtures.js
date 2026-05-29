@@ -1496,6 +1496,83 @@ function setupTestFixtures(scenario) {
         break;
       }
 
+      case 'begin_journey_session': {
+        // Clone the master template (testDocId) into a fresh named journey doc.
+        // Does NOT update TEST_DOC_ID or TEST_DOC_TEMPLATE_ID — safe to run
+        // alongside an active begin_test_session clone in the same pytest session.
+        var bjsNow    = new Date();
+        var bjsDate   = Utilities.formatDate(bjsNow, Session.getScriptTimeZone(), 'yyyyMMdd');
+        var bjsHex    = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4);
+        var bjsName   = 'GActionSheet-Test-journey-' + bjsDate + '-' + bjsHex;
+        var bjsSheetId = PropertiesService.getScriptProperties().getProperty('TEST_SHEET_ID');
+        var bjsFolderIter = DriveApp.getFileById(bjsSheetId).getParents();
+        var bjsParent = bjsFolderIter.hasNext() ? bjsFolderIter.next() : DriveApp.getRootFolder();
+        var bjsClone  = DriveApp.getFileById(testDocId).makeCopy(bjsName, bjsParent);
+        _TF_RESULT = {
+          tag:  'fixture.begin_journey_session',
+          data: { journeyDocId: bjsClone.getId(), journeyName: bjsName }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'end_journey_session': {
+        // Trash the journey clone identified by testDocId.
+        DriveApp.getFileById(testDocId).setTrashed(true);
+        _TF_RESULT = { tag: 'fixture.end_journey_session', data: { trashed: testDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'scenario_journey_seed': {
+        // Insert the four §14 AI-token seed items into the journey doc.
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        var sjsToken = ScriptApp.getOAuthToken();
+        _tfAppendTextListItem(sjsToken, testDocId,
+          'AI: This tag and text confirms creation of an unassigned action item');
+        _tfAppendTextListItem(sjsToken, testDocId,
+          'AI: aitest@example.com This tag and email address along with this text confirms the creation of an action item with an assignee.');
+        _tfAppendTextListItem(sjsToken, testDocId,
+          'AI-5: This tag and text confirms creation of an action item with id AI-5 pre-assigning the specific ID.');
+        _tfAppendTextListItem(sjsToken, testDocId,
+          'AI-9: minister@northlakeuu.org This tag, email and text should result in the creation of the assignee as a person chip, working within our Northlake domain this has a username of \'Northlake Minister\' which should appear in the chip.');
+        _TF_RESULT = { tag: 'fixture.scenario_journey_seed', data: { itemsSeeded: 4 } };
+        break;
+      }
+
+      case 'insert_tracker_table': {
+        // Standalone tracker table insert — no seeding bundled in.
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        insertTrackerTable(testDocId);
+        _TF_RESULT = { tag: 'fixture.insert_tracker_table', data: { inserted: true } };
+        break;
+      }
+
+      case 'scenario_delete_unassigned': {
+        // Find the §14 unassigned action by its exact seeded text and delete it.
+        var sduTarget  = 'This tag and text confirms creation of an unassigned action item';
+        var sduActions = _scanFloatingActions(doc);
+        var sduId      = '';
+        for (var sdui = 0; sdui < sduActions.length; sdui++) {
+          if (sduActions[sdui].actionText === sduTarget) {
+            sduId = sduActions[sdui].globalId || '';
+            break;
+          }
+        }
+        if (!sduId) {
+          GasLogger.log('fixture.scenario_delete_unassigned', { error: 'not found', target: sduTarget });
+          _TF_RESULT = { tag: 'fixture.scenario_delete_unassigned', data: { error: 'not found' } };
+          break;
+        }
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        sidebarDeleteAction(sduId, testDocId);
+        _TF_RESULT = { tag: 'fixture.scenario_delete_unassigned', data: { globalId: sduId } };
+        break;
+      }
+
       case 'ensure_sheet_structure': {
         // Ensure the ActionSheet has the correct tab layout and headers.
         // Used by test_infrastructure.py before header-layout assertions.
