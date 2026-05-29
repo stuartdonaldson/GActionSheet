@@ -587,104 +587,112 @@ function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status
   // Docs REST API insertInlineImage does not support SVG — use PNG until PNG status icons exist.
   var imgUrl = 'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
 
-  // GET to find paragraph indices. builtText is text-run content only;
-  // inline images appear as inlineObjectElement (not textRun) so they are absent.
-  // Therefore builtText for [img][AI-N: ][chip] text starts with "AI-N: ".
-  var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=revisionId,body.content',
-    { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
-  if (getResp.getResponseCode() !== 200) {
-    GasLogger.log('flush.error', { msg: 'GET failed: HTTP ' + getResp.getResponseCode(), globalId: globalId });
-    return;
-  }
-
-  var getBody   = JSON.parse(getResp.getContentText());
-  var revisionId = getBody.revisionId || '';
-  var content   = (getBody.body || {}).content || [];
-
-  // Collect ALL occurrences of this AI-N: token (handles copy-pasted paragraphs).
-  // Process descending so lower-index paragraphs are unaffected by higher-index changes.
-  var occurrences = [];
-  for (var i = 0; i < content.length; i++) {
-    var para = content[i].paragraph;
-    if (!para) continue;
-    var runs = para.elements || [];
-    var builtText = '';
-    for (var j = 0; j < runs.length; j++) {
-      if (runs[j].textRun) builtText += runs[j].textRun.content || '';
-    }
-    var plainText = builtText.replace(/\n$/, '');
-    var m = plainText.match(/^AI-(\d+):/);
-    if (m && parseInt(m[1], 10) === N) {
-      occurrences.push({ pStart: content[i].startIndex, pEnd: content[i].endIndex });
-    }
-  }
-
-  if (occurrences.length === 0) {
-    GasLogger.log('flush.warn', { msg: 'Paragraph not found', globalId: globalId });
-    return false;
-  }
-
-  occurrences.sort(function(a, b) { return b.pStart - a.pStart; });
-
   var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);
   var tokenLen   = ('AI-' + N + ': ').length;
-  var requests   = [];
+  var delays     = [0, 500, 1000];
 
-  for (var oi = 0; oi < occurrences.length; oi++) {
-    var pStart = occurrences[oi].pStart;
-    var pEnd   = occurrences[oi].pEnd;
+  for (var attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) Utilities.sleep(delays[attempt]);
 
-    // Delete existing paragraph content, preserving the trailing \n at pEnd-1.
-    if (pEnd - 1 > pStart) {
-      requests.push({ deleteContentRange: { range: { startIndex: pStart, endIndex: pEnd - 1 } } });
+    // GET to find paragraph indices and capture revisionId for conflict detection.
+    // builtText is text-run content only — inline images appear as inlineObjectElement.
+    var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=revisionId,body.content',
+      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+    if (getResp.getResponseCode() !== 200) {
+      GasLogger.log('flush.error', { msg: 'GET failed: HTTP ' + getResp.getResponseCode(), globalId: globalId, attempt: attempt });
+      return false;
     }
 
-    // Re-insert in reverse order (each inserts at pStart, pushing prior content right).
-    // Final paragraph order: [image][AI-N: text][optional person chip][action text (status)]
-    if (validEmail) {
-      requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: pStart } } });
-      // insertPerson rejects any name field in personProperties — email only
-      requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: pStart } } });
-    } else {
-      requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: pStart } } });
+    var getBody    = JSON.parse(getResp.getContentText());
+    var revisionId = getBody.revisionId || '';
+    var content    = (getBody.body || {}).content || [];
+
+    // Collect ALL occurrences of this AI-N: token (handles copy-pasted paragraphs).
+    // Process descending so lower-index paragraphs are unaffected by higher-index changes.
+    var occurrences = [];
+    for (var i = 0; i < content.length; i++) {
+      var para = content[i].paragraph;
+      if (!para) continue;
+      var runs = para.elements || [];
+      var builtText = '';
+      for (var j = 0; j < runs.length; j++) {
+        if (runs[j].textRun) builtText += runs[j].textRun.content || '';
+      }
+      var plainText = builtText.replace(/\n$/, '');
+      var m = plainText.match(/^AI-(\d+):/);
+      if (m && parseInt(m[1], 10) === N) {
+        occurrences.push({ pStart: content[i].startIndex, pEnd: content[i].endIndex });
+      }
     }
-    requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: pStart } } });
-    requests.push({ insertInlineImage: {
-      uri: imgUrl, location: { index: pStart },
-      objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
-    }});
-    requests.push({ updateTextStyle: {
-      range: { startIndex: pStart, endIndex: pStart + 1 + tokenLen },
-      textStyle: { link: { url: chipUrl } }, fields: 'link'
-    }});
-    // Chip badge: Comic Sans bold dark-purple, no background, no hyperlink underline
-    requests.push({ updateTextStyle: {
-      range: { startIndex: pStart + 1, endIndex: pStart + 1 + tokenLen },
-      textStyle: {
-        bold: true, underline: false,
-        foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
-        backgroundColor: { color: { rgbColor: { red: 1.0, green: 1.0, blue: 1.0 } } },
-        weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
-      },
-      fields: 'bold,underline,foregroundColor,backgroundColor,weightedFontFamily'
-    }});
-  }
 
-  var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
-    method: 'post', muteHttpExceptions: true,
-    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-    payload: JSON.stringify({ requests: requests, requiredRevisionId: revisionId })
-  });
+    if (occurrences.length === 0) {
+      GasLogger.log('flush.warn', { msg: 'Paragraph not found', globalId: globalId });
+      return false;
+    }
 
-  if (batchResp.getResponseCode() !== 200) {
-    GasLogger.log('flush.error', {
-      msg:      'batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
-      body:     batchResp.getContentText().substring(0, 300),
-      globalId: globalId,
-      copies:   occurrences.length
+    occurrences.sort(function(a, b) { return b.pStart - a.pStart; });
+
+    var requests = [];
+    for (var oi = 0; oi < occurrences.length; oi++) {
+      var pStart = occurrences[oi].pStart;
+      var pEnd   = occurrences[oi].pEnd;
+
+      // Delete existing paragraph content, preserving the trailing \n at pEnd-1.
+      if (pEnd - 1 > pStart) {
+        requests.push({ deleteContentRange: { range: { startIndex: pStart, endIndex: pEnd - 1 } } });
+      }
+
+      // Re-insert in reverse order (each inserts at pStart, pushing prior content right).
+      // Final paragraph order: [image][AI-N: text][optional person chip][action text (status)]
+      if (validEmail) {
+        requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: pStart } } });
+        // insertPerson rejects any name field in personProperties — email only
+        requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: pStart } } });
+      } else {
+        requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: pStart } } });
+      }
+      requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: pStart } } });
+      requests.push({ insertInlineImage: {
+        uri: imgUrl, location: { index: pStart },
+        objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
+      }});
+      requests.push({ updateTextStyle: {
+        range: { startIndex: pStart, endIndex: pStart + 1 + tokenLen },
+        textStyle: { link: { url: chipUrl } }, fields: 'link'
+      }});
+      // Chip badge: Comic Sans bold dark-purple, no background, no hyperlink underline
+      requests.push({ updateTextStyle: {
+        range: { startIndex: pStart + 1, endIndex: pStart + 1 + tokenLen },
+        textStyle: {
+          bold: true, underline: false,
+          foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
+          backgroundColor: { color: { rgbColor: { red: 1.0, green: 1.0, blue: 1.0 } } },
+          weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
+        },
+        fields: 'bold,underline,foregroundColor,backgroundColor,weightedFontFamily'
+      }});
+    }
+
+    var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
+      method: 'post', muteHttpExceptions: true,
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      payload: JSON.stringify({ requests: requests, requiredRevisionId: revisionId })
     });
-    return false;
+
+    if (batchResp.getResponseCode() === 200) {
+      GasLogger.log('flush.done', { globalId: globalId, status: status, copies: occurrences.length, attempt: attempt });
+      return true;
+    }
+
+    var respBody  = batchResp.getContentText();
+    var isAborted = respBody.indexOf('ABORTED') !== -1 || respBody.indexOf('requiredRevisionId') !== -1;
+    if (!isAborted) {
+      GasLogger.log('flush.error', { msg: 'batchUpdate failed: HTTP ' + batchResp.getResponseCode(), body: respBody.substring(0, 300), globalId: globalId, copies: occurrences.length });
+      return false;
+    }
+    GasLogger.log('flush.retry', { msg: 'revision conflict', attempt: attempt, globalId: globalId });
   }
-  GasLogger.log('flush.done', { globalId: globalId, status: status, copies: occurrences.length });
-  return true;
+
+  GasLogger.log('flush.error', { msg: 'batchUpdate failed after 3 attempts', globalId: globalId });
+  return false;
 }
