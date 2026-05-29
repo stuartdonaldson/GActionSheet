@@ -221,7 +221,7 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
 
     var suggestions = CardService.newSuggestions();
 
-    if (query.length >= 2) {
+    if (query.length >= 3) {
       var token = ScriptApp.getOAuthToken();
       var url   = 'https://people.googleapis.com/v1/people:searchDirectoryPeople'
         + '?query='    + encodeURIComponent(query)
@@ -277,7 +277,7 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
 
 /** Adds up to 8 People API person objects to a Suggestions instance. */
 function _poc_addPeopleSuggestions(suggestions, people) {
-  for (var i = 0; i < people.length && i < 8; i++) {
+  for (var i = 0; i < people.length && i < 4; i++) {
     var emails = (people[i] && people[i].emailAddresses) || [];
     var names  = (people[i] && people[i].names)          || [];
     var email  = emails.length ? emails[0].value      : '';
