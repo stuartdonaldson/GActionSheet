@@ -437,18 +437,16 @@ function _poc_setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
       .build();
   }
 
-  if (hasTracker) {
-    insertTrackerTable(docId);
-  }
-
   _poc_scheduleSheetUpdate({
-    docUrl:        doc.getUrl(),
-    docTitle:      doc.getName(),
-    namedRangeId:  globalId,
-    actionText:    actionText,
-    assigneeEmail: assigneeEmail,
-    assigneeName:  assigneeName,
-    status:        newStatus
+    docUrl:         doc.getUrl(),
+    docTitle:       doc.getName(),
+    namedRangeId:   globalId,
+    actionText:     actionText,
+    assigneeEmail:  assigneeEmail,
+    assigneeName:   assigneeName,
+    status:         newStatus,
+    refreshTracker: hasTracker,
+    docId:          docId
   });
 
   GasLogger.log('POC_EDIT_ACTION.complete', { globalId: globalId, status: newStatus });
@@ -533,6 +531,13 @@ function _poc_processPendingSheetUpdates(e) { // eslint-disable-line no-unused-v
       });
     } catch (err) {
       GasLogger.log('poc.asyncSheet.error', { namedRangeId: p.namedRangeId, msg: String(err) });
+    }
+    if (p.refreshTracker && p.docId) {
+      try {
+        insertTrackerTable(p.docId);
+      } catch (err) {
+        GasLogger.log('poc.asyncTracker.error', { docId: p.docId, msg: String(err) });
+      }
     }
   }
 
