@@ -6,7 +6,8 @@
  * and ActionSheet rows for the same document.
  */
 
-var _VERIFY_TRACKER_HEADING = '=== Tracked Actions ===';
+var _VERIFY_TRACKER_HEADING     = 'Action Item Summary';
+var _VERIFY_TRACKER_HEADING_OLD = '=== Tracked Actions ===';
 
 function verifyDocumentSync(docId) {
   if (!docId) {
@@ -106,7 +107,8 @@ function _readTrackerTableState(doc) {
     if (!headingFound) {
       if ((type === DocumentApp.ElementType.PARAGRAPH ||
            type === DocumentApp.ElementType.LIST_ITEM) &&
-          child.getText().trim() === _VERIFY_TRACKER_HEADING) {
+          (child.getText().trim() === _VERIFY_TRACKER_HEADING ||
+           child.getText().trim() === _VERIFY_TRACKER_HEADING_OLD)) {
         headingFound = true;
       }
       continue;

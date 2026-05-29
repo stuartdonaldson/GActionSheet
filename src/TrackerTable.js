@@ -4,7 +4,7 @@
  * UC-C: Insert or refresh the in-doc tracker table.
  *
  * The tracker section comprises:
- *   1. A heading paragraph "=== Tracked Actions ==="
+ *   1. A heading paragraph "Action Item Summary" (Heading 1; preserved on refresh)
  *   2. A read-only notice paragraph
  *   3. A table: ID | Assignee | Action | Status  (header row + one data row per action)
  *
@@ -17,7 +17,8 @@
  * body-index order.
  */
 
-var _TRACKER_HEADING       = '=== Tracked Actions ===';
+var _TRACKER_HEADING       = 'Action Item Summary';
+var _TRACKER_HEADING_OLD   = '=== Tracked Actions ===';
 var _TRACKER_ANCHOR_NAME   = 'gactionsheet-tracker-anchor';
 var _TRACKER_NOTICE        = (
   'This table is read-only. ' +
@@ -50,8 +51,8 @@ function insertTrackerTable(docId) {
     var sheetRows = _readTrackerSheetRows(ss, docId);
     var dataRows  = _buildTrackerDataRows(floatingActions, sheetRows);
 
-    var insertIndex = _removeTrackerSection(doc);
-    var sectionOut  = _insertTrackerSection(doc, dataRows, insertIndex);
+    var removed    = _removeTrackerSection(doc);
+    var sectionOut = _insertTrackerSection(doc, dataRows, removed.index, removed.headingKept);
 
     doc.saveAndClose();
 
@@ -165,24 +166,34 @@ function _buildTrackerDataRows(floatingActions, sheetRows) {
 function _removeTrackerSection(doc) {
   var body         = doc.getBody();
   var headingIndex = -1;
+  var isNewHeading = false;
   var i;
 
   for (i = 0; i < body.getNumChildren(); i++) {
     var child = body.getChild(i);
     var type  = child.getType();
-    if ((type === DocumentApp.ElementType.PARAGRAPH ||
-         type === DocumentApp.ElementType.LIST_ITEM) &&
-        child.getText().trim() === _TRACKER_HEADING) {
-      headingIndex = i;
-      break;
+    if (type === DocumentApp.ElementType.PARAGRAPH ||
+        type === DocumentApp.ElementType.LIST_ITEM) {
+      var txt = child.getText().trim();
+      if (txt === _TRACKER_HEADING) {
+        headingIndex = i;
+        isNewHeading = true;
+        break;
+      }
+      if (txt === _TRACKER_HEADING_OLD) {
+        headingIndex = i;
+        break;
+      }
     }
   }
 
-  if (headingIndex === -1) return -1;
+  if (headingIndex === -1) return { index: -1, headingKept: false };
 
-  // Collect indices: heading + any paragraphs that follow + the table
-  var toRemove = [headingIndex];
-  for (i = headingIndex + 1; i < body.getNumChildren(); i++) {
+  // For the new heading, preserve it — only remove the notice + table that follow.
+  // For the old heading, remove it too so it gets replaced.
+  var startRemove = isNewHeading ? headingIndex + 1 : headingIndex;
+  var toRemove    = [];
+  for (i = startRemove; i < body.getNumChildren(); i++) {
     var el  = body.getChild(i);
     var elt = el.getType();
     if (elt === DocumentApp.ElementType.TABLE) {
@@ -197,12 +208,14 @@ function _removeTrackerSection(doc) {
     }
   }
 
-  // Remove in reverse order so earlier indices stay valid
   for (var j = toRemove.length - 1; j >= 0; j--) {
     body.removeChild(body.getChild(toRemove[j]));
   }
 
-  return headingIndex;
+  return {
+    index:       isNewHeading ? headingIndex + 1 : headingIndex,
+    headingKept: isNewHeading
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -217,20 +230,34 @@ function _removeTrackerSection(doc) {
  *
  * @param {Document}  doc
  * @param {Array}     dataRows     Output of _buildTrackerDataRows.
- * @param {number}    insertIndex  Child index returned by _removeTrackerSection.
+ * @param {number}  insertIndex  Child index returned by _removeTrackerSection.
+ * @param {boolean} headingKept  True when the heading was preserved (not removed).
  * @returns {{ assigneeEmails: string[], globalIds: string[] }}
  */
-function _insertTrackerSection(doc, dataRows, insertIndex) {
-  var body       = doc.getBody();
-  var appending  = (insertIndex === -1);
+function _insertTrackerSection(doc, dataRows, insertIndex, headingKept) {
+  var body      = doc.getBody();
+  var appending = (insertIndex === -1);
 
   var headingPara;
-  if (appending) {
+  var noticeIdx;
+  if (headingKept) {
+    // Heading already in place — insert notice immediately after it.
+    var noticePara = body.insertParagraph(insertIndex, _TRACKER_NOTICE);
+    noticePara.editAsText().setItalic(true).setFontSize(10);
+    noticeIdx  = insertIndex;
+    headingPara = body.getChild(insertIndex - 1).asParagraph();
+  } else if (appending) {
     headingPara = body.appendParagraph(_TRACKER_HEADING);
-    body.appendParagraph(_TRACKER_NOTICE);
+    headingPara.setHeading(DocumentApp.ParagraphHeading.HEADING1);
+    var np = body.appendParagraph(_TRACKER_NOTICE);
+    np.editAsText().setItalic(true).setFontSize(10);
+    noticeIdx = body.getChildIndex(np);
   } else {
     headingPara = body.insertParagraph(insertIndex, _TRACKER_HEADING);
-    body.insertParagraph(insertIndex + 1, _TRACKER_NOTICE);
+    headingPara.setHeading(DocumentApp.ParagraphHeading.HEADING1);
+    var noticePara2 = body.insertParagraph(insertIndex + 1, _TRACKER_NOTICE);
+    noticePara2.editAsText().setItalic(true).setFontSize(10);
+    noticeIdx = insertIndex + 1;
   }
 
   // Build 2D cells array: header row + one data row per action
@@ -248,7 +275,7 @@ function _insertTrackerSection(doc, dataRows, insertIndex) {
   if (appending) {
     table = body.appendTable(cells);
   } else {
-    table = body.insertTable(insertIndex + 2, cells);
+    table = body.insertTable(noticeIdx + 1, cells);
   }
 
   // Column alignment (ID, Assignee, Status centered; Action left as-is) + bold header row
@@ -336,7 +363,8 @@ function _insertTrackerAssigneeChips(docId, assigneeEmails, assigneeNames) {
   for (var i = 0; i < content.length; i++) {
     var elem = content[i];
     if (!headingFound && elem.paragraph) {
-      if (_extractParaText(elem.paragraph).trim() === _TRACKER_HEADING) {
+      var pt = _extractParaText(elem.paragraph).trim();
+      if (pt === _TRACKER_HEADING || pt === _TRACKER_HEADING_OLD) {
         headingFound = true;
       }
     } else if (headingFound && elem.table) {
@@ -433,7 +461,8 @@ function _insertTrackerIdLinks(docId, globalIds) {
   for (var i = 0; i < content.length; i++) {
     var elem = content[i];
     if (!headingFound && elem.paragraph) {
-      if (_extractParaText(elem.paragraph).trim() === _TRACKER_HEADING) {
+      var pt2 = _extractParaText(elem.paragraph).trim();
+      if (pt2 === _TRACKER_HEADING || pt2 === _TRACKER_HEADING_OLD) {
         headingFound = true;
       }
     } else if (headingFound && elem.table) {
