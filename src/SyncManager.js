@@ -590,14 +590,16 @@ function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status
   // GET to find paragraph indices. builtText is text-run content only;
   // inline images appear as inlineObjectElement (not textRun) so they are absent.
   // Therefore builtText for [img][AI-N: ][chip] text starts with "AI-N: ".
-  var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=body.content',
+  var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=revisionId,body.content',
     { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
   if (getResp.getResponseCode() !== 200) {
     GasLogger.log('flush.error', { msg: 'GET failed: HTTP ' + getResp.getResponseCode(), globalId: globalId });
     return;
   }
 
-  var content   = (JSON.parse(getResp.getContentText()).body || {}).content || [];
+  var getBody   = JSON.parse(getResp.getContentText());
+  var revisionId = getBody.revisionId || '';
+  var content   = (getBody.body || {}).content || [];
 
   // Collect ALL occurrences of this AI-N: token (handles copy-pasted paragraphs).
   // Process descending so lower-index paragraphs are unaffected by higher-index changes.
@@ -671,7 +673,7 @@ function _poc_flushActionParagraph(docId, token, N, globalId, actionText, status
   var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
     method: 'post', muteHttpExceptions: true,
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-    payload: JSON.stringify({ requests: requests })
+    payload: JSON.stringify({ requests: requests, requiredRevisionId: revisionId })
   });
 
   if (batchResp.getResponseCode() !== 200) {
