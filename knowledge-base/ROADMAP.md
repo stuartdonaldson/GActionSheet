@@ -104,12 +104,20 @@ folder; and an action to rebind the document to a different tracker intentionall
 1. Resolve the active document's parent folder.
 2. Create or validate one folder-local tracking spreadsheet for that folder.
 3. Enumerate only supported documents in that same folder.
-4. For each eligible document, set its tracker document property to the folder-local spreadsheet ID.
-5. Run a per-document sync into that tracker.
+4. Partition documents into: (a) documents already bound to this folder-local tracker, (b) documents
+   bound to the bound fallback, and (c) documents already bound to a different valid tracker.
+5. Rebind categories (a) and (b) to the folder-local tracker as needed, and run a per-document sync.
+6. Present an initialization report listing:
+   - documents updated to the folder-local tracker,
+   - documents already pointing elsewhere, with their current tracker path/name and ID,
+   - documents skipped because they were already correctly bound.
+7. For documents already pointing elsewhere, offer an explicit user choice to rebind each one (or
+   selected subsets) to the local folder tracker.
+8. Apply only user-approved rebindings and run sync for changed documents.
 
-Guardrails: do not rewrite properties for documents already pointing at a different valid tracker
-without explicit confirmation; treat initialization as an administrative action that produces a
-summary report.
+Guardrails: initialization must not silently rewrite documents already pointing to a different valid
+tracker. The action must be user-confirmed, and the report must identify where those documents are
+currently pointing (path and document name) before any rebinding occurs.
 
 ### Bound-sheet registry (troubleshooting index, not a routing authority)
 
