@@ -240,3 +240,209 @@ AI creation from the AI-N tagging creation can be tested by inserting the follow
 
 * **No mocking of external platform APIs** — platform behaviors and quotas shift silently; mocking introduces a dangerous divergence from production reality.
 * **No test-per-variant parametrize explosion** — input permutations live inside the fixture, not as separate test functions.
+
+---
+
+## §15 — Scenario Test Python Architecture
+
+_Working design from the 2026-05-29 session. Captures architectural decisions and open questions for the implementation of the §14 scenario in Python._
+
+### Document initialization
+
+The journey starts with a **new empty Google Doc**, not a clone of the master template. This eliminates template-state contamination entirely — the doc is guaranteed clean, has no pre-existing floating actions, and requires no reset step between runs.
+
+The GAS `begin_journey_session` fixture creates the doc with `DocumentApp.create(name)`, names it `GActionSheet-Test-journey-{YYYYMMDD}-{4-char-hex}`, and places it in the same Drive folder as the test sheet. The Python fixture trashes it at teardown via `end_journey_session`.
+
+Document initialization variants — and when to use each:
+
+| Source | When to use |
+|---|---|
+| New empty doc (`DocumentApp.create`) | Standard scenario start — guaranteed clean, no template drift |
+| Clone of master template | When specific pre-populated structure is required (not currently needed) |
+| Existing specific doc | Edge-case tests around docs that already have actions; known to have rough edges around delete-all scenarios — **not prioritized** |
+
+### `ActionItem` — internal representation
+
+An `ActionItem` holds what we know about one action across its full lifecycle. Field names match the ActionSheet column schema so that find/update fixture calls do not require a translation layer.
+
+```
+ActionItem
+  seed_text          # full string inserted into doc, e.g. "AI: aitest@example.com Some text"
+  action_text        # body only — without the AI: prefix and email
+  assignee_email     # None for unassigned
+  assignee_name      # None for unassigned; resolved display name for domain users
+  expected_id        # None = auto-assigned; integer = explicit (e.g. 5 for AI-5:)
+  global_id          # populated after sync, e.g. "docId/AI-3"
+  status             # "Open" initially
+  sync_status        # "" (clean) or "Dirty"; read back from find_sheet_actions
+  last_modified      # read back from find_sheet_actions; archival, not used for conflict resolution
+  row_id             # sheet row number; populated by find_sheet_actions for use with update_sheet_field
+```
+
+### `ScenarioSession` — thin driver, not assertion owner
+
+`ScenarioSession` owns: doc lifecycle, fixture invocation, downloads, and `ActionItem` state accumulation. It does **not** own assertion logic. Methods return data structures; assertion functions are standalone — either in the test file or a shared `assertions.py` module.
+
+```python
+class ScenarioSession:
+    # Lifecycle
+    @classmethod
+    def new_doc(cls, settings) -> ScenarioSession: ...   # creates empty doc, registers for teardown
+    def close(self): ...                                  # trashes journey doc
+
+    # Doc mutations (each is one HTTP fixture call)
+    def append_doc_item(self, item: ActionItem): ...      # inserts seed text; registers item on session
+    def insert_tracker_table(self): ...
+
+    # Sync (name states the mechanism explicitly)
+    def sync_document(self): ...                          # calls GAS syncDocument() via doPost — Scenario C
+
+    # Artifact downloads
+    def doc_items(self) -> list[DocItem]: ...             # download + parse docx; return floating action structs
+    def sheet_rows(self) -> list[ActionItem]: ...         # download + parse xlsx; filter for this doc's rows
+
+    # Sheet read/write (for manipulation tests)
+    def find_sheet_actions(self) -> list[ActionItem]: ... # doPost find_sheet_actions — returns rows with row_id
+    def update_sheet_field(self, row_id, field, value): ...  # doPost update_sheet_field — see open question below
+
+    # GAS-side consistency (doc ↔ sheet verification)
+    def verify_consistency(self) -> dict: ...             # calls verify_consistency fixture; returns data dict
+```
+
+Assertion functions receive the data structures returned by these methods and carry the `[UC AC#]` context tag:
+
+```python
+def assert_all_imported(doc_items, sheet_rows, items: list[ActionItem]): ...
+def assert_doc_sheet_consistent(consistency_data): ...
+def assert_tracker_rows(consistency_data, items: list[ActionItem]): ...
+def assert_field_propagated(doc_items, sheet_rows, item, field, expected): ...
+def assert_sync_status_clear(sheet_rows, item): ...
+def assert_unassigned_deleted(sheet_rows, item): ...
+```
+
+### Module-scoped fixture carries state across test functions
+
+```python
+@pytest.fixture(scope="module")
+def journey(settings):
+    session = ScenarioSession.new_doc(settings)
+    yield session
+    session.close()
+```
+
+Each test function receives `journey` and operates on accumulated state. `append_doc_item` both inserts the item into the doc and registers it on `session.items` (and named attributes like `session.unassigned`, `session.with_email`, `session.explicit_5`, `session.domain_user`), so later test functions can reference them without re-declaring.
+
+Pytest module ordering guarantees the test sequence. Dependency between tests is intentional and explicit: this is a scenario, not isolated unit tests.
+
+### Explicit seeding in test_01
+
+Each item is declared inline in the test — not buried in a `seed()` helper. The test reads as a specification:
+
+```python
+def test_01_seed_and_import(journey):
+    journey.append_doc_item(ActionItem(
+        seed_text="AI: This tag and text confirms creation of an unassigned action item",
+        action_text="This tag and text confirms creation of an unassigned action item",
+        assignee_email=None, assignee_name=None, expected_id=None,
+    ))
+    journey.append_doc_item(ActionItem(
+        seed_text="AI: aitest@example.com This tag and email address ...",
+        action_text="This tag and email address along with this text ...",
+        assignee_email="aitest@example.com", assignee_name="Aitest", expected_id=None,
+    ))
+    journey.append_doc_item(ActionItem(
+        seed_text="AI-5: This tag and text confirms creation of an action item with id AI-5 ...",
+        action_text="This tag and text confirms creation of an action item with id AI-5 ...",
+        assignee_email=None, assignee_name=None, expected_id=5,
+    ))
+    journey.append_doc_item(ActionItem(
+        seed_text="AI-9: minister@northlakeuu.org This tag, email and text ...",
+        action_text="This tag, email and text ...",
+        assignee_email="minister@northlakeuu.org", assignee_name="Northlake Minister", expected_id=9,
+    ))
+
+    journey.sync_document()
+
+    doc_items = journey.doc_items()
+    sheet_rows = journey.sheet_rows()
+    consistency = journey.verify_consistency()
+
+    assert_all_imported(doc_items, sheet_rows, journey.items)
+    assert_doc_sheet_consistent(consistency)
+```
+
+**Note on doc verification:** after sync, `AI:` items must appear promoted to `AI-N:` with auto-assigned integers; `AI-5:` and `AI-9:` must be unchanged; the domain user must have a resolved display name. Named range IDs (now called `globalId`) are Google Docs metadata and do not survive the docx export — `globalId` linkage is verified through the GAS-side `verify_consistency` call, not by parsing the docx directly.
+
+### Sync naming
+
+`sync_document()` maps to Scenario C (DESIGN.md §Sync Scenarios): direct call to `syncDocument()` via doPost. This is the bidirectional full reconcile. Other sync entry points are distinct and named explicitly when used:
+
+| Method | Mechanism | DESIGN.md scenario |
+|---|---|---|
+| `sync_document()` | doPost → `sync_action_rows` | Scenario C |
+| Playwright: sidebar "Sync Now" | CardService button → `onSyncNow` → `syncDocument` | Scenario C (UI path) |
+| `onActionSheetEdit` stamp + flush | Installable trigger, auto-fires on col 3–6 edit | Scenario B |
+| `syncAll` sweep | Time-based trigger | Scenario C (automated) |
+
+### Full test sequence
+
+```
+test_01  doc: seed 4 items explicitly → sync_document() → verify doc + sheet + consistency
+test_02  doc: insert_tracker_table → sync_document() → verify tracker rows
+
+         — sheet manipulation phase (HTTP only, conflict resolution coverage) —
+
+test_03  sheet: update assignee_email on one row → sync_document() → verify propagated to doc
+test_04  sheet: update action_text → sync_document() → verify
+test_05  sheet: update status → sync_document() → verify
+test_06  doc: edit status token in paragraph → sync_document() → verify sheet updated (doc wins)
+test_07  conflict: set field on both sides; sheet has Dirty → verify sheet wins
+test_08  idempotency: sync_document() twice with no changes → verify no new rows, no mutations
+
+         — Playwright phase (deferred) —
+
+test_09  UI: open sidebar, verify Sync Now, verify actions visible
+test_10  UI: @create flow → verify action in doc, sheet, tracker
+test_11  UI: preview card status change → verify propagation
+test_12  UI: mark item deleted via preview card → verify Deleted in sheet, removed from doc
+```
+
+### Sheet manipulation fixtures — GAS side
+
+Two new `doPost` routes needed in `TestFixtures.js` (or `WebApp.js`):
+
+**`find_sheet_actions`**
+- Input: `docId` (sufficient; no filter needed — the doc's globalId prefix uniquely scopes results)
+- Returns: array of row objects with field names matching `ActionItem` plus `row_id` (sheet row number)
+- Read-only; safe to call at any time
+
+**`update_sheet_field`**
+- Input: `row_id`, `field` (ActionItem field name), `value`
+- Writes one cell to the Actions sheet using the field→column mapping
+
+### Conflict resolution context (from DESIGN.md ADR-0009)
+
+Resolution is per-row by `Sync Status` (col 10), not by timestamp:
+- `Sync Status = 'Dirty'` → sheet wins: values flushed doc-ward on next sync, Dirty cleared
+- `Sync Status = ''` → doc wins: sheet cells overwritten from scanned doc state on next sync
+- `Date Modified` (col 9) is archival only — not used for resolution
+
+`onActionSheetEdit` stamps Dirty + Date Modified when a user edits cols 3–6. **Critical constraint:** doPost writes (including `update_sheet_field`) run as the deployer in a separate execution and do **not** fire `onActionSheetEdit` (confirmed in DESIGN.md §Programmatic Write Suppression). This means the `update_sheet_field` fixture must handle Dirty stamping explicitly.
+
+### Open questions (unresolved as of 2026-05-29)
+
+**Q1: Should `update_sheet_field` auto-stamp Dirty + Date Modified for data columns?**
+
+Option A: Yes — fixture replicates `onActionSheetEdit` behaviour when writing cols 3–6. A single call means "simulate a user sheet edit," which is the intended test scenario. Simpler test code.
+
+Option B: No — test explicitly calls `update_sheet_field` twice (value, then Dirty). Makes the "what is being tested" more explicit — the test shows it's setting up a Dirty row. Slightly more verbose.
+
+Lean toward Option A for readability, but needs confirmation.
+
+**Q2: What is the stable identifier for `update_sheet_field`?**
+
+Option A: Raw sheet row number (`row_id`). Simple, but fragile if rows shift during the test.
+
+Option B: `globalId` (e.g. `docId/AI-3`). Already unique per action, already in ActionItem. `update_sheet_field` resolves it to a row number server-side.
+
+Lean toward Option B — `globalId` is the system's own stable identity and does not depend on physical row position.
