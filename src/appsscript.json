@@ -13,6 +13,7 @@
     "https://www.googleapis.com/auth/workspace.linkpreview",
     "https://www.googleapis.com/auth/workspace.linkcreate",
     "https://www.googleapis.com/auth/directory.readonly",
+    "https://www.googleapis.com/auth/contacts.readonly",
     "openid"
   ],
   "urlFetchWhitelist": [

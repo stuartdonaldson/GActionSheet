@@ -238,19 +238,28 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
       GasLogger.flush();
 
       if (code === 200) {
-        var people = JSON.parse(resp.getContentText()).people || [];
-        for (var i = 0; i < people.length && i < 8; i++) {
-          var emails = people[i].emailAddresses || [];
-          var names  = people[i].names          || [];
-          var email  = emails.length ? emails[0].value      : '';
-          var name   = names.length  ? names[0].displayName : '';
-          if (email) {
-            suggestions.addSuggestion(name ? name + ' <' + email + '>' : email);
-          }
-        }
+        _poc_addPeopleSuggestions(suggestions, JSON.parse(resp.getContentText()).people || []);
       } else {
-        GasLogger.log('poc.suggestAssignees.apiError', { code: code, body: resp.getContentText().substring(0, 300) });
+        // Directory search failed (likely 403 — scope not granted or domain policy).
+        // Fall back to personal contacts search which requires only contacts.readonly.
+        console.log('suggestAssignees: directory 403, body=' + resp.getContentText().substring(0, 300));
+        var contactsUrl = 'https://people.googleapis.com/v1/people:searchContacts'
+          + '?query='    + encodeURIComponent(query)
+          + '&readMask=' + encodeURIComponent('emailAddresses,names');
+        var cresp = UrlFetchApp.fetch(contactsUrl, {
+          headers:            { Authorization: 'Bearer ' + token },
+          muteHttpExceptions: true
+        });
+        var ccode = cresp.getResponseCode();
+        GasLogger.log('poc.suggestAssignees.contacts', { code: ccode });
         GasLogger.flush();
+        if (ccode === 200) {
+          var cdata    = JSON.parse(cresp.getContentText());
+          var cresults = (cdata.results || []).map(function(r) { return r.person; });
+          _poc_addPeopleSuggestions(suggestions, cresults);
+        } else {
+          console.log('suggestAssignees: contacts also failed, code=' + ccode + ' body=' + cresp.getContentText().substring(0, 300));
+        }
       }
     }
 
@@ -263,6 +272,19 @@ function _poc_suggestAssignees(e) { // eslint-disable-line no-unused-vars
     return CardService.newSuggestionsResponseBuilder()
       .setSuggestions(CardService.newSuggestions())
       .build();
+  }
+}
+
+/** Adds up to 8 People API person objects to a Suggestions instance. */
+function _poc_addPeopleSuggestions(suggestions, people) {
+  for (var i = 0; i < people.length && i < 8; i++) {
+    var emails = (people[i] && people[i].emailAddresses) || [];
+    var names  = (people[i] && people[i].names)          || [];
+    var email  = emails.length ? emails[0].value      : '';
+    var name   = names.length  ? names[0].displayName : '';
+    if (email) {
+      suggestions.addSuggestion(name ? name + ' <' + email + '>' : email);
+    }
   }
 }
 
