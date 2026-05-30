@@ -348,7 +348,7 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
  * Builds a sheet row array in SHEET_HEADERS order.
  *
  * SHEET_HEADERS = [NamedRangeId, ID, Assignee Email, Assignee Name, Action,
- *                  Status, Document, Date Created, Date Modified]
+ *                  Status, Document, Date Created, Date Modified, Sync Status]
  *
  * @param {object} opts
  * @param {string}  opts.globalId  globalId (format: {docId}/AI-{N}); empty until first sync.
@@ -360,7 +360,8 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
  * @param {string}  opts.docFormula   Full =HYPERLINK(…) formula string.
  * @param {Date}    opts.dateCreated
  * @param {Date}    opts.dateModified
- * @returns {Array}  9-element array.
+ * @param {string}  opts.syncStatus
+ * @returns {Array}  Row array aligned to SHEET_HEADERS.
  */
 function _tfSheetRow(opts) {
   return [
@@ -372,7 +373,8 @@ function _tfSheetRow(opts) {
     opts.status || '',
     opts.docFormula || '',
     opts.dateCreated || '',
-    opts.dateModified || ''
+    opts.dateModified || '',
+    opts.syncStatus || ''
   ];
 }
 
@@ -1343,7 +1345,8 @@ function setupTestFixtures(scenario) {
               'Open',
               ssNFFormula,
               new Date('2026-01-01'),
-              new Date('2026-01-01')
+              new Date('2026-01-01'),
+              ''
             ]);
           }
         });
@@ -1497,7 +1500,7 @@ function setupTestFixtures(scenario) {
       }
 
       case 'begin_journey_session': {
-        // Clone the master template (testDocId) into a fresh named journey doc.
+        // Empty-create a fresh journey doc (§16.11 #1 — never a template clone).
         // Does NOT update TEST_DOC_ID or TEST_DOC_TEMPLATE_ID — safe to run
         // alongside an active begin_test_session clone in the same pytest session.
         var bjsNow    = new Date();
@@ -1507,10 +1510,11 @@ function setupTestFixtures(scenario) {
         var bjsSheetId = PropertiesService.getScriptProperties().getProperty('TEST_SHEET_ID');
         var bjsFolderIter = DriveApp.getFileById(bjsSheetId).getParents();
         var bjsParent = bjsFolderIter.hasNext() ? bjsFolderIter.next() : DriveApp.getRootFolder();
-        var bjsClone  = DriveApp.getFileById(testDocId).makeCopy(bjsName, bjsParent);
+        var bjsDoc    = DocumentApp.create(bjsName);
+        DriveApp.getFileById(bjsDoc.getId()).moveTo(bjsParent);
         _TF_RESULT = {
           tag:  'fixture.begin_journey_session',
-          data: { journeyDocId: bjsClone.getId(), journeyName: bjsName }
+          data: { ok: true, docId: bjsDoc.getId(), docName: bjsName, docUrl: bjsDoc.getUrl() }
         };
         docAlreadyClosed = true;
         break;

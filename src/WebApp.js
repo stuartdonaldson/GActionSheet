@@ -277,6 +277,34 @@ function _handleSyncActionRows(payload) {
     return _jsonResponse({ error: 'Actions sheet not found' });
   }
 
+  // §16.11 #4: drain ACTION_SHEET_QUEUE before reconciliation so all pending
+  // chip-click upserts are applied before the sync response is returned.
+  var queueDrained = 0;
+  (function () {
+    var props = PropertiesService.getScriptProperties();
+    var lock  = LockService.getScriptLock();
+    var snapshot;
+    lock.waitLock(5000);
+    try {
+      snapshot = JSON.parse(props.getProperty('ACTION_SHEET_QUEUE') || '[]');
+      props.setProperty('ACTION_SHEET_QUEUE', '[]');
+    } finally {
+      lock.releaseLock();
+    }
+    for (var qi = 0; qi < snapshot.length; qi++) {
+      var q = snapshot[qi];
+      _handleUpsertActionRows({
+        action:   'upsert_action_rows',
+        docUrl:   q.docUrl,
+        docTitle: q.docTitle,
+        rows: [{ globalId: q.globalId, actionText: q.actionText,
+                 assigneeEmail: q.assigneeEmail, assigneeName: q.assigneeName,
+                 status: q.status }]
+      });
+    }
+    queueDrained = snapshot.length;
+  })();
+
   var docUrl              = payload.docUrl   || '';
   var docTitle            = payload.docTitle || 'Untitled';
   var docId               = payload.docId    || '';
@@ -402,7 +430,7 @@ function _handleSyncActionRows(payload) {
     }
   });
 
-  return _jsonResponse({ upserted: upserted, updated: updated, sheetWins: sheetWins });
+  return _jsonResponse({ ok: true, upserted: upserted, updated: updated, sheetWins: sheetWins, queueDrained: queueDrained });
 }
 
 /**
