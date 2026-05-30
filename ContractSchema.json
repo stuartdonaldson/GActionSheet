@@ -1,0 +1,141 @@
+{
+  "actionItem": {
+    "fields": [
+      "action_id",
+      "assignee_email",
+      "action_text",
+      "status"
+    ]
+  },
+  "sheetAction": {
+    "fields": [
+      "global_id",
+      "action_id",
+      "assignee_email",
+      "assignee_name",
+      "action_text",
+      "status",
+      "document_formula",
+      "doc_id",
+      "doc_name",
+      "created_date",
+      "modified_date",
+      "sync_status"
+    ],
+    "headers": [
+      "NamedRangeId",
+      "ID",
+      "Assignee Email",
+      "Assignee Name",
+      "Action",
+      "Status",
+      "Document",
+      "Date Created",
+      "Date Modified",
+      "Sync Status"
+    ],
+    "columnsByField": {
+      "global_id": 1,
+      "action_id": 2,
+      "assignee_email": 3,
+      "assignee_name": 4,
+      "action_text": 5,
+      "status": 6,
+      "document_formula": 7,
+      "created_date": 8,
+      "modified_date": 9,
+      "sync_status": 10
+    }
+  },
+  "webApp": {
+    "routeNames": [
+      "set_test_token",
+      "upsert_action_rows",
+      "sync_action_rows",
+      "verify_action_rows",
+      "mark_doc_not_found",
+      "delete_action_row",
+      "patch_action_status",
+      "run_fixture"
+    ],
+    "testRouteNames": [
+      "edit_action_row",
+      "find_sheet_actions"
+    ],
+    "messages": {
+      "sync_action_rows": {
+        "request": [
+          "action",
+          "testToken",
+          "docId"
+        ],
+        "response": [
+          "ok",
+          "sheetWins",
+          "docWins",
+          "queueDrained"
+        ],
+        "completionSignal": "synchronous response after ACTION_SHEET_QUEUE drains (§16.11 #4)"
+      },
+      "edit_action_row": {
+        "request": [
+          "action",
+          "testToken",
+          "global_id",
+          "fields"
+        ],
+        "response": [
+          "ok",
+          "global_id",
+          "row"
+        ],
+        "completionSignal": "synchronous response; row stamped Sync Status='Dirty' + Date Modified"
+      },
+      "patch_action_status": {
+        "request": [
+          "action",
+          "testToken",
+          "global_id",
+          "status"
+        ],
+        "response": [
+          "ok",
+          "global_id"
+        ],
+        "completionSignal": "synchronous ack; durable status converges on the next sync_action_rows"
+      },
+      "delete_action_row": {
+        "request": [
+          "action",
+          "testToken",
+          "global_id"
+        ],
+        "response": [
+          "ok",
+          "global_id"
+        ],
+        "completionSignal": "synchronous response; row stamped Sync Status='Deleted'"
+      },
+      "find_sheet_actions": {
+        "request": [
+          "action",
+          "testToken",
+          "docId"
+        ],
+        "response": [
+          "ok",
+          "docId",
+          "rows"
+        ],
+        "completionSignal": "synchronous response; rows scoped to docId"
+      }
+    }
+  },
+  "documentRead": {
+    "modelNames": [
+      "floating_action",
+      "tracker_row",
+      "verification_sheet_row"
+    ]
+  }
+}

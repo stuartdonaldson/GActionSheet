@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "export-contract": "node scripts/export-contract.js",
     "push": "node manage-deployments.js --deploy-dev",
     "deploy:test": "node manage-deployments.js --deploy-test",
     "deploy:prod": "node manage-deployments.js --deploy-prod",
