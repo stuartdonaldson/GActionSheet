@@ -14,6 +14,7 @@ from scn.engine import (
     Surface,
 )
 from scn.surfaces import DocReader, SheetReader, TrackerReader
+from scn.session import ScenarioSession
 
 __all__ = [
     "AUTO",
@@ -27,4 +28,5 @@ __all__ = [
     "DocReader",
     "SheetReader",
     "TrackerReader",
+    "ScenarioSession",
 ]
