@@ -142,3 +142,4 @@
 {"id":"int-d9d75363","kind":"field_change","created_at":"2026-05-29T16:12:16.417080349Z","actor":"Stuart Donaldson","issue_id":"GTaskSheet-bpa","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Obsolete"}}
 {"id":"int-c5b746b0","kind":"field_change","created_at":"2026-05-29T18:01:28.416523489Z","actor":"Stuart Donaldson","issue_id":"GTaskSheet-y8rb","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-3cbc6323","kind":"field_change","created_at":"2026-05-29T18:01:34.231944368Z","actor":"Stuart Donaldson","issue_id":"GTaskSheet-jyyf","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-cca11f78","kind":"field_change","created_at":"2026-05-30T18:15:59.16063671Z","actor":"Stuart Donaldson","issue_id":"GTaskSheet-5vwu.1","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
