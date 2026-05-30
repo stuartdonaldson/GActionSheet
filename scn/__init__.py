@@ -13,6 +13,7 @@ from scn.engine import (
     Severity,
     Surface,
 )
+from scn.surfaces import DocReader, SheetReader, TrackerReader
 
 __all__ = [
     "AUTO",
@@ -23,4 +24,7 @@ __all__ = [
     "Expectation",
     "Severity",
     "Surface",
+    "DocReader",
+    "SheetReader",
+    "TrackerReader",
 ]
