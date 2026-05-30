@@ -1,25 +1,57 @@
 /**
  * TestWebApp.js
  *
- * HTTP fixture dispatcher for integration tests.
+ * HTTP fixture dispatcher and test-support routes for integration tests.
  *
- * Provides a doPost route (`run_fixture`) that invokes GAS test fixture
- * functions directly, bypassing the Sheets UI and Playwright.
+ * Provides:
+ *   - `run_fixture`: invokes GAS test fixture functions directly.
+ *   - `edit_action_row`, `find_sheet_actions`: ATDD test-support routes defined
+ *     in ContractSchema.js testRouteNames; operate on production data but have
+ *     no production caller (ContractSchema.js webApp.testRouteNames, bead .9).
+ *   - `begin_journey_session`, `end_journey_session`: ATDD session lifecycle
+ *     (AtddContracts.js sessionRouteNames).
  *
  * Security model:
- *   - Validated by a per-deployment TEST_TOKEN (separate from WEBAPP_SECRET).
+ *   - All routes in this file are validated by a per-deployment TEST_TOKEN
+ *     (separate from WEBAPP_SECRET).
  *   - Token expires TEST_TOKEN_EXPIRES hours after `npm run deploy:test`.
  *   - Token is registered via the `set_test_token` action in WebApp.js.
- *   - Only the `run_fixture` action uses this token; all production routes
- *     continue to use WEBAPP_SECRET.
+ *   - Production routes continue to use WEBAPP_SECRET.
  *
  * Flow:
  *   1. Deployment script generates UUID testToken, POSTs set_test_token to WebApp.
  *   2. GAS stores testToken + expiresAt in Script Properties.
  *   3. Deployment script writes testToken to local.settings.json.
- *   4. Python tests POST run_fixture with testToken — no browser needed.
- *   5. GAS runs the fixture synchronously and returns { tag, data } in the body.
+ *   4. Python tests POST run_fixture / testRouteNames with testToken — no browser needed.
+ *   5. GAS runs the handler synchronously and returns JSON in the body.
  */
+
+/**
+ * Validates the incoming testToken against Script Properties.
+ * Returns null when the token is valid.
+ * Returns a plain-text ContentService response when invalid or expired,
+ * matching doPost's unauthorized response style.
+ *
+ * @param {string} incoming
+ * @return {GoogleAppsScript.Content.TextOutput|null}
+ */
+function _checkTestToken(incoming) {
+  var props     = PropertiesService.getScriptProperties();
+  var stored    = props.getProperty('TEST_TOKEN')         || '';
+  var expiresAt = props.getProperty('TEST_TOKEN_EXPIRES') || '';
+
+  if (!stored || incoming !== stored) {
+    return ContentService
+      .createTextOutput('test-token-unauthorized')
+      .setMimeType(ContentService.MimeType.TEXT);
+  }
+  if (!expiresAt || new Date() > new Date(expiresAt)) {
+    return ContentService
+      .createTextOutput('test-token-expired')
+      .setMimeType(ContentService.MimeType.TEXT);
+  }
+  return null;
+}
 
 /**
  * HTTP fixture dispatcher.  Called from doPost in WebApp.js when
@@ -34,29 +66,13 @@
  * Response shape (error):
  *   { error: '<message>' }
  *
- * Token errors return plain text (not JSON) to match doPost's unauthorized
- * response style: 'test-token-unauthorized' or 'test-token-expired'.
+ * Token errors return plain text: 'test-token-unauthorized' or 'test-token-expired'.
  */
 function _handleRunFixture(payload) {
-  var props     = PropertiesService.getScriptProperties();
-  var stored    = props.getProperty('TEST_TOKEN')         || '';
-  var expiresAt = props.getProperty('TEST_TOKEN_EXPIRES') || '';
-  var incoming  = payload.testToken || '';
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
 
-  // Token presence + match check.
-  if (!stored || incoming !== stored) {
-    return ContentService
-      .createTextOutput('test-token-unauthorized')
-      .setMimeType(ContentService.MimeType.TEXT);
-  }
-
-  // TEST_TOKEN_EXPIRES must be set and in the future; deploy:test always writes it.
-  if (!expiresAt || new Date() > new Date(expiresAt)) {
-    return ContentService
-      .createTextOutput('test-token-expired')
-      .setMimeType(ContentService.MimeType.TEXT);
-  }
-
+  var props = PropertiesService.getScriptProperties();
   var fixtureName = payload.fixture   || '';
   var testDocId   = payload.testDocId || '';
   var previousTestDocId = props.getProperty('TEST_DOC_ID') || '';

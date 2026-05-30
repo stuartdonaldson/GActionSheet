@@ -46,11 +46,22 @@ function doPost(e) {
     return _jsonResponse({ error: 'bad JSON' }, 200);
   }
 
-  // Test fixture route — authenticated by per-deployment TEST_TOKEN, not WEBAPP_SECRET.
-  // Must be checked before the WEBAPP_SECRET gate so the deployment script can register
-  // the token using WEBAPP_SECRET without the token already being required.
+  // Test-token-gated routes — authenticated by per-deployment TEST_TOKEN, not WEBAPP_SECRET.
+  // Checked before the WEBAPP_SECRET gate. Includes run_fixture (fixture dispatcher) and
+  // ATDD test-support routes from ContractSchema.js webApp.testRouteNames (bead .9) and
+  // AtddContracts.js sessionRouteNames (bead .8).
   if (payload.action === 'run_fixture') {
     return _handleRunFixture(payload);
+  }
+  if (payload.action === 'edit_action_row') {
+    return _handleEditActionRow(payload);
+  }
+  if (payload.action === 'find_sheet_actions') {
+    return _handleFindSheetActions(payload);
+  }
+  if (payload.action === 'begin_journey_session' ||
+      payload.action === 'end_journey_session') {
+    return _handleJourneySession(payload);
   }
 
   var expected = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
@@ -600,6 +611,166 @@ function _handlePatchActionStatus(payload) {
 
   GasLogger.log('sidebar.status.patched', { globalId: globalId, newStatus: newStatus, row: entry.rowIndex });
   return _jsonResponse({ patched: 1 });
+}
+
+// ---------------------------------------------------------------------------
+// edit_action_row handler  (testRouteNames — testToken-gated, bead .9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Simulates a user editing one or more ActionSheet fields over the API path.
+ * Addressed by globalId (§16.11 #3). Replicates onActionSheetEdit's Dirty +
+ * Date-Modified stamp because doPost writes run as the deployer in a separate
+ * execution and do not fire the installable trigger (§16.11 #2; §Programmatic
+ * Write Suppression). The row's Sync Status = 'Dirty' makes it sheet-wins on
+ * the next sync_action_rows call.
+ *
+ * Payload shape (ContractSchema.js messages.edit_action_row):
+ *   { action: 'edit_action_row', testToken, global_id,
+ *     fields: { assignee_email?, assignee_name?, action_text?, status? } }
+ *
+ * Response shape:
+ *   { ok: true, global_id, row: <SheetAction fields> }
+ */
+function _handleEditActionRow(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found' });
+  }
+
+  var globalId = payload.global_id || '';
+  var fields   = payload.fields    || {};
+  if (!globalId) {
+    return _jsonResponse({ error: 'global_id required' });
+  }
+
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var entry       = existingMap[globalId];
+  if (!entry) {
+    return _jsonResponse({ error: 'row not found', global_id: globalId });
+  }
+
+  var now = new Date();
+  var rowIdx = entry.rowIndex;
+
+  WriteGuard.wrapPersistent(function () {
+    if (fields.assignee_email !== undefined) {
+      actionsSheet.getRange(rowIdx, 3).setValue(fields.assignee_email);
+    }
+    if (fields.assignee_name !== undefined) {
+      actionsSheet.getRange(rowIdx, 4).setValue(fields.assignee_name);
+    }
+    if (fields.action_text !== undefined) {
+      actionsSheet.getRange(rowIdx, 5).setValue(fields.action_text);
+    }
+    if (fields.status !== undefined) {
+      actionsSheet.getRange(rowIdx, 6).setValue(fields.status);
+    }
+    // Replicate onActionSheetEdit: stamp Date Modified + Sync Status = 'Dirty'.
+    actionsSheet.getRange(rowIdx, 9).setValue(now);
+    actionsSheet.getRange(rowIdx, 10).setValue('Dirty');
+  });
+
+  // Re-read the row to return authoritative post-write state.
+  var updated = _loadExistingRowsByGlobalId(actionsSheet)[globalId] || {};
+  GasLogger.log('test.edit_action_row', { global_id: globalId, fields: Object.keys(fields) });
+  GasLogger.flush();
+  return _jsonResponse({
+    ok:        true,
+    global_id: globalId,
+    row: {
+      global_id:      globalId,
+      action_id:      updated.id            || '',
+      assignee_email: updated.assigneeEmail || '',
+      assignee_name:  updated.assigneeName  || '',
+      action_text:    updated.action        || '',
+      status:         updated.status        || '',
+      modified_date:  updated.dateModified  ? updated.dateModified.toISOString() : '',
+      sync_status:    updated.syncStatus    || ''
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// find_sheet_actions handler  (testRouteNames — testToken-gated, bead .9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the current ActionSheet rows scoped to a single document, in the
+ * authoritative SheetAction shape (ContractSchema.js sheetAction.fields).
+ * Read-only — no mutation. doc_id / doc_name are DERIVED from the
+ * document_formula (col 7), not stored columns (Coordination Log .1 §7 #1).
+ *
+ * Payload shape (ContractSchema.js messages.find_sheet_actions):
+ *   { action: 'find_sheet_actions', testToken, docId }
+ *
+ * Response shape:
+ *   { ok: true, docId, rows: [<SheetAction>] }
+ */
+function _handleFindSheetActions(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found', rows: [] });
+  }
+
+  var docId   = payload.docId || '';
+  var lastRow = actionsSheet.getLastRow();
+  if (lastRow < 2) {
+    return _jsonResponse({ ok: true, docId: docId, rows: [] });
+  }
+
+  var numRows  = lastRow - 1;
+  var data     = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
+  var formulas = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
+  var rows     = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var formula = formulas[i][0] || '';
+    if (!formula) continue;
+    var formulaDocId = _extractDocIdFromString(formula);
+    if (docId && formulaDocId !== docId) continue;
+
+    var docName = _extractDocNameFromFormula(formula);
+    var createdRaw  = data[i][7];
+    var modifiedRaw = data[i][8];
+
+    rows.push({
+      global_id:        data[i][0] || '',
+      action_id:        data[i][1] || '',
+      assignee_email:   data[i][2] || '',
+      assignee_name:    data[i][3] || '',
+      action_text:      data[i][4] || '',
+      status:           data[i][5] || '',
+      document_formula: formula,
+      doc_id:           formulaDocId,
+      doc_name:         docName,
+      created_date:     createdRaw  instanceof Date ? createdRaw.toISOString()  : (createdRaw  || ''),
+      modified_date:    modifiedRaw instanceof Date ? modifiedRaw.toISOString() : (modifiedRaw || ''),
+      sync_status:      data[i][9] || ''
+    });
+  }
+
+  GasLogger.log('test.find_sheet_actions', { docId: docId, count: rows.length });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, docId: docId, rows: rows });
+}
+
+/**
+ * Extracts the display name (second argument) from a HYPERLINK formula.
+ * =HYPERLINK("url","name") → "name"
+ * Returns '' when the formula does not match or has no name.
+ */
+function _extractDocNameFromFormula(formula) {
+  var m = formula.match(/HYPERLINK\s*\(\s*"[^"]*"\s*,\s*"([^"]*)"/i);
+  return m ? m[1] : '';
 }
 
 function _extractDocIdFromString(s) {
