@@ -12,6 +12,26 @@ Stable action identity is an **in-text `AI-N:` token** at the start of each floa
 
 > **Identity history.** Earlier designs anchored actions with Docs REST *named ranges* (ADR-0005); this was abandoned because smart-chip / rich-link pill elements are invisible to `getText()`, forcing a text-token scanner. The current model is recorded in **ADR-0008**, the single-project architecture in **ADR-0007**, and conflict resolution in **ADR-0009**. The in-code field has been renamed `globalId` (set 3 reconciliation, 2026-05-29). The ActionSheet column heading still reads `NamedRangeId` as a legacy label pending a sheet header rename.
 
+## Contract Sources
+
+
+Human-readable contract semantics live in this document. The authoritative machine-readable contract source is [src/ContractSchema.js](/home/stuar/roots/c-dev/GActionSheet/src/ContractSchema.js).
+
+**Workflow for contract changes:**
+- Update ContractSchema.js as the single source for any contract field or structure changes.
+- Re-export the schema as JSON for test consumption if needed.
+- Update scenario tests and fixtures to consume the new schema version.
+- Document any semantic changes here; do not duplicate field lists.
+
+Current contract families owned by that schema file:
+
+- `ActionItem` field set for action-content payloads and test seeding.
+- `SheetAction` field set plus ActionSheet headers and column mapping.
+- Web App `doPost()` route names.
+- Document-read model names used by verification and scenario-test helpers.
+
+Rule: when tests, fixtures, and app code need the exact same field list or column mapping, they should read or derive it from [src/ContractSchema.js](/home/stuar/roots/c-dev/GActionSheet/src/ContractSchema.js) rather than redefining it locally. If a semantic explanation is needed, this document is the place for it.
+
 ---
 
 ## Deployment Architecture
@@ -61,6 +81,7 @@ Context column refers to the execution contexts defined in §Runtime Architectur
 |------|------|---------|
 | `src/WorkspaceAddonCard.js` | Workspace homepage card builder + button/mutation handlers (Sync, VerifySync, status, delete) — CardService | ① |
 | `src/EditorAddonCard.js` | Docs editor add-on: `@`-menu create-action card, smart-chip `onLinkPreview`, preview status taps, `ACTION_SHEET_QUEUE` enqueue — CardService | ② |
+| `src/ContractSchema.js` | Authoritative machine-readable contract definitions shared by app and tests | all |
 | `src/SyncManager.js` | Scanner (`_scanFloatingActions`), token assignment, `syncDocument` / `syncAll`, REST paragraph flush (`_flushActionParagraph`), shared chip-badge style (`_chipBadgeStyleRequest`), chip URL base (`ACTION_CHIP_URL_BASE`), `onActionSheetEdit` | ① ② ④ |
 | `src/WebApp.js` | `doGet` (self-register URL), `doPost` router + all sheet writes | ③ |
 | `src/TrackerTable.js` | Insert/refresh the in-doc tracker table (DocumentApp + REST) | ① ② ④ |
