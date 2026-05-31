@@ -63,6 +63,18 @@ function doPost(e) {
       payload.action === 'end_journey_session') {
     return _handleJourneySession(payload);
   }
+  if (payload.action === 'append_doc_paragraph') {
+    return _handleAppendDocParagraph(payload);
+  }
+  // patch_action_status and delete_action_row are production routes (WEBAPP_SECRET-gated
+  // when called by the add-on). When called by the ATDD harness they arrive with a
+  // testToken and snake_case field names per ContractSchema.js messages (§16.11 #3).
+  if (payload.testToken && payload.action === 'patch_action_status') {
+    return _handlePatchActionStatusAtdd(payload);
+  }
+  if (payload.testToken && payload.action === 'delete_action_row') {
+    return _handleDeleteActionRowAtdd(payload);
+  }
 
   var expected = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
   if (!expected || payload.secret !== expected) {
@@ -761,6 +773,199 @@ function _handleFindSheetActions(payload) {
   GasLogger.log('test.find_sheet_actions', { docId: docId, count: rows.length });
   GasLogger.flush();
   return _jsonResponse({ ok: true, docId: docId, rows: rows });
+}
+
+// ---------------------------------------------------------------------------
+// ATDD wrappers for production routes (testToken-gated, snake_case fields)
+// ---------------------------------------------------------------------------
+
+/**
+ * ATDD-path patch_action_status: updates Status for a row addressed by global_id.
+ * Field names follow ContractSchema.js messages.patch_action_status (§16.11 #3):
+ * request { action, testToken, global_id, status }; response { ok, global_id }.
+ *
+ * The production add-on calls the same route with WEBAPP_SECRET + camelCase fields
+ * (globalId / newStatus). Both paths share _handlePatchActionStatus logic via
+ * this thin adapter rather than duplicating the sheet-write code.
+ */
+function _handlePatchActionStatusAtdd(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found' });
+  }
+
+  var globalId  = payload.global_id || '';
+  var newStatus = payload.status    || '';
+  if (!globalId || !newStatus) {
+    return _jsonResponse({ error: 'global_id and status required' });
+  }
+
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var entry       = existingMap[globalId];
+  if (!entry) {
+    return _jsonResponse({ error: 'row not found', global_id: globalId });
+  }
+
+  var now = new Date();
+  WriteGuard.wrapPersistent(function () {
+    actionsSheet.getRange(entry.rowIndex, 6).setValue(newStatus);
+    // Stamp Dirty + Date Modified so the status change survives the next sync
+    // via sheet-wins, matching the observable behaviour of a real sidebar tap
+    // (onActionSheetEdit fires on col 6 edits and does the same stamp).
+    actionsSheet.getRange(entry.rowIndex, 9).setValue(now);
+    actionsSheet.getRange(entry.rowIndex, 10).setValue('Dirty');
+  });
+
+  GasLogger.log('test.patch_action_status', { global_id: globalId, status: newStatus });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, global_id: globalId });
+}
+
+/**
+ * ATDD-path delete_action_row: stamps Sync Status='Deleted' on the row addressed
+ * by global_id. Does NOT physically remove the row (contrast with the production
+ * sidebar path which physically deletes after removing the doc paragraph).
+ *
+ * Field names follow ContractSchema.js messages.delete_action_row (§16.11 #3):
+ * request { action, testToken, global_id }; response { ok, global_id }.
+ *
+ * After this call, the next sync() that scans the doc will see the doc paragraph
+ * still present and apply doc-wins (clearing Deleted). The 'Deleted+removed' AC
+ * is verified at the HTTP layer by asserting the stamp immediately after the call
+ * (before the next sync). Removal from doc via the full production flow is covered
+ * by the Playwright/UI path (§15 test_12).
+ */
+function _handleDeleteActionRowAtdd(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found' });
+  }
+
+  var globalId = payload.global_id || '';
+  if (!globalId) {
+    return _jsonResponse({ error: 'global_id required' });
+  }
+
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var entry       = existingMap[globalId];
+  if (!entry) {
+    return _jsonResponse({ error: 'row not found', global_id: globalId });
+  }
+
+  WriteGuard.wrapPersistent(function () {
+    actionsSheet.getRange(entry.rowIndex, 10).setValue('Deleted');
+  });
+
+  GasLogger.log('test.delete_action_row', { global_id: globalId });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, global_id: globalId });
+}
+
+// ---------------------------------------------------------------------------
+// append_doc_paragraph handler  (ATDD doc-seeding route — testToken-gated)
+// ---------------------------------------------------------------------------
+
+/**
+ * Appends a single paragraph to a journey doc over the API path.
+ * Implements the session.py append_paragraph() act (§16.9).
+ * The text is inserted as a plain paragraph (no chip, no list item).
+ *
+ * Payload shape:
+ *   { action: 'append_doc_paragraph', testToken, testDocId, text }
+ * Response shape:
+ *   { ok: true, docId }
+ */
+function _handleAppendDocParagraph(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.testDocId || '';
+  var text  = payload.text      || '';
+  if (!docId) {
+    return _jsonResponse({ error: 'testDocId required for append_doc_paragraph' });
+  }
+  if (!text) {
+    return _jsonResponse({ error: 'text required for append_doc_paragraph' });
+  }
+
+  var doc = DocumentApp.openById(docId);
+  doc.getBody().appendParagraph(text);
+  doc.saveAndClose();
+
+  GasLogger.log('test.append_doc_paragraph', { docId: docId, textLen: text.length });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, docId: docId });
+}
+
+// ---------------------------------------------------------------------------
+// begin/end_journey_session handler  (AtddContracts — testToken-gated, bead .8/.9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates or trashes an ATDD journey doc (§16.11 #1 empty-create).
+ * Addressed by testToken; no WEBAPP_SECRET required.
+ *
+ * begin_journey_session payload:
+ *   { action: 'begin_journey_session', testToken }
+ * Response:
+ *   { ok: true, docId, docName, docUrl }    — session.py reads result.get("docId")
+ *
+ * end_journey_session payload:
+ *   { action: 'end_journey_session', testToken, docId }
+ * Response:
+ *   { ok: true, trashed: docId }
+ */
+function _handleJourneySession(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var props = PropertiesService.getScriptProperties();
+
+  if (payload.action === 'begin_journey_session') {
+    var now       = new Date();
+    var dateStr   = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyyMMdd');
+    var hexSuffix = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4);
+    var docName   = 'GActionSheet-Test-journey-' + dateStr + '-' + hexSuffix;
+
+    var sheetId    = props.getProperty('TEST_SHEET_ID') || '';
+    var folderIter = sheetId ? DriveApp.getFileById(sheetId).getParents() : null;
+    var parent     = (folderIter && folderIter.hasNext())
+                     ? folderIter.next()
+                     : DriveApp.getRootFolder();
+
+    var bjsDoc = DocumentApp.create(docName);
+    DriveApp.getFileById(bjsDoc.getId()).moveTo(parent);
+
+    GasLogger.log('journey.begin', { docId: bjsDoc.getId(), docName: docName });
+    GasLogger.flush();
+    return _jsonResponse({
+      ok:     true,
+      docId:  bjsDoc.getId(),
+      docName: docName,
+      docUrl: bjsDoc.getUrl()
+    });
+  }
+
+  if (payload.action === 'end_journey_session') {
+    var docId = payload.docId || '';
+    if (!docId) {
+      return _jsonResponse({ error: 'docId required for end_journey_session' });
+    }
+    DriveApp.getFileById(docId).setTrashed(true);
+    GasLogger.log('journey.end', { trashed: docId });
+    GasLogger.flush();
+    return _jsonResponse({ ok: true, trashed: docId });
+  }
+
+  return _jsonResponse({ error: 'unknown journey action: ' + (payload.action || '') });
 }
 
 /**

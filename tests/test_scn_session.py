@@ -128,20 +128,22 @@ def test_sync_posts_correct_route(monkeypatch):
 
     def fake_http(url, payload, timeout=360):
         captured.update(payload)
-        return {"ok": True, "queueDrained": True}
+        # run_fixture returns { tag, data: { synced, docId } }
+        return {"tag": "fixture.sync_document", "data": {"synced": True, "docId": DOC_ID}}
 
     _patch_http(monkeypatch, fake_http)
     scn = _make_session()
     scn.sync()
 
-    assert captured["action"] == "sync_action_rows"
-    assert captured["docId"] == DOC_ID
+    assert captured["action"] == "run_fixture"
+    assert captured["fixture"] == "sync_document"
+    assert captured["testDocId"] == DOC_ID
 
 
-def test_sync_raises_if_queue_not_drained(monkeypatch):
-    _patch_http(monkeypatch, lambda url, p, timeout=360: {"ok": True, "queueDrained": False})
+def test_sync_raises_if_synced_not_true(monkeypatch):
+    _patch_http(monkeypatch, lambda url, p, timeout=360: {"tag": "fixture.sync_document", "data": {}})
     scn = _make_session()
-    with pytest.raises(RuntimeError, match="queueDrained"):
+    with pytest.raises(RuntimeError, match="sync_document fixture returned unexpected response"):
         scn.sync()
 
 

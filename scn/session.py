@@ -209,10 +209,10 @@ class ScenarioSession:
     def append_paragraph(self, text: str) -> None:
         """Insert a paragraph into the journey doc (no action implied until sync).
 
-        # TODO(.8 CONTRACT GAP): fixture name 'append_doc_paragraph' is a placeholder.
-        # Confirm with bead .8 before .11/.13 run. See epic Coordination Log.
+        Routes through the append_doc_paragraph testToken-gated route (WebApp.js).
+        Text is appended as a plain paragraph; the AI-N: token causes sync to detect it.
         """
-        self._post_fixture("append_doc_paragraph", {"text": text})
+        self._post_route("append_doc_paragraph", {"testDocId": self.doc_id, "text": text})
 
     def insert_tracker(self) -> None:
         """Insert/refresh the tracker table; widens surface set of subsequent verify_all_expectations.
@@ -224,15 +224,18 @@ class ScenarioSession:
         self.tracker_present = True
 
     def sync(self) -> None:
-        """Synchronise the journey doc via sync_action_rows.
+        """Synchronise the journey doc via the sync_document fixture.
 
-        Blocks until the ACTION_SHEET_QUEUE drains (§16.11 #4) — response carries queueDrained.
+        Routes through run_fixture('sync_document') — the testToken-gated path that
+        calls GAS syncDocument() internally, which in turn POSTs sync_action_rows with
+        WEBAPP_SECRET and drains ACTION_SHEET_QUEUE before responding (§16.11 #4).
         A following sync() is how the scenario forces an async act to convergence.
         """
-        resp = self._post_route("sync_action_rows", {"docId": self.doc_id})
-        if not resp.get("queueDrained"):
+        resp = self._post_fixture("sync_document")
+        data = resp.get("data") or {}
+        if not data.get("synced"):
             raise RuntimeError(
-                f"sync_action_rows responded but queueDrained is not True: {resp}"
+                f"sync_document fixture returned unexpected response: {resp}"
             )
 
     def edit_sheet(self, target: ai, **fields) -> None:

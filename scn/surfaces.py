@@ -26,6 +26,7 @@ _EMAIL_RE = re.compile(r"[\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+", re.IGNORECASE)
 _STATUS_RE = re.compile(r"\s*\(([^)]+)\)\s*$")
 _HYPERLINK_FORMULA_RE = re.compile(r'^=HYPERLINK\("([^"]+)"(?:,"([^"]*)")?\)', re.IGNORECASE)
 _GDOC_ID_RE = re.compile(r"/document/d/([^/]+)/")
+_DRIVE_ID_RE = re.compile(r"[?&]id=([a-zA-Z0-9_-]+)")
 _TRACKER_HEADING = "=== Tracked Actions ==="
 
 
@@ -197,7 +198,7 @@ class SheetReader:
 
     def read(self, xlsx_bytes: bytes, doc_id: str) -> list[ai]:
         wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
-        ws = wb.active
+        ws = wb["Actions"] if "Actions" in wb.sheetnames else wb.active
 
         # Build 1-based column index from contract (authoritative)
         col = _contract.COLUMNS_BY_FIELD  # e.g. {"global_id": 1, "action_id": 2, ...}
@@ -251,17 +252,19 @@ class SheetReader:
         # Path 1: openpyxl-resolved hyperlink object
         if cell.hyperlink:
             url = cell.hyperlink.target or ""
-            m = _GDOC_ID_RE.search(url)
+            m = _GDOC_ID_RE.search(url) or _DRIVE_ID_RE.search(url)
             if m:
                 doc_id = m.group(1)
             doc_name = cell.hyperlink.tooltip or (str(cell.value) if cell.value else None)
 
-        # Path 2: =HYPERLINK("url","name") formula string
+        # Path 2: =HYPERLINK("url","name") formula string.
+        # Google Sheets normalises document URLs to https://docs.google.com/open?id=DOCID
+        # when storing =HYPERLINK() formulas, so both URL formats must be matched.
         if doc_id is None and isinstance(cell.value, str):
             fm = _HYPERLINK_FORMULA_RE.match(cell.value)
             if fm:
                 url = fm.group(1)
-                m = _GDOC_ID_RE.search(url)
+                m = _GDOC_ID_RE.search(url) or _DRIVE_ID_RE.search(url)
                 if m:
                     doc_id = m.group(1)
                 if doc_name is None:
