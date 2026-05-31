@@ -15,7 +15,7 @@
  * Pre-code contract for epic GTaskSheet-5vwu (bead .2); implemented by .8;
  * exported to JSON + consumed by Python in .3.
  *
- * Decisions consumed (docs/proposed-atdd-lifecycle.md §16.11):
+ * Decisions consumed (docs/atdd/atdd-lifecycle.md §16.11):
  *   #1 empty-create journey doc; #4 sync drains the message queue before responding.
  */
 

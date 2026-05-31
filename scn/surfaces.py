@@ -1,7 +1,7 @@
 """
 surfaces.py — DOC, SHEET, TRACKER surface readers (GTaskSheet-5vwu.6).
 
-Spec: docs/proposed-atdd-lifecycle.md §16.5, §16.3 rule 4
+Spec: docs/atdd/atdd-lifecycle.md §16.5, §16.3 rule 4
 Design: docs/atdd/scenario-harness-design.md §3.7
 
 Each reader returns plain ai-shaped records; no assertion logic lives here.

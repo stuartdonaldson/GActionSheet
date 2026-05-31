@@ -110,7 +110,7 @@ bd close <id>         # Complete work
 
 ## Testing Strategy & Issue Conventions
 
-This project follows the ATDD lifecycle defined in `docs/proposed-atdd-lifecycle.md`. Key rules for every session:
+This project follows the ATDD lifecycle defined in `docs/atdd/atdd-lifecycle.md`. Key rules for every session:
 
 **Issue title prefixes (required on all new issues):**
 - `[IMP]` — GAS implementation work

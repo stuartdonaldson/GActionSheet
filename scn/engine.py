@@ -1,7 +1,7 @@
 """
 engine.py — expectation queue + checkpoint drain (GTaskSheet-5vwu.5).
 
-Spec: docs/proposed-atdd-lifecycle.md §16.1, §16.6
+Spec: docs/atdd/atdd-lifecycle.md §16.1, §16.6
 Design: docs/atdd/scenario-harness-design.md §4 (authoritative algorithm reference)
 
 Public API consumed by scn/session.py (.7) thin enqueuers:

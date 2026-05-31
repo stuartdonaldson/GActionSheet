@@ -1,6 +1,6 @@
 # Review: Scenario Testing Approach for Broad Coverage
 
-_Reviewer note, 2026-05-29. Subject: `docs/proposed-atdd-lifecycle.md` §11–§15 — the scenario-workflow test layer. Goal of the review: assess how well the documented approach achieves **broad coverage of varied functionality** through scenarios, and recommend extensions for under-covered lifecycle paths (deleted actions, sheet-side modifications, deleted files, and similar)._
+_Reviewer note, 2026-05-29. Subject: `docs/atdd/atdd-lifecycle.md` §11–§15 — the scenario-workflow test layer. Goal of the review: assess how well the documented approach achieves **broad coverage of varied functionality** through scenarios, and recommend extensions for under-covered lifecycle paths (deleted actions, sheet-side modifications, deleted files, and similar)._
 
 ---
 
@@ -69,7 +69,7 @@ A recent fix ("invalid email in floating action skips — no abort") has no scen
 A standing project invariant is that action lookups are document-qualified and must never return actions globally. No scenario seeds a *second* document's rows to prove the first journey's reads exclude them. Add a second-doc fixture and an absence assertion in the integrity checkpoint (this fixture is also reused by P0-2 and P1-1).
 
 **P2-6 [METH] §15 architecture has already drifted from the implementing fixtures — reconcile before extending.**
-The §15 note states the journey "starts with a **new empty Google Doc** … `DocumentApp.create(name)`," but the implemented `begin_journey_session` fixture **clones the master template** (`DriveApp.getFileById(testDocId).makeCopy(...)`). Separately, the `sync_status_deleted` fixture — the closest existing thing to P0-1 — still removes a **named range** and reasons about `getNamedRanges()`, which is the superseded ADR-0008 identity model (the live scanner is token-based on `globalId`); that fixture's NR handling is likely dead code against current behavior. Both are signs the scenario layer is being designed in `proposed-atdd-lifecycle.md` while the fixtures evolve separately. Before building the P0/P1 journeys, reconcile §15 with the fixtures (clone-vs-create; token-vs-NR deletion) so new journeys are written against real behavior, not a stale spec.
+The §15 note states the journey "starts with a **new empty Google Doc** … `DocumentApp.create(name)`," but the implemented `begin_journey_session` fixture **clones the master template** (`DriveApp.getFileById(testDocId).makeCopy(...)`). Separately, the `sync_status_deleted` fixture — the closest existing thing to P0-1 — still removes a **named range** and reasons about `getNamedRanges()`, which is the superseded ADR-0008 identity model (the live scanner is token-based on `globalId`); that fixture's NR handling is likely dead code against current behavior. Both are signs the scenario layer is being designed in `atdd-lifecycle.md` while the fixtures evolve separately. Before building the P0/P1 journeys, reconcile §15 with the fixtures (clone-vs-create; token-vs-NR deletion) so new journeys are written against real behavior, not a stale spec.
 
 ### P3 — Lower / structural
 

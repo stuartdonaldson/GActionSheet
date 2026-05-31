@@ -1,7 +1,7 @@
 """
 contacts.py — TEST_CONTACTS directory + name-resolution (GTaskSheet-5vwu.4).
 
-Spec: docs/proposed-atdd-lifecycle.md §16.4
+Spec: docs/atdd/atdd-lifecycle.md §16.4
 Design: docs/atdd/scenario-harness-design.md §3.2
 """
 

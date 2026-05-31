@@ -213,7 +213,7 @@ See **§16.10** for the canonical structured journey (acts, expectations, checkp
 
 ## §15 — Scenario Test Python Architecture
 
-_Working test-architecture note from the 2026-05-29 session. Describes how the §14 Python scenario should consume authoritative contracts defined elsewhere._
+_Background reference (2026-05-29). §16 supersedes this section's API naming — this section is retained for its contract-ownership model and conflict-resolution detail only. The `scn/session.py` module is the as-built implementation._
 
 > **§16 is canonical for the scenario API and supersedes this section's naming where they differ:** `append_doc_item`→`append_paragraph`, `sync_document`→`sync`, `ActionItem`→`ai`, `seed_text()`→`as_text()`, `update_sheet_field`→`edit_sheet`. §15 is retained for its contract-ownership model and conflict-resolution detail, not as the canonical API surface.
 
@@ -239,7 +239,7 @@ Recommended ownership model:
 
 - [docs/DESIGN.md](/home/stuar/roots/c-dev/GActionSheet/docs/DESIGN.md) owns the human-readable contract semantics: boundary names, field meanings, invariants, defaults, and ownership rules.
 - [src/ContractSchema.js](/home/stuar/roots/c-dev/GActionSheet/src/ContractSchema.js) owns the exact machine-readable shapes currently shared across app code and test consumers.
-- [docs/proposed-atdd-lifecycle.md](/home/stuar/roots/c-dev/GActionSheet/docs/proposed-atdd-lifecycle.md) should only describe how tests use those contracts.
+- [docs/atdd/atdd-lifecycle.md](/mnt/c/dev/GActionSheet/docs/atdd/atdd-lifecycle.md) should only describe how tests use those contracts.
 
 For this system, the likely contract families are:
 
@@ -429,13 +429,13 @@ Resolution is per-row by `Sync Status` (col 10), not by timestamp:
 
 `onActionSheetEdit` stamps Dirty + Date Modified when a user edits cols 3–6. **Critical constraint:** doPost writes (including `update_sheet_field`) run as the deployer in a separate execution and do **not** fire `onActionSheetEdit` (confirmed in DESIGN.md §Programmatic Write Suppression). That behavior belongs in the authoritative Web App/message contract; the scenario test should rely on that contract rather than redefining the stamping rules locally.
 
-### Contract decisions still needed
+### Contract status
 
-Two of these are now **decided** (§16.11); the mechanical shape still lands in the authoritative contract source:
+All decisions are resolved; the authoritative shapes live in `ContractSchema.js` / `DESIGN.md §ATDD Journey Pre-Code Contract`:
 
 1. **Resolved (§16.11 #2):** `edit_sheet` (the renamed `update_sheet_field`) on the API/fixture path **does** replicate a full user edit, stamping Dirty + Date Modified; the Playwright UI path relies on the real `onActionSheetEdit` trigger.
 2. **Resolved (§16.11 #3):** write routes use **`globalId`** as the stable identifier.
-3. **Still open:** whether doc-derived reads are exposed only through `doPost()` routes or also through dedicated fixture-only entry points — route to DESIGN.md / `src/ContractSchema.js`.
+3. **Deferred:** doc-derived read route architecture documented in `DESIGN.md §ATDD Journey Pre-Code Contract`; refinement deferred to next journey extension.
 
 This document consumes those decisions; it is not where they are finalized.
 
@@ -443,7 +443,7 @@ This document consumes those decisions; it is not where they are finalized.
 
 ## §16 — Scenario Definition Model (canonical)
 
-_Status: this is the **canonical** definition of how a scenario is written. This is **design, not built** — the function names below describe the intended API; nothing here asserts current implementation. §14 (prose example) and §15 (early Python architecture) remain as background; once this model settles, §14 will be trimmed to a short narrative intro that points here._
+_This is the **canonical** definition of how a scenario is written. **Implemented in GTaskSheet-5vwu (2026-05-30).** The `scn/` package (`scn/ai.py`, `engine.py`, `session.py`, `surfaces.py`, `ui.py`, `contract.py`) implements this model; `tests/test_journey.py` is the canonical journey. §14 (prose example) and §15 (early Python architecture) are retained as background._
 
 §14 read as 23 imperative steps. That style does not scale: it bundles unrelated operations into single steps, leaves intent implicit, and makes under-assertion easy. This section replaces the *style* (not the goal) with a small, uniform vocabulary, defines the data object a scenario manipulates, states the level of detail to write at, and catalogs the support functions a scenario author calls.
 
@@ -605,13 +605,13 @@ scn.expect_alt(scn.ui.locate(alt="In Progress", next=True), "In Progress", sever
 scn.ui.set_status(card, "In Progress")        # click; driver waits out the gray/busy state (10s)
 ```
 
-### 16.9 Support-function catalog (ideal API)
+### 16.9 Support-function catalog
 
-The author writes against a thin driver (`ScenarioSession`, "scn") plus standalone assertion helpers; the driver owns lifecycle, fixture invocation, captures, and `ai`-state accumulation, but **not** assertion logic (§15). The catalog below is the **ideal shape**. Where an existing GAS fixture is a plausible starting point for implementation, it's noted as a non-binding *reuse hint* — these hints must not shape the API.
+The author writes against a thin driver (`ScenarioSession`, "scn") plus standalone assertion helpers; the driver owns lifecycle, fixture invocation, captures, and `ai`-state accumulation, but **not** assertion logic (§15). The catalog below is the **as-built API** implemented in `scn/session.py`. Reuse hints are retained for traceability.
 
 **Lifecycle**
 
-| Function | Purpose | Reuse hint (non-binding) |
+| Function | Purpose | Implemented as |
 |---|---|---|
 | `ScenarioSession.new_doc(settings)` | Create the isolated journey doc (empty-create, §16.11 #1); register for teardown. | a `begin_journey_session` fixture exists; point it at `DocumentApp.create` rather than the clone path. |
 | `scn.close()` | Trash the journey doc; assert the expectation queue is empty. | `end_journey_session`. |
@@ -639,7 +639,7 @@ The author writes against a thin driver (`ScenarioSession`, "scn") plus standalo
 
 ### 16.10 Clean worked example — the canonical journey
 
-This is the journey from the human-level notes, restructured. Each act maps to one entry point; each expectation states intent on the `ai`. It exercises Sync Scenarios C, B/A, and the editor UI; it is **representative, not exhaustive**.
+This is the journey from the human-level notes, restructured. Each act maps to one entry point; each expectation states intent on the `ai`. It exercises Sync Scenarios C, B/A, and the editor UI; it is **representative, not exhaustive**. **Implemented as `tests/test_journey.py` (GTaskSheet-5vwu.13).** See test file header for documented deviations D1–D3.
 
 ```python
 @pytest.fixture(scope="module")
@@ -728,3 +728,28 @@ These were open when the model was drafted; all are now decided (SD, 2026-05-30)
 8. **Tooltip / popped-card observability — driver layer.** Confirmed: deferred to the Playwright driver / page-object layer (§16.8). Not a scenario-level concern.
 
 9. **Partial-drain granularity — per-surface.** A checkpoint drains a multi-surface expectation **per surface** (mark the sheet satisfied now, keep the doc queued); a pinned `at=INTEGRITY` expectation is never partially drained early and is evaluated whole at the boundary.
+
+---
+
+## §17 — Known Enhancement Candidates
+
+Coverage gaps identified in `docs/atdd/scenario-testing-review-2026-05-29.md` not yet in any journey. These are future work items, not defects in the current implementation.
+
+### P0 — Entry-point coverage invariant violations
+
+- **P0-1 (doc-initiated deletion):** removing an `AI-N:` paragraph in-doc, then syncing — verifies orphan reconciliation code path. Not in `test_journey.py`.
+- **P0-2 (whole-doc deletion / orphaned rows):** deleting the entire doc or all its actions, verifying `syncAll` stamps `Doc Not Found` / `Deleted` correctly. Highest user-risk path; not in any current journey.
+
+### P1 — Entry-point coverage gaps
+
+- **P1-1 (`syncAll` sweep as call-site):** `syncAll()` (the 30-min time-based trigger) must be exercised end-to-end as the call-site, not only via `syncDocument`. Violates the entry-point coverage invariant until addressed.
+- **P1-2 (live `onActionSheetEdit` trigger):** Acts 4–5 skip when the add-on test deployment is not installed; a dedicated `[TST]` journey should exercise the real installable trigger as a call-site.
+- **P1-3 (full status lifecycle):** `In Progress → Done` and reopen paths not yet covered.
+
+### P2 — Structural improvements (deferred)
+
+- **Invariant-based assertions** at `INTEGRITY` checkpoints (1:1 doc-row pairing, no duplicate `globalId`, deleted/done actions match tracker).
+- **Non-fatal failure mode** so a mid-journey failure records the defect but continues to accumulate observations for later acts.
+- **Doc-scoped invariant assertions:** the ActionSheet accumulates rows across test runs; assertions must scope to the journey doc's `globalId` space.
+
+_Track as bd issues when the next journey extension begins._

@@ -16,7 +16,7 @@ ADR-0003 addressed part of this with red-phase/green-phase labels, but those lab
 
 ## Decision
 
-Adopt the ATDD lifecycle defined in `docs/proposed-atdd-lifecycle.md`. The specific commitments are:
+Adopt the ATDD lifecycle defined in `docs/atdd/atdd-lifecycle.md`. The specific commitments are:
 
 **1. Issue title prefixes.**
 All new issues use `[IMP]`, `[TST]`, `[FIX]`, or `[INF]` as the first token of the title. The prefix lives in the title, not only as a tag, so it is visible in every bd report format regardless of tag display. Existing open issues are not retroactively renamed.

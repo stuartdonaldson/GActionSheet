@@ -157,6 +157,8 @@ Apps Script editor → Run → initializeTriggers
 
 ## Running Tests
 
+The `scn/` package provides the scenario harness (`ai`, `engine`, `session`, `surfaces`, `ui`, `contract` modules). Architecture: `docs/atdd/scenario-harness-design.md`. Strategy: `docs/atdd/atdd-lifecycle.md`.
+
 ```bash
 # Always use -x (fail-fast): stop after the first test that fails.
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/ -x -v
@@ -166,6 +168,14 @@ Apps Script editor → Run → initializeTriggers
 
 # UC-A acceptance tests (requires live GAS — npm run deploy:test first):
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_uc_a.py -x -v
+
+# §16.10 canonical ATDD journey — Acts 1–3 (requires live GAS — npm run deploy:test first):
+/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey_acts_1_3.py -x -v
+
+# §16.10 canonical ATDD journey — full Acts 1–5:
+# Acts 4–5 additionally require the add-on test deployment installed in the test account:
+#   Apps Script editor → Deploy → Test deployments → Install as Add-on
+/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey.py -x -v
 ```
 
 Each UC scenario test has significant setup/teardown cost (GAS invocation, up to 300 s). A root-cause failure in an early scenario cascades to all later ones — running to completion wastes time and obscures the real defect. Fix the first failure before proceeding.

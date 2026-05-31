@@ -1,7 +1,7 @@
 """
 assertions.py — standalone per-surface assertion helpers (GTaskSheet-5vwu.5).
 
-Spec: docs/proposed-atdd-lifecycle.md §16.5, §16.6
+Spec: docs/atdd/atdd-lifecycle.md §16.5, §16.6
 Design: docs/atdd/scenario-harness-design.md §3.7, §5
 
 Returns None on pass, an error string on failure.

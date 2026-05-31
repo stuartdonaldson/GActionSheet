@@ -1,7 +1,7 @@
 """
 ui.py — Playwright page-object UI driver (GTaskSheet-5vwu.10).
 
-Spec: docs/proposed-atdd-lifecycle.md §16.8, §16.11 #8
+Spec: docs/atdd/atdd-lifecycle.md §16.8, §16.11 #8
 Design: docs/atdd/scenario-harness-design.md §3.8
 
 Public API exposed as scn.ui (attach to ScenarioSession after creation):

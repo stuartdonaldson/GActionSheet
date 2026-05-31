@@ -9,7 +9,7 @@ harness code is written here; no GAS implementation was read._
 ## 1. Scope & sources
 
 This note is the **harness build specification**. It consumes the canonical scenario-author model
-in `docs/proposed-atdd-lifecycle.md` **§16** and turns it into a concrete Python package: a module
+in `docs/atdd/atdd-lifecycle.md` **§16** and turns it into a concrete Python package: a module
 layout, typed signatures for every §16.9 catalog entry, and — the deepest piece — the
 **expectation/checkpoint engine algorithm** (§4).
 
@@ -19,7 +19,7 @@ three primitives, the worked journey) stays in §16, which is canonical and supe
 §15 conflict, §16 wins; §15 is retained only for its contract-ownership and conflict-resolution
 detail.
 
-Sources consulted: `docs/proposed-atdd-lifecycle.md` §16 (canonical) + §15 (background),
+Sources consulted: `docs/atdd/atdd-lifecycle.md` §16 (canonical) + §15 (background),
 `src/ContractSchema.js`. §16 vocabulary and the §16.11 resolved decisions are honored verbatim.
 
 **Authoritative-contract rule (from §15).** The harness never restates field tables. Shared shapes

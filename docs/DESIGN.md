@@ -258,7 +258,9 @@ Grouped by execution context (see §Runtime Architecture).
 | Component | Responsibility |
 |-----------|---------------|
 | Sync handler | `_handleSyncActionRows`: for each scanned action, inserts a new row, or (row exists) applies **Dirty-flag conflict resolution** — `Sync Status = 'Dirty'` → sheet wins (returned in `sheetWins` for the caller to flush doc-ward); otherwise doc wins (overwrite changed cells). Also removes stale duplicate rows and stamps orphans `Deleted` / `Doc Not Found`. All writes wrapped by the in-process `WriteGuard` |
-| Other routes | `upsert_action_rows` (editor create + async drain), `patch_action_status` / `delete_action_row` (sidebar fast paths), `verify_action_rows` (read-only), `mark_doc_not_found`, `set_test_token` / `run_fixture` (test-only) |
+| Production routes | `sync_action_rows` (blocks until `ACTION_SHEET_QUEUE` drains), `upsert_action_rows` (editor create + async drain), `patch_action_status` / `delete_action_row` (sidebar fast paths) — auth: `WEBAPP_SECRET` |
+| Test-support routes | `edit_action_row` (replicates `onActionSheetEdit` Dirty+DateModified stamp), `find_sheet_actions` (read, docId-scoped), `append_doc_paragraph`, `patch_action_status` / `delete_action_row` ATDD wrappers (stamp Dirty so sheet-wins applies), `verify_action_rows`, `mark_doc_not_found`, `set_test_token`, `run_fixture` — auth: `testToken`; defined in `ContractSchema.js webApp.testRouteNames` |
+| ATDD session routes | `begin_journey_session` (empty-create doc named `GActionSheet-Test-journey-{YYYYMMDD}-{hex}` in test folder), `end_journey_session` (trash doc) — auth: `testToken`; defined in `src/AtddContracts.js` |
 
 ### ④ Container-bound automation (sheet owner)
 
@@ -526,6 +528,7 @@ Each Use Case has **one** end-to-end test that asserts the user-visible outcome 
 
 | UC | What the test does | What it asserts |
 |---|---|---|
+| **§16.10 Journey** (`tests/test_journey.py`) | Acts 1–5: empty-create doc → sync-with-actions → sheet-edit + queue-drain → set_status + conflict → editor UI chip hover/preview. Acts 4–5 require add-on test deployment installed. | Full surface coverage: DOC, SHEET, TRACKER per §16.7 consistency checklist. Deviations D1–D3 documented in test file header. See `docs/atdd/atdd-lifecycle.md §16.10`. |
 | **UC-A** | Insert one `AI-N:` item with a person-chip assignee AND one with a bare-email assignee in the same doc, click Sync, then click Sync again with no changes | Both items appear in ActionSheet with correct email, name, action text, and status (AC1); second Sync produces no new rows, all `globalId` values unchanged, sheet and doc content byte-for-byte identical (AC2) |
 | **UC-B** | Four flows: (1) edit the sheet row's Status/Action/Assignee, then Sync; (2) edit the floating action's trailing `(Status)`, then Sync; (3) edit the floating action's text after the chip, then Sync; (4) replace the chip with a different person, then Sync. Plus a negative case (5): type into the tracker table cell, then Sync | (1)–(4) the *other* authoritative side reflects the edit, no duplicate ActionSheet row, the `AI-N` token / `globalId` preserved across all four; (5) the ActionSheet is unchanged and the next tracker refresh restores the rendered values |
 | **UC-C** | Click **Insert / refresh tracker** twice, with intervening action changes; include a refresh after a tracker-cell edit | First click produces instructional paragraph + N-row table; second click reflects added/removed/closed actions in place; no stale rows remain; tracker-cell edits are overwritten on refresh |
@@ -554,9 +557,40 @@ Atomic tests run with `-x` fail-fast and are owned per concern. They isolate roo
 
 ---
 
+## ATDD Journey Pre-Code Contract
+
+_Durable design record for the §16.10 canonical journey (GTaskSheet-5vwu). Authoritative shapes live in `src/ContractSchema.js` and `src/AtddContracts.js`._
+
+### Three-tier route ownership
+
+| Tier | Auth | Source | Routes |
+|------|------|--------|--------|
+| Production | `WEBAPP_SECRET` | `ContractSchema.js webApp.routeNames` | `sync_action_rows`, `patch_action_status`, `delete_action_row`, `upsert_action_rows` |
+| Test-support | `testToken` | `ContractSchema.js webApp.testRouteNames` | `edit_action_row`, `find_sheet_actions`, `append_doc_paragraph`, `patch_action_status` (ATDD wrapper), `delete_action_row` (ATDD wrapper), `verify_action_rows`, `mark_doc_not_found`, `set_test_token`, `run_fixture` |
+| ATDD session | `testToken` | `src/AtddContracts.js` | `begin_journey_session`, `end_journey_session` |
+
+### Completion-signal model (response-based — no log polling)
+
+- `sync_action_rows` — **synchronous**; blocks until `ACTION_SHEET_QUEUE` drains before responding. A following `sync()` call is guaranteed to find the queue empty.
+- `patch_action_status` — **asynchronous**; enqueues and returns immediately. Converges to a consistent state on the next `sync()` call.
+- All other routes — synchronous; response body is the result.
+
+### Key semantics
+
+- **`edit_action_row`** replicates `onActionSheetEdit` semantics on the API/fixture path: stamps `Dirty` + `DateModified` so the edit survives the next sync via sheet-wins (§16.11 #2). When the same gesture is driven through the Playwright UI, the real `onActionSheetEdit` trigger fires and no replication is needed.
+- **All write routes** address their target row by `globalId`, not physical row index (§16.11 #3).
+- **`begin_journey_session`** creates an empty doc via `DocumentApp.create`, named `GActionSheet-Test-journey-{YYYYMMDD}-{hex}`, in the same Drive folder as the test sheet. `end_journey_session` trashes it.
+- **`doc_id` / `doc_name`** are DERIVED from the `document_formula` hyperlink (col 7), not stored columns. `SheetReader` must parse them; they are not available as direct sheet fields.
+- **ATDD wrappers** for `patch_action_status` and `delete_action_row` are `testToken`-gated and stamp `Dirty`, whereas the production routes are `WEBAPP_SECRET`-gated. This keeps the ATDD test path honest: a patched status survives the next sync via sheet-wins rather than being overwritten by doc-wins.
+
+---
+
 ## References
 | Document | Location | Covers |
 |----------|----------|--------|
 | Original requirements (archived) | /knowledge-base/references/requirements-original-2026.md | Full functional specification for the prior `AI-` prefix / container-bound-on-Sheet design (superseded) |
 | Google Docs / Tasks API findings | /home/stuar/roots/g-Proj/GDocTools/DocsAPI/DOCS_API_FINDINGS.md | API capability matrix and architectural options that drove this design |
 | GAS best practices | /mnt/c/dev/GAS-Practices/best-practices/ | Deployment, xlsx download, server logging, editor-testing patterns |
+| ATDD lifecycle & strategy | docs/atdd/atdd-lifecycle.md | Process model, twin-ticket rule, §16 scenario definition model, §16.10 canonical journey, §16.11 resolved decisions, §17 enhancement candidates |
+| Python harness architecture | docs/atdd/scenario-harness-design.md | `scn/` module layout, ownership rules, concrete signatures for §16.9 catalog |
+| Scenario coverage review | docs/atdd/scenario-testing-review-2026-05-29.md | P0–P3 coverage gap findings from 2026-05-29 review |

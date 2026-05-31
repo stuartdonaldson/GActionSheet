@@ -1,7 +1,7 @@
 """
 ai.py — the noun a scenario manipulates (GTaskSheet-5vwu.4).
 
-Spec: docs/proposed-atdd-lifecycle.md §16.2
+Spec: docs/atdd/atdd-lifecycle.md §16.2
 Design: docs/atdd/scenario-harness-design.md §3.1
 """
 from dataclasses import dataclass

@@ -5,7 +5,7 @@ Exercises Sync Scenarios C, B/A, and the editor UI against a live GAS deployment
 Each act maps to one entry point; every expectation declares intent on an ai.
 
 Bead: GTaskSheet-5vwu.13
-Canonical source: docs/proposed-atdd-lifecycle.md §16.10
+Canonical source: docs/atdd/atdd-lifecycle.md §16.10
 
 Deviations from §16.10 (both mechanical, not design):
   D1 — Coordination Log (bead .1): Act 4 "Open" SHEET probe and Act 5 "In Progress"

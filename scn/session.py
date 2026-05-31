@@ -1,7 +1,7 @@
 """
 session.py — ScenarioSession thin driver (GTaskSheet-5vwu.7).
 
-Spec: docs/proposed-atdd-lifecycle.md §16.9, §16.11
+Spec: docs/atdd/atdd-lifecycle.md §16.9, §16.11
 Design: docs/atdd/scenario-harness-design.md §3, §4
 
 Public API (§16.9 catalog):
