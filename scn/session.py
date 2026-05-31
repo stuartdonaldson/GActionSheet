@@ -129,6 +129,8 @@ class ScenarioSession:
         self.tracker_present: bool = False
         self.engine = CheckpointEngine()
         self._seq: int = 0
+        # Attach after creation: scn.ui = UiDriver(page, doc_id=scn.doc_id)
+        self.ui: UiDriver | None = None
 
     # ------------------------------------------------------------------
     # Private HTTP helpers
@@ -366,6 +368,38 @@ class ScenarioSession:
             tag=tag or _current_test_tag(),
         )
         self._enqueue(exp)
+
+    # ------------------------------------------------------------------
+    # UI expectations — convenience wrappers that delegate to scn.ui (§16.8)
+    # ------------------------------------------------------------------
+
+    def expect_visible(self, card, *, timeout: str = "5s") -> None:
+        """Assert the preview card is visible; delegates to scn.ui (§16.8).
+
+        Convenience wrapper so scenarios write `scn.expect_visible(card)` per
+        the §16.8 usage pattern.
+        """
+        if self.ui is None:
+            raise RuntimeError(
+                "scn.expect_visible requires scn.ui — "
+                "set scn.ui = UiDriver(page, doc_id=scn.doc_id)"
+            )
+        self.ui.expect_visible(card, timeout=timeout)
+
+    def expect_alt(
+        self,
+        locator,
+        text: str,
+        *,
+        severity: Severity = Severity.FAIL,
+    ) -> None:
+        """Assert aria-label / alt / title of element equals text; delegates to scn.ui."""
+        if self.ui is None:
+            raise RuntimeError(
+                "scn.expect_alt requires scn.ui — "
+                "set scn.ui = UiDriver(page, doc_id=scn.doc_id)"
+            )
+        self.ui.expect_alt(locator, text, severity=severity)
 
     def checkpoint(
         self,

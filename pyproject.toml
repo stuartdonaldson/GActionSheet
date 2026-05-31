@@ -9,5 +9,10 @@ dependencies = [
     "python-docx>=1.1",
 ]
 
+[project.optional-dependencies]
+# Required for scn/ui.py live-browser integration tests; not needed for unit tests.
+# Install with: uv pip install -e ".[ui]"
+ui = ["playwright>=1.49"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

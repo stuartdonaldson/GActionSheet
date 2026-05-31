@@ -28,7 +28,7 @@ module.exports = defineConfig({
   retries: 1,
   use: {
     baseURL: getSheetUrl(),
-    headless: false,
+    headless: process.env.PWHEADFUL !== '1',
     storageState: path.join(__dirname, '..', '..', '.auth', 'user.json'),
     viewport: { width: 1280, height: 900 },
     screenshot: 'only-on-failure',
