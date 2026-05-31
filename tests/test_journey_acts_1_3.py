@@ -63,9 +63,17 @@ def test_journey_acts_1_3(scn):
     with_email.status = "Open"              # tokenless → detected Open
     explicit_5.status = "Open"
     domain_usr.status = "Open"
-    unassigned.action_id = "AI-1"
-    with_email.action_id = "AI-2"           # expected auto-assignment
     # explicit_5 / domain_usr already carry AI-5 / AI-9; started_ip keeps In Progress
+
+    # Resolve auto-assigned action_ids from the sheet — §16.10 shows "AI-1" / "AI-2" but
+    # those assume a clean sheet; the live sheet accumulates IDs across runs.
+    for row in scn.find_sheet_actions():
+        if row.action == unassigned.action:
+            unassigned.action_id = row.action_id
+        elif row.action == with_email.action:
+            with_email.action_id = row.action_id
+    assert unassigned.action_id is not None, "unassigned action not found in sheet after sync"
+    assert with_email.action_id is not None, "with_email action not found in sheet after sync"
 
     for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
         scn.verify_all_expectations(a)      # doc+sheet; text/email/name/id/status

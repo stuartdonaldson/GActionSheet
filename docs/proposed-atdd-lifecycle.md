@@ -187,52 +187,20 @@ This pattern keeps the scenario readable: the action step declares what it inten
 
 ### 14. Example scenario: document-to-sheet sync plus editor interactions
 
-The following example shows how a single scenario can efficiently exercise multiple ACs and code paths while preserving focused checkpoints.
+_This section originally read as 23 imperative steps. That style is superseded by the Act / Expect / Checkpoint model; the **canonical, structured form of this journey is §16.10**. This intro is retained for narrative orientation and for the concrete seed strings._
 
-**Scenario name:** AI tag import, sidebar sync, tracker insertion, and `@create` interaction
+**Scenario name:** AI tag import, sidebar sync, tracker insertion, and `@create` interaction.
 
-**Environment:** Fresh clone of a known template in an isolated test run.
+**Narrative.** Starting from a clean isolated environment, an author types several `AI:`/`AI-N:` lines into a document; a sync converts them into actions across doc and sheet; the tracker table is inserted and re-synced; then the editor add-on UI is exercised — `@create`, preview-card hover, and a status change — with durable state reconciled at the HTTP boundaries. It exercises Sync Scenarios C, B/A, and the editor UI in one realistic journey, providing broad regression coverage without removing the need for focused AC tests for parsing, sync rules, tracker insertion, and status transitions.
 
-**Seed data inserted into the test document:**
-
-AI creation from the AI-N tagging creation can be tested by inserting the following text. This can be done by calling test functions from the dev environment test scripts. The following text can be inserted verbatim as examples and, when scanned by a sync operation, will trigger the creation of action items.
+**Seed strings** (verbatim text inserted into the document; each triggers one action when scanned by sync):
 
 * `AI: This tag and text confirms creation of an unassigned action item`
 * `AI: aitest@example.com This tag and email address along with this text confirms the creation of an action item with an assignee.`
 * `AI-5: This tag and text confirms creation of an action item with id AI-5 pre-assigning the specific ID.`
 * `AI-9: minister@northlakeuu.org This tag, email and text should result in the creation of the assignee as a person chip, working within our Northlake domain this has a username of 'Northlake Minister' which should appear in the chip.`
 
-**Scenario flow:**
-
-1. Start with a cloned copy of the known test template.
-2. Insert the seed data above into the test document.
-3. Trigger sync by calling `doPost()` for the test document.
-4. Queue the expected results for the four inserted AI-tag examples.
-5. Run an integrity checkpoint against the test document and its sheet only.
-6. Consume the queued verification items for AI-tag parsing, ID assignment, assignee extraction, and chip resolution.
-7. Verify that all actions in the sheet are present in the document and vice versa, and that action text and assignee information match.
-8. Verify the expected seed outcomes:
-    * the first `AI:` tag creates a new action with a generated ID, no assignee, and the action text `This tag and text confirms creation of an unassigned action item`;
-    * the second `AI:` tag creates a new action with a generated ID, the assignee `aitest@example.com`, and the action text `This tag and email address along with this text confirms the creation of an action item with an assignee.`;
-    * `AI-5` is preserved as an explicit ID and retains the action text `This tag and text confirms creation of an action item with id AI-5 pre-assigning the specific ID.`;
-    * `AI-9` is preserved as an explicit ID, parses `minister@northlakeuu.org` as the assignee, retains the remaining sentence as the action text, and resolves the assignee chip name to `Northlake Minister`.
-9. Open the test document in Playwright.
-10. Open the sidebar from the editor add-on icon.
-11. Verify the displayed version.
-12. Run Sync Now, queue the expected sidebar-visible results, and verify that the seeded actions appear in the sidebar.
-13. Insert the tracker table, queue the expected tracker rows, and run Sync Now again.
-14. On a new line in the document, type `@create`, choose Create Action from the `@` menu, set the action text to `Creating an action via the @- trigger`, and set the assignee to `sdonaldson@northlakeuu.org`.
-15. Queue verification items for the newly created action across document text, sidebar state, and tracker-table state.
-16. Treat missing autocomplete as a warning-only observation unless the AC explicitly requires autocomplete for completion.
-17. Verify that the newly created action appears in the document, sidebar, and tracker table where applicable.
-18. Hover over the newly created `AI-N` action and verify that the preview card appears.
-19. Hover over the In Progress icon and verify that the tooltip appears.
-20. Click In Progress, queue the expected status transition, allow the temporary busy state to clear, and verify within 10 seconds that the action status has updated.
-21. Run a final integrity checkpoint by downloading the DOCX/XLSX artifacts and reconciling document actions, sheet actions, and tracker-table rows for the test document only.
-22. Consume the remaining queued verification items for Playwright-created actions and status changes.
-23. Verify the two actions created through editor interaction have the correct text, status, and assignee in all durable representations.
-
-**Why this is a scenario test:** It exercises several ACs and interaction seams in one realistic journey. It provides broad regression coverage efficiently, but it does not remove the need for focused AC tests for parsing, sync rules, tracker insertion, and status transitions.
+See **§16.10** for the canonical structured journey (acts, expectations, checkpoints) and **§16.1–16.9** for the vocabulary it is written in.
 
 ---
 
@@ -245,7 +213,9 @@ AI creation from the AI-N tagging creation can be tested by inserting the follow
 
 ## §15 — Scenario Test Python Architecture
 
-_Working design from the 2026-05-29 session. Captures architectural decisions and open questions for the implementation of the §14 scenario in Python._
+_Working test-architecture note from the 2026-05-29 session. Describes how the §14 Python scenario should consume authoritative contracts defined elsewhere._
+
+> **§16 is canonical for the scenario API and supersedes this section's naming where they differ:** `append_doc_item`→`append_paragraph`, `sync_document`→`sync`, `ActionItem`→`ai`, `seed_text()`→`as_text()`, `update_sheet_field`→`edit_sheet`. §15 is retained for its contract-ownership model and conflict-resolution detail, not as the canonical API surface.
 
 ### Document initialization
 
@@ -261,27 +231,62 @@ Document initialization variants — and when to use each:
 | Clone of master template | When specific pre-populated structure is required (not currently needed) |
 | Existing specific doc | Edge-case tests around docs that already have actions; known to have rough edges around delete-all scenarios — **not prioritized** |
 
-### `ActionItem` — internal representation
+### Contract ownership for scenario tests
 
-An `ActionItem` holds what we know about one action across its full lifecycle. Field names match the ActionSheet column schema so that find/update fixture calls do not require a translation layer.
+This section is **not** the authoritative source for application contracts. It describes how the scenario tests should **consume** contracts that are defined elsewhere.
 
+Recommended ownership model:
+
+- [docs/DESIGN.md](/home/stuar/roots/c-dev/GActionSheet/docs/DESIGN.md) owns the human-readable contract semantics: boundary names, field meanings, invariants, defaults, and ownership rules.
+- [src/ContractSchema.js](/home/stuar/roots/c-dev/GActionSheet/src/ContractSchema.js) owns the exact machine-readable shapes currently shared across app code and test consumers.
+- [docs/proposed-atdd-lifecycle.md](/home/stuar/roots/c-dev/GActionSheet/docs/proposed-atdd-lifecycle.md) should only describe how tests use those contracts.
+
+For this system, the likely contract families are:
+
+1. `ActionItem` contract: the minimal action content model used for doc seeding and doc-state assertions.
+2. `SheetAction` contract: the ActionSheet row model, including column mapping and derived fields.
+3. Web App message contract: every `doPost()` action payload and response shape.
+4. Document read contract: the structure returned when test code or fixtures read floating actions, tracker rows, or other doc-derived state.
+
+Preferred single-source pattern:
+
+1. `DESIGN.md` states which contract families exist and who owns them.
+2. [src/ContractSchema.js](/home/stuar/roots/c-dev/GActionSheet/src/ContractSchema.js) defines the exact field lists and shared names currently needed by app code and tests.
+3. Tests, fixtures, and implementation code all read from that same source or are validated against it.
+
+Applied to this scenario architecture:
+
+- The scenario test should construct `ActionItem` values using the authoritative action-content contract.
+- The scenario test should read sheet rows into `SheetAction` values using the authoritative ActionSheet contract.
+- Every helper that posts to the Web App should conform to the authoritative `doPost()` message contract.
+- Every helper that reads state from the document should conform to the authoritative document-read contract.
+
+
+The current dedicated interface source file is [src/ContractSchema.js](/home/stuar/roots/c-dev/GActionSheet/src/ContractSchema.js). This document should reference it and avoid restating its field tables.
+
+#### Example: Consuming the contract in Python scenario tests
+
+Scenario tests should consume the contract as data, not by duplicating field lists. This can be done by:
+
+1. Exporting the schema from ContractSchema.js as JSON (e.g., via a build step or script).
+2. Loading the JSON in Python test code:
+
+```python
+import json
+with open('ContractSchema.json') as f:
+    contract = json.load(f)
+SHEET_HEADERS = contract['SHEET_HEADERS']
 ```
-ActionItem
-  seed_text          # full string inserted into doc, e.g. "AI: aitest@example.com Some text"
-  action_text        # body only — without the AI: prefix and email
-  assignee_email     # None for unassigned
-  assignee_name      # None for unassigned; resolved display name for domain users
-  expected_id        # None = auto-assigned; integer = explicit (e.g. 5 for AI-5:)
-  global_id          # populated after sync, e.g. "docId/AI-3"
-  status             # "Open" initially
-  sync_status        # "" (clean) or "Dirty"; read back from find_sheet_actions
-  last_modified      # read back from find_sheet_actions; archival, not used for conflict resolution
-  row_id             # sheet row number; populated by find_sheet_actions for use with update_sheet_field
-```
+
+Alternatively, tests can parse the .js file directly if needed, but a JSON export is preferred for clarity and automation.
+
+**Workflow for contract updates:**
+- When a contract field or structure changes in ContractSchema.js, re-export the JSON and update test fixtures to match.
+- Tests should fail clearly if the contract and test expectations drift, enforcing single-source discipline.
+
 
 ### `ScenarioSession` — thin driver, not assertion owner
-
-`ScenarioSession` owns: doc lifecycle, fixture invocation, downloads, and `ActionItem` state accumulation. It does **not** own assertion logic. Methods return data structures; assertion functions are standalone — either in the test file or a shared `assertions.py` module.
+`ScenarioSession` owns: doc lifecycle, fixture invocation, downloads, and `ActionItem`/`SheetAction` state accumulation. It does **not** own assertion logic. Methods return data structures; assertion functions are standalone — either in the test file or a shared `assertions.py` module.
 
 ```python
 class ScenarioSession:
@@ -291,19 +296,20 @@ class ScenarioSession:
     def close(self): ...                                  # trashes journey doc
 
     # Doc mutations (each is one HTTP fixture call)
-    def append_doc_item(self, item: ActionItem): ...      # inserts seed text; registers item on session
+    def append_doc_item(self, item: ActionItem): ...      # inserts item.seed_text(); registers item on session
     def insert_tracker_table(self): ...
 
     # Sync (name states the mechanism explicitly)
     def sync_document(self): ...                          # calls GAS syncDocument() via doPost — Scenario C
 
     # Artifact downloads
-    def doc_items(self) -> list[DocItem]: ...             # download + parse docx; return floating action structs
-    def sheet_rows(self) -> list[ActionItem]: ...         # download + parse xlsx; filter for this doc's rows
+    def doc_items(self) -> list[DocItem]: ...             # parse floating action state; includes doc-only presentation details
+    def sheet_rows(self) -> list[SheetAction]: ...        # download + parse xlsx; map columns by SHEET_HEADERS
 
     # Sheet read/write (for manipulation tests)
-    def find_sheet_actions(self) -> list[ActionItem]: ... # doPost find_sheet_actions — returns rows with row_id
-    def update_sheet_field(self, row_id, field, value): ...  # doPost update_sheet_field — see open question below
+    def find_sheet_actions(self) -> list[SheetAction]: ...    # fixture/webapp read for current doc only
+    def update_sheet_field(self, sheet_action, field, value): ...
+                                                # update a SheetAction field using stable identity
 
     # GAS-side consistency (doc ↔ sheet verification)
     def verify_consistency(self) -> dict: ...             # calls verify_consistency fixture; returns data dict
@@ -341,24 +347,20 @@ Each item is declared inline in the test — not buried in a `seed()` helper. Th
 ```python
 def test_01_seed_and_import(journey):
     journey.append_doc_item(ActionItem(
-        seed_text="AI: This tag and text confirms creation of an unassigned action item",
         action_text="This tag and text confirms creation of an unassigned action item",
-        assignee_email=None, assignee_name=None, expected_id=None,
     ))
     journey.append_doc_item(ActionItem(
-        seed_text="AI: aitest@example.com This tag and email address ...",
         action_text="This tag and email address along with this text ...",
-        assignee_email="aitest@example.com", assignee_name="Aitest", expected_id=None,
+        assignee_email="aitest@example.com",
     ))
     journey.append_doc_item(ActionItem(
-        seed_text="AI-5: This tag and text confirms creation of an action item with id AI-5 ...",
         action_text="This tag and text confirms creation of an action item with id AI-5 ...",
-        assignee_email=None, assignee_name=None, expected_id=5,
+        action_id="AI-5",
     ))
     journey.append_doc_item(ActionItem(
-        seed_text="AI-9: minister@northlakeuu.org This tag, email and text ...",
         action_text="This tag, email and text ...",
-        assignee_email="minister@northlakeuu.org", assignee_name="Northlake Minister", expected_id=9,
+        assignee_email="minister@northlakeuu.org",
+        action_id="AI-9",
     ))
 
     journey.sync_document()
@@ -409,16 +411,14 @@ test_12  UI: mark item deleted via preview card → verify Deleted in sheet, rem
 
 ### Sheet manipulation fixtures — GAS side
 
-Two new `doPost` routes needed in `TestFixtures.js` (or `WebApp.js`):
+If new sheet-manipulation fixtures are added, their request/response shapes should be defined in the authoritative Web App message contract rather than here.
 
-**`find_sheet_actions`**
-- Input: `docId` (sufficient; no filter needed — the doc's globalId prefix uniquely scopes results)
-- Returns: array of row objects with field names matching `ActionItem` plus `row_id` (sheet row number)
-- Read-only; safe to call at any time
+For this scenario, the likely fixture/message pair is still:
 
-**`update_sheet_field`**
-- Input: `row_id`, `field` (ActionItem field name), `value`
-- Writes one cell to the Actions sheet using the field→column mapping
+- `find_sheet_actions`: read-only route returning the current document's ActionSheet rows in the authoritative `SheetAction` shape.
+- `update_sheet_field`: write route that updates one logical `SheetAction` field using the authoritative field-to-column mapping.
+
+The important rule is ownership: this document may name the routes the scenario needs, but payload fields, response fields, and stable identifiers belong in the shared contract source.
 
 ### Conflict resolution context (from DESIGN.md ADR-0009)
 
@@ -427,22 +427,304 @@ Resolution is per-row by `Sync Status` (col 10), not by timestamp:
 - `Sync Status = ''` → doc wins: sheet cells overwritten from scanned doc state on next sync
 - `Date Modified` (col 9) is archival only — not used for resolution
 
-`onActionSheetEdit` stamps Dirty + Date Modified when a user edits cols 3–6. **Critical constraint:** doPost writes (including `update_sheet_field`) run as the deployer in a separate execution and do **not** fire `onActionSheetEdit` (confirmed in DESIGN.md §Programmatic Write Suppression). This means the `update_sheet_field` fixture must handle Dirty stamping explicitly.
+`onActionSheetEdit` stamps Dirty + Date Modified when a user edits cols 3–6. **Critical constraint:** doPost writes (including `update_sheet_field`) run as the deployer in a separate execution and do **not** fire `onActionSheetEdit` (confirmed in DESIGN.md §Programmatic Write Suppression). That behavior belongs in the authoritative Web App/message contract; the scenario test should rely on that contract rather than redefining the stamping rules locally.
 
-### Open questions (unresolved as of 2026-05-29)
+### Contract decisions still needed
 
-**Q1: Should `update_sheet_field` auto-stamp Dirty + Date Modified for data columns?**
+Two of these are now **decided** (§16.11); the mechanical shape still lands in the authoritative contract source:
 
-Option A: Yes — fixture replicates `onActionSheetEdit` behaviour when writing cols 3–6. A single call means "simulate a user sheet edit," which is the intended test scenario. Simpler test code.
+1. **Resolved (§16.11 #2):** `edit_sheet` (the renamed `update_sheet_field`) on the API/fixture path **does** replicate a full user edit, stamping Dirty + Date Modified; the Playwright UI path relies on the real `onActionSheetEdit` trigger.
+2. **Resolved (§16.11 #3):** write routes use **`globalId`** as the stable identifier.
+3. **Still open:** whether doc-derived reads are exposed only through `doPost()` routes or also through dedicated fixture-only entry points — route to DESIGN.md / `src/ContractSchema.js`.
 
-Option B: No — test explicitly calls `update_sheet_field` twice (value, then Dirty). Makes the "what is being tested" more explicit — the test shows it's setting up a Dirty row. Slightly more verbose.
+This document consumes those decisions; it is not where they are finalized.
 
-Lean toward Option A for readability, but needs confirmation.
+---
 
-**Q2: What is the stable identifier for `update_sheet_field`?**
+## §16 — Scenario Definition Model (canonical)
 
-Option A: Raw sheet row number (`row_id`). Simple, but fragile if rows shift during the test.
+_Status: this is the **canonical** definition of how a scenario is written. This is **design, not built** — the function names below describe the intended API; nothing here asserts current implementation. §14 (prose example) and §15 (early Python architecture) remain as background; once this model settles, §14 will be trimmed to a short narrative intro that points here._
 
-Option B: `globalId` (e.g. `docId/AI-3`). Already unique per action, already in ActionItem. `update_sheet_field` resolves it to a row number server-side.
+§14 read as 23 imperative steps. That style does not scale: it bundles unrelated operations into single steps, leaves intent implicit, and makes under-assertion easy. This section replaces the *style* (not the goal) with a small, uniform vocabulary, defines the data object a scenario manipulates, states the level of detail to write at, and catalogs the support functions a scenario author calls.
 
-Lean toward Option B — `globalId` is the system's own stable identity and does not depend on physical row position.
+### 16.1 A scenario is a sequence of three primitives
+
+A scenario is an ordered journey against **one isolated environment**, expressed with three primitives:
+
+| Primitive | What it is | Rule of thumb |
+|---|---|---|
+| **Act** | One state mutation through **one** user-facing entry point (add a paragraph, sync, edit a sheet field, set a status, delete, insert the tracker, a UI gesture). | One act = one entry point = one user gesture. Never bundle two entry points into one act. |
+| **Expect** | A declaration of the outcome an act should produce, enqueued (the §13 queued-verification pattern), with optional arguments for *which surface* and *when* to check it. | State intent where you cause it; if the outcome only becomes true later, target it forward. An act whose outcome is never expected is a coverage hole. |
+| **Checkpoint** | The point where enqueued expectations are evaluated against freshly captured state, draining the ones it can observe. Two kinds (below). | Cheap `STEP` checkpoints inline; full `INTEGRITY` checkpoints at mutation boundaries; the queue must be empty by journey end. |
+
+Two checkpoint kinds:
+
+- **`STEP`** — validates only the queued expectations its **lightweight read can observe** (e.g. a single `sheet_rows()` pull sees sheet fields but not doc paragraph state, tracker rows, or `globalId` linkage). Drains the ones it satisfied and **leaves the rest queued**. Fast; use after most acts.
+- **`INTEGRITY`** — captures the doc (`.docx`), sheet (`.xlsx`), and tracker, runs the GAS-side consistency checklist (§16.7), and can evaluate **every** kind of expectation. Reserve for major mutation boundaries and the journey end. Expensive — **do not run mid-Playwright** (see §16.3 rule 5).
+
+**Drain invariant.** An expectation is verified only when a checkpoint that can observe it drains it. A `STEP` may leave expectations queued; an `INTEGRITY` may not — every queued expectation it can observe must be satisfied and drained. Therefore **every expectation must be drained at or before journey end, and the queue must be empty when the session closes.** A non-empty queue at teardown is a test failure (an expectation nobody verified), not a pass. Consequently every journey ends with an `INTEGRITY` checkpoint, and any expectation a `STEP` cannot see simply rides the queue to the next `INTEGRITY`.
+
+#### Two reasons an expectation defers — and how to target it
+
+1. **Observability** — the checkpoint's read cannot *see* the surface (a `STEP`'s `sheet_rows()` cannot observe doc paragraph or tracker state). Handled automatically: drain what's observable, leave the rest queued.
+2. **Timing / causality** — the outcome is not *true yet* at enqueue time; it only becomes true after a **later act** (an async sidebar status change that converges after the queue drains; a row that archives only after the sweep; a value that reconciles only after a following `sync()`). The author declares this with an **evaluation target**:
+
+| Target | Meaning | Use for |
+|---|---|---|
+| `at=AUTO` *(default)* | Drain at the **earliest checkpoint that can observe it**; must be satisfied then. | Outcomes true immediately. |
+| `at=INTEGRITY` | Skip all `STEP`s; evaluate at the **next `INTEGRITY`**. | Cross-surface / not-yet-true outcomes a `STEP` shouldn't judge prematurely. |
+| `at="<label>"` | Evaluate at a **specific labeled checkpoint** placed downstream (`scn.checkpoint(STEP, label="…")`). | An outcome that becomes true only after a particular later act. |
+
+Targeting rules: a checkpoint evaluates an expectation only when it is the target (or, for `AUTO`, the earliest observer) — a pinned expectation is **not** drained early even if observable. When a checkpoint *is* the target the expectation **must** pass there. The drain invariant still governs: a labeled target that never runs leaves a non-empty queue at `close()` — a failure. This makes "check-at-a-specific-step", "check-at-system-integrity", and "check-as-soon-as-visible" one mechanism.
+
+### 16.2 The `ai` object — the noun a scenario manipulates
+
+A scenario manipulates `ai` objects. An `ai` carries **what is known** about one action, **renders its own document text** from those fields, and is **mutable** so the author can pin more once it's known (e.g. an auto-assigned id after sync). The author never types raw document text and never hand-writes a derived value like an assignee name.
+
+```python
+aix = ai(action="Creating an action via the @- trigger",
+         assignee="sdonaldson@northlakeuu.org")   # only what's known now
+aix.as_text()    # → "AI: sdonaldson@northlakeuu.org Creating an action via the @- trigger"
+aix.action_id = "AI-9"   # pin later if known; leave unset to just verify a valid AI-N was assigned
+aix.status = "Open"      # see status rule below
+```
+
+Fields: `action` (text), `assignee` (email, optional), `action_id` (`AI-N`, optional), `status` (free text — common values exist but a user may type anything; optional), `assignee_source` (`chip` | `parsed`, optional — set by the parser when an `ai` is read back from a synced surface, recording whether the assignee came from a chip or from leading-email text; unset on author-constructed `ai`s — §16.5, §16.11 #6).
+
+**`as_text()` rendering** — the string representation of the `ai` exactly as it appears as a paragraph in the document (this is *not* a "seed"; nothing here is meant to change on its own):
+
+| fields known | `as_text()` output |
+|---|---|
+| `action` | `AI: {action}` |
+| `action`, `assignee` | `AI: {assignee} {action}` |
+| `action`, `action_id` | `AI-{N}: {action}` |
+| `action`, `assignee`, `action_id` | `AI-{N}: {assignee} {action}` |
+
+**Status rendering rule.** The trailing `({status})` token is rendered **only if `status` is set on the `ai`**. If `status` is unset, no token renders. This matters at two moments:
+
+- **Before append:** a user is not expected to type a status unless it is something *other than* `Open`. So a plain action is appended with `status` **unset** (renders no token), and an action the user deliberately starts as `In Progress` is appended with `status="In Progress"` (renders `… (In Progress)`).
+- **After append, before expecting:** for the plain action, set `status="Open"` on the `ai` so the post-sync expectation matches — sync detects a tokenless action as `Open` and writes the explicit `(Open)` token. The two cases give two distinct test paths: *default-to-Open detection* and *honor-an-explicit-non-default-status*.
+
+### 16.3 Level of detail — the altitude to write at
+
+Acts at the **entry-point** altitude; expectations at the **observable-state** altitude.
+
+1. **One entry point per act.** `sync()` is one act; "edit the sheet *and* sync" is two. Keeps each failure attributable to one seam and keeps the entry-point coverage matrix honest.
+2. **Declare intent in data, not prose.** Mutate the `ai` to what you expect, then enqueue it — the scenario reads as a specification; the assertion code is generic.
+3. **Assert observable state only.** Sheet rows from the `.xlsx`, paragraph state from the `.docx`/scan, tracker rows from the rendered table, UI evidence for interactive acts. Never a return value or a log tag (§5).
+4. **Scope every read and invariant to the journey's own `docId`.** The ActionSheet accumulates rows across runs; `globalId` carries the doc prefix, so doc-scoping is the clean filter. A whole-sheet count or uniqueness check will read polluted cross-session state.
+5. **Checkpoint by cost, never mid-Playwright.** Full `INTEGRITY` reconciliation is expensive and would balloon UI runs. During the Playwright phase prefer **targeted single-surface expectations** (a probe of one `ai` on the docx or xlsx) and reserve `INTEGRITY` for HTTP-phase boundaries and the journey end.
+6. **Seed all, then sync once.** You *could* sync-and-verify after each append, but it adds execution time for little value; append the full set, then sync.
+7. **Respect the 6-minute GAS ceiling / start clean-room.** Batch input variants into one fixture (§6); split into a new scenario only when the operation model materially changes (e.g. HTTP phase vs. Playwright phase). Let the act sequence build state; don't encode incidental preconditions.
+
+### 16.4 The static test contact list
+
+A single fixture supplies the testing user's directory/contacts stand-in. It drives two things at once: the **expected assignee name** and whether **`@create` autocomplete is expected to fire**.
+
+```python
+TEST_CONTACTS = {
+    "minister@northlakeuu.org":   "Northlake Minister",
+    "sdonaldson@northlakeuu.org": "Stuart Donaldson",
+    # aitest@example.com deliberately absent → exercises the username-derivation path
+}
+```
+
+**Name-resolution rule** (the two paths the system itself uses, so the test *derives* the expectation rather than hand-writing it):
+
+```
+expected_name(email) = TEST_CONTACTS[email]      if email in contacts   # chip / directory path
+                     = name_from_email(email)     otherwise              # "jane.smith" → "Jane Smith"
+```
+
+So `minister@…` → `Northlake Minister`; `aitest@example.com` → `Aitest`. **Autocomplete rule:** an `@create` assignee whose email is in `TEST_CONTACTS` is expected to autocomplete; absence of autocomplete is a **warning-only** observation (§16.6), not a failure.
+
+### 16.5 The four observation surfaces
+
+An action is observable on four surfaces. Every expectation targets one or more; the cheapest surface that can see the claim is used.
+
+| Surface | How it's read | Cost | What an action looks like there |
+|---|---|---|---|
+| `DOC` | `.docx` download / scan | cheap | Floating-action paragraph: `AI-N: {chip} {text} ({status})`. **All occurrences of an id are identical** — `AI-5` may appear in several paragraphs; every occurrence carries the same canonical content. |
+| `SHEET` | `.xlsx` download, scoped to docId | cheap | A row in column form (`globalId`, id, email, name, action, status, …). |
+| `TRACKER` | parse the table in the `.docx` | cheap | The id always exists, but **expanded into table columns** (not a floating-action text form), with the **assignee rendered as a chip**. |
+| `UI` | live Playwright DOM (sidebar card, preview card) | live; only valid mid-session | Card rows, preview-card fields, status icons. |
+
+**Assignee is always a chip in a synced document** — in both the floating action and the tracker table. When the test parses a synced document it splits the chip into `email` + `name` for the internal `ai` and records the origin in the **`assignee_source`** field (`chip` | `parsed`, §16.2); for an already-synced document, finding `assignee_source == parsed` (a non-chip assignee) where a chip is expected is itself a consistency error discovered during parsing.
+
+### 16.6 Expectations and verification
+
+The author enqueues expectations against an `ai`. Two breadths:
+
+- **`scn.verify_all_expectations(ai)`** — the action is present and consistent across **doc + sheet + tracker (if a tracker is present)**, and its derivable properties match: action text == `ai.action`; assignee email == `ai.assignee`; assignee name == `expected_name(ai.assignee)`; status == `ai.status` (if set); id matches `ai.action_id` if set, else must be a present, valid `AI-N`; and all doc occurrences are identical (§16.5).
+- **`scn.verify(ai, on=SURFACE, ...)`** — the same checks but on **one** surface only, for the cases where surfaces legitimately diverge in time (e.g. doc updated now, sheet async).
+
+Both accept the targeting/severity options:
+
+| Option | Meaning |
+|---|---|
+| `on=DOC\|SHEET\|TRACKER\|UI` | restrict to one surface (omit on `verify_all_expectations`) |
+| `at=AUTO\|INTEGRITY\|"<label>"` | when to evaluate (§16.1) |
+| `within="10s"` | bounded poll: keep checking a live surface until true or timeout |
+| `severity=WARN` | a miss records a warning and continues, instead of failing the journey |
+
+`scn.expect_absent(ai, on=...)` enqueues an absence/terminal expectation (e.g. no live doc action; sheet `Sync Status = Deleted`). Every expectation carries its `[uc AC#]` triage tag (§10) so a drain-time failure is self-explaining.
+
+### 16.7 The consistency checklist (what an `INTEGRITY` checkpoint verifies)
+
+`verify_consistency(scope=doc)` — callable standalone at any point, and run internally by every `INTEGRITY` checkpoint — checks, scoped to the journey's `docId`:
+
+1. **Queued expectations are met** — the specific AIs expected are present; the tracker table is present or absent as expected.
+2. **Every doc AI is internally consistent** — `action_id` present; `status` present; `assignee` email (if present) is a valid address; name is valid-for-email or empty. **Doc-specific:** the status icon is present and correct (today one icon; future: must match the status); the chip link is present and valid; all occurrences identical.
+3. **Every sheet AI (scoped to this doc) is consistent** — standard column consistency. **Sheet-specific:** `globalId` present; the Document column carries the doc name and link.
+4. **Every doc AI is present in the sheet.**
+5. **Every sheet AI (scoped to this doc) is present in the doc.**
+
+_(These are grouped deliberately so they can be reused as named expectation bundles; the exact field rules will be finalized against the contract source — see §16.9.)_
+
+### 16.8 Driving the UI (the layer below the scenario)
+
+Scenarios contain **no selectors, frames, or waits**. UI gestures are named intents on `scn.ui`; a driver/page-object layer holds the fragile knowledge (the sidebar/preview-card iframes, alt-text of icons, the busy→return timing). When Google reshuffles the card DOM, one driver method changes, not the scenarios.
+
+**Locating a UI target.** A gesture needs an explicit target, expressed as a small descriptor — not "the action":
+
+```python
+scn.ui.locate(text=ai.action_id, occurrence=1)   # the nth occurrence of this text/id in the doc
+scn.ui.locate(alt="In Progress", next=True)       # an element by alt-text, in the next area from where we are
+```
+
+- `text=` + `occurrence=` targets the *nth* occurrence of a string/id (an action id may appear many times).
+- `alt=` targets an element by its alt-text (icon buttons use stable alt-text like `"In Progress"`, not pixels).
+- `next=True` means "relative to where we currently are, look in the next area" (e.g. inside the preview card that just popped up). The precise scoping — and whether a popped card is reachable by DOM scan or must be waited for — is a Playwright mechanics detail for the driver layer (open item §16.10).
+
+**Gestures and waits carry timeouts.** A gesture is `click` / `mouse-down-hold` / `hover-until-next-action`. Anything that waits for something to *appear* (the preview card) takes an explicit `timeout`. For the **tooltip**: the displayed text comes from the element's alt-text/title; if that's present in the DOM we assert it by scanning (no wait), but if it only renders inside a popped card we may need a bounded wait — this is left to the driver and flagged in §16.10.
+
+```python
+card = scn.ui.hover(scn.ui.locate(text=created.action_id, occurrence=1), timeout="5s")
+scn.expect_visible(card, timeout="5s")
+scn.expect_alt(scn.ui.locate(alt="In Progress", next=True), "In Progress", severity=WARN)
+scn.ui.set_status(card, "In Progress")        # click; driver waits out the gray/busy state (10s)
+```
+
+### 16.9 Support-function catalog (ideal API)
+
+The author writes against a thin driver (`ScenarioSession`, "scn") plus standalone assertion helpers; the driver owns lifecycle, fixture invocation, captures, and `ai`-state accumulation, but **not** assertion logic (§15). The catalog below is the **ideal shape**. Where an existing GAS fixture is a plausible starting point for implementation, it's noted as a non-binding *reuse hint* — these hints must not shape the API.
+
+**Lifecycle**
+
+| Function | Purpose | Reuse hint (non-binding) |
+|---|---|---|
+| `ScenarioSession.new_doc(settings)` | Create the isolated journey doc (empty-create, §16.11 #1); register for teardown. | a `begin_journey_session` fixture exists; point it at `DocumentApp.create` rather than the clone path. |
+| `scn.close()` | Trash the journey doc; assert the expectation queue is empty. | `end_journey_session`. |
+
+**Acts (state mutations — one entry point each)**
+
+| Act | Entry point | Sync scenario |
+|---|---|---|
+| `scn.append_paragraph(ai.as_text())` | doc paragraph insert (no action implied until sync) | — |
+| `scn.insert_tracker()` | tracker insert/refresh | — |
+| `scn.sync()` | `syncDocument` via doPost — bidirectional reconcile | C |
+| `scn.edit_sheet(ai, **fields)` | sheet-cell edit (Dirty stamp, sheet-wins) | B |
+| `scn.set_status(ai, status)` | sidebar status action | A |
+| `scn.delete(ai)` | sidebar delete | — |
+| `scn.ui.create_action(ai)` | `@`-menu Create-action form (autocomplete per §16.4) | — |
+| `scn.ui.hover` / `set_status` / gestures | live preview-card interaction (§16.8) | — |
+
+> Document-text deletion (removing the `AI-N:` paragraph) and the `syncAll` sweep are **distinct entry points** with their own acts when those journeys are written.
+
+**Write-route semantics (resolved, §16.11).** `edit_sheet`, `set_status`, and `delete` address their target row by `globalId` (#3). `edit_sheet` over the API/fixture path replicates `onActionSheetEdit`'s Dirty + Date-Modified stamp so the act faithfully simulates a user edit (#2); the same gesture driven through the Playwright UI fires the real trigger and needs no replication. `sync()` blocks until the script-properties message queue drains, so a following `sync()` is how the scenario forces an async act (a sidebar `set_status`) to convergence (#4).
+
+**Queries (read, no mutation)** — `scn.doc_items()`, `scn.sheet_rows()` (docId-scoped), `scn.find_sheet_actions()`, `scn.verify_consistency(scope=doc)` (§16.7; also run by `INTEGRITY`).
+
+**Expectation + checkpoint** — `scn.verify_all_expectations(ai, *, at=…)`, `scn.verify(ai, on=…, at=…, within=…, severity=…)`, `scn.expect_absent(ai, on=…, at=…)`, `scn.checkpoint(STEP|INTEGRITY, label=None)`.
+
+### 16.10 Clean worked example — the canonical journey
+
+This is the journey from the human-level notes, restructured. Each act maps to one entry point; each expectation states intent on the `ai`. It exercises Sync Scenarios C, B/A, and the editor UI; it is **representative, not exhaustive**.
+
+```python
+@pytest.fixture(scope="module")
+def scn(settings):
+    s = ScenarioSession.new_doc(settings)     # blank journey doc
+    yield s
+    s.close()                                  # trash; assert queue empty
+
+
+def test_journey(scn):
+    # ── Act 1 — author types four AI lines into a blank doc ───────────────────
+    #   status left UNSET on plain items (a user types no status unless non-default)
+    unassigned = ai(action="This tag and text confirms creation of an unassigned action item")
+    with_email = ai(action="This tag and email address along with this text …",
+                    assignee="aitest@example.com")
+    explicit_5 = ai(action="This tag and text … pre-assigning the specific ID.", action_id="AI-5")
+    domain_usr = ai(action="This tag, email and text …",
+                    assignee="minister@northlakeuu.org", action_id="AI-9")
+    started_ip = ai(action="An action the author starts in progress", status="In Progress")  # non-default path
+
+    for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
+        scn.append_paragraph(a.as_text())     # pure doc mutation; no action implied yet
+
+    # ── Act 2 — sync converts the lines into actions (Scenario C) ─────────────
+    scn.sync()
+
+    # pin what we expect the conversion to produce, then verify across surfaces
+    unassigned.status = "Open"; with_email.status = "Open"        # tokenless → detected Open
+    explicit_5.status = "Open"; domain_usr.status = "Open"
+    unassigned.action_id = "AI-1"; with_email.action_id = "AI-2"  # expected auto-assignment
+    # explicit_5 / domain_usr already carry AI-5 / AI-9; started_ip keeps In Progress
+    for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
+        scn.verify_all_expectations(a)        # doc+sheet (+tracker if present); text/email/name/id/status
+    scn.verify_consistency(scope=DOC)         # the §16.7 checklist, this doc only
+    scn.checkpoint(INTEGRITY)                 # capture docx+xlsx; drain the above
+
+    # ── Act 3 — insert the tracker table and re-sync ──────────────────────────
+    scn.insert_tracker()
+    scn.sync()
+    for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
+        scn.verify(a, on=TRACKER)             # column form; assignee as chip
+    scn.checkpoint(STEP)
+
+    # ── Act 4 — @create through the editor UI (Playwright phase begins) ───────
+    created = ai(action="Creating an action via the @- trigger",
+                 assignee="sdonaldson@northlakeuu.org")
+    scn.ui.create_action(created)             # fills @-menu form; autocomplete expected (in TEST_CONTACTS)
+    # action_id left UNSET — next id is ambiguous after AI-1,2,5,9; just verify a valid AI-N landed
+    scn.verify(created, on=DOC, status="Open")                    # cheap doc probe, now
+    scn.verify(created, on=SHEET, status="Open", at=INTEGRITY)    # async sheet write → defer
+
+    # ── Act 5 — hover the chip, read the preview card, change status ──────────
+    card = scn.ui.hover(scn.ui.locate(text=created.action_id, occurrence=1), timeout="5s")
+    scn.expect_visible(card, timeout="5s")
+    scn.expect_alt(scn.ui.locate(alt="In Progress", next=True), "In Progress", severity=WARN)
+
+    scn.ui.set_status(card, "In Progress")    # click; driver waits out gray/busy (≤10s)
+    created.status = "In Progress"
+    scn.verify(created, on=UI, within="10s")                      # card/doc returns updated ≤10s
+    scn.verify(created, on=SHEET, at=INTEGRITY)                   # durable, async (13–60s) → defer
+
+    # ── Final reconcile (HTTP phase) — settle every deferred expectation ──────
+    scn.checkpoint(INTEGRITY)                 # docx+xlsx+tracker+consistency; queue empty at close
+```
+
+Why this reads well: every act is one entry point; the author only ever fills in or pins fields on an `ai` and the model derives the rest (auto id, assignee name); cheap single-surface `verify(on=…)` probes carry the Playwright phase while the expensive `INTEGRITY` reconciliations sit at the HTTP boundaries; and the closing `INTEGRITY` drains every deferred (`at=INTEGRITY`) expectation — the `created` action's durable sheet state included — so nothing declared goes unverified.
+
+### 16.11 Resolved decisions
+
+These were open when the model was drafted; all are now decided (SD, 2026-05-30). Where a mechanical detail still belongs in `DESIGN.md` / `src/ContractSchema.js` it is noted, but the design decision below is binding and this document consumes it.
+
+1. **`new_doc` — empty-create.** The journey doc is a guaranteed-clean empty doc (`DocumentApp.create`), never a clone of a pre-populated template. No reset step is needed between runs. (Consistent with §15 *Document initialization*.)
+
+2. **`edit_sheet` stamping — path-dependent.** A sheet edit driven through the **Playwright UI** fires the real `onActionSheetEdit` trigger, so the test does nothing extra. A sheet edit driven through the **API/fixture** path must replicate `onActionSheetEdit`'s Dirty + Date-Modified stamp, because the act simulates a user making that change — and doPost writes otherwise suppress the trigger (DESIGN.md §Programmatic Write Suppression).
+
+3. **Write-route stable id — `globalId`.** `edit_sheet`, `set_status`, and `delete` address the target row by `globalId`, not physical row index (simpler and stable across re-sorts).
+
+4. **`set_status` convergence — `sync()` drains the queue.** `scn.sync()` blocks until the script-properties message queue has drained before returning. An async act (e.g. a sidebar status change) is forced to convergence by a following `sync()`; the act itself need not block.
+
+5. **Naming — confirmed.** `as_text()`, `verify()`, and `verify_all_expectations()` are the final names.
+
+6. **Chip-vs-parsed assignee — an `ai` field.** The `ai` records whether the assignee email/name came from a chip vs. parsed leading-email text, in a field on the object (`assignee_source`, §16.2 / §16.5).
+
+7. **Consistency-group reuse — accepted as-is for now.** The §16.7 groups stand as the working expectation bundles; their exact field rules finalize against the contract source when needed.
+
+8. **Tooltip / popped-card observability — driver layer.** Confirmed: deferred to the Playwright driver / page-object layer (§16.8). Not a scenario-level concern.
+
+9. **Partial-drain granularity — per-surface.** A checkpoint drains a multi-surface expectation **per surface** (mark the sheet satisfied now, keep the doc queued); a pinned `at=INTEGRITY` expectation is never partially drained early and is evaluated whole at the boundary.

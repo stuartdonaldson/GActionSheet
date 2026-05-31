@@ -66,6 +66,9 @@ function doPost(e) {
   if (payload.action === 'append_doc_paragraph') {
     return _handleAppendDocParagraph(payload);
   }
+  if (payload.action === 'verify_action_rows') {
+    return _handleVerifyActionRows(payload);
+  }
   // patch_action_status and delete_action_row are production routes (WEBAPP_SECRET-gated
   // when called by the add-on). When called by the ATDD harness they arrive with a
   // testToken and snake_case field names per ContractSchema.js messages (§16.11 #3).
@@ -471,9 +474,11 @@ function _handleVerifyActionRows(payload) {
   if (!actionsSheet) {
     return _jsonResponse({ error: 'Actions sheet not found', rows: [] });
   }
-
+  // testToken path sends docId; WEBAPP_SECRET path sends docUrl — normalise to URL form
+  var docUrl = payload.docUrl ||
+    (payload.docId ? 'https://docs.google.com/document/d/' + payload.docId + '/edit' : '');
   return _jsonResponse({
-    rows: _loadRowsForDocUrl(actionsSheet, payload.docUrl || '')
+    rows: _loadRowsForDocUrl(actionsSheet, docUrl)
   });
 }
 

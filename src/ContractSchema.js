@@ -107,8 +107,8 @@ var CONTRACT_SCHEMA = Object.freeze({
       // action_text, status). Sheet-wins on the next sync.
       //   Completion signal: synchronous response; Sync Status = 'Dirty' on the row.
       edit_action_row: Object.freeze({
-        request:  Object.freeze(['action', 'testToken', 'globalId', 'fields']),
-        response: Object.freeze(['ok', 'globalId', 'row']),
+        request:  Object.freeze(['action', 'testToken', 'global_id', 'fields']),
+        response: Object.freeze(['ok', 'global_id', 'row']),
         completionSignal: "synchronous response; row stamped Sync Status='Dirty' + Date Modified"
       }),
 
@@ -117,8 +117,8 @@ var CONTRACT_SCHEMA = Object.freeze({
       // converges when a following sync() drains the queue (§16.11 #4).
       //   Completion signal: synchronous { ok } ack; durable convergence at next sync.
       patch_action_status: Object.freeze({
-        request:  Object.freeze(['action', 'testToken', 'globalId', 'status']),
-        response: Object.freeze(['ok', 'globalId']),
+        request:  Object.freeze(['action', 'testToken', 'global_id', 'status']),
+        response: Object.freeze(['ok', 'global_id']),
         completionSignal: 'synchronous ack; durable status converges on the next sync_action_rows'
       }),
 
@@ -126,8 +126,8 @@ var CONTRACT_SCHEMA = Object.freeze({
       // row is stamped Sync Status = 'Deleted' (not physically removed by this route).
       //   Completion signal: synchronous response; Sync Status = 'Deleted'.
       delete_action_row: Object.freeze({
-        request:  Object.freeze(['action', 'testToken', 'globalId']),
-        response: Object.freeze(['ok', 'globalId']),
+        request:  Object.freeze(['action', 'testToken', 'global_id']),
+        response: Object.freeze(['ok', 'global_id']),
         completionSignal: "synchronous response; row stamped Sync Status='Deleted'"
       }),
 

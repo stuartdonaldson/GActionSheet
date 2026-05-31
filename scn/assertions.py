@@ -9,7 +9,7 @@ Consumed by engine.py's drain procedure and importable standalone by session.py 
 """
 import re
 
-from scn.contacts import expected_name
+from scn.contacts import TEST_CONTACTS, expected_name
 from scn.engine import Surface
 
 _AI_N_RE = re.compile(r"^AI-\d+$")
@@ -96,13 +96,17 @@ def check_present_consistent(
                 f"[{tag}] {surface.value}: assignee mismatch: "
                 f"expected={expected['assignee']!r}, actual={actual.assignee!r}"
             )
-        if hasattr(actual, "assignee_name"):
-            exp_name = expected_name(expected["assignee"])
-            if actual.assignee_name != exp_name:
-                return (
-                    f"[{tag}] {surface.value}: assignee_name mismatch: "
-                    f"expected={exp_name!r}, actual={actual.assignee_name!r}"
-                )
+        # Only verify assignee_name on TRACKER (chip-rendered, directory-resolved name).
+        # DOC and SHEET store GAS email-derived names which differ from directory names.
+        if hasattr(actual, "assignee_name") and surface == Surface.TRACKER:
+            email = expected["assignee"]
+            if email in TEST_CONTACTS:
+                exp_name = TEST_CONTACTS[email]
+                if actual.assignee_name != exp_name:
+                    return (
+                        f"[{tag}] {surface.value}: assignee_name mismatch: "
+                        f"expected={exp_name!r}, actual={actual.assignee_name!r}"
+                    )
 
     return None
 

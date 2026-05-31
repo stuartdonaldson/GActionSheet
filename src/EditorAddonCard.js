@@ -52,7 +52,7 @@ function createActionTrigger(e) { // eslint-disable-line no-unused-vars
  */
 function onLinkPreview(e) { // eslint-disable-line no-unused-vars
   var url = (e && e.docs && e.docs.matchedUrl && e.docs.matchedUrl.url) || '';
-  GasLogger.log('LINK_PREVIEW', { url: url });
+  GasLogger.log('LINK_PREVIEW', { url: url, version: BUILD_INFO.version });
   try {
     return _buildPreviewCard(url);
   } catch (err) {

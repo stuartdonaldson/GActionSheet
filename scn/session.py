@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import pathlib
 import urllib.error
 import urllib.request
 
@@ -56,18 +57,49 @@ class FixtureError(RuntimeError):
     """GAS fixture returned an application-level error."""
 
 
+_AUTH_COOKIE_DOMAINS = {"script.google.com", ".google.com", "accounts.google.com"}
+
+_AUTH_FILE = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+
+
+def _load_auth_cookie_header() -> str | None:
+    """Load Playwright auth cookies from .auth/user.json and return a Cookie header string.
+
+    Only cookies whose domain matches Google's auth domains are included.
+    Returns None if the auth file is absent (falls through to unauthenticated request).
+    """
+    if not _AUTH_FILE.exists():
+        return None
+    try:
+        state = json.loads(_AUTH_FILE.read_text())
+    except Exception:
+        return None
+    parts = []
+    for c in state.get("cookies", []):
+        domain = c.get("domain", "")
+        if any(domain == d or domain.endswith(d) for d in _AUTH_COOKIE_DOMAINS):
+            parts.append(f"{c['name']}={c['value']}")
+    return "; ".join(parts) if parts else None
+
+
 def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
     """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors."""
     if not url:
         raise RuntimeError(
-            "webappTestUrl not set in local.settings.json — run npm run deploy:test"
+            "webappTestUrl not set in local.settings.json"
         )
 
     data = json.dumps(payload).encode("utf-8")
+    headers: dict = {"Content-Type": "application/json"}
+    # /dev URLs require Google auth; inject saved Playwright cookies when present.
+    if url.endswith("/dev"):
+        cookie = _load_auth_cookie_header()
+        if cookie:
+            headers["Cookie"] = cookie
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
 
@@ -87,7 +119,7 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
     if raw in ("test-token-unauthorized", "test-token-expired"):
         raise FixtureTokenError(
             f"GAS rejected test token for action={payload.get('action')!r}: {raw}. "
-            "Run npm run deploy:test to generate a fresh token."
+            "Re-register with: python scripts/refresh_test_token.py (or npm run deploy:test)."
         )
 
     try:

@@ -30,5 +30,5 @@ Use single-script dual-deployment (option 3).
 ## Tradeoffs
 
 - Web App access must be "Anyone" (not org-restricted) — org admin must set this; cannot be controlled in code
-- Shared secret is the only viable auth mechanism (Bearer tokens not propagated by Apps Script runtime)
+- Shared secret (`WEBAPP_SECRET`) is the application-level auth mechanism — `doPost` cannot read the Bearer token to identify the caller (Google does not propagate caller identity through the header). See ADR-0012 for the full two-layer auth model: the Bearer token IS still required in `UrlFetchApp` calls to satisfy GAS's own HTTP auth gate before `doPost` runs.
 - Both add-on and Web App deployments must be updated in sync on each release

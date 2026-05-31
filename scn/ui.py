@@ -280,10 +280,18 @@ class UiDriver:
             timeout=5000,
         )
         self._page.keyboard.type("Create")
-        self._page.wait_for_timeout(500)
+        # GAS add-on items are fetched server-side; cold start can take 5-15s.
+        self._page.wait_for_timeout(3000)
 
         item = self._page.locator(_AT_MENU_CREATE).first
-        item.wait_for(state="visible", timeout=5000)
+        try:
+            item.wait_for(state="visible", timeout=20000)
+        except Exception as exc:
+            raise RuntimeError(
+                "createActionTriggers 'Create action' not found in the @-menu after 20s. "
+                "The editor add-on must be installed as a test deployment: "
+                "Apps Script editor → Deploy → Test deployments → Install as Add-on."
+            ) from exc
         item.click()
 
         # Wait for the action creation form to appear.

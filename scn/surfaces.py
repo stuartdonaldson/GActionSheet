@@ -27,7 +27,8 @@ _STATUS_RE = re.compile(r"\s*\(([^)]+)\)\s*$")
 _HYPERLINK_FORMULA_RE = re.compile(r'^=HYPERLINK\("([^"]+)"(?:,"([^"]*)")?\)', re.IGNORECASE)
 _GDOC_ID_RE = re.compile(r"/document/d/([^/]+)/")
 _DRIVE_ID_RE = re.compile(r"[?&]id=([a-zA-Z0-9_-]+)")
-_TRACKER_HEADING = "=== Tracked Actions ==="
+_TRACKER_HEADING = "Action Item Summary"
+_TRACKER_HEADING_OLD = "=== Tracked Actions ==="  # legacy; accepted for back-compat
 
 
 def _email_by_rid(document_part) -> dict[str, str]:
@@ -289,7 +290,7 @@ class TrackerReader:
         found_heading = False
         for block in _iter_block_items(document):
             if isinstance(block, Paragraph):
-                if block.text.strip() == _TRACKER_HEADING:
+                if block.text.strip() in (_TRACKER_HEADING, _TRACKER_HEADING_OLD):
                     found_heading = True
                     continue
             elif isinstance(block, Table) and found_heading:
@@ -312,11 +313,13 @@ class TrackerReader:
             action_text = _col_text(cells, col_idx, "Action") or ""
             status = _col_text(cells, col_idx, "Status") or None
 
-            # Assignee: prefer chip in 'Assignee Name', fall back to 'Assignee Email' text
+            # Assignee: prefer chip in 'Assignee Name' (legacy schema) or 'Assignee'
+            # (current GAS schema = ['ID','Assignee','Action','Status']).
             chip_email = None
             assignee_name_text = ""
-            if "Assignee Name" in col_idx:
-                name_cell = cells[col_idx["Assignee Name"]]
+            assignee_col = "Assignee Name" if "Assignee Name" in col_idx else "Assignee"
+            if assignee_col in col_idx:
+                name_cell = cells[col_idx[assignee_col]]
                 chip_email = _find_chip_in_cell(name_cell)
                 assignee_name_text = name_cell.text.strip()
 
@@ -324,7 +327,10 @@ class TrackerReader:
                 assignee = chip_email
                 assignee_source = "chip"
             else:
+                # fall back to 'Assignee Email' column (legacy schema) or plain cell text
                 assignee = _col_text(cells, col_idx, "Assignee Email") or None
+                if not assignee and assignee_name_text and _EMAIL_RE.fullmatch(assignee_name_text):
+                    assignee = assignee_name_text
                 assignee_source = "parsed" if assignee else None
 
             obj = ai(

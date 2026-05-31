@@ -240,9 +240,19 @@ This is a Google platform constraint — Docs caches the installed add-on versio
 
 ### Marketplace listing version must be updated after every deploy
 
-The `linkPreviewTriggers` URL pattern matching is driven by the manifest of the **Marketplace-installed version**, not the current push. After `npm run deploy:prod` creates a new version, the GCP Console → Marketplace SDK → App Configuration → Docs add-on → script version field must be updated manually to the new version number, then the listing re-published.
+The `linkPreviewTriggers` URL pattern matching is driven by the manifest of the **deployment configured in the GCP Marketplace SDK App Configuration page**, not the current push or the user's installed version. After `npm run deploy:test` or `npm run deploy:prod` creates a new version, the GCP Console → Marketplace SDK → App Configuration → Docs add-on → script version field must be updated manually to the new version number, then the draft/listing re-saved. If this is not done, the Docs client does not recognize the URL patterns and never calls `onLinkPreview` — link preview silently stops working with no log activity at all.
 
-`createActionTriggers` runs from the PROD deployment directly (always current). `linkPreviewTriggers` patterns are client-side and come from the Marketplace manifest. These are dispatched differently — keeping the Marketplace version stale silently breaks link preview while leaving chip creation working.
+`createActionTriggers` runs from the deployment the user has installed (always current for `/dev` users). `linkPreviewTriggers` patterns are client-side and come from the SDK-configured deployment's manifest. These are dispatched differently — keeping the Marketplace SDK version stale silently breaks link preview while leaving chip creation working.
+
+### Split execution model for link preview (confirmed 2026-05-30)
+
+There appear to be two separate lookups in the Docs client:
+
+1. **Pattern matching** — Docs checks `linkPreviewTriggers` URL patterns from the manifest of the **deployment pinned in the GCP Marketplace SDK App Configuration**. If that version is stale (e.g. the SDK still points to version 124 but version 128 has been deployed), Docs does not recognize the URL and never fires the trigger. No log activity appears.
+
+2. **Function execution** — once the pattern matches, Docs calls `onLinkPreview` using the deployment **the individual user has installed** (their test deployment or Marketplace install). A developer with a `/dev` test deployment installed will see `(DEV)` in the version log; a user who installed from the Marketplace draft will see `(TEST)` or `(PROD)`.
+
+**Practical implication**: you can develop and test `onLinkPreview` logic against `/dev` HEAD (fast iteration, no redeploy needed), as long as the GCP Marketplace SDK App Configuration is saved with any valid recent version — that version only needs to have a `linkPreviewTriggers` entry with the correct URL pattern. Only the pattern matching comes from it; the actual function code comes from the user's installed deployment.
 
 ### `pathPrefix` format
 

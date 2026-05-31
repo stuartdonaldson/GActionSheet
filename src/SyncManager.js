@@ -409,10 +409,17 @@ function _scanFloatingActions(doc) {
       }
     }
 
-    // Strip leading assignee email from afterToken if present
+    // Strip leading assignee email from afterToken if present; also covers the plain-text
+    // case where the email shares child 0 with the AI-N: token (append_doc_paragraph path).
     var actionText = afterToken;
     var assigneeStrip = afterToken.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
-    if (assigneeStrip) actionText = afterToken.slice(assigneeStrip[0].length);
+    if (assigneeStrip) {
+      actionText = afterToken.slice(assigneeStrip[0].length);
+      if (!assigneeEmail) {
+        assigneeEmail = assigneeStrip[1];
+        assigneeName  = _nameFromEmail(assigneeEmail);
+      }
+    }
 
     // Parse trailing (status) token
     var status     = 'Open';
@@ -532,10 +539,16 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
     });
   }
 
+  // Bearer token is required: UrlFetchApp does not carry the caller's Google session
+  // automatically. Without it, GAS returns HTTP 401 before doPost runs, regardless of
+  // deployment type (/dev always enforces this; /exec with access:ANYONE also requires it).
+  // The token satisfies GAS's auth gate only — doPost uses WEBAPP_SECRET for app-level auth.
+  var oauthToken = ScriptApp.getOAuthToken();
   var resp = UrlFetchApp.fetch(webAppUrl, {
     method:             'post',
     contentType:        'application/json',
     muteHttpExceptions: true,
+    headers:            { 'Authorization': 'Bearer ' + oauthToken },
     payload:            JSON.stringify({
       secret:             secret || '',
       action:             'sync_action_rows',
@@ -577,10 +590,12 @@ function _markDocNotFound(docId) {
   var webAppUrl = getWebAppUrl();
   var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
   if (!webAppUrl) return;
+  var oauthToken = ScriptApp.getOAuthToken();
   UrlFetchApp.fetch(webAppUrl, {
     method:             'post',
     contentType:        'application/json',
     muteHttpExceptions: true,
+    headers:            { 'Authorization': 'Bearer ' + oauthToken },
     payload:            JSON.stringify({
       secret:        secret || '',
       action:        'mark_doc_not_found',
