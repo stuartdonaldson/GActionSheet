@@ -49,6 +49,16 @@ function syncDocument(docId) {
       _markDocNotFound(docId);
       return;
     }
+    // DocumentApp.openById() succeeds on trashed docs — check explicitly.
+    try {
+      if (DriveApp.getFileById(docId).isTrashed()) {
+        GasLogger.log('sync.warn', { msg: 'Doc not found', docId: docId, err: 'Document is in Trash' });
+        _markDocNotFound(docId);
+        return;
+      }
+    } catch (driveErr) {
+      // Drive API unavailable or permission denied — proceed with sync.
+    }
     var assignResult = _assignPlaceholderTokens(doc);
     if (assignResult.count > 0) {
       GasLogger.log('sync.assigned', { docId: docId, count: assignResult.count });
@@ -251,11 +261,60 @@ function syncAll() {
     var docIds = Object.keys(docIdSet);
     GasLogger.log('sync.all.start', { docCount: docIds.length });
 
-    for (var j = 0; j < docIds.length; j++) {
-      syncDocument(docIds[j]);
+    var syncStateSheet = _getOrCreateSyncStateSheet(ss);
+    var syncState      = _loadSyncState(syncStateSheet);
+
+    // Read cols 1 + 10 once for dirty-row detection across all docs.
+    var actionData = actionsSheet.getRange(2, 1, numRows, 10).getValues();
+
+    // Pre-build dirty-doc set in one pass — avoids O(docs × rows) scan per doc.
+    var dirtyDocIds = {};
+    for (var d = 0; d < actionData.length; d++) {
+      if (actionData[d][9] === 'Dirty') {
+        var gid   = actionData[d][0];
+        var slash = gid.indexOf('/');
+        if (slash > 0) dirtyDocIds[gid.substring(0, slash)] = true;
+      }
     }
 
-    GasLogger.log('sync.all.complete', { docCount: docIds.length });
+    var synced = 0, skipped = 0;
+    for (var j = 0; j < docIds.length; j++) {
+      var docId = docIds[j];
+
+      // Single Drive call: trash check + last-modified timestamp.
+      var driveFile, isTrashed, lastModified, docTitle;
+      try {
+        driveFile    = DriveApp.getFileById(docId);
+        isTrashed    = driveFile.isTrashed();
+        lastModified = driveFile.getLastUpdated();
+        docTitle     = driveFile.getName();
+      } catch (driveErr) {
+        // Can't reach Drive — fall through to syncDocument which handles open failure.
+        syncDocument(docId);
+        _updateSyncState(syncStateSheet, docId, new Date(), '', syncState);
+        synced++;
+        continue;
+      }
+
+      if (isTrashed) {
+        GasLogger.log('sync.warn', { msg: 'Doc not found', docId: docId, err: 'Document is in Trash' });
+        _markDocNotFound(docId);
+        continue;
+      }
+
+      var lastSynced = syncState[docId] ? syncState[docId].syncedAt : null;
+      if (lastSynced && lastModified <= lastSynced && !dirtyDocIds[docId]) {
+        GasLogger.log('sync.skip', { docId: docId });
+        skipped++;
+        continue;
+      }
+
+      syncDocument(docId);
+      _updateSyncState(syncStateSheet, docId, new Date(), docTitle, syncState);
+      synced++;
+    }
+
+    GasLogger.log('sync.all.complete', { docCount: docIds.length, synced: synced, skipped: skipped });
   } catch (e) {
     GasLogger.log('sync.all.error', { msg: e.message });
   } finally {
@@ -632,6 +691,62 @@ function _remarkRowDirty(globalId) {
     GasLogger.log('flush.remark-dirty.error', { globalId: globalId, msg: e.message });
   }
 }
+
+// ---------------------------------------------------------------------------
+// SyncState sheet — per-doc last-synced-at tracking
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the SyncState sheet, creating it with a header row if absent.
+ * Columns: Doc ID | Last Synced At | Doc Title
+ */
+function _getOrCreateSyncStateSheet(ss) {
+  var sheet = ss.getSheetByName('SyncState');
+  if (!sheet) {
+    sheet = ss.insertSheet('SyncState');
+    sheet.getRange(1, 1, 1, 3).setValues([['Doc ID', 'Last Synced At', 'Doc Title']]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+/**
+ * Reads the SyncState sheet into a map: { docId: { syncedAt: Date, row: number } }.
+ * row is the 1-based sheet row so _updateSyncState can write in place.
+ */
+function _loadSyncState(syncStateSheet) {
+  var state   = {};
+  var lastRow = syncStateSheet.getLastRow();
+  if (lastRow < 2) return state;
+
+  var data = syncStateSheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < data.length; i++) {
+    var docId    = data[i][0];
+    var syncedAt = data[i][1];
+    if (!docId) continue;
+    state[docId] = {
+      syncedAt: syncedAt instanceof Date ? syncedAt : new Date(syncedAt),
+      row:      i + 2
+    };
+  }
+  return state;
+}
+
+/**
+ * Writes or updates a SyncState row for docId.
+ * Mutates stateMap so subsequent lookups in the same run see the new timestamp.
+ */
+function _updateSyncState(syncStateSheet, docId, syncedAt, docTitle, stateMap) {
+  if (stateMap[docId]) {
+    syncStateSheet.getRange(stateMap[docId].row, 2, 1, 2).setValues([[syncedAt, docTitle || '']]);
+    stateMap[docId].syncedAt = syncedAt;
+  } else {
+    var newRow = syncStateSheet.getLastRow() + 1;
+    syncStateSheet.getRange(newRow, 1, 1, 3).setValues([[docId, syncedAt, docTitle || '']]);
+    stateMap[docId] = { syncedAt: syncedAt, row: newRow };
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // Shared chip styling

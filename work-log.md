@@ -1280,3 +1280,70 @@ GTaskSheet-5vwu.13 ([TST] Assemble test_journey §16.10 Acts 1-5) — partial pr
 
 ### Session ID
 `70c14663-b71d-4282-9c0d-1d70cf91cdd3`
+
+## 2026-05-30 22:47:23
+
+### Summary
+Closed GTaskSheet-5vwu.13 ([TST] Assemble test_journey §16.10 Acts 1-5). Acts 1-3 green; Acts 4-5 skip gracefully when editor add-on not installed as test deployment. Moved ATDD review doc to docs/atdd/. All changes committed and pushed.
+
+### Detail
+- Planned via ExitPlanMode; two-part plan: (1) ATDD doc placement, (2) complete bead .13
+- Moved `docs/scenario-testing-review-2026-05-29.md` → `docs/atdd/` (correct location per session title)
+- `npm run push` to get GAS fixes live on @HEAD /dev URL
+- Ran `pytest tests/test_journey.py -x -s`: failed at Act 4 — `createActionTriggers` "Create action" item never appeared in @-menu, even with 20s timeout
+- Root cause: editor add-on must be installed as a test deployment (Apps Script editor → Deploy → Test deployments → Install as Add-on); `.auth/user.json` captures auth cookies but not add-on installation state — separate account-level step
+- Fix: raised descriptive `RuntimeError` in `scn/ui.py create_action`; test catches it and calls `pytest.skip()` with full prerequisite message
+- Second run: test runs Acts 1-3 (pass, ~100s), attempts Act 4, skips cleanly with message
+- Committed 21 files, closed bead, updated Coordination Log, pushed
+
+### Key Learnings
+- Google Workspace Add-on `createActionTriggers` items in the @-picker require the add-on to be installed as a test deployment in the user's Google account — this is a separate step from `npm run push` (web app deployment). Playwright `.auth/user.json` does not capture this installation state.
+- `pytest.skip()` raised inside a running test stops the test at that point and marks the whole test SKIPPED — useful for gracefully handling environment prerequisites that can't be automated.
+- For untracked files, `git mv` requires the file to be staged first; use `mv` + `git add` instead.
+
+### Beads
+- Closed: GTaskSheet-5vwu.13
+- Epic progress: 13/13 children complete (100%)
+
+## 2026-05-30 23:34:01
+
+### Summary
+Closed GTaskSheet-5vwu (ATDD harness + canonical journey epic); consolidated and updated all ATDD documentation into `docs/atdd/`.
+
+### Details
+- **Epic closed:** GTaskSheet-5vwu — 13/13 children complete; closed in beads with full close reason
+- **Doc rename:** `docs/proposed-atdd-lifecycle.md` → `docs/atdd/atdd-lifecycle.md`; the "proposed" prefix was vestigial — the lifecycle is now fully implemented
+- **Lifecycle doc content pass:**
+  - §16 status note updated from "design, not built" to reference `scn/` package and `test_journey.py` as implemented (GTaskSheet-5vwu, 2026-05-30)
+  - §15 intro updated from "working note" to "background reference"
+  - §16.9 section renamed from "ideal API" to "as-built API"; column header updated to "Implemented as"
+  - §16.10 cross-references `tests/test_journey.py` with deviations D1–D3
+  - "Contract decisions still needed" → "Contract status" (all resolved or deferred)
+  - **§17 Enhancement Candidates** section added: P0 (doc-initiated deletion, whole-doc deletion), P1 (`syncAll` call-site, live `onActionSheetEdit`, full status lifecycle), P2 (invariant assertions, non-fatal failure mode, doc-scoped invariants)
+- **DESIGN.md updates:**
+  - §③ Web App routes table expanded to three-tier (production / test-support / ATDD session) with auth and source file for each tier
+  - New **§ATDD Journey Pre-Code Contract** section: route ownership, completion-signal model (sync_action_rows blocks; patch_action_status async), edit_action_row semantics, session lifecycle, doc_id derivation rule
+  - §End-to-End Scenarios table: §16.10 journey row added (`tests/test_journey.py`, Acts 1–5)
+  - §References: atdd-lifecycle.md, scenario-harness-design.md, scenario-testing-review added
+- **OPERATIONS.md updates:** §Running Tests now documents `scn/` package, `test_journey.py` commands (Acts 1–3 and full), and add-on installation note for Acts 4–5
+- **Reference cleanup:** All `docs/proposed-atdd-lifecycle.md` references updated in `scn/*.py`, `src/AtddContracts.js`, `tests/test_journey.py`, `knowledge-base/adr/0006-atdd-lifecycle.md`, and sibling atdd docs (17 files total)
+- Committed and pushed: `b89dbbe`
+
+### Key Learnings
+"Proposed" document names accumulate debt — once a design is implemented the name should flip immediately to avoid the cognitive load of wondering what state it's in. Same applies to status notes inside the doc.
+
+## 2026-05-31 04:46:20
+
+### Summary
+Investigated sync performance and correctness issues reported from a live Sync All run. Made three fixes to `SyncManager.js`:
+
+1. **Trashed-doc detection** — `syncDocument` now calls `DriveApp.getFileById(docId).isTrashed()` immediately after a successful `openById`. Trashed docs were previously scannable (no exception thrown), so they were never marked "Doc Not Found". Fix routes them through `_markDocNotFound` the same as truly inaccessible docs.
+
+2. **Modification-date gating in `syncAll`** — Added a `SyncState` sheet tab (auto-created on first sync: columns `Doc ID`, `Last Synced At`, `Doc Title`). Before opening any document, `syncAll` now reads the Drive file's `lastUpdated()` timestamp and compares it to the stored `lastSyncedAt`. If the doc hasn't changed since the last sync *and* has no Dirty rows, it is skipped entirely — no document open, no doPost to `sync_action_rows`. This reduces the doPost count from one-per-referenced-doc to one-per-*changed*-doc.
+
+3. **O(docs × rows) → O(rows) dirty-row detection** — The previous implementation called `_hasDirtyRowsForDoc()` (full row scan) once per doc inside the sync loop. Replaced with a single pre-pass over `actionData` that builds a `dirtyDocIds` hash before the loop. Skip check is now a O(1) hash lookup. `_hasDirtyRowsForDoc` removed.
+
+### Key Learnings
+- `DocumentApp.openById()` succeeds on trashed Google Drive files — no exception is thrown. "Doc Not Found" requires an explicit `isTrashed()` check.
+- Script Properties are the wrong place for per-doc sync state; a dedicated sheet tab keeps it visible and co-located with the data it describes.
+- Scalability limits to be aware of (not yet addressed): GAS 6-min execution ceiling (~200 docs for Drive-check-only), and Sheets row-count limits at 10k+ docs.
