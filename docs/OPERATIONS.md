@@ -186,9 +186,11 @@ All UC tests use **HTTP fixture invocation** — no browser required for setup. 
 
 **Prerequisites for running tests:**
 1. `npm run deploy:test` — pushes source, stamps the revision, repoints the TEST Web App deployment, writes `testToken` and `testTokenExpiresAt` to `local.settings.json`.
-2. `local.settings.json` must contain `testSheetId`, `testDocId`, `testToken`, and `webappTestUrl`.
+2. `local.settings.json` must contain `testSheetId`, `testDocId`, `webappSecret`, and `testToken`.
 
 **Token expiry:** `testTokenExpiresAt` in `local.settings.json` records the expiry. If the token expires mid-session, re-run `npm run deploy:test` to rotate it.
+
+> **Pitfall — do not add `webappTestUrl` to `local.settings.json`.** `deploy:test` derives the TEST Web App URL directly from the `TEST-WEB-APP` deployment ID returned by `clasp deployments` — no URL needs to be configured. If `webappTestUrl` is present, it overrides the derived URL. If that value is stale (e.g. left over from a previous deployment cycle), token registration silently fails with "Page Not Found" and `testToken` is never updated, breaking all fixture calls. Remove `webappTestUrl` from the file if it exists.
 
 Playwright is used only for **UI-level tests** (homepage card rendering, menu presence assertions). It is not used for GAS fixture setup.
 

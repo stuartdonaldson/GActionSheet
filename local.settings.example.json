@@ -7,10 +7,10 @@
   "discoveryStaleDocId": "DOC_ID_MODIFIED_8_OR_MORE_DAYS_AGO",
   "discoverySubfolderDocId": "DOC_ID_IN_SUBFOLDER_MODIFIED_WITHIN_7_DAYS",
 
-  "webappTestUrl": "https://script.google.com/macros/s/YOUR_TEST_DEPLOYMENT_ID/exec",
   "webappSecret": "YOUR_WEBAPP_SECRET_SCRIPT_PROPERTY_VALUE",
 
   "_note_testToken": "Auto-populated by npm run deploy:test — do not edit manually.",
+  "_note_webappTestUrl": "DO NOT ADD webappTestUrl here. deploy:test derives the URL from the TEST-WEB-APP deployment ID via clasp deployments — no URL override needed. Adding webappTestUrl causes token registration to call a stale URL and silently fail.",
   "testToken": "",
   "testTokenExpiresAt": ""
 }
