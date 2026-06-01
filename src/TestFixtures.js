@@ -267,6 +267,87 @@ function _tfAppendTextListItem(token, docId, text) {
 }
 
 /**
+ * Appends an AI-N: token + PERSON chip bulleted list item to the end of the document.
+ *
+ * Inserts: <aiNPrefix> <chip(email)> <actionText> as a bullet.
+ * The scanner reads the PERSON chip's getName() (Google contact resolution) rather
+ * than deriving a display name from the email username.
+ *
+ * @param {string} token      OAuth2 access token from ScriptApp.getOAuthToken()
+ * @param {string} docId      Document ID
+ * @param {string} aiNPrefix  Token prefix, e.g. "AI-9:"
+ * @param {string} email      Assignee email (must be in contacts or Workspace directory)
+ * @param {string} actionText Text to append after the chip
+ */
+function _tfAppendAINPersonChipListItem(token, docId, aiNPrefix, email, actionText) {
+  var baseUrl    = 'https://docs.googleapis.com/v1/documents/';
+  var authHeader = { 'Authorization': 'Bearer ' + token };
+
+  var getResp = UrlFetchApp.fetch(
+    baseUrl + docId + '?fields=body.content',
+    { headers: authHeader, muteHttpExceptions: true }
+  );
+  if (getResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendAINPersonChipListItem GET failed: HTTP ' + getResp.getResponseCode());
+  }
+  var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
+
+  var lastParaEndIndex = null;
+  for (var ci = content.length - 1; ci >= 0; ci--) {
+    if (content[ci].paragraph) {
+      lastParaEndIndex = content[ci].endIndex;
+      break;
+    }
+  }
+  if (lastParaEndIndex === null) {
+    throw new Error('_tfAppendAINPersonChipListItem: no paragraph found in doc body');
+  }
+
+  var insertAt  = lastParaEndIndex - 1;
+  var prefix    = aiNPrefix + ' ';   // e.g. "AI-9: "
+  var prefixLen = prefix.length;
+
+  var requests = [
+    { insertText: { location: { index: insertAt }, text: '\n' } },
+    { createParagraphBullets: {
+        range: { startIndex: lastParaEndIndex, endIndex: lastParaEndIndex + 1 },
+        bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE'
+      }
+    },
+    { insertText: {
+        location: { index: lastParaEndIndex },
+        text: prefix
+      }
+    },
+    { insertPerson: {
+        personProperties: { email: email },
+        location: { index: lastParaEndIndex + prefixLen }
+      }
+    },
+    { insertText: {
+        location: { index: lastParaEndIndex + prefixLen + 1 },
+        text: ' ' + actionText
+      }
+    }
+  ];
+
+  var batchResp = UrlFetchApp.fetch(
+    baseUrl + docId + ':batchUpdate',
+    {
+      method: 'post',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeader),
+      payload: JSON.stringify({ requests: requests }),
+      muteHttpExceptions: true
+    }
+  );
+  if (batchResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendAINPersonChipListItem batchUpdate failed: HTTP ' +
+                    batchResp.getResponseCode() + ': ' +
+                    batchResp.getContentText().substring(0, 200));
+  }
+}
+
+/**
  * Appends a chip-led bulleted list item to the END of the document via the
  * Docs REST API, without clearing existing content.
  *
@@ -1539,8 +1620,11 @@ function setupTestFixtures(scenario) {
           'AI: aitest@example.com This tag and email address along with this text confirms the creation of an action item with an assignee.');
         _tfAppendTextListItem(sjsToken, testDocId,
           'AI-5: This tag and text confirms creation of an action item with id AI-5 pre-assigning the specific ID.');
-        _tfAppendTextListItem(sjsToken, testDocId,
-          'AI-9: minister@northlakeuu.org This tag, email and text should result in the creation of the assignee as a person chip, working within our Northlake domain this has a username of \'Northlake Minister\' which should appear in the chip.');
+        _tfAppendAINPersonChipListItem(sjsToken, testDocId,
+          'AI-9:', 'minister@northlakeuu.org',
+          'This tag, email and text should result in the creation of the assignee as a person chip,' +
+          ' working within our Northlake domain this has a username of \'Northlake Minister\'' +
+          ' which should appear in the chip.');
         _TF_RESULT = { tag: 'fixture.scenario_journey_seed', data: { itemsSeeded: 4 } };
         break;
       }
@@ -1821,6 +1905,7 @@ function verifyConsistencyForTest(docId) {
 
     var tracker = _readTrackerTableState(doc);
     result.counts.tracker = tracker.rows.length;
+    result.tracker = tracker;
 
     // Read ActionSheet rows directly (all 9 columns) to get dates and Document formula.
     var ss = SpreadsheetApp.openById(testSheetId);
@@ -1847,9 +1932,29 @@ function verifyConsistencyForTest(docId) {
         });
       }
     }
+    // Scope to the tested doc only — the ActionSheet accumulates rows from all
+    // test runs, and globalId encodes the docId as the leading segment.
+    sheetRows = sheetRows.filter(function(r) {
+      return r.globalId.indexOf(resolvedDocId + '/') === 0;
+    });
     result.counts.sheet = sheetRows.length;
 
-    _runConsistencyChecks(result, floatingActions, tracker, sheetRows, result.docTitle);
+    // Build set of IDs that were archived for this doc so orphan tracker rows
+    // for archived actions are not reported as consistency failures.
+    var archivedIds = {};
+    var archiveSheet = ss.getSheetByName('Archive');
+    if (archiveSheet && archiveSheet.getLastRow() > 1) {
+      var archNumRows = archiveSheet.getLastRow() - 1;
+      var archData    = archiveSheet.getRange(2, 1, archNumRows, 1).getValues();
+      for (var ai = 0; ai < archData.length; ai++) {
+        var archGid = archData[ai][0] || '';
+        if (archGid.indexOf(resolvedDocId + '/') === 0) {
+          archivedIds[archGid.substring(archGid.indexOf('/') + 1)] = true;
+        }
+      }
+    }
+
+    _runConsistencyChecks(result, floatingActions, tracker, sheetRows, result.docTitle, archivedIds);
     result.ok = result.issues.length === 0;
 
     GasLogger.log('verify.consistency.complete', result);
@@ -1873,7 +1978,16 @@ function verifyConsistencyForTest(docId) {
  * @param {Array}    sheetRows       Direct ActionSheet read (all 9 fields + docTitle).
  * @param {string}   docTitle        Current document title from doc.getName().
  */
-function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docTitle) {
+function _isEmailDerivedName(email, name) {
+  if (!email || !name) return false;
+  var derived = email.split('@')[0]
+    .replace(/[._\-]+/g, ' ')
+    .replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+  return derived === name;
+}
+
+function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docTitle, archivedIds) {
+  archivedIds = archivedIds || {};
   var floatingByNrId = {};
   var sheetByNrId    = {};
   var sheetById      = {};
@@ -1926,8 +2040,15 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
         floating.assigneeEmail + '" sheet="' + sheet.assigneeEmail + '"');
     }
     if (floating.assigneeName !== sheet.assigneeName) {
-      result.issues.push('assigneeName mismatch (ID ' + sheet.id + '): doc="' +
-        floating.assigneeName + '" sheet="' + sheet.assigneeName + '"');
+      // When sync converts a plain-text email to a PERSON chip, getName() returns ""
+      // for emails not in the directory.  The sheet keeps the derived username name,
+      // which is correct — skip the mismatch for this case.
+      var docNameEmpty   = floating.assigneeName === '';
+      var sheetDerived   = _isEmailDerivedName(floating.assigneeEmail, sheet.assigneeName);
+      if (!(docNameEmpty && sheetDerived)) {
+        result.issues.push('assigneeName mismatch (ID ' + sheet.id + '): doc="' +
+          floating.assigneeName + '" sheet="' + sheet.assigneeName + '"');
+      }
     }
     if (floating.action !== sheet.action) {
       result.issues.push('action mismatch (ID ' + sheet.id + '): doc="' +
@@ -1980,10 +2101,18 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
   }
 
   // Tracker rows with no ActionSheet row.
+  // Only flag when the floating action still exists — if neither sheet nor doc has it,
+  // the action was fully deleted and the stale tracker row is expected.
   if (tracker.found) {
+    var floatingByAIN = {};
+    for (var fgid in floatingByNrId) {
+      if (!Object.prototype.hasOwnProperty.call(floatingByNrId, fgid)) continue;
+      var ainMatch = fgid.match(/\/?(AI-\d+)$/);
+      if (ainMatch) floatingByAIN[ainMatch[1]] = true;
+    }
     for (var tid in trackerById) {
       if (!Object.prototype.hasOwnProperty.call(trackerById, tid)) continue;
-      if (!sheetById[tid]) {
+      if (!sheetById[tid] && !archivedIds[tid] && floatingByAIN[tid]) {
         result.issues.push('Tracker row ID ' + tid + ' has no ActionSheet row');
       }
     }

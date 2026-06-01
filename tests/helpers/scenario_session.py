@@ -4,6 +4,8 @@ import dataclasses
 import re
 from typing import Optional
 
+_GLOBAL_ID_RE = re.compile(r'^[A-Za-z0-9_-]{25,44}/AI-\d+$')
+
 from tests.helpers.fixture_invoke import invoke_fixture
 from tests.helpers.download import download_xlsx, download_docx
 from tests.helpers.sheet_inspect import load_sheet, rows_for_doc
@@ -35,7 +37,7 @@ class ScenarioSession:
     def from_standard_clone(cls, master_doc_id: str, sheet_id: str, settings: dict) -> "ScenarioSession":
         """Clone the master template into a fresh, descriptively-named journey doc."""
         result = invoke_fixture("begin_journey_session", master_doc_id, settings, timeout=180)
-        doc_id = result["data"]["journeyDocId"]
+        doc_id = result["data"]["docId"]
         return cls(doc_id, sheet_id, settings, _owns_doc=True)
 
     @classmethod
@@ -120,6 +122,10 @@ class ScenarioSession:
             row = matches[0]
             assert row.get("globalId") not in (None, ""), (
                 f"[scenario UC-A AC1] globalId not set for {h.seed_text!r}"
+            )
+            assert _GLOBAL_ID_RE.match(row.get("globalId") or ""), (
+                f"[scenario UC-A AC1] globalId format invalid: {row.get('globalId')!r} "
+                f"(expected '{{docId}}/AI-{{N}}') for {h.seed_text!r}"
             )
             assert row.get("Status") == h.expected_status, (
                 f"[scenario UC-A AC1] Status: expected {h.expected_status!r}, "
