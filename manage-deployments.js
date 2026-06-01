@@ -162,13 +162,9 @@ async function registerTestToken(deploymentId) {
     return;
   }
 
-  // URL is derived from the deployment ID — webappTestUrl should NOT be set in
-  // local.settings.json. If it is present and stale, it overrides the correct URL
-  // and token registration silently fails (the old deployment returns 404/401).
-  const url    = settings.webappTestUrl || webAppUrl(deploymentId);
-  if (settings.webappTestUrl) {
-    console.warn('⚠️  webappTestUrl is set in local.settings.json — this overrides the derived TEST URL and may cause token registration to fail if stale. Remove it.');
-  }
+  // Always derive the URL from the deployment ID — never trust a manually-set
+  // webappTestUrl, which may be stale from a previous deployment cycle.
+  const url = webAppUrl(deploymentId);
   const secret = settings.webappSecret;
   if (!secret) {
     console.warn('⚠️  webappSecret not set in local.settings.json — skipping test token registration.');
@@ -197,7 +193,10 @@ async function registerTestToken(deploymentId) {
     return;
   }
 
-  // Persist token to local.settings.json for Python tests.
+  // Persist token + derived URL to local.settings.json for Python tests.
+  // webappTestUrl is always overwritten with the authoritative derived URL so
+  // it can never become stale from a previous deployment cycle.
+  settings.webappTestUrl      = url;
   settings.testToken          = testToken;
   settings.testTokenExpiresAt = expiresAt;
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');

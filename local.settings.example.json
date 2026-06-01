@@ -10,7 +10,8 @@
   "webappSecret": "YOUR_WEBAPP_SECRET_SCRIPT_PROPERTY_VALUE",
 
   "_note_testToken": "Auto-populated by npm run deploy:test — do not edit manually.",
-  "_note_webappTestUrl": "DO NOT ADD webappTestUrl here. deploy:test derives the URL from the TEST-WEB-APP deployment ID via clasp deployments — no URL override needed. Adding webappTestUrl causes token registration to call a stale URL and silently fail.",
+  "_note_webappTestUrl": "Auto-written by npm run deploy:test from the TEST-WEB-APP deployment ID — do not set manually. deploy:test always overwrites this with the current derived URL so it cannot become stale.",
+  "webappTestUrl": "",
   "testToken": "",
   "testTokenExpiresAt": ""
 }
