@@ -550,7 +550,7 @@ function _handleMarkDocNotFound(payload) {
 }
 
 /**
- * Permanently deletes the ActionSheet row whose NamedRangeId matches
+ * Permanently deletes the ActionSheet row whose globalId matches
  * payload.globalId.  Called by sidebarDeleteAction after the doc-side
  * paragraph has been removed.
  *

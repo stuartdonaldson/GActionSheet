@@ -10,7 +10,7 @@ GActionSheet is **one** GAS project (`scriptId 12EKX…`), container-bound to th
 
 Stable action identity is an **in-text `AI-N:` token** at the start of each floating-action paragraph; the cross-document key is `globalId = {docFileId}/AI-{N}`, stored in ActionSheet column 1. DocumentApp is used for read-side traversal (the token is visible to `getText()`, and PERSON chips are exposed ergonomically); the Docs REST API `batchUpdate` is used for write-side paragraph rewrites and tracker-table mutation. **No named ranges are created for actions** — the only named range in a document is the tracker-table heading anchor.
 
-> **Identity history.** Earlier designs anchored actions with Docs REST *named ranges* (ADR-0005); this was abandoned because smart-chip / rich-link pill elements are invisible to `getText()`, forcing a text-token scanner. The current model is recorded in **ADR-0008**, the single-project architecture in **ADR-0007**, and conflict resolution in **ADR-0009**. The in-code field has been renamed `globalId` (set 3 reconciliation, 2026-05-29). The ActionSheet column heading still reads `NamedRangeId` as a legacy label pending a sheet header rename.
+> **Identity history.** Earlier designs anchored actions with Docs REST *named ranges* (ADR-0005); this was abandoned because smart-chip / rich-link pill elements are invisible to `getText()`, forcing a text-token scanner. The current model is recorded in **ADR-0008**, the single-project architecture in **ADR-0007**, and conflict resolution in **ADR-0009**. The in-code field and ActionSheet column header are both `globalId`.
 
 ## Contract Sources
 
@@ -324,7 +324,7 @@ erDiagram
 
 The cross-doc key is `globalId = {docId}/AI-{N}`, stored in ActionSheet column 1. The doc-scoped `id` (column 2) is the human-facing `AI-N` derived from that key; `N` is assigned once per document by the Token Manager and then persists in the paragraph text — it is stable, not recomputed from document order.
 
-> The field in all three entities is `globalId`. The ActionSheet column heading still reads `NamedRangeId` as a legacy label pending a sheet rename.
+> The field in all three entities is `globalId`. The ActionSheet column heading is `globalId`.
 
 **Field notes:**
 - `assigneeChip` — compound value extracted from the PERSON chip, canonical form `name <email>`. The ActionSheet stores this in two separate columns (`Assignee Name`, `Assignee Email`); `DocChecklistItem` and `TrackerTableRow` hold it as a single parsed unit.

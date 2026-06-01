@@ -347,7 +347,7 @@ function onActionSheetEdit(e) {
  * Propagates a single ActionSheet row edit to the corresponding floating action
  * in the source document via REST batchUpdate.
  *
- * Reads: NamedRangeId/globalId (col 1), Action (col 5), Status (col 6), Document URL (col 7)
+ * Reads: globalId (col 1), Action (col 5), Status (col 6), Document URL (col 7)
  * Extracts docId from the Document hyperlink formula.
  * Extracts N from the globalId (format: {docId}/AI-{N}).
  *

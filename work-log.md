@@ -1347,3 +1347,20 @@ Investigated sync performance and correctness issues reported from a live Sync A
 - `DocumentApp.openById()` succeeds on trashed Google Drive files — no exception is thrown. "Doc Not Found" requires an explicit `isTrashed()` check.
 - Script Properties are the wrong place for per-doc sync state; a dedicated sheet tab keeps it visible and co-located with the data it describes.
 - Scalability limits to be aware of (not yet addressed): GAS 6-min execution ceiling (~200 docs for Drive-check-only), and Sheets row-count limits at 10k+ docs.
+
+## 2026-05-31 12:17:07
+Model: Claude Sonnet 4.6 | Session: 2deaa75a-dbde-4979-a86a-3296dfec090c
+
+### Summary
+Reviewed and rewrote the future design section of knowledge-base/ROADMAP.md, replacing the physical per-team tracker sheets architecture with a simpler logical team scope model. Reviewed and refined the assignee reminder feature concept. Extracted GAS HTML email templating practice from F3Go30 and captured it as a bead.
+
+### Changes
+- **ROADMAP.md §Future design** — replaced "per-team tracker sheets with master registry" with "logical team scope with master registry"; eliminated 5 of 7 failure modes, 10-step initialization flow, Web App contract changes, and deployer access complexity; reframed as Phase 1 (team scope column + auto-assignment on sync), Phase 2 (Settings card override), Phase 3 (deferred physical partitioning)
+- **ROADMAP.md §Funnel** — replaced single-line "email notification to assignee when a new action is assigned" with a fully specified "assignee reminder" entry covering: user-triggered CardService card, team scope via `ActionTeam` property, `isResolved()` as single source of truth for Closed/Done/Rejected, multi-select with confirmation, `GmailApp` sender identity, HTML template pattern via F3Go30-i1m
+- **F3Go30 bead F3Go30-i1m** — created in F3Go30 project documenting GAS HTML email templating practice: `*EmailTemplate.html` + `renderXxxEmailHtml_()` + `buildXxxEmailTemplate_()` + `escapeHtml_()` + sender-identity choice; references canonical files in F3Go30 (`ReminderEmailTemplate.html`, `onboardingEmail.js`, `nag.js`)
+
+### Key Learnings
+- Logical team identity (document property `ActionTeam`) is architecturally cleaner than physical-sheet routing — eliminates provisioning, access grants, contract changes, and 5 failure modes; defers physical partitioning to when there is a demonstrated need
+- `HtmlService.createTemplateFromFile()` scriptlets (`<?= ?>`) do NOT auto-escape — `escapeHtml_()` must be applied to all user-controlled values in templates
+- `GmailApp.sendEmail()` sends as the active OAuth user (context ①); `MailApp.sendEmail()` sends as deployer — choice has significant UX implications for sender identity in reminder emails
+- bash history expansion (`!`) silently truncates bead body when `bd create --body` contains `!`; use `--body-file` with a temp file to avoid this

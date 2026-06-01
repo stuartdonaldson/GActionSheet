@@ -10,11 +10,14 @@ Covers the §15 test_03-07/12 conflict matrix at the HTTP-act layer:
 
 Bead: GTaskSheet-5vwu.12
 """
+import re
 import pytest
 
 from scn.ai import ai
 from scn.engine import CheckpointKind, Severity, Surface
 from scn.session import ScenarioSession
+
+_GLOBAL_ID_RE = re.compile(r'^[A-Za-z0-9_-]{25,44}/AI-\d+$')
 
 DOC = Surface.DOC
 SHEET = Surface.SHEET
@@ -66,6 +69,13 @@ def test_b7_write_routes(scn):
 
     # Pin IDs now so we can address rows by globalId in the write acts below
     _pin_ids(scn, [target_edit, target_status, target_delete])
+
+    # AC2 (sjj): verify the auto-assigned globalIds match the expected format {docId}/AI-{N}
+    for label, a in [("edit", target_edit), ("status", target_status), ("delete", target_delete)]:
+        assert _GLOBAL_ID_RE.match(a.action_id or ""), (
+            f"[B7 AC2] {label} action_id globalId format invalid: {a.action_id!r} "
+            "(expected '{docId}/AI-{N}')"
+        )
 
     # ── ACT A — edit_sheet: Dirty stamp + sheet-wins on next sync ────────────────
     #

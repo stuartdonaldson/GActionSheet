@@ -13,17 +13,28 @@ Detection forms tested:
 
 Acceptance criteria (from docs/CONTEXT.md §UC-A):
   AC1. After Sync, all floating-action list items appear in the ActionSheet
-       with correct assignee, action text, status, and a NamedRangeId anchor.
+       with correct assignee, action text, status, and a globalId anchor.
   AC2. A second Sync produces no duplicate rows, preserves named range IDs,
        and leaves the ActionSheet and doc content unchanged (idempotent).
 """
 
+import re
 import pytest
 
 from tests.helpers.download import download_xlsx, download_docx
 from tests.helpers.fixture_invoke import invoke_fixture
 from tests.helpers.sheet_inspect import load_sheet, rows_for_doc
 from tests.helpers.doc_inspect import load_doc, floating_actions
+
+# globalId must be "{docFileId}/AI-{N}" — Drive file IDs are base64url, 25–44 chars
+_GLOBAL_ID_RE = re.compile(r'^[A-Za-z0-9_-]{25,44}/AI-\d+$')
+
+
+def _assert_global_id_format(value: str, context: str) -> None:
+    assert _GLOBAL_ID_RE.match(value or ""), (
+        f"[{context}] globalId / globalId format invalid: {value!r} "
+        "(expected '{docId}/AI-{N}')"
+    )
 
 _EMAIL_ITEM_EMAIL  = "jane.smith@example.com"
 _EMAIL_ITEM_NAME   = "Jane Smith"
@@ -106,9 +117,10 @@ def test_uc_a_ac1_multi_format_detection(uc_a_state, settings):
     assert chip_row.get("Status") == _CHIP_ITEM_STATUS, (
         f"[uc_a AC1] Chip row Status: expected {_CHIP_ITEM_STATUS!r}, got {chip_row.get('Status')!r}"
     )
-    assert chip_row.get("NamedRangeId") not in (None, ""), (
-        "[uc_a AC1] Chip row NamedRangeId not set — anchor not created"
+    assert chip_row.get("globalId") not in (None, ""), (
+        "[uc_a AC1] Chip row globalId not set — anchor not created"
     )
+    _assert_global_id_format(chip_row.get("globalId"), "uc_a AC1 chip")
     assert _CHIP_ITEM_ACTION in (chip_row.get("Action") or ""), (
         f"[uc_a AC1] Chip row Action: expected to contain {_CHIP_ITEM_ACTION!r}, "
         f"got {chip_row.get('Action')!r}"
@@ -118,9 +130,10 @@ def test_uc_a_ac1_multi_format_detection(uc_a_state, settings):
         f"[uc_a AC1] Email row Status: expected {_EMAIL_ITEM_STATUS!r}, "
         f"got {email_row.get('Status')!r}"
     )
-    assert email_row.get("NamedRangeId") not in (None, ""), (
-        "[uc_a AC1] Email row NamedRangeId not set — anchor not created"
+    assert email_row.get("globalId") not in (None, ""), (
+        "[uc_a AC1] Email row globalId not set — anchor not created"
     )
+    _assert_global_id_format(email_row.get("globalId"), "uc_a AC1 email")
     assert email_row.get("Assignee Name") == _EMAIL_ITEM_NAME, (
         f"[uc_a AC1] Email row Assignee Name: expected {_EMAIL_ITEM_NAME!r}, "
         f"got {email_row.get('Assignee Name')!r}"
@@ -149,7 +162,7 @@ def test_uc_a_ac2_idempotent_second_sync(uc_a_state):
     assert len(ac1_rows1) == 2, (
         f"[uc_a AC2] Expected 2 AC1: rows in first-sync state, got {len(ac1_rows1)}"
     )
-    nr_ids_1 = {r["Assignee Email"]: r["NamedRangeId"] for r in ac1_rows1}
+    nr_ids_1 = {r["Assignee Email"]: r["globalId"] for r in ac1_rows1}
 
     ws2    = load_sheet(uc_a_state["xlsx_final"], sheet_name="Actions")
     rows2  = rows_for_doc(ws2, uc_a_state["doc_id"])
@@ -160,10 +173,10 @@ def test_uc_a_ac2_idempotent_second_sync(uc_a_state):
         "Duplicate rows created or rows lost on subsequent syncs."
     )
 
-    nr_ids_2 = {r["Assignee Email"]: r["NamedRangeId"] for r in ac1_rows2}
+    nr_ids_2 = {r["Assignee Email"]: r["globalId"] for r in ac1_rows2}
     for email, nrid in nr_ids_1.items():
         assert nr_ids_2.get(email) == nrid, (
-            f"[uc_a AC2] NamedRangeId changed for {email!r}: "
+            f"[uc_a AC2] globalId changed for {email!r}: "
             f"{nrid!r} → {nr_ids_2.get(email)!r}"
         )
 
@@ -216,9 +229,10 @@ def test_uc_a_ac1_permutation_coverage(uc_a_state, settings):
         f"[uc_a permutations] Chip row Action: expected to contain {_PERM_CHIP_ACTION!r}, "
         f"got {chip_row.get('Action')!r}"
     )
-    assert chip_row.get("NamedRangeId") not in (None, ""), (
-        "[uc_a permutations] Chip row NamedRangeId not set — anchor not created"
+    assert chip_row.get("globalId") not in (None, ""), (
+        "[uc_a permutations] Chip row globalId not set — anchor not created"
     )
+    _assert_global_id_format(chip_row.get("globalId"), "uc_a perm chip")
 
     assert jane_row.get("Status") == _PERM_NO_STATUS_STATUS, (
         f"[uc_a permutations] Jane row Status: expected {_PERM_NO_STATUS_STATUS!r} (default), "
@@ -232,9 +246,10 @@ def test_uc_a_ac1_permutation_coverage(uc_a_state, settings):
         f"[uc_a permutations] Jane row Action: expected to contain {_PERM_NO_STATUS_ACTION!r}, "
         f"got {jane_row.get('Action')!r}"
     )
-    assert jane_row.get("NamedRangeId") not in (None, ""), (
-        "[uc_a permutations] Jane row NamedRangeId not set — anchor not created"
+    assert jane_row.get("globalId") not in (None, ""), (
+        "[uc_a permutations] Jane row globalId not set — anchor not created"
     )
+    _assert_global_id_format(jane_row.get("globalId"), "uc_a perm jane")
 
     assert bob_row.get("Assignee Name") == _PERM_UNDERSCORE_NAME, (
         f"[uc_a permutations] Bob row Assignee Name: expected {_PERM_UNDERSCORE_NAME!r}, "
@@ -244,6 +259,7 @@ def test_uc_a_ac1_permutation_coverage(uc_a_state, settings):
         f"[uc_a permutations] Bob row Action: expected to contain {_PERM_UNDERSCORE_ACTION!r}, "
         f"got {bob_row.get('Action')!r}"
     )
-    assert bob_row.get("NamedRangeId") not in (None, ""), (
-        "[uc_a permutations] Bob row NamedRangeId not set — anchor not created"
+    assert bob_row.get("globalId") not in (None, ""), (
+        "[uc_a permutations] Bob row globalId not set — anchor not created"
     )
+    _assert_global_id_format(bob_row.get("globalId"), "uc_a perm bob")

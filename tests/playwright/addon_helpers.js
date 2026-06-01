@@ -154,7 +154,7 @@ async function sidebarActionRows(page) {
  *   const result = await verifyConsistency(page, docId);
  *   expect(result.ok, result.issues.join('\n')).toBe(true);
  *
- * FIELDS VERIFIED (floating action ↔ ActionSheet row, keyed by namedRangeId):
+ * FIELDS VERIFIED (floating action ↔ ActionSheet row, keyed by globalId):
  *   assigneeEmail, assigneeName — exact match
  *   action                      — exact text match
  *   status                      — exact match (default 'Open' on both sides)

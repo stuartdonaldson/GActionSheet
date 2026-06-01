@@ -244,7 +244,7 @@ def _make_xlsx_bytes(rows: list[dict]) -> bytes:
     document_url → stored as =HYPERLINK("url","name") formula in col 7.
     """
     HEADERS = [
-        "NamedRangeId", "ID", "Assignee Email", "Assignee Name",
+        "globalId", "ID", "Assignee Email", "Assignee Name",
         "Action", "Status", "Document",
         "Date Created", "Date Modified", "Sync Status"
     ]

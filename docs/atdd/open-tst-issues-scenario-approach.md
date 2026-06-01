@@ -197,7 +197,7 @@ and keeps all state in GAS. File a `[IMP]` paired issue if `seed_mixed_url_rows`
 
 **What it tests.** Four entry points must each appear as a direct call-site in at least one
 scenario: `syncDocument` (scanner), `sidebarCreateAction` (creation), `sidebarSetStatus` (flush),
-`sidebarDeleteAction` (delete). The additional AC is that col 1 (NamedRangeId/globalId) equals
+`sidebarDeleteAction` (delete). The additional AC is that col 1 (globalId) equals
 `{docId}/AI-N` after initial sync.
 
 **Scenario approach.** Four acts, each targeting one entry point. The existing `test_b7_write_routes.py`

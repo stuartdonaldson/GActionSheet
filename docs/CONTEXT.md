@@ -3,7 +3,7 @@
 ## Introduction & Goals
 
 ### Purpose
-GActionSheet captures and tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Authors create actions natively — a checklist item that begins with a Google Docs person chip is an action assigned to that person. Each action is anchored with a named range so its identity survives edits. The Workspace Add-on homepage card is the user-facing surface for the active document; the ActionSheet is the cross-doc store.
+GActionSheet captures and tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Authors create actions natively — a checklist item that begins with a Google Docs person chip is an action assigned to that person. Each action is identified by an in-text `AI-N:` token so its identity survives edits. The Workspace Add-on homepage card is the user-facing surface for the active document; the ActionSheet is the cross-doc store.
 
 ### Quality Goals
 | Priority | Quality Goal | Scenario |
@@ -11,7 +11,7 @@ GActionSheet captures and tracks action items inside Google Docs and aggregates 
 | 1 | Idempotence | Clicking **Sync now** twice in succession with no edits produces no further writes to the doc or the ActionSheet |
 | 2 | Data integrity | No action record is silently overwritten; `Last Modified` precedence determines the winner on every conflict |
 | 3 | Operability | A document author can capture an action by adding a checklist item that begins with a person chip — no typed prefix, no separate sheet interaction |
-| 4 | Stable identity | An action's anchor (named range) survives edits elsewhere in the doc; no duplicate ActionSheet rows are produced |
+| 4 | Stable identity | An action's `AI-N:` text token survives edits elsewhere in the doc; no duplicate ActionSheet rows are produced |
 
 ### Stakeholders
 | Stakeholder | Expectation |
@@ -45,7 +45,7 @@ A **floating action** (also called an action item) is a paragraph or list item i
 Common fields:
 - Action text is everything after the chip/email on the same paragraph, with any trailing `(Status)` token stripped
 - Status lives in a trailing parenthesized token at the end of the paragraph; Sync writes an explicit token when one is missing, using `(Open)` as the default; `(Closed)` is recognized for archiving; any other value is preserved verbatim as a free-form status
-- Each action is anchored by a named range whose `namedRangeId` is the durable identity stored in the ActionSheet
+- Each action is identified by an in-text `AI-N:` token; the durable identity is `globalId = {docId}/AI-{N}`, stored in the ActionSheet
 - Dates are stored in the ActionSheet as native sheet date values; in the in-doc tracker table they are written using the sheet's locale-formatted date
 
 ### Organizational Constraints
@@ -60,7 +60,7 @@ Common fields:
 
 | Column | Notes |
 |--------|-------|
-| NamedRangeId | The durable identity of the action; matches the `namedRangeId` of the anchor named range in the source doc |
+| globalId | The action's global identifier `{docId}/AI-{N}`, derived from the `AI-N:` text token at paragraph start |
 | ID | Document-scoped sequential integer for human reference (e.g. shown in the tracker table) |
 | Assignee Email | Canonical email address from the person chip or email-at-start text |
 | Assignee Name | Display name from the chip; or derived from email username if chip absent |
@@ -85,7 +85,7 @@ The in-doc tracker is a table inserted by the **Insert / refresh tracker** butto
 | Assigned Date | Date first synced |
 | Last Modified | Most recent reconcile or edit time |
 
-The tracker table is itself anchored by a named range so refresh can replace its contents in place without disturbing surrounding doc content.
+The tracker table is located by a sentinel heading paragraph so refresh can replace its contents in place without disturbing surrounding doc content.
 
 ---
 
@@ -93,7 +93,7 @@ The tracker table is itself anchored by a named range so refresh can replace its
 - **Web App proxy endpoint** — the same GAS script is deployed as a Web App; the add-on uses `UrlFetchApp` to call `doPost`, which runs as the deployer identity with sheet-write authority over the ActionSheet
 - **Proxy-write pattern** — bridges the cross-identity boundary: add-on runs as the active user (read-only doc access); Web App runs as the deployer (`executeAs: USER_DEPLOYING`); no service account required
 - Detect actions in the **active doc** (the doc the sidebar is attached to) as checklist items beginning with a PERSON chip
-- Anchor each action with a named range; the `namedRangeId` is the stable identity recorded in the ActionSheet
+- Identify each action with an in-text `AI-N:` token; the `globalId` is the stable identity recorded in the ActionSheet
 - Maintain a trailing `(Status)` token on each action paragraph; default `(Open)`, recognize `(Closed)` for archiving, preserve any other value as a free-form custom status
 - Refresh the homepage card without mutating data — **Scan card** re-reads the current doc, tracker, and sheet-derived summary state so the visible card catches up to edits or a recent sync
 - Sync the active doc to the ActionSheet on demand from the homepage card — a single **Sync now** action that scans the doc and reconciles ActionSheet rows in one round (push/pull resolved by `Last Modified`)
@@ -109,7 +109,7 @@ The tracker table is itself anchored by a named range so refresh can replace its
 
 ### Invariants (apply to every use case)
 
-- **Identity is the named range.** The `namedRangeId` of the action's anchor is the durable key. ActionSheet rows are keyed on `NamedRangeId`. The doc-scoped `ID` is for human reference only.
+- **Identity is the text token.** The `globalId` (`{docId}/AI-{N}`) derived from the `AI-N:` token is the durable key. ActionSheet rows are keyed on `globalId`. The doc-scoped `ID` is for human reference only.
 - **Status is the trailing parenthesized token.** The visual checkbox state is decorative; the parenthesized status string is the truth.
 - **Modified-date precedence.** Each row carries a `Last Modified` timestamp on both sides. Later wins. On tie, the ActionSheet row wins. A blank `Last Modified` means "just edited" — it is stamped to sync-start time and propagated.
 - **Sync is eventually consistent.** Per-doc Sync is on-demand from the sidebar; cross-doc consistency is provided by the timed sweep.
@@ -127,15 +127,15 @@ Preconditions:
 Primary Flow:
 1. Author writes a checklist item that begins with `AI:` or `AI-N:`, optionally followed by an assignee email and action text, with an optional trailing `(Status)` token.
 2. Author opens the homepage card and clicks **Sync now**.
-3. The add-on scans the doc, detects each floating action by `AI-N:` token at paragraph start (bare `AI:` is first promoted to `AI-N:`), creates a named range anchoring each one, and writes a row to the ActionSheet with the resolved assignee and `Status = Open` (or the trailing token value if present).
+3. The add-on scans the doc, detects each floating action by `AI-N:` token at paragraph start (bare `AI:` is first promoted to `AI-N:`), assigns a `globalId` to each one, and writes a row to the ActionSheet with the resolved assignee and `Status = Open` (or the trailing token value if present).
 4. The homepage card refreshes and shows the new actions.
 
 Postconditions:
-- Every floating action in the document has exactly one corresponding ActionSheet row, and the pair agrees on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `NamedRangeId` (non-empty). The ActionSheet `Document` column display text equals the current document title. No ActionSheet rows for this document exist beyond those with a corresponding floating action.
+- Every floating action in the document has exactly one corresponding ActionSheet row, and the pair agrees on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `globalId` (non-empty, format `{docId}/AI-{N}`). The ActionSheet `Document` column display text equals the current document title. No ActionSheet rows for this document exist beyond those with a corresponding floating action.
 
 Acceptance Criteria:
-- AC1: After Sync, AI-token items — bare `AI:` (auto-ID) and explicit `AI-N:`, with and without an assignee email — appear in the ActionSheet with correct `Assignee Email`, `Assignee Name`, action text, status, and a non-empty `NamedRangeId`. For email assignees, `Assignee Name` is derived from the username portion of the email.
-- AC2: A second Sync with no edits produces no new rows and no lost rows. All `NamedRangeId` values are unchanged. Every floating action has exactly one ActionSheet row; the pair is consistent on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `NamedRangeId`. The `Document` column display text equals the current document title.
+- AC1: After Sync, AI-token items — bare `AI:` (auto-ID) and explicit `AI-N:`, with and without an assignee email — appear in the ActionSheet with correct `Assignee Email`, `Assignee Name`, action text, status, and a non-empty `globalId`. For email assignees, `Assignee Name` is derived from the username portion of the email.
+- AC2: A second Sync with no edits produces no new rows and no lost rows. All `globalId` values are unchanged. Every floating action has exactly one ActionSheet row; the pair is consistent on `Assignee Email`, `Assignee Name`, `Action` text, `Status`, and `globalId`. The `Document` column display text equals the current document title.
 
 ---
 
@@ -144,7 +144,7 @@ Acceptance Criteria:
 Actor: Action owner (ActionSheet side) **or** Document author (floating action side)
 
 Preconditions:
-- The action already exists with a row on the ActionSheet and a chip-led checklist paragraph in the doc, sharing a `namedRangeId`
+- The action already exists with a row on the ActionSheet and a chip-led checklist paragraph in the doc, sharing a `globalId`
 
 Authoritative edit surfaces:
 - The **floating action paragraph** (chip + action text + trailing `(Status)`) is the doc-side authority.
@@ -156,7 +156,7 @@ Primary Flow:
 2. The next Sync (sidebar click or timed sweep) detects the difference and applies the later-modified side's values to the other.
 
 Postconditions:
-- After Sync, every floating action in the document has exactly one corresponding ActionSheet row. The pair is consistent on: `Assignee Email` and `Assignee Name` (match the floating action's assignee), `Action` text (exact match), `Status` (exact match), `NamedRangeId` (stable, non-empty), and `Document` column display text (equals the current document title). No ActionSheet rows exist for floating actions that have been deleted; no floating actions exist without a matching ActionSheet row.
+- After Sync, every floating action in the document has exactly one corresponding ActionSheet row. The pair is consistent on: `Assignee Email` and `Assignee Name` (match the floating action's assignee), `Action` text (exact match), `Status` (exact match), `globalId` (stable, non-empty, format `{docId}/AI-{N}`), and `Document` column display text (equals the current document title). No ActionSheet rows exist for floating actions that have been deleted; no floating actions exist without a matching ActionSheet row.
 - If an earlier re-anchor left a stale duplicate ActionSheet row for the same action, the next successful Sync removes the stale row so the doc returns to a 1:1 doc-row pairing.
 - After the next tracker refresh, the in-doc tracker row for that action shows the same `Action` and `Status` values.
 - `Last Modified` on both sides reflects the time of the original user edit.
@@ -165,7 +165,7 @@ Acceptance Criteria:
 - A sheet edit to `Status`, `Action`, or `Assignee` reaches the floating action paragraph after Sync, regardless of which side was edited last; later `Last Modified` wins.
 - A doc edit to the floating action propagates to the ActionSheet after Sync for all three mutation types: trailing `(Status)` change (free-form value preserved verbatim), action text change, and chip-replaced assignee change.
 - After those values converge, the next **Insert / refresh tracker** updates the tracker-table row so its `Action` and `Status` cells match the floating action paragraph and the ActionSheet row for the same action.
-- The action's named-range anchor survives every edit type above, and no duplicate ActionSheet rows are created.
+- The action's `AI-N:` text token survives every edit type above, and no duplicate ActionSheet rows are created.
 - Edits typed directly into the in-doc tracker table cells are **not** reflected on the ActionSheet by any Sync; the next tracker refresh restores the rendered values from the floating actions (covered by UC-C).
 
 ---
@@ -182,7 +182,7 @@ Primary Flow:
 2. The add-on inserts (or refreshes) the tracker table at its anchor, prefixed with the instructional paragraph, with one row per current action in document order.
 
 Postconditions:
-- Every floating action in the document has exactly one tracker-table row and one ActionSheet row. All three agree on `Action` text and `Status`. The ActionSheet rows also agree with their paired floating actions on `Assignee Email`, `Assignee Name`, and `NamedRangeId`. The `Document` column display text on each ActionSheet row equals the current document title.
+- Every floating action in the document has exactly one tracker-table row and one ActionSheet row. All three agree on `Action` text and `Status`. The ActionSheet rows also agree with their paired floating actions on `Assignee Email`, `Assignee Name`, and `globalId`. The `Document` column display text on each ActionSheet row equals the current document title.
 
 Acceptance Criteria:
 - First click on a doc with N actions produces the instructional paragraph plus a table with N rows in document order, anchored so subsequent refreshes update in place.
@@ -204,7 +204,7 @@ Postconditions:
 Acceptance Criteria:
 - An ActionSheet row with `Status = Closed` and `Last Modified > 30 days` is moved from the ActionSheet to the archive sheet on the next sweep, preserving `Last Modified`.
 - Archiving does not alter any document content.
-- If a previously archived action reappears (its named range still exists in the doc), a later Sync may restore an active ActionSheet row for it.
+- If a previously archived action reappears (its `AI-N:` token still exists in the doc), a later Sync may restore an active ActionSheet row for it.
 
 ---
 
@@ -222,7 +222,7 @@ Errors are surfaced in the sidebar (for add-on operations) or logged to the auto
 ## Non-Goals
 - Real-time bidirectional sync (Sync is on-demand or on the sweep cadence)
 - Reading the visual checked state of a checklist item (not exposed by any API)
-- Cross-document `ID` uniqueness (`ID` is doc-scoped; the cross-doc key is `NamedRangeId`)
+- Cross-document `ID` uniqueness (`ID` is doc-scoped; the cross-doc key is `globalId`)
 - Preservation of rich text formatting (bold, italic, colour) on the action paragraph when rewriting the trailing `(Status)` token
 - Multi-tenant or cross-organisation support
 
@@ -234,7 +234,7 @@ Errors are surfaced in the sidebar (for add-on operations) or logged to the auto
 | Action item (action) | A checklist item in a Google Doc whose first inline child is a PERSON chip. The chip is the assignee. The trailing parenthesized token is the status. |
 | ActionSheet | The central Google Spreadsheet that aggregates actions across docs. The cross-doc store. |
 | Add-on | The Google Workspace Add-on (Docs) that provides the sidebar UI. |
-| Anchor (named range anchor) | The named range covering an action's checklist paragraph; its `namedRangeId` is the action's durable identity. |
+| AI-N token | The in-text `AI-N:` prefix at a floating action paragraph's start (e.g. `AI-3:`). The durable identity is `globalId = {docId}/AI-{N}`, stored in the `globalId` column. Bare `AI:` placeholders are promoted to `AI-N:` on first Sync. |
 | Automation script | The container-bound Apps Script on the ActionSheet that owns the `onEdit` timestamp stamper, the timed sweep trigger, and the archive job. |
 | Last Modified | A timestamp column on each ActionSheet row and (implicitly) each anchored action. Records the most recent reconcile or user edit time. Empty means never synced. |
 | Sidebar | The card-based UI shown by the add-on in the active doc, built with CardService (not HtmlService). Surfaces sync state, action buttons (Sync now, VerifySync, Insert tracker), and a per-action list with status dropdown and delete. |

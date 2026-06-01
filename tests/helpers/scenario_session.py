@@ -104,7 +104,7 @@ class ScenarioSession:
                     r for r in rows
                     if re.search(
                         rf"AI-{h.expected_id}\b",
-                        (r.get("GlobalId") or "") + (r.get("NamedRangeId") or ""),
+                        (r.get("globalId") or ""),
                     )
                 ]
             else:
@@ -118,8 +118,8 @@ class ScenarioSession:
                 f"got {len(matches)}.\n  rows={rows}"
             )
             row = matches[0]
-            assert row.get("NamedRangeId") not in (None, ""), (
-                f"[scenario UC-A AC1] NamedRangeId not set for {h.seed_text!r}"
+            assert row.get("globalId") not in (None, ""), (
+                f"[scenario UC-A AC1] globalId not set for {h.seed_text!r}"
             )
             assert row.get("Status") == h.expected_status, (
                 f"[scenario UC-A AC1] Status: expected {h.expected_status!r}, "
@@ -135,7 +135,7 @@ class ScenarioSession:
                     f"[scenario UC-A AC1] Assignee Name: expected {h.expected_display_name!r}, "
                     f"got {row.get('Assignee Name')!r}"
                 )
-            gid = (row.get("GlobalId") or "") + (row.get("NamedRangeId") or "")
+            gid = (row.get("globalId") or "")
             m = re.search(r"AI-(\d+)", gid)
             if m:
                 h.resolved_id = int(m.group(1))

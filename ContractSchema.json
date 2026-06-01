@@ -23,7 +23,7 @@
       "sync_status"
     ],
     "headers": [
-      "NamedRangeId",
+      "globalId",
       "ID",
       "Assignee Email",
       "Assignee Name",

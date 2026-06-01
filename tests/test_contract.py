@@ -22,7 +22,7 @@ def test_sentinel_field_names():
     # and this test fails after re-export.
     assert 'global_id' in contract.SHEET_ACTION_FIELDS
     assert 'document_formula' in contract.SHEET_ACTION_FIELDS
-    assert contract.SHEET_HEADERS[0] == 'NamedRangeId'  # retained alias for global_id
+    assert contract.SHEET_HEADERS[0] == 'globalId'
     assert 'sync_action_rows' in contract.ROUTE_NAMES
     assert 'edit_action_row' in contract.TEST_ROUTE_NAMES
     assert 'find_sheet_actions' in contract.TEST_ROUTE_NAMES

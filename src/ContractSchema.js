@@ -34,7 +34,7 @@ var CONTRACT_SCHEMA = Object.freeze({
     ]),
 
     headers: Object.freeze([
-      'NamedRangeId',
+      'globalId',
       'ID',
       'Assignee Email',
       'Assignee Name',

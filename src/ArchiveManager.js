@@ -17,7 +17,7 @@ var ArchiveManager = (function () {
 
   var ARCHIVE_THRESHOLD_DAYS = 30;
 
-  // 1-based column indices (matching SHEET_HEADERS with NamedRangeId as col 1).
+  // 1-based column indices (matching SHEET_HEADERS with globalId as col 1).
   var COL_STATUS        = 6;
   var COL_DATE_MODIFIED = 9;
   var TOTAL_COLS        = 10;

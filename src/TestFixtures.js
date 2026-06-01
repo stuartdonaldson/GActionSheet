@@ -347,7 +347,7 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
 /**
  * Builds a sheet row array in SHEET_HEADERS order.
  *
- * SHEET_HEADERS = [NamedRangeId, ID, Assignee Email, Assignee Name, Action,
+ * SHEET_HEADERS = [globalId, ID, Assignee Email, Assignee Name, Action,
  *                  Status, Document, Date Created, Date Modified, Sync Status]
  *
  * @param {object} opts
@@ -1274,7 +1274,7 @@ function setupTestFixtures(scenario) {
 
         // After the first sync, read the NR ID for the SS-DEL row from the sheet.
         // GAS does NOT auto-remove named ranges when their paragraph is deleted, so
-        // the NR would appear in allDocNamedRangeIds during the second syncDocument,
+        // the NR would appear in allDocGlobalIds during the second syncDocument,
         // causing the orphan-detection loop to skip the row (activeNrIdSet check).
         // We must explicitly remove the NR from the doc after paragraph deletion.
         var ssDelSheet   = ss.getSheetByName('Actions');
@@ -1286,7 +1286,7 @@ function setupTestFixtures(scenario) {
           for (var sdi = 0; sdi < ssDelSheetData.length; sdi++) {
             if (ssDelSheetFmls[sdi][0].indexOf(testDocId) !== -1 &&
                 (ssDelSheetData[sdi][4] || '').indexOf('SS-DEL:') !== -1) {
-              ssDelNRId = ssDelSheetData[sdi][0]; // col 1 = NamedRangeId
+              ssDelNRId = ssDelSheetData[sdi][0]; // col 1 = globalId
               break;
             }
           }
@@ -1636,6 +1636,37 @@ function setupTestFixtures(scenario) {
         docAlreadyClosed = true;
         sidebarDeleteAction(sdaNrId, testDocId);
         _TF_RESULT = { tag: 'fixture.sidebar_delete_action', data: { globalId: sdaNrId } };
+        break;
+      }
+
+      case 'ai_n_token_scan': {
+        // Append a bare AI: paragraph, then call syncDocument so the scanner upgrades it
+        // to AI-N: and writes a sheet row.  Returns the assigned globalId and action text
+        // so the Python test can assert format and cross-check the sheet row.
+        var antText = 'ANT: verify AI-N token format and globalId assignment';
+        body.appendParagraph('AI: ' + antText);
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        syncDocument(testDocId);
+        SpreadsheetApp.flush();
+        var antSheet = ss.getSheetByName('Actions');
+        var antData  = antSheet.getDataRange().getValues();
+        var antHdr   = antData[0];
+        var antColId = antHdr.indexOf('globalId');
+        var antColAc = antHdr.indexOf('Action');
+        var antColDo = antHdr.indexOf('Document');
+        var antRow   = null;
+        for (var anti = 1; anti < antData.length; anti++) {
+          if ((antData[anti][antColAc] || '').indexOf(antText) !== -1) {
+            antRow = antData[anti];
+            break;
+          }
+        }
+        var antGlobalId = antRow ? (antRow[antColId] || '') : '';
+        _TF_RESULT = {
+          tag:  'fixture.ai_n_token_scan',
+          data: { globalId: antGlobalId, actionText: antText, docId: testDocId }
+        };
         break;
       }
 
