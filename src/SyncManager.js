@@ -334,10 +334,25 @@ function onActionSheetEdit(e) {
 
   // Stamp Date Modified and mark Sync Status = 'Dirty' so the next bidirectional
   // sync knows this row was edited on the sheet side (sheet wins conflict resolution).
+  // For multi-row pastes, stamp ALL rows in the range — if only the first row is
+  // marked Dirty, the subsequent syncDocument call treats the other pasted rows as
+  // doc-wins and overwrites them with old doc values.
+  var numRows = range.getNumRows();
   var dateModified = new Date();
   WriteGuard.wrap(function () {
-    sheet.getRange(row, 9).setValue(dateModified);
-    sheet.getRange(row, 10).setValue('Dirty');
+    if (numRows === 1) {
+      sheet.getRange(row, 9).setValue(dateModified);
+      sheet.getRange(row, 10).setValue('Dirty');
+    } else {
+      var dates    = [];
+      var dirtyCol = [];
+      for (var r = 0; r < numRows; r++) {
+        dates.push([dateModified]);
+        dirtyCol.push(['Dirty']);
+      }
+      sheet.getRange(row, 9, numRows, 1).setValues(dates);
+      sheet.getRange(row, 10, numRows, 1).setValues(dirtyCol);
+    }
   });
 
   _syncSheetRowToDoc(sheet, row);
