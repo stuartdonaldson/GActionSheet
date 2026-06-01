@@ -9,13 +9,19 @@
     "https://www.googleapis.com/auth/documents",
     "https://www.googleapis.com/auth/script.scriptapp",
     "https://www.googleapis.com/auth/script.external_request",
-    "https://www.googleapis.com/auth/userinfo.email"
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/workspace.linkpreview",
+    "https://www.googleapis.com/auth/workspace.linkcreate",
+    "https://www.googleapis.com/auth/directory.readonly",
+    "https://www.googleapis.com/auth/contacts.readonly",
+    "openid"
   ],
   "urlFetchWhitelist": [
     "https://script.google.com/a/macros/northlakeuu.org/s/",
     "https://script.google.com/a/northlakeuu.org/macros/s/",
     "https://script.google.com/macros/s/",
-    "https://docs.googleapis.com/"
+    "https://docs.googleapis.com/",
+    "https://people.googleapis.com/"
   ],
   "webapp": {
     "access": "ANYONE_ANONYMOUS",
@@ -23,7 +29,7 @@
   },
   "addOns": {
     "common": {
-      "name": "Action Sync",
+      "name": "Northlake Doc Tools",
       "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-128.png",
       "homepageTrigger": {
         "runFunction": "buildHomepageCard"
@@ -32,7 +38,28 @@
     "docs": {
       "homepageTrigger": {
         "runFunction": "buildHomepageCard"
-      }
+      },
+      "createActionTriggers": [
+        {
+          "id": "createAction",
+          "runFunction": "createActionTrigger",
+          "labelText": "Create action",
+          "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png"
+        }
+      ],
+      "linkPreviewTriggers": [
+        {
+          "labelText": "GActionSheet Action",
+          "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png",
+          "patterns": [
+            {
+              "hostPattern": "northlakeuu.org",
+              "pathPrefix": "NUTS/action"
+            }
+          ],
+          "runFunction": "onLinkPreview"
+        }
+      ]
     }
   }
 }

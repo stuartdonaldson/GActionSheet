@@ -1,0 +1,502 @@
+"""
+session.py — ScenarioSession thin driver (GTaskSheet-5vwu.7).
+
+Spec: docs/atdd/atdd-lifecycle.md §16.9, §16.11
+Design: docs/atdd/scenario-harness-design.md §3, §4
+
+Public API (§16.9 catalog):
+  Lifecycle:   new_doc, close
+  Acts:        append_paragraph, insert_tracker, sync, edit_sheet, set_status, delete
+  Queries:     doc_items, sheet_rows, find_sheet_actions, verify_consistency
+  Expectations: verify, verify_all_expectations, expect_absent, checkpoint
+
+Ownership: session owns lifecycle, HTTP acts, surface captures, and ai-state accumulation.
+It does NOT own assertion logic — evaluation lives in engine.py + assertions.py.
+"""
+from __future__ import annotations
+
+import copy
+import json
+import os
+import pathlib
+import urllib.error
+import urllib.request
+
+from scn.ai import ai
+from scn.engine import (
+    AUTO,
+    CheckpointEngine,
+    CheckpointKind,
+    Expectation,
+    Severity,
+    Surface,
+)
+from scn.surfaces import DocReader, SheetReader, TrackerReader
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers (pure functions — no session state)
+# ---------------------------------------------------------------------------
+
+def _snapshot(target: ai) -> dict:
+    """Deep-copy the ai's primitive fields at enqueue time (§4.2 snapshot rule)."""
+    return copy.copy({k: v for k, v in vars(target).items() if v is not None})
+
+
+def _current_test_tag() -> str:
+    """Derive a triage tag from pytest's running test id (§3.6 tag source)."""
+    raw = os.environ.get("PYTEST_CURRENT_TEST", "unknown")
+    return raw.split("::")[-1]
+
+
+class FixtureTokenError(RuntimeError):
+    """GAS WebApp rejected the test token (missing, mismatched, or expired)."""
+
+
+class FixtureError(RuntimeError):
+    """GAS fixture returned an application-level error."""
+
+
+_AUTH_COOKIE_DOMAINS = {"script.google.com", ".google.com", "accounts.google.com"}
+
+_AUTH_FILE = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+
+
+def _load_auth_cookie_header() -> str | None:
+    """Load Playwright auth cookies from .auth/user.json and return a Cookie header string.
+
+    Only cookies whose domain matches Google's auth domains are included.
+    Returns None if the auth file is absent (falls through to unauthenticated request).
+    """
+    if not _AUTH_FILE.exists():
+        return None
+    try:
+        state = json.loads(_AUTH_FILE.read_text())
+    except Exception:
+        return None
+    parts = []
+    for c in state.get("cookies", []):
+        domain = c.get("domain", "")
+        if any(domain == d or domain.endswith(d) for d in _AUTH_COOKIE_DOMAINS):
+            parts.append(f"{c['name']}={c['value']}")
+    return "; ".join(parts) if parts else None
+
+
+def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
+    """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors."""
+    if not url:
+        raise RuntimeError(
+            "webappTestUrl not set in local.settings.json"
+        )
+
+    data = json.dumps(payload).encode("utf-8")
+    headers: dict = {"Content-Type": "application/json"}
+    # /dev URLs require Google auth; inject saved Playwright cookies when present.
+    if url.endswith("/dev"):
+        cookie = _load_auth_cookie_header()
+        if cookie:
+            headers["Cookie"] = cookie
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw!r}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"Network error (action={payload.get('action')!r}): {exc.reason}"
+        ) from exc
+
+    if raw in ("test-token-unauthorized", "test-token-expired"):
+        raise FixtureTokenError(
+            f"GAS rejected test token for action={payload.get('action')!r}: {raw}. "
+            "Re-register with: python scripts/refresh_test_token.py (or npm run deploy:test)."
+        )
+
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Non-JSON response (action={payload.get('action')!r}): {raw!r}"
+        ) from exc
+
+    if "error" in result:
+        raise FixtureError(
+            f"GAS returned error for action={payload.get('action')!r}: {result['error']}"
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# ScenarioSession
+# ---------------------------------------------------------------------------
+
+class ScenarioSession:
+    """Thin driver for §16.10 scenario journeys.
+
+    Created via new_doc(); torn down via close().
+    The author writes acts + expectations + checkpoints against `scn` (an instance).
+    """
+
+    def __init__(
+        self,
+        *,
+        doc_id: str,
+        sheet_id: str,
+        settings: dict,
+    ) -> None:
+        self.doc_id = doc_id
+        self.sheet_id = sheet_id
+        self.settings = settings
+        self.tracker_present: bool = False
+        self.engine = CheckpointEngine()
+        self._seq: int = 0
+        # Attach after creation: scn.ui = UiDriver(page, doc_id=scn.doc_id)
+        self.ui: UiDriver | None = None
+
+    # ------------------------------------------------------------------
+    # Private HTTP helpers
+    # ------------------------------------------------------------------
+
+    def _post(self, payload: dict, *, timeout: int = 360) -> dict:
+        """POST JSON payload to webappTestUrl; delegates to module-level _http_post."""
+        url = self.settings.get("webappTestUrl") or ""
+        return _http_post(url, payload, timeout)
+
+    def _post_route(self, action: str, extra: dict | None = None) -> dict:
+        """POST a named webapp route with the test token."""
+        payload = {"action": action, "testToken": self.settings.get("testToken") or ""}
+        if extra:
+            payload.update(extra)
+        return self._post(payload)
+
+    def _post_fixture(self, fixture_name: str, extra: dict | None = None) -> dict:
+        """POST run_fixture with fixture_name and the current doc ID."""
+        payload = {
+            "action": "run_fixture",
+            "testToken": self.settings.get("testToken") or "",
+            "fixture": fixture_name,
+            "testDocId": self.doc_id,
+        }
+        if extra:
+            payload.update(extra)
+        return self._post(payload)
+
+    def _gid(self, target: ai) -> str:
+        """Construct the globalId from doc_id + target.action_id (§16.11 #3)."""
+        if not target.action_id:
+            raise ValueError(
+                f"Cannot address target by globalId: ai.action_id is not set. "
+                "Pin action_id on the ai after a sync/read before calling write acts."
+            )
+        return f"{self.doc_id}/{target.action_id}"
+
+    # ------------------------------------------------------------------
+    # Lifecycle (§16.9 / §3.3)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def new_doc(cls, settings: dict) -> "ScenarioSession":
+        """Create a guaranteed-clean empty journey doc (§16.11 #1).
+
+        Calls begin_journey_session (AtddContracts.js); synchronous response carries docId.
+        """
+        url = settings.get("webappTestUrl") or ""
+        token = settings.get("testToken") or ""
+        result = _http_post(url, {"action": "begin_journey_session", "testToken": token})
+
+        doc_id = result.get("docId")
+        if not doc_id:
+            raise RuntimeError(f"begin_journey_session response missing docId: {result}")
+
+        return cls(
+            doc_id=doc_id,
+            sheet_id=settings["testSheetId"],
+            settings=settings,
+        )
+
+    def close(self) -> None:
+        """Trash the journey doc and assert the expectation queue is empty (§4.6).
+
+        Calls end_journey_session (AtddContracts.js); then engine.close() enforces
+        the drain invariant — a non-empty queue is a DrainInvariantError (test failure).
+        """
+        self._post_route("end_journey_session", {"docId": self.doc_id})
+        self.engine.close()
+
+    # ------------------------------------------------------------------
+    # Acts — HTTP mutations (§16.9 / §3.4)
+    # ------------------------------------------------------------------
+
+    def append_paragraph(self, text: str) -> None:
+        """Insert a paragraph into the journey doc (no action implied until sync).
+
+        Routes through the append_doc_paragraph testToken-gated route (WebApp.js).
+        Text is appended as a plain paragraph; the AI-N: token causes sync to detect it.
+        """
+        self._post_route("append_doc_paragraph", {"testDocId": self.doc_id, "text": text})
+
+    def insert_tracker(self) -> None:
+        """Insert/refresh the tracker table; widens surface set of subsequent verify_all_expectations.
+
+        # TODO(.8 CONTRACT GAP): fixture name 'insert_tracker_table' is a placeholder.
+        # Confirm with bead .8 before .11/.13 run. See epic Coordination Log.
+        """
+        self._post_fixture("insert_tracker_table")
+        self.tracker_present = True
+
+    def sync(self) -> None:
+        """Synchronise the journey doc via the sync_document fixture.
+
+        Routes through run_fixture('sync_document') — the testToken-gated path that
+        calls GAS syncDocument() internally, which in turn POSTs sync_action_rows with
+        WEBAPP_SECRET and drains ACTION_SHEET_QUEUE before responding (§16.11 #4).
+        A following sync() is how the scenario forces an async act to convergence.
+        """
+        resp = self._post_fixture("sync_document")
+        data = resp.get("data") or {}
+        if not data.get("synced"):
+            raise RuntimeError(
+                f"sync_document fixture returned unexpected response: {resp}"
+            )
+
+    def edit_sheet(self, target: ai, **fields) -> None:
+        """Edit one or more sheet fields for target (addressed by globalId, §16.11 #3).
+
+        Replicates onActionSheetEdit's Dirty + Date-Modified stamp on the API path (§16.11 #2).
+        """
+        self._post_route("edit_action_row", {"global_id": self._gid(target), "fields": fields})
+
+    def set_status(self, target: ai, status: str) -> None:
+        """Set status via the sidebar path (async; converges on next sync(), §16.11 #4)."""
+        self._post_route("patch_action_status", {"global_id": self._gid(target), "status": status})
+
+    def delete(self, target: ai) -> None:
+        """Delete the target row (addressed by globalId, §16.11 #3); Sync Status → 'Deleted'."""
+        self._post_route("delete_action_row", {"global_id": self._gid(target)})
+
+    # ------------------------------------------------------------------
+    # Queries — read-only, no mutation (§16.9 / §3.5)
+    # ------------------------------------------------------------------
+
+    def doc_items(self) -> list[ai]:
+        """Parse floating actions from the live journey doc (.docx download, DOC surface)."""
+        from tests.helpers.download import download_docx
+        docx = download_docx(self.doc_id)
+        return DocReader().read(docx, self.doc_id)
+
+    def sheet_rows(self) -> list[ai]:
+        """Download the ActionSheet (.xlsx), parse rows scoped to this doc (SHEET surface)."""
+        from tests.helpers.download import download_xlsx
+        xlsx = download_xlsx(self.sheet_id)
+        return SheetReader().read(xlsx, self.doc_id)
+
+    def find_sheet_actions(self) -> list[ai]:
+        """Fetch current-doc sheet rows via the find_sheet_actions webapp route."""
+        resp = self._post_route("find_sheet_actions", {"docId": self.doc_id})
+        rows = resp.get("rows") or []
+        return [_row_dict_to_ai(r) for r in rows]
+
+    def verify_consistency(self, scope: Surface = Surface.DOC) -> dict:
+        """Run the §16.7 consistency checklist (docId-scoped); also called by INTEGRITY drain."""
+        return self._post_route("verify_action_rows", {"docId": self.doc_id})
+
+    # ------------------------------------------------------------------
+    # Expectation delegation — thin enqueuers (§16.9 / §3.6)
+    # ------------------------------------------------------------------
+
+    def _enqueue(self, exp: Expectation) -> None:
+        self.engine.enqueue(exp)
+        self._seq += 1
+
+    def verify_all_expectations(
+        self,
+        target: ai,
+        *,
+        at=AUTO,
+        severity: Severity = Severity.FAIL,
+        tag: str = "",
+    ) -> None:
+        """Enqueue a present-and-consistent expectation across DOC + SHEET (+ TRACKER if present).
+
+        Snapshot the ai NOW (§4.2) — pin action_id/status before calling this.
+        needs_consistency=True: the CONSISTENCY obligation runs at the next INTEGRITY.
+        """
+        surfaces = frozenset(
+            {Surface.DOC, Surface.SHEET}
+            | ({Surface.TRACKER} if self.tracker_present else set())
+        )
+        exp = Expectation(
+            seq=self._seq,
+            expected=_snapshot(target),
+            surfaces=surfaces,
+            remaining=set(surfaces),
+            target=at,
+            kind="PRESENT_CONSISTENT",
+            within=None,
+            severity=severity,
+            needs_consistency=True,
+            tag=tag or _current_test_tag(),
+        )
+        self._enqueue(exp)
+
+    def verify(
+        self,
+        target: ai,
+        *,
+        on: Surface,
+        at=AUTO,
+        within: str | None = None,
+        severity: Severity = Severity.FAIL,
+        tag: str = "",
+        **field_overrides,
+    ) -> None:
+        """Enqueue a single-surface present-and-consistent expectation.
+
+        field_overrides (e.g. status="Open") override the snapshot for this surface only (§16.10 Act 4).
+        """
+        snap = _snapshot(target)
+        snap.update(field_overrides)
+        exp = Expectation(
+            seq=self._seq,
+            expected=snap,
+            surfaces=frozenset({on}),
+            remaining={on},
+            target=at,
+            kind="PRESENT_CONSISTENT",
+            within=within,
+            severity=severity,
+            needs_consistency=False,
+            tag=tag or _current_test_tag(),
+        )
+        self._enqueue(exp)
+
+    def expect_absent(
+        self,
+        target: ai,
+        *,
+        on: Surface,
+        at=AUTO,
+        tag: str = "",
+    ) -> None:
+        """Enqueue an absence expectation (terminal; sheet Sync Status = 'Deleted')."""
+        exp = Expectation(
+            seq=self._seq,
+            expected=_snapshot(target),
+            surfaces=frozenset({on}),
+            remaining={on},
+            target=at,
+            kind="ABSENT",
+            within=None,
+            severity=Severity.FAIL,
+            needs_consistency=False,
+            tag=tag or _current_test_tag(),
+        )
+        self._enqueue(exp)
+
+    # ------------------------------------------------------------------
+    # UI expectations — convenience wrappers that delegate to scn.ui (§16.8)
+    # ------------------------------------------------------------------
+
+    def expect_visible(self, card, *, timeout: str = "5s") -> None:
+        """Assert the preview card is visible; delegates to scn.ui (§16.8).
+
+        Convenience wrapper so scenarios write `scn.expect_visible(card)` per
+        the §16.8 usage pattern.
+        """
+        if self.ui is None:
+            raise RuntimeError(
+                "scn.expect_visible requires scn.ui — "
+                "set scn.ui = UiDriver(page, doc_id=scn.doc_id)"
+            )
+        self.ui.expect_visible(card, timeout=timeout)
+
+    def expect_alt(
+        self,
+        locator,
+        text: str,
+        *,
+        severity: Severity = Severity.FAIL,
+    ) -> None:
+        """Assert aria-label / alt / title of element equals text; delegates to scn.ui."""
+        if self.ui is None:
+            raise RuntimeError(
+                "scn.expect_alt requires scn.ui — "
+                "set scn.ui = UiDriver(page, doc_id=scn.doc_id)"
+            )
+        self.ui.expect_alt(locator, text, severity=severity)
+
+    def checkpoint(
+        self,
+        kind: CheckpointKind,
+        *,
+        on: frozenset | None = None,
+        label: str | None = None,
+    ) -> list[str]:
+        """Drain queued expectations at this checkpoint; return any warnings.
+
+        Builds a lazy-download read closure: each surface is downloaded at most once
+        per checkpoint call. DOC and TRACKER share the same .docx download.
+        """
+        from tests.helpers.download import download_docx, download_xlsx
+
+        _bytes_cache: dict = {}
+
+        def read(surface: Surface) -> list[ai]:
+            if surface in (Surface.DOC, Surface.TRACKER):
+                if "docx" not in _bytes_cache:
+                    _bytes_cache["docx"] = download_docx(self.doc_id)
+                docx = _bytes_cache["docx"]
+                if surface == Surface.DOC:
+                    return DocReader().read(docx, self.doc_id)
+                return TrackerReader().read(docx, self.doc_id)
+            if surface == Surface.SHEET:
+                if "xlsx" not in _bytes_cache:
+                    _bytes_cache["xlsx"] = download_xlsx(self.sheet_id)
+                return SheetReader().read(_bytes_cache["xlsx"], self.doc_id)
+            return []
+
+        def read_consistency() -> dict:
+            return self.verify_consistency()
+
+        return self.engine.drain(
+            kind,
+            label=label,
+            on=on,
+            read=read,
+            read_consistency=read_consistency,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Module-level row conversion helper
+# ---------------------------------------------------------------------------
+
+def _row_dict_to_ai(row: dict) -> ai:
+    """Convert a find_sheet_actions response row (JSON dict) to an ai.
+
+    ContractSchema sheetAction field names → ai field names.
+    Dynamic attributes (global_id, assignee_name, sync_status) attached post-init.
+    """
+    item = ai(
+        action=row.get("action_text") or "",
+        assignee=row.get("assignee_email") or None,
+        action_id=row.get("action_id") or None,
+        status=row.get("status") or None,
+    )
+    item.global_id = row.get("global_id") or ""
+    item.assignee_name = row.get("assignee_name") or ""
+    item.sync_status = row.get("sync_status") or ""
+    item.doc_id = row.get("doc_id") or ""
+    item.doc_name = row.get("doc_name") or ""
+    return item

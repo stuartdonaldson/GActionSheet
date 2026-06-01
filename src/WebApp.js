@@ -12,8 +12,30 @@ function doGet(e) {
   var url = ScriptApp.getService().getUrl();
   // Normalize org-specific URL to the canonical form stored in script properties
   url = url.replace(/https:\/\/script\.google\.com\/a\/[^\/]+\/macros\//, 'https://script.google.com/macros/');
-  PropertiesService.getScriptProperties().setProperty('WEBAPP_URL', url);
-  return ContentService.createTextOutput('WEBAPP_URL registered: ' + url);
+
+  var props      = PropertiesService.getScriptProperties();
+  var storedUrl  = props.getProperty('WEBAPP_URL') || '';
+  var urlStatus;
+
+  if (!storedUrl) {
+    props.setProperty('WEBAPP_URL', url);
+    urlStatus = 'registered (was unset)';
+  } else if (storedUrl !== url) {
+    props.setProperty('WEBAPP_URL', url);
+    urlStatus = 'updated (was: ' + storedUrl + ')';
+  } else {
+    urlStatus = 'unchanged';
+  }
+
+  GasLogger.log('webapp.doGet', { url: url, urlStatus: urlStatus, version: BUILD_INFO.version });
+  GasLogger.flush();
+
+  return ContentService.createTextOutput(
+    'GActionSheet ' + BUILD_INFO.version + '\n' +
+    'Build:   ' + BUILD_INFO.buildDate + '\n' +
+    'WebApp:  ' + url + '\n' +
+    'URL:     ' + urlStatus
+  );
 }
 
 function doPost(e) {
@@ -24,11 +46,37 @@ function doPost(e) {
     return _jsonResponse({ error: 'bad JSON' }, 200);
   }
 
-  // Test fixture route — authenticated by per-deployment TEST_TOKEN, not WEBAPP_SECRET.
-  // Must be checked before the WEBAPP_SECRET gate so the deployment script can register
-  // the token using WEBAPP_SECRET without the token already being required.
+  // Test-token-gated routes — authenticated by per-deployment TEST_TOKEN, not WEBAPP_SECRET.
+  // Checked before the WEBAPP_SECRET gate. Includes run_fixture (fixture dispatcher) and
+  // ATDD test-support routes from ContractSchema.js webApp.testRouteNames (bead .9) and
+  // AtddContracts.js sessionRouteNames (bead .8).
   if (payload.action === 'run_fixture') {
     return _handleRunFixture(payload);
+  }
+  if (payload.action === 'edit_action_row') {
+    return _handleEditActionRow(payload);
+  }
+  if (payload.action === 'find_sheet_actions') {
+    return _handleFindSheetActions(payload);
+  }
+  if (payload.action === 'begin_journey_session' ||
+      payload.action === 'end_journey_session') {
+    return _handleJourneySession(payload);
+  }
+  if (payload.action === 'append_doc_paragraph') {
+    return _handleAppendDocParagraph(payload);
+  }
+  if (payload.action === 'verify_action_rows') {
+    return _handleVerifyActionRows(payload);
+  }
+  // patch_action_status and delete_action_row are production routes (WEBAPP_SECRET-gated
+  // when called by the add-on). When called by the ATDD harness they arrive with a
+  // testToken and snake_case field names per ContractSchema.js messages (§16.11 #3).
+  if (payload.testToken && payload.action === 'patch_action_status') {
+    return _handlePatchActionStatusAtdd(payload);
+  }
+  if (payload.testToken && payload.action === 'delete_action_row') {
+    return _handleDeleteActionRowAtdd(payload);
   }
 
   var expected = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
@@ -36,38 +84,36 @@ function doPost(e) {
     return ContentService.createTextOutput('unauthorized').setMimeType(ContentService.MimeType.TEXT);
   }
 
+  if (payload.clientVersion && payload.clientVersion !== BUILD_INFO.version) {
+    GasLogger.log('webapp.version.mismatch', { client: payload.clientVersion, server: BUILD_INFO.version });
+  }
+
   if (payload.action === 'set_test_token') {
     return _handleSetTestToken(payload);
   }
 
+  var result;
   if (payload.action === 'upsert_action_rows') {
-    return _handleUpsertActionRows(payload);
+    result = _handleUpsertActionRows(payload);
+  } else if (payload.action === 'sync_action_rows') {
+    result = _handleSyncActionRows(payload);
+  } else if (payload.action === 'verify_action_rows') {
+    result = _handleVerifyActionRows(payload);
+  } else if (payload.action === 'mark_doc_not_found') {
+    result = _handleMarkDocNotFound(payload);
+  } else if (payload.action === 'delete_action_row') {
+    result = _handleDeleteActionRow(payload);
+  } else if (payload.action === 'patch_action_status') {
+    result = _handlePatchActionStatus(payload);
+  } else {
+    // Legacy POC — retained for diagnostics
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
+    result = ContentService.createTextOutput('ok');
   }
 
-  if (payload.action === 'sync_action_rows') {
-    return _handleSyncActionRows(payload);
-  }
-
-  if (payload.action === 'verify_action_rows') {
-    return _handleVerifyActionRows(payload);
-  }
-
-  if (payload.action === 'mark_doc_not_found') {
-    return _handleMarkDocNotFound(payload);
-  }
-
-  if (payload.action === 'delete_action_row') {
-    return _handleDeleteActionRow(payload);
-  }
-
-  if (payload.action === 'patch_action_status') {
-    return _handlePatchActionStatus(payload);
-  }
-
-  // Legacy POC — retained for diagnostics
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
-  return ContentService.createTextOutput('ok');
+  GasLogger.flush();
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,16 +150,17 @@ function _handleSetTestToken(payload) {
 // ---------------------------------------------------------------------------
 
 /**
- * Inserts new action rows into the "Actions" sheet.
- * Rows whose namedRangeId already exists are silently skipped (idempotent).
+ * Inserts or updates action rows in the "Actions" sheet.
+ * Existing rows (matched by globalId) have assigneeEmail, assigneeName, actionText,
+ * status, and dateModified updated in place when values differ. Absent rows are appended.
  *
  * Payload shape:
  *   { secret, action: 'upsert_action_rows', docUrl, docTitle, rows: [
- *     { namedRangeId, assigneeEmail, assigneeName, actionText, status }
+ *     { globalId, assigneeEmail, assigneeName, actionText, status }
  *   ] }
  *
  * Response shape:
- *   { upserted: <count> }
+ *   { inserted: <count>, updated: <count> }
  */
 function _handleUpsertActionRows(payload) {
   var ss           = SpreadsheetApp.getActiveSpreadsheet();
@@ -126,36 +173,60 @@ function _handleUpsertActionRows(payload) {
   var docTitle = payload.docTitle || 'Untitled';
   var rows     = payload.rows     || [];
 
-  var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
-  var maxId       = _findMaxId(existingMap);
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
 
-  var upserted = 0;
+  var inserted = 0;
+  var updated  = 0;
   var now      = new Date();
 
-  WriteGuard.wrap(function () {
+  WriteGuard.wrapPersistent(function () {
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
-      if (!row.namedRangeId || existingMap[row.namedRangeId]) continue;
+      if (!row.globalId) continue;
 
-      maxId++;
-      var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
-      actionsSheet.appendRow([
-        row.namedRangeId,
-        maxId,
-        row.assigneeEmail || '',
-        row.assigneeName  || '',
-        row.actionText    || '',
-        row.status        || 'Open',
-        docFormula,
-        now,
-        now,
-        ''  // Sync Status — blank on insert
-      ]);
-      upserted++;
+      var existing = existingMap[row.globalId];
+      if (existing) {
+        var r         = existing.rowIndex;
+        var newId     = _extractActionId(row.globalId);
+        var newEmail  = row.assigneeEmail || existing.assigneeEmail;
+        var newName   = row.assigneeName  || existing.assigneeName;
+        var newText   = row.actionText    || existing.action;
+        var newStatus = row.status        || existing.status;
+        var changed = newId    !== existing.id           ||
+                      newEmail !== existing.assigneeEmail ||
+                      newName  !== existing.assigneeName  ||
+                      newText  !== existing.action        ||
+                      newStatus !== existing.status;
+        if (changed) {
+          actionsSheet.getRange(r, 2).setValue(newId);
+          actionsSheet.getRange(r, 3).setValue(newEmail);
+          actionsSheet.getRange(r, 4).setValue(newName);
+          actionsSheet.getRange(r, 5).setValue(newText);
+          actionsSheet.getRange(r, 6).setValue(newStatus);
+          actionsSheet.getRange(r, 9).setValue(now);
+          updated++;
+        }
+      } else {
+        var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
+        actionsSheet.appendRow([
+          row.globalId,
+          _extractActionId(row.globalId),
+          row.assigneeEmail || '',
+          row.assigneeName  || '',
+          row.actionText    || '',
+          row.status        || 'Open',
+          docFormula,
+          now,
+          now,
+          ''  // Sync Status — blank on insert
+        ]);
+        inserted++;
+      }
     }
   });
 
-  return _jsonResponse({ upserted: upserted });
+  GasLogger.log('upsert.complete', { inserted: inserted, updated: updated, rows: rows.map(function(r) { return { globalId: r.globalId, status: r.status }; }) });
+  return _jsonResponse({ inserted: inserted, updated: updated });
 }
 
 // ---------------------------------------------------------------------------
@@ -163,9 +234,9 @@ function _handleUpsertActionRows(payload) {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns { namedRangeId: { id, ... } } for every non-blank row in actionsSheet.
+ * Returns { globalId: { id, ... } } for every non-blank row in actionsSheet.
  */
-function _loadExistingRowsByNamedRangeId(actionsSheet) {
+function _loadExistingRowsByGlobalId(actionsSheet) {
   var lastRow = actionsSheet.getLastRow();
   if (lastRow < 2) return {};
 
@@ -173,13 +244,13 @@ function _loadExistingRowsByNamedRangeId(actionsSheet) {
   var result = {};
 
   for (var i = 0; i < data.length; i++) {
-    var namedRangeId = data[i][0];
-    if (!namedRangeId) continue;
-    result[namedRangeId] = {
+    var globalId = data[i][0];
+    if (!globalId) continue;
+    result[globalId] = {
       rowIndex:      i + 2,
       id:            data[i][1],
       assigneeEmail: data[i][2],
-      assigneeName:  data[i][3],
+      assigneeName:  data[i][3] || '',
       action:        data[i][4],
       status:        data[i][5],
       dateModified:  data[i][8] instanceof Date ? data[i][8] : null,
@@ -190,13 +261,20 @@ function _loadExistingRowsByNamedRangeId(actionsSheet) {
   return result;
 }
 
-function _findMaxId(existingMap) {
-  var max = 0;
-  for (var k in existingMap) {
-    var id = existingMap[k].id;
-    if (typeof id === 'number' && id > max) max = id;
-  }
-  return max;
+/**
+ * Parses a globalId into its components.
+ * globalId format: {docFileId}/AI-{N}
+ * Returns { docId, N, actionId } where actionId = 'AI-{N}'.
+ * If the format is unexpected, N is NaN and actionId/docId are empty.
+ */
+function parseGlobalId(globalId) {
+  var parts = (globalId || '').split('/AI-');
+  if (parts.length < 2) return { docId: '', N: NaN, actionId: globalId || '' };
+  return { docId: parts[0], N: parseInt(parts[1], 10), actionId: 'AI-' + parts[1] };
+}
+
+function _extractActionId(globalId) {
+  return parseGlobalId(globalId).actionId;
 }
 
 function _rowIdentityKey(assigneeEmail, action, status) {
@@ -213,10 +291,10 @@ function _rowIdentityKey(assigneeEmail, action, status) {
  *
  * Payload shape:
  *   { secret, action: 'sync_action_rows', docUrl, docTitle,
- *     docState: [{ namedRangeId, assigneeEmail, assigneeName, actionText, status }] }
+ *     docState: [{ globalId, assigneeEmail, assigneeName, actionText, status }] }
  *
  * Response shape:
- *   { upserted, updated, sheetWins: [{ namedRangeId, action, status, assigneeEmail }] }
+ *   { upserted, updated, sheetWins: [{ globalId, action, status, assigneeEmail }] }
  */
 function _handleSyncActionRows(payload) {
   var ss           = SpreadsheetApp.getActiveSpreadsheet();
@@ -225,30 +303,57 @@ function _handleSyncActionRows(payload) {
     return _jsonResponse({ error: 'Actions sheet not found' });
   }
 
+  // §16.11 #4: drain ACTION_SHEET_QUEUE before reconciliation so all pending
+  // chip-click upserts are applied before the sync response is returned.
+  var queueDrained = 0;
+  (function () {
+    var props = PropertiesService.getScriptProperties();
+    var lock  = LockService.getScriptLock();
+    var snapshot;
+    lock.waitLock(5000);
+    try {
+      snapshot = JSON.parse(props.getProperty('ACTION_SHEET_QUEUE') || '[]');
+      props.setProperty('ACTION_SHEET_QUEUE', '[]');
+    } finally {
+      lock.releaseLock();
+    }
+    for (var qi = 0; qi < snapshot.length; qi++) {
+      var q = snapshot[qi];
+      _handleUpsertActionRows({
+        action:   'upsert_action_rows',
+        docUrl:   q.docUrl,
+        docTitle: q.docTitle,
+        rows: [{ globalId: q.globalId, actionText: q.actionText,
+                 assigneeEmail: q.assigneeEmail, assigneeName: q.assigneeName,
+                 status: q.status }]
+      });
+    }
+    queueDrained = snapshot.length;
+  })();
+
   var docUrl              = payload.docUrl   || '';
   var docTitle            = payload.docTitle || 'Untitled';
   var docId               = payload.docId    || '';
   var docState            = payload.docState || [];
-  var allDocNamedRangeIds = payload.allDocNamedRangeIds || [];
+  var allDocGlobalIds = payload.allDocGlobalIds || [];
 
   // Build a set for O(1) membership checks.
-  var activeNrIdSet = {};
-  for (var ai = 0; ai < allDocNamedRangeIds.length; ai++) {
-    activeNrIdSet[allDocNamedRangeIds[ai]] = true;
+  var activeGlobalIdSet = {};
+  for (var ai = 0; ai < allDocGlobalIds.length; ai++) {
+    activeGlobalIdSet[allDocGlobalIds[ai]] = true;
   }
 
-  var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
-  var maxId       = _findMaxId(existingMap);
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
   var now         = new Date();
   var upserted    = 0;
   var updated     = 0;
   var sheetWins   = [];
-  var docStateByNamedRangeId = {};
-  var docStateIdentitySet    = {};
+  var docStateByGlobalId  = {};
+  var docStateIdentitySet = {};
 
   for (var dsi = 0; dsi < docState.length; dsi++) {
     var docRow = docState[dsi];
-    docStateByNamedRangeId[docRow.namedRangeId] = true;
+    docStateByGlobalId[docRow.globalId] = true;
     docStateIdentitySet[_rowIdentityKey(docRow.assigneeEmail, docRow.actionText, docRow.status)] = true;
   }
 
@@ -259,17 +364,16 @@ function _handleSyncActionRows(payload) {
     : [];
   var duplicateRowIndexes = [];
 
-  WriteGuard.wrap(function () {
+  WriteGuard.wrapPersistent(function () {
     for (var i = 0; i < docState.length; i++) {
       var row      = docState[i];
-      var existing = existingMap[row.namedRangeId];
+      var existing = existingMap[row.globalId];
 
       if (!existing) {
-        maxId++;
         var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
         actionsSheet.appendRow([
-          row.namedRangeId,
-          maxId,
+          row.globalId,
+          _extractActionId(row.globalId),
           row.assigneeEmail || '',
           row.assigneeName  || '',
           row.actionText    || '',
@@ -284,10 +388,11 @@ function _handleSyncActionRows(payload) {
         // Sheet was edited (onActionSheetEdit set Sync Status = 'Dirty') — sheet wins.
         // SyncManager will apply the sheet values back to the doc floating action.
         sheetWins.push({
-          namedRangeId: row.namedRangeId,
+          globalId:      row.globalId,
           assigneeEmail: existing.assigneeEmail,
-          action:       existing.action,
-          status:       existing.status
+          assigneeName:  existing.assigneeName,
+          action:        existing.action,
+          status:        existing.status
         });
         // Row synced successfully — clear any prior Sync Status.
         actionsSheet.getRange(existing.rowIndex, 10).setValue('');
@@ -295,6 +400,10 @@ function _handleSyncActionRows(payload) {
         // Doc is authoritative — update sheet row only when content values differ.
         var rowIdx     = existing.rowIndex;
         var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
+        var correctId = _extractActionId(row.globalId);
+        if (existing.id !== correctId) {
+          actionsSheet.getRange(rowIdx, 2).setValue(correctId);
+        }
         if (existing.assigneeEmail !== row.assigneeEmail ||
             existing.assigneeName !== row.assigneeName ||
             existing.action !== row.actionText ||
@@ -306,33 +415,38 @@ function _handleSyncActionRows(payload) {
           actionsSheet.getRange(rowIdx, 9).setValue(now);
           updated++;
         }
-        actionsSheet.getRange(rowIdx, 7).setFormula(docFormula);
-        // Row synced successfully — clear any prior Sync Status.
-        actionsSheet.getRange(rowIdx, 10).setValue('');
+        var fIdx = rowIdx - 2;
+        var existingFormula = (fIdx >= 0 && fIdx < formulasCol7.length) ? formulasCol7[fIdx][0] : '';
+        if (existingFormula !== docFormula) {
+          actionsSheet.getRange(rowIdx, 7).setFormula(docFormula);
+        }
+        if (existing.syncStatus !== '') {
+          actionsSheet.getRange(rowIdx, 10).setValue('');
+        }
       }
     }
 
-    // Detect orphaned rows: rows for this doc whose named range is gone from the doc.
+    // Detect orphaned rows: rows for this doc whose globalId is gone from the doc.
     if (docId) {
-      for (var nrId in existingMap) {
-        if (docStateByNamedRangeId[nrId]) continue;
-        var entry = existingMap[nrId];
+      for (var gId in existingMap) {
+        if (docStateByGlobalId[gId]) continue;
+        var entry = existingMap[gId];
         var fIdx  = entry.rowIndex - 2; // formulasCol7 is 0-based from row 2
         var formula = (fIdx >= 0 && fIdx < formulasCol7.length) ? formulasCol7[fIdx][0] : '';
         if (formula.indexOf(docId) === -1) continue; // belongs to a different doc
 
         // If the current doc still has the same action state under a different
-        // named range, this row is a stale duplicate left behind by a re-anchor.
+        // globalId, this row is a stale duplicate left behind by a re-anchor.
         var identityKey = _rowIdentityKey(entry.assigneeEmail, entry.action, entry.status);
         if (docStateIdentitySet[identityKey]) {
           duplicateRowIndexes.push(entry.rowIndex);
           continue;
         }
 
-        if (activeNrIdSet[nrId]) continue; // still in the doc
+        if (activeGlobalIdSet[gId]) continue; // still in the doc
 
         actionsSheet.getRange(entry.rowIndex, 10).setValue('Deleted');
-        GasLogger.log('sync.info', { msg: 'Sync Status — Deleted', row: entry.rowIndex, namedRangeId: nrId });
+        GasLogger.log('sync.info', { msg: 'Sync Status — Deleted', row: entry.rowIndex, globalId: gId });
       }
 
       duplicateRowIndexes.sort(function (a, b) { return b - a; });
@@ -342,7 +456,7 @@ function _handleSyncActionRows(payload) {
     }
   });
 
-  return _jsonResponse({ upserted: upserted, updated: updated, sheetWins: sheetWins });
+  return _jsonResponse({ ok: true, upserted: upserted, updated: updated, sheetWins: sheetWins, queueDrained: queueDrained });
 }
 
 /**
@@ -352,7 +466,7 @@ function _handleSyncActionRows(payload) {
  *   { secret, action: 'verify_action_rows', docUrl }
  *
  * Response shape:
- *   { rows: [{ namedRangeId, id, assigneeEmail, assigneeName, action, status }] }
+ *   { rows: [{ globalId, id, assigneeEmail, assigneeName, action, status }] }
  */
 function _handleVerifyActionRows(payload) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -360,9 +474,11 @@ function _handleVerifyActionRows(payload) {
   if (!actionsSheet) {
     return _jsonResponse({ error: 'Actions sheet not found', rows: [] });
   }
-
+  // testToken path sends docId; WEBAPP_SECRET path sends docUrl — normalise to URL form
+  var docUrl = payload.docUrl ||
+    (payload.docId ? 'https://docs.google.com/document/d/' + payload.docId + '/edit' : '');
   return _jsonResponse({
-    rows: _loadRowsForDocUrl(actionsSheet, payload.docUrl || '')
+    rows: _loadRowsForDocUrl(actionsSheet, docUrl)
   });
 }
 
@@ -372,6 +488,7 @@ function _loadRowsForDocUrl(actionsSheet, docUrl) {
     return [];
   }
 
+  var targetDocId = _extractDocIdFromString(docUrl);
   var numRows = lastRow - 1;
   var data = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
   var formulas = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
@@ -379,12 +496,12 @@ function _loadRowsForDocUrl(actionsSheet, docUrl) {
 
   for (var i = 0; i < data.length; i++) {
     var docFormula = formulas[i][0] || '';
-    if (docUrl && docFormula.indexOf(docUrl) === -1) {
+    if (docUrl && _extractDocIdFromString(docFormula) !== targetDocId) {
       continue;
     }
 
     rows.push({
-      namedRangeId: data[i][0] || '',
+      globalId: data[i][0] || '',
       id: data[i][1] || '',
       assigneeEmail: data[i][2] || '',
       assigneeName: data[i][3] || '',
@@ -419,7 +536,7 @@ function _handleMarkDocNotFound(payload) {
   var formulasCol7 = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
   var marked       = 0;
 
-  WriteGuard.wrap(function () {
+  WriteGuard.wrapPersistent(function () {
     for (var i = 0; i < formulasCol7.length; i++) {
       var formula = formulasCol7[i][0] || '';
       if (formula.indexOf(docId) === -1) continue;
@@ -433,12 +550,12 @@ function _handleMarkDocNotFound(payload) {
 }
 
 /**
- * Permanently deletes the ActionSheet row whose NamedRangeId matches
- * payload.namedRangeId.  Called by sidebarDeleteAction after the doc-side
- * paragraph and named range have already been removed.
+ * Permanently deletes the ActionSheet row whose globalId matches
+ * payload.globalId.  Called by sidebarDeleteAction after the doc-side
+ * paragraph has been removed.
  *
  * Payload shape:
- *   { secret, action: 'delete_action_row', namedRangeId }
+ *   { secret, action: 'delete_action_row', globalId }
  *
  * Response shape:
  *   { deleted: 0|1 }
@@ -450,35 +567,35 @@ function _handleDeleteActionRow(payload) {
     return _jsonResponse({ error: 'Actions sheet not found', deleted: 0 });
   }
 
-  var namedRangeId = payload.namedRangeId || '';
-  if (!namedRangeId) {
-    return _jsonResponse({ error: 'namedRangeId required', deleted: 0 });
+  var globalId = payload.globalId || '';
+  if (!globalId) {
+    return _jsonResponse({ error: 'globalId required', deleted: 0 });
   }
 
-  var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
-  var entry       = existingMap[namedRangeId];
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var entry       = existingMap[globalId];
   if (!entry) {
     return _jsonResponse({ deleted: 0 });
   }
 
-  WriteGuard.wrap(function () {
+  WriteGuard.wrapPersistent(function () {
     actionsSheet.deleteRow(entry.rowIndex);
   });
 
-  GasLogger.log('sidebar.delete.row', { namedRangeId: namedRangeId, rowIndex: entry.rowIndex });
+  GasLogger.log('sidebar.delete.row', { globalId: globalId, rowIndex: entry.rowIndex });
   return _jsonResponse({ deleted: 1 });
 }
 
 /**
  * Updates Status and Date Modified for a single ActionSheet row, identified by
- * namedRangeId.  Also clears Sync Status so a stale 'Dirty' flag cannot cause
+ * globalId.  Also clears Sync Status so a stale 'Dirty' flag cannot cause
  * the next bidirectional sync to overwrite the change.
  *
  * Called by sidebarSetStatus instead of the full syncDocument — avoids the
  * sheet-wins revert bug and is ~10× faster (no doc scan, no full sheet scan).
  *
  * Payload shape:
- *   { secret, action: 'patch_action_status', namedRangeId, newStatus }
+ *   { secret, action: 'patch_action_status', globalId, newStatus }
  *
  * Response shape:
  *   { patched: 0|1 }
@@ -490,27 +607,386 @@ function _handlePatchActionStatus(payload) {
     return _jsonResponse({ error: 'Actions sheet not found', patched: 0 });
   }
 
-  var namedRangeId = payload.namedRangeId || '';
-  var newStatus    = payload.newStatus    || '';
-  if (!namedRangeId || !newStatus) {
-    return _jsonResponse({ error: 'namedRangeId and newStatus required', patched: 0 });
+  var globalId  = payload.globalId  || '';
+  var newStatus = payload.newStatus || '';
+  if (!globalId || !newStatus) {
+    return _jsonResponse({ error: 'globalId and newStatus required', patched: 0 });
   }
 
-  var existingMap = _loadExistingRowsByNamedRangeId(actionsSheet);
-  var entry       = existingMap[namedRangeId];
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var entry       = existingMap[globalId];
   if (!entry) {
     return _jsonResponse({ patched: 0 });
   }
 
   var now = new Date();
-  WriteGuard.wrap(function () {
+  WriteGuard.wrapPersistent(function () {
     actionsSheet.getRange(entry.rowIndex, 6).setValue(newStatus); // Status
     actionsSheet.getRange(entry.rowIndex, 9).setValue(now);       // Date Modified
     actionsSheet.getRange(entry.rowIndex, 10).setValue('');       // clear Sync Status
   });
 
-  GasLogger.log('sidebar.status.patched', { namedRangeId: namedRangeId, newStatus: newStatus, row: entry.rowIndex });
+  GasLogger.log('sidebar.status.patched', { globalId: globalId, newStatus: newStatus, row: entry.rowIndex });
   return _jsonResponse({ patched: 1 });
+}
+
+// ---------------------------------------------------------------------------
+// edit_action_row handler  (testRouteNames — testToken-gated, bead .9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Simulates a user editing one or more ActionSheet fields over the API path.
+ * Addressed by globalId (§16.11 #3). Replicates onActionSheetEdit's Dirty +
+ * Date-Modified stamp because doPost writes run as the deployer in a separate
+ * execution and do not fire the installable trigger (§16.11 #2; §Programmatic
+ * Write Suppression). The row's Sync Status = 'Dirty' makes it sheet-wins on
+ * the next sync_action_rows call.
+ *
+ * Payload shape (ContractSchema.js messages.edit_action_row):
+ *   { action: 'edit_action_row', testToken, global_id,
+ *     fields: { assignee_email?, assignee_name?, action_text?, status? } }
+ *
+ * Response shape:
+ *   { ok: true, global_id, row: <SheetAction fields> }
+ */
+function _handleEditActionRow(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found' });
+  }
+
+  var globalId = payload.global_id || '';
+  var fields   = payload.fields    || {};
+  if (!globalId) {
+    return _jsonResponse({ error: 'global_id required' });
+  }
+
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var entry       = existingMap[globalId];
+  if (!entry) {
+    return _jsonResponse({ error: 'row not found', global_id: globalId });
+  }
+
+  var now = new Date();
+  var rowIdx = entry.rowIndex;
+
+  WriteGuard.wrapPersistent(function () {
+    if (fields.assignee_email !== undefined) {
+      actionsSheet.getRange(rowIdx, 3).setValue(fields.assignee_email);
+    }
+    if (fields.assignee_name !== undefined) {
+      actionsSheet.getRange(rowIdx, 4).setValue(fields.assignee_name);
+    }
+    if (fields.action_text !== undefined) {
+      actionsSheet.getRange(rowIdx, 5).setValue(fields.action_text);
+    }
+    if (fields.status !== undefined) {
+      actionsSheet.getRange(rowIdx, 6).setValue(fields.status);
+    }
+    // Replicate onActionSheetEdit: stamp Date Modified + Sync Status = 'Dirty'.
+    actionsSheet.getRange(rowIdx, 9).setValue(now);
+    actionsSheet.getRange(rowIdx, 10).setValue('Dirty');
+  });
+
+  // Re-read the row to return authoritative post-write state.
+  var updated = _loadExistingRowsByGlobalId(actionsSheet)[globalId] || {};
+  GasLogger.log('test.edit_action_row', { global_id: globalId, fields: Object.keys(fields) });
+  GasLogger.flush();
+  return _jsonResponse({
+    ok:        true,
+    global_id: globalId,
+    row: {
+      global_id:      globalId,
+      action_id:      updated.id            || '',
+      assignee_email: updated.assigneeEmail || '',
+      assignee_name:  updated.assigneeName  || '',
+      action_text:    updated.action        || '',
+      status:         updated.status        || '',
+      modified_date:  updated.dateModified  ? updated.dateModified.toISOString() : '',
+      sync_status:    updated.syncStatus    || ''
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// find_sheet_actions handler  (testRouteNames — testToken-gated, bead .9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the current ActionSheet rows scoped to a single document, in the
+ * authoritative SheetAction shape (ContractSchema.js sheetAction.fields).
+ * Read-only — no mutation. doc_id / doc_name are DERIVED from the
+ * document_formula (col 7), not stored columns (Coordination Log .1 §7 #1).
+ *
+ * Payload shape (ContractSchema.js messages.find_sheet_actions):
+ *   { action: 'find_sheet_actions', testToken, docId }
+ *
+ * Response shape:
+ *   { ok: true, docId, rows: [<SheetAction>] }
+ */
+function _handleFindSheetActions(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found', rows: [] });
+  }
+
+  var docId   = payload.docId || '';
+  var lastRow = actionsSheet.getLastRow();
+  if (lastRow < 2) {
+    return _jsonResponse({ ok: true, docId: docId, rows: [] });
+  }
+
+  var numRows  = lastRow - 1;
+  var data     = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
+  var formulas = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
+  var rows     = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var formula = formulas[i][0] || '';
+    if (!formula) continue;
+    var formulaDocId = _extractDocIdFromString(formula);
+    if (docId && formulaDocId !== docId) continue;
+
+    var docName = _extractDocNameFromFormula(formula);
+    var createdRaw  = data[i][7];
+    var modifiedRaw = data[i][8];
+
+    rows.push({
+      global_id:        data[i][0] || '',
+      action_id:        data[i][1] || '',
+      assignee_email:   data[i][2] || '',
+      assignee_name:    data[i][3] || '',
+      action_text:      data[i][4] || '',
+      status:           data[i][5] || '',
+      document_formula: formula,
+      doc_id:           formulaDocId,
+      doc_name:         docName,
+      created_date:     createdRaw  instanceof Date ? createdRaw.toISOString()  : (createdRaw  || ''),
+      modified_date:    modifiedRaw instanceof Date ? modifiedRaw.toISOString() : (modifiedRaw || ''),
+      sync_status:      data[i][9] || ''
+    });
+  }
+
+  GasLogger.log('test.find_sheet_actions', { docId: docId, count: rows.length });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, docId: docId, rows: rows });
+}
+
+// ---------------------------------------------------------------------------
+// ATDD wrappers for production routes (testToken-gated, snake_case fields)
+// ---------------------------------------------------------------------------
+
+/**
+ * ATDD-path patch_action_status: updates Status for a row addressed by global_id.
+ * Field names follow ContractSchema.js messages.patch_action_status (§16.11 #3):
+ * request { action, testToken, global_id, status }; response { ok, global_id }.
+ *
+ * The production add-on calls the same route with WEBAPP_SECRET + camelCase fields
+ * (globalId / newStatus). Both paths share _handlePatchActionStatus logic via
+ * this thin adapter rather than duplicating the sheet-write code.
+ */
+function _handlePatchActionStatusAtdd(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found' });
+  }
+
+  var globalId  = payload.global_id || '';
+  var newStatus = payload.status    || '';
+  if (!globalId || !newStatus) {
+    return _jsonResponse({ error: 'global_id and status required' });
+  }
+
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var entry       = existingMap[globalId];
+  if (!entry) {
+    return _jsonResponse({ error: 'row not found', global_id: globalId });
+  }
+
+  var now = new Date();
+  WriteGuard.wrapPersistent(function () {
+    actionsSheet.getRange(entry.rowIndex, 6).setValue(newStatus);
+    // Stamp Dirty + Date Modified so the status change survives the next sync
+    // via sheet-wins, matching the observable behaviour of a real sidebar tap
+    // (onActionSheetEdit fires on col 6 edits and does the same stamp).
+    actionsSheet.getRange(entry.rowIndex, 9).setValue(now);
+    actionsSheet.getRange(entry.rowIndex, 10).setValue('Dirty');
+  });
+
+  GasLogger.log('test.patch_action_status', { global_id: globalId, status: newStatus });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, global_id: globalId });
+}
+
+/**
+ * ATDD-path delete_action_row: stamps Sync Status='Deleted' on the row addressed
+ * by global_id. Does NOT physically remove the row (contrast with the production
+ * sidebar path which physically deletes after removing the doc paragraph).
+ *
+ * Field names follow ContractSchema.js messages.delete_action_row (§16.11 #3):
+ * request { action, testToken, global_id }; response { ok, global_id }.
+ *
+ * After this call, the next sync() that scans the doc will see the doc paragraph
+ * still present and apply doc-wins (clearing Deleted). The 'Deleted+removed' AC
+ * is verified at the HTTP layer by asserting the stamp immediately after the call
+ * (before the next sync). Removal from doc via the full production flow is covered
+ * by the Playwright/UI path (§15 test_12).
+ */
+function _handleDeleteActionRowAtdd(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found' });
+  }
+
+  var globalId = payload.global_id || '';
+  if (!globalId) {
+    return _jsonResponse({ error: 'global_id required' });
+  }
+
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var entry       = existingMap[globalId];
+  if (!entry) {
+    return _jsonResponse({ error: 'row not found', global_id: globalId });
+  }
+
+  WriteGuard.wrapPersistent(function () {
+    actionsSheet.getRange(entry.rowIndex, 10).setValue('Deleted');
+  });
+
+  GasLogger.log('test.delete_action_row', { global_id: globalId });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, global_id: globalId });
+}
+
+// ---------------------------------------------------------------------------
+// append_doc_paragraph handler  (ATDD doc-seeding route — testToken-gated)
+// ---------------------------------------------------------------------------
+
+/**
+ * Appends a single paragraph to a journey doc over the API path.
+ * Implements the session.py append_paragraph() act (§16.9).
+ * The text is inserted as a plain paragraph (no chip, no list item).
+ *
+ * Payload shape:
+ *   { action: 'append_doc_paragraph', testToken, testDocId, text }
+ * Response shape:
+ *   { ok: true, docId }
+ */
+function _handleAppendDocParagraph(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.testDocId || '';
+  var text  = payload.text      || '';
+  if (!docId) {
+    return _jsonResponse({ error: 'testDocId required for append_doc_paragraph' });
+  }
+  if (!text) {
+    return _jsonResponse({ error: 'text required for append_doc_paragraph' });
+  }
+
+  var doc = DocumentApp.openById(docId);
+  doc.getBody().appendParagraph(text);
+  doc.saveAndClose();
+
+  GasLogger.log('test.append_doc_paragraph', { docId: docId, textLen: text.length });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, docId: docId });
+}
+
+// ---------------------------------------------------------------------------
+// begin/end_journey_session handler  (AtddContracts — testToken-gated, bead .8/.9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates or trashes an ATDD journey doc (§16.11 #1 empty-create).
+ * Addressed by testToken; no WEBAPP_SECRET required.
+ *
+ * begin_journey_session payload:
+ *   { action: 'begin_journey_session', testToken }
+ * Response:
+ *   { ok: true, docId, docName, docUrl }    — session.py reads result.get("docId")
+ *
+ * end_journey_session payload:
+ *   { action: 'end_journey_session', testToken, docId }
+ * Response:
+ *   { ok: true, trashed: docId }
+ */
+function _handleJourneySession(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var props = PropertiesService.getScriptProperties();
+
+  if (payload.action === 'begin_journey_session') {
+    var now       = new Date();
+    var dateStr   = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyyMMdd');
+    var hexSuffix = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4);
+    var docName   = 'GActionSheet-Test-journey-' + dateStr + '-' + hexSuffix;
+
+    var sheetId    = props.getProperty('TEST_SHEET_ID') || '';
+    var folderIter = sheetId ? DriveApp.getFileById(sheetId).getParents() : null;
+    var parent     = (folderIter && folderIter.hasNext())
+                     ? folderIter.next()
+                     : DriveApp.getRootFolder();
+
+    var bjsDoc = DocumentApp.create(docName);
+    DriveApp.getFileById(bjsDoc.getId()).moveTo(parent);
+
+    GasLogger.log('journey.begin', { docId: bjsDoc.getId(), docName: docName });
+    GasLogger.flush();
+    return _jsonResponse({
+      ok:     true,
+      docId:  bjsDoc.getId(),
+      docName: docName,
+      docUrl: bjsDoc.getUrl()
+    });
+  }
+
+  if (payload.action === 'end_journey_session') {
+    var docId = payload.docId || '';
+    if (!docId) {
+      return _jsonResponse({ error: 'docId required for end_journey_session' });
+    }
+    DriveApp.getFileById(docId).setTrashed(true);
+    GasLogger.log('journey.end', { trashed: docId });
+    GasLogger.flush();
+    return _jsonResponse({ ok: true, trashed: docId });
+  }
+
+  return _jsonResponse({ error: 'unknown journey action: ' + (payload.action || '') });
+}
+
+/**
+ * Extracts the display name (second argument) from a HYPERLINK formula.
+ * =HYPERLINK("url","name") → "name"
+ * Returns '' when the formula does not match or has no name.
+ */
+function _extractDocNameFromFormula(formula) {
+  var m = formula.match(/HYPERLINK\s*\(\s*"[^"]*"\s*,\s*"([^"]*)"/i);
+  return m ? m[1] : '';
+}
+
+function _extractDocIdFromString(s) {
+  if (!s) return '';
+  var m = s.match(/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : '';
 }
 
 function _escapeQuotes(s) {
@@ -519,6 +995,7 @@ function _escapeQuotes(s) {
 }
 
 function _jsonResponse(obj) {
+  obj.serverVersion = BUILD_INFO.version;
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);

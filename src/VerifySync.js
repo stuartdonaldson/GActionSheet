@@ -6,7 +6,8 @@
  * and ActionSheet rows for the same document.
  */
 
-var _VERIFY_TRACKER_HEADING = '=== Tracked Actions ===';
+var _VERIFY_TRACKER_HEADING     = 'Action Item Summary';
+var _VERIFY_TRACKER_HEADING_OLD = '=== Tracked Actions ===';
 
 function verifyDocumentSync(docId) {
   if (!docId) {
@@ -76,13 +77,12 @@ function _verifyProgress(result, message) {
 
 function _collectFloatingActionState(doc) {
   var floatingActions = _scanFloatingActions(doc);
-  var anchoredMap = _buildAnchoredIndexMap(doc);
   var rows = [];
 
   for (var i = 0; i < floatingActions.length; i++) {
     var action = floatingActions[i];
     rows.push({
-      namedRangeId: anchoredMap[action.bodyChildIndex] || '',
+      globalId: action.globalId || '',
       assigneeEmail: action.assigneeEmail || '',
       assigneeName: action.assigneeName || '',
       action: action.actionText || '',
@@ -107,7 +107,8 @@ function _readTrackerTableState(doc) {
     if (!headingFound) {
       if ((type === DocumentApp.ElementType.PARAGRAPH ||
            type === DocumentApp.ElementType.LIST_ITEM) &&
-          child.getText().trim() === _VERIFY_TRACKER_HEADING) {
+          (child.getText().trim() === _VERIFY_TRACKER_HEADING ||
+           child.getText().trim() === _VERIFY_TRACKER_HEADING_OLD)) {
         headingFound = true;
       }
       continue;
@@ -179,12 +180,11 @@ function _fetchSheetRowsForVerification(docUrl) {
 }
 
 function _callVerifyWebApp(payload) {
-  var props = PropertiesService.getScriptProperties();
-  var webAppUrl = props.getProperty('WEBAPP_URL');
-  var secret = props.getProperty('WEBAPP_SECRET');
+  var webAppUrl = getWebAppUrl();
+  var secret = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
 
   if (!webAppUrl) {
-    throw new Error('WEBAPP_URL script property not set');
+    throw new Error('WEBAPP_URL not set');
   }
 
   var oauthToken = ScriptApp.getOAuthToken();
@@ -193,7 +193,7 @@ function _callVerifyWebApp(payload) {
     contentType: 'application/json',
     muteHttpExceptions: true,
     headers: { Authorization: 'Bearer ' + oauthToken },
-    payload: JSON.stringify(_mergeVerifyPayload(payload, { secret: secret || '' }))
+    payload: JSON.stringify(_mergeVerifyPayload(payload, { secret: secret || '', clientVersion: BUILD_INFO.version }))
   });
 
   if (resp.getResponseCode() !== 200) {
@@ -201,7 +201,9 @@ function _callVerifyWebApp(payload) {
   }
 
   try {
-    return JSON.parse(resp.getContentText());
+    var parsed = JSON.parse(resp.getContentText());
+    _logVersionMismatch(parsed, 'verify');
+    return parsed;
   } catch (e) {
     throw new Error('Verify request returned non-JSON response');
   }
@@ -227,23 +229,23 @@ function _mergeVerifyPayload(left, right) {
 }
 
 function _compareVerificationState(result, floatingActions, tracker, sheetRows) {
-  var floatingByNamedRangeId = {};
-  var sheetByNamedRangeId = {};
-  var sheetById = {};
-  var trackerById = {};
+  var floatingByGlobalId = {};
+  var sheetByGlobalId    = {};
+  var sheetById          = {};
+  var trackerById        = {};
   var i;
 
   for (i = 0; i < floatingActions.length; i++) {
     var floating = floatingActions[i];
-    if (!floating.namedRangeId) {
+    if (!floating.globalId) {
       _verifyIssue(
         result,
-        'Floating action is missing a named-range anchor: ' + _formatActionLabel(floating.action, floating.status)
+        'Floating action is missing a globalId: ' + _formatActionLabel(floating.action, floating.status)
       );
       continue;
     }
-    if (floatingByNamedRangeId[floating.namedRangeId]) {
-      _verifyIssue(result, 'Duplicate floating action anchor found: ' + floating.namedRangeId);
+    if (floatingByGlobalId[floating.globalId]) {
+      _verifyIssue(result, 'Duplicate floating action globalId found: ' + floating.globalId);
       continue;
     }
     if (!floating.hasExplicitStatus) {
@@ -252,20 +254,20 @@ function _compareVerificationState(result, floatingActions, tracker, sheetRows) 
         'Floating action is missing an explicit status token: ' + _formatActionLabel(floating.action, floating.status)
       );
     }
-    floatingByNamedRangeId[floating.namedRangeId] = floating;
+    floatingByGlobalId[floating.globalId] = floating;
   }
 
   for (i = 0; i < sheetRows.length; i++) {
     var sheetRow = sheetRows[i];
-    if (!sheetRow.namedRangeId) {
-      _verifyIssue(result, 'ActionSheet row ID ' + (sheetRow.id || '?') + ' is missing NamedRangeId');
+    if (!sheetRow.globalId) {
+      _verifyIssue(result, 'ActionSheet row ID ' + (sheetRow.id || '?') + ' is missing globalId');
       continue;
     }
-    if (sheetByNamedRangeId[sheetRow.namedRangeId]) {
-      _verifyIssue(result, 'Duplicate ActionSheet NamedRangeId found: ' + sheetRow.namedRangeId);
+    if (sheetByGlobalId[sheetRow.globalId]) {
+      _verifyIssue(result, 'Duplicate ActionSheet globalId found: ' + sheetRow.globalId);
       continue;
     }
-    sheetByNamedRangeId[sheetRow.namedRangeId] = sheetRow;
+    sheetByGlobalId[sheetRow.globalId] = sheetRow;
     if (sheetRow.id) {
       sheetById[String(sheetRow.id)] = sheetRow;
     }
@@ -286,12 +288,12 @@ function _compareVerificationState(result, floatingActions, tracker, sheetRows) 
     }
   }
 
-  for (var namedRangeId in floatingByNamedRangeId) {
-    if (!Object.prototype.hasOwnProperty.call(floatingByNamedRangeId, namedRangeId)) {
+  for (var gId in floatingByGlobalId) {
+    if (!Object.prototype.hasOwnProperty.call(floatingByGlobalId, gId)) {
       continue;
     }
-    var floatingRow = floatingByNamedRangeId[namedRangeId];
-    var matchingSheetRow = sheetByNamedRangeId[namedRangeId];
+    var floatingRow = floatingByGlobalId[gId];
+    var matchingSheetRow = sheetByGlobalId[gId];
     if (!matchingSheetRow) {
       _verifyIssue(
         result,
@@ -342,12 +344,12 @@ function _compareVerificationState(result, floatingActions, tracker, sheetRows) 
     result.counts.matched++;
   }
 
-  for (var sheetNamedRangeId in sheetByNamedRangeId) {
-    if (!Object.prototype.hasOwnProperty.call(sheetByNamedRangeId, sheetNamedRangeId)) {
+  for (var sheetGlobalId in sheetByGlobalId) {
+    if (!Object.prototype.hasOwnProperty.call(sheetByGlobalId, sheetGlobalId)) {
       continue;
     }
-    if (!floatingByNamedRangeId[sheetNamedRangeId]) {
-      var extraSheetRow = sheetByNamedRangeId[sheetNamedRangeId];
+    if (!floatingByGlobalId[sheetGlobalId]) {
+      var extraSheetRow = sheetByGlobalId[sheetGlobalId];
       _verifyIssue(
         result,
         'ActionSheet row ID ' + extraSheetRow.id + ' is not listed in the document: ' + _formatActionLabel(extraSheetRow.action, extraSheetRow.status)

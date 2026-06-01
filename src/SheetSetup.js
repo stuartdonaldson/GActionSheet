@@ -2,25 +2,11 @@
  * SheetSetup.js
  *
  * Creates or validates the "Actions" and "Archive" sheet tabs with the
- * required 8-column header row, bold/frozen row 1, and a basic filter.
+ * required 10-column header row, bold/frozen row 1, and a basic filter.
  * Also resolves and persists the DOC_FOLDER_ID script property.
  */
 
-// Column positions (1-based): NamedRangeId=1, ID=2, Assignee Email=3,
-// Assignee Name=4, Action=5, Status=6, Document=7, Date Created=8, Date Modified=9,
-// Sync Status=10
-var SHEET_HEADERS = [
-  'NamedRangeId',
-  'ID',
-  'Assignee Email',
-  'Assignee Name',
-  'Action',
-  'Status',
-  'Document',
-  'Date Created',
-  'Date Modified',
-  'Sync Status'
-];
+// Column positions (1-based) are defined in ContractSchema.js.
 
 /**
  * Returns the sheet with the given name, creating it if it does not exist.

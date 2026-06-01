@@ -6,27 +6,35 @@
  */
 
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Action Sync')
-    .addItem('Sync', 'menuSync')
-    .addSeparator()
-    .addSubMenu(
-      SpreadsheetApp.getUi().createMenu('Setup')
-        .addItem('Ensure Sheet Structure', 'menuEnsureSheetStructure')
-        .addItem('Initialize Triggers', 'menuInitializeTriggers')
-        .addItem('Bootstrap Test Properties', 'menuBootstrap')
-    )
-    .addSeparator()
-    .addItem('Test: Begin Session', 'menuBeginTestSession')
-    .addItem('Test: End Session', 'menuEndTestSession')
-    .addItem('Test: Setup Fixture', 'menuSetupFixture')
-    .addItem('Test: Sync Document', 'menuSyncDocument')
-    .addItem('Test: Setup And Sync', 'menuSetupAndSync')
-    .addItem('Test: Verify Consistency', 'menuVerifyConsistency')
-    .addItem('Test: Insert Tracker Table', 'menuInsertTrackerTable')
-    .addItem('Test: Run Archive', 'menuRunArchive')
-    .addItem('Test: Debug Doc Body', 'menuDebugDocBody')
-    .addToUi();
+  // onOpen is a Sheets simple trigger. When this script also runs as a Docs/
+  // Slides/Forms add-on, SpreadsheetApp.getUi() is not available in that
+  // context. getActiveSpreadsheet() returns null rather than throwing, so
+  // checking it is insufficient — wrap the entire body in try/catch instead.
+  try {
+    SpreadsheetApp.getUi()
+      .createMenu('Action Sync')
+      .addItem('Sync', 'menuSync')
+      .addSeparator()
+      .addSubMenu(
+        SpreadsheetApp.getUi().createMenu('Setup')
+          .addItem('Ensure Sheet Structure', 'menuEnsureSheetStructure')
+          .addItem('Initialize Triggers', 'menuInitializeTriggers')
+          .addItem('Bootstrap Test Properties', 'menuBootstrap')
+      )
+      .addSeparator()
+      .addItem('Test: Begin Session', 'menuBeginTestSession')
+      .addItem('Test: End Session', 'menuEndTestSession')
+      .addItem('Test: Setup Fixture', 'menuSetupFixture')
+      .addItem('Test: Sync Document', 'menuSyncDocument')
+      .addItem('Test: Setup And Sync', 'menuSetupAndSync')
+      .addItem('Test: Verify Consistency', 'menuVerifyConsistency')
+      .addItem('Test: Insert Tracker Table', 'menuInsertTrackerTable')
+      .addItem('Test: Run Archive', 'menuRunArchive')
+      .addItem('Test: Debug Doc Body', 'menuDebugDocBody')
+      .addToUi();
+  } catch (e) {
+    // Not a Sheets context (e.g. running as a Docs add-on) — exit silently.
+  }
 }
 
 function menuEnsureSheetStructure() {

@@ -157,6 +157,8 @@ Apps Script editor → Run → initializeTriggers
 
 ## Running Tests
 
+The `scn/` package provides the scenario harness (`ai`, `engine`, `session`, `surfaces`, `ui`, `contract` modules). Architecture: `docs/atdd/scenario-harness-design.md`. Strategy: `docs/atdd/atdd-lifecycle.md`.
+
 ```bash
 # Always use -x (fail-fast): stop after the first test that fails.
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/ -x -v
@@ -166,6 +168,14 @@ Apps Script editor → Run → initializeTriggers
 
 # UC-A acceptance tests (requires live GAS — npm run deploy:test first):
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_uc_a.py -x -v
+
+# §16.10 canonical ATDD journey — Acts 1–3 (requires live GAS — npm run deploy:test first):
+/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey_acts_1_3.py -x -v
+
+# §16.10 canonical ATDD journey — full Acts 1–5:
+# Acts 4–5 additionally require the add-on test deployment installed in the test account:
+#   Apps Script editor → Deploy → Test deployments → Install as Add-on
+/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey.py -x -v
 ```
 
 Each UC scenario test has significant setup/teardown cost (GAS invocation, up to 300 s). A root-cause failure in an early scenario cascades to all later ones — running to completion wastes time and obscures the real defect. Fix the first failure before proceeding.
@@ -176,9 +186,11 @@ All UC tests use **HTTP fixture invocation** — no browser required for setup. 
 
 **Prerequisites for running tests:**
 1. `npm run deploy:test` — pushes source, stamps the revision, repoints the TEST Web App deployment, writes `testToken` and `testTokenExpiresAt` to `local.settings.json`.
-2. `local.settings.json` must contain `testSheetId`, `testDocId`, `testToken`, and `webappTestUrl`.
+2. `local.settings.json` must contain `testSheetId`, `testDocId`, `webappSecret`, and `testToken`.
 
 **Token expiry:** `testTokenExpiresAt` in `local.settings.json` records the expiry. If the token expires mid-session, re-run `npm run deploy:test` to rotate it.
+
+> **`webappTestUrl` is auto-managed — do not set it manually.** `deploy:test` derives the TEST Web App URL from the `TEST-WEB-APP` deployment ID returned by `clasp deployments` and always overwrites `webappTestUrl` in `local.settings.json` with the authoritative value. A manually-set URL cannot become stale because it is overwritten on every successful deploy.
 
 Playwright is used only for **UI-level tests** (homepage card rendering, menu presence assertions). It is not used for GAS fixture setup.
 

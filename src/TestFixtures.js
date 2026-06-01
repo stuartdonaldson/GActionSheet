@@ -267,6 +267,87 @@ function _tfAppendTextListItem(token, docId, text) {
 }
 
 /**
+ * Appends an AI-N: token + PERSON chip bulleted list item to the end of the document.
+ *
+ * Inserts: <aiNPrefix> <chip(email)> <actionText> as a bullet.
+ * The scanner reads the PERSON chip's getName() (Google contact resolution) rather
+ * than deriving a display name from the email username.
+ *
+ * @param {string} token      OAuth2 access token from ScriptApp.getOAuthToken()
+ * @param {string} docId      Document ID
+ * @param {string} aiNPrefix  Token prefix, e.g. "AI-9:"
+ * @param {string} email      Assignee email (must be in contacts or Workspace directory)
+ * @param {string} actionText Text to append after the chip
+ */
+function _tfAppendAINPersonChipListItem(token, docId, aiNPrefix, email, actionText) {
+  var baseUrl    = 'https://docs.googleapis.com/v1/documents/';
+  var authHeader = { 'Authorization': 'Bearer ' + token };
+
+  var getResp = UrlFetchApp.fetch(
+    baseUrl + docId + '?fields=body.content',
+    { headers: authHeader, muteHttpExceptions: true }
+  );
+  if (getResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendAINPersonChipListItem GET failed: HTTP ' + getResp.getResponseCode());
+  }
+  var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
+
+  var lastParaEndIndex = null;
+  for (var ci = content.length - 1; ci >= 0; ci--) {
+    if (content[ci].paragraph) {
+      lastParaEndIndex = content[ci].endIndex;
+      break;
+    }
+  }
+  if (lastParaEndIndex === null) {
+    throw new Error('_tfAppendAINPersonChipListItem: no paragraph found in doc body');
+  }
+
+  var insertAt  = lastParaEndIndex - 1;
+  var prefix    = aiNPrefix + ' ';   // e.g. "AI-9: "
+  var prefixLen = prefix.length;
+
+  var requests = [
+    { insertText: { location: { index: insertAt }, text: '\n' } },
+    { createParagraphBullets: {
+        range: { startIndex: lastParaEndIndex, endIndex: lastParaEndIndex + 1 },
+        bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE'
+      }
+    },
+    { insertText: {
+        location: { index: lastParaEndIndex },
+        text: prefix
+      }
+    },
+    { insertPerson: {
+        personProperties: { email: email },
+        location: { index: lastParaEndIndex + prefixLen }
+      }
+    },
+    { insertText: {
+        location: { index: lastParaEndIndex + prefixLen + 1 },
+        text: ' ' + actionText
+      }
+    }
+  ];
+
+  var batchResp = UrlFetchApp.fetch(
+    baseUrl + docId + ':batchUpdate',
+    {
+      method: 'post',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeader),
+      payload: JSON.stringify({ requests: requests }),
+      muteHttpExceptions: true
+    }
+  );
+  if (batchResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendAINPersonChipListItem batchUpdate failed: HTTP ' +
+                    batchResp.getResponseCode() + ': ' +
+                    batchResp.getContentText().substring(0, 200));
+  }
+}
+
+/**
  * Appends a chip-led bulleted list item to the END of the document via the
  * Docs REST API, without clearing existing content.
  *
@@ -347,11 +428,11 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
 /**
  * Builds a sheet row array in SHEET_HEADERS order.
  *
- * SHEET_HEADERS = [NamedRangeId, ID, Assignee Email, Assignee Name, Action,
- *                  Status, Document, Date Created, Date Modified]
+ * SHEET_HEADERS = [globalId, ID, Assignee Email, Assignee Name, Action,
+ *                  Status, Document, Date Created, Date Modified, Sync Status]
  *
  * @param {object} opts
- * @param {string}  opts.namedRangeId  Named range anchor ID (empty until anchor written).
+ * @param {string}  opts.globalId  globalId (format: {docId}/AI-{N}); empty until first sync.
  * @param {string|number} opts.id
  * @param {string}  opts.assigneeEmail
  * @param {string}  opts.assigneeName
@@ -360,11 +441,12 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
  * @param {string}  opts.docFormula   Full =HYPERLINK(…) formula string.
  * @param {Date}    opts.dateCreated
  * @param {Date}    opts.dateModified
- * @returns {Array}  9-element array.
+ * @param {string}  opts.syncStatus
+ * @returns {Array}  Row array aligned to SHEET_HEADERS.
  */
 function _tfSheetRow(opts) {
   return [
-    opts.namedRangeId || '',
+    opts.globalId || '',
     opts.id,
     opts.assigneeEmail || '',
     opts.assigneeName || '',
@@ -372,7 +454,8 @@ function _tfSheetRow(opts) {
     opts.status || '',
     opts.docFormula || '',
     opts.dateCreated || '',
-    opts.dateModified || ''
+    opts.dateModified || '',
+    opts.syncStatus || ''
   ];
 }
 
@@ -1272,7 +1355,7 @@ function setupTestFixtures(scenario) {
 
         // After the first sync, read the NR ID for the SS-DEL row from the sheet.
         // GAS does NOT auto-remove named ranges when their paragraph is deleted, so
-        // the NR would appear in allDocNamedRangeIds during the second syncDocument,
+        // the NR would appear in allDocGlobalIds during the second syncDocument,
         // causing the orphan-detection loop to skip the row (activeNrIdSet check).
         // We must explicitly remove the NR from the doc after paragraph deletion.
         var ssDelSheet   = ss.getSheetByName('Actions');
@@ -1284,7 +1367,7 @@ function setupTestFixtures(scenario) {
           for (var sdi = 0; sdi < ssDelSheetData.length; sdi++) {
             if (ssDelSheetFmls[sdi][0].indexOf(testDocId) !== -1 &&
                 (ssDelSheetData[sdi][4] || '').indexOf('SS-DEL:') !== -1) {
-              ssDelNRId = ssDelSheetData[sdi][0]; // col 1 = NamedRangeId
+              ssDelNRId = ssDelSheetData[sdi][0]; // col 1 = globalId
               break;
             }
           }
@@ -1343,7 +1426,8 @@ function setupTestFixtures(scenario) {
               'Open',
               ssNFFormula,
               new Date('2026-01-01'),
-              new Date('2026-01-01')
+              new Date('2026-01-01'),
+              ''
             ]);
           }
         });
@@ -1496,6 +1580,87 @@ function setupTestFixtures(scenario) {
         break;
       }
 
+      case 'begin_journey_session': {
+        // Empty-create a fresh journey doc (§16.11 #1 — never a template clone).
+        // Does NOT update TEST_DOC_ID or TEST_DOC_TEMPLATE_ID — safe to run
+        // alongside an active begin_test_session clone in the same pytest session.
+        var bjsNow    = new Date();
+        var bjsDate   = Utilities.formatDate(bjsNow, Session.getScriptTimeZone(), 'yyyyMMdd');
+        var bjsHex    = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4);
+        var bjsName   = 'GActionSheet-Test-journey-' + bjsDate + '-' + bjsHex;
+        var bjsSheetId = PropertiesService.getScriptProperties().getProperty('TEST_SHEET_ID');
+        var bjsFolderIter = DriveApp.getFileById(bjsSheetId).getParents();
+        var bjsParent = bjsFolderIter.hasNext() ? bjsFolderIter.next() : DriveApp.getRootFolder();
+        var bjsDoc    = DocumentApp.create(bjsName);
+        DriveApp.getFileById(bjsDoc.getId()).moveTo(bjsParent);
+        _TF_RESULT = {
+          tag:  'fixture.begin_journey_session',
+          data: { ok: true, docId: bjsDoc.getId(), docName: bjsName, docUrl: bjsDoc.getUrl() }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'end_journey_session': {
+        // Trash the journey clone identified by testDocId.
+        DriveApp.getFileById(testDocId).setTrashed(true);
+        _TF_RESULT = { tag: 'fixture.end_journey_session', data: { trashed: testDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'scenario_journey_seed': {
+        // Insert the four §14 AI-token seed items into the journey doc.
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        var sjsToken = ScriptApp.getOAuthToken();
+        _tfAppendTextListItem(sjsToken, testDocId,
+          'AI: This tag and text confirms creation of an unassigned action item');
+        _tfAppendTextListItem(sjsToken, testDocId,
+          'AI: aitest@example.com This tag and email address along with this text confirms the creation of an action item with an assignee.');
+        _tfAppendTextListItem(sjsToken, testDocId,
+          'AI-5: This tag and text confirms creation of an action item with id AI-5 pre-assigning the specific ID.');
+        _tfAppendAINPersonChipListItem(sjsToken, testDocId,
+          'AI-9:', 'minister@northlakeuu.org',
+          'This tag, email and text should result in the creation of the assignee as a person chip,' +
+          ' working within our Northlake domain this has a username of \'Northlake Minister\'' +
+          ' which should appear in the chip.');
+        _TF_RESULT = { tag: 'fixture.scenario_journey_seed', data: { itemsSeeded: 4 } };
+        break;
+      }
+
+      case 'insert_tracker_table': {
+        // Standalone tracker table insert — no seeding bundled in.
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        insertTrackerTable(testDocId);
+        _TF_RESULT = { tag: 'fixture.insert_tracker_table', data: { inserted: true } };
+        break;
+      }
+
+      case 'scenario_delete_unassigned': {
+        // Find the §14 unassigned action by its exact seeded text and delete it.
+        var sduTarget  = 'This tag and text confirms creation of an unassigned action item';
+        var sduActions = _scanFloatingActions(doc);
+        var sduId      = '';
+        for (var sdui = 0; sdui < sduActions.length; sdui++) {
+          if (sduActions[sdui].actionText === sduTarget) {
+            sduId = sduActions[sdui].globalId || '';
+            break;
+          }
+        }
+        if (!sduId) {
+          GasLogger.log('fixture.scenario_delete_unassigned', { error: 'not found', target: sduTarget });
+          _TF_RESULT = { tag: 'fixture.scenario_delete_unassigned', data: { error: 'not found' } };
+          break;
+        }
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        sidebarDeleteAction(sduId, testDocId);
+        _TF_RESULT = { tag: 'fixture.scenario_delete_unassigned', data: { globalId: sduId } };
+        break;
+      }
+
       case 'ensure_sheet_structure': {
         // Ensure the ActionSheet has the correct tab layout and headers.
         // Used by test_infrastructure.py before header-layout assertions.
@@ -1506,18 +1671,15 @@ function setupTestFixtures(scenario) {
       }
 
       case 'sidebar_set_status': {
-        // Mutation: change the chip-led "AC1: Review the project budget" action
-        // from "Open" to "Done" using sidebarSetStatus.
-        // Resolves namedRangeId by scanning floating actions for the target text.
+        // Mutation: change an action from "Open" to "Done" using sidebarSetStatus.
+        // Resolves globalId by scanning floating actions for the target text.
         var sssTargetText = 'AC1: Review the project budget';
         var sssNewStatus  = 'Done';
         var sssFloating   = _scanFloatingActions(doc);
         var sssNrId       = '';
-        var sssAnchoredMap = _buildAnchoredIndexMap(doc);
         for (var ssi = 0; ssi < sssFloating.length; ssi++) {
           if (sssFloating[ssi].actionText === sssTargetText) {
-            var sssIdx = sssFloating[ssi].bodyChildIndex;
-            sssNrId = sssAnchoredMap[sssIdx] || '';
+            sssNrId = sssFloating[ssi].globalId || '';
             break;
           }
         }
@@ -1530,24 +1692,21 @@ function setupTestFixtures(scenario) {
         doc.saveAndClose();
         docAlreadyClosed = true;
         sidebarSetStatus(sssNrId, sssNewStatus, testDocId);
-        _TF_RESULT = { tag: 'fixture.sidebar_set_status', data: { namedRangeId: sssNrId, newStatus: sssNewStatus } };
+        _TF_RESULT = { tag: 'fixture.sidebar_set_status', data: { globalId: sssNrId, newStatus: sssNewStatus } };
         break;
       }
 
       case 'sidebar_delete_action': {
-        // Mutation: delete the email-led "AC1: Approve the project proposal" action
-        // (jane.smith@example.com) using sidebarDeleteAction.
-        // Resolves namedRangeId by scanning floating actions for the target text + email.
+        // Mutation: delete an action using sidebarDeleteAction.
+        // Resolves globalId by scanning floating actions for the target text + email.
         var sdaTargetText  = 'AC1: Approve the project proposal';
         var sdaTargetEmail = 'jane.smith@example.com';
         var sdaFloating    = _scanFloatingActions(doc);
         var sdaNrId        = '';
-        var sdaAnchoredMap = _buildAnchoredIndexMap(doc);
         for (var sdai = 0; sdai < sdaFloating.length; sdai++) {
           var sdaFa = sdaFloating[sdai];
           if (sdaFa.actionText === sdaTargetText && sdaFa.assigneeEmail === sdaTargetEmail) {
-            var sdaIdx = sdaFa.bodyChildIndex;
-            sdaNrId = sdaAnchoredMap[sdaIdx] || '';
+            sdaNrId = sdaFa.globalId || '';
             break;
           }
         }
@@ -1560,7 +1719,38 @@ function setupTestFixtures(scenario) {
         doc.saveAndClose();
         docAlreadyClosed = true;
         sidebarDeleteAction(sdaNrId, testDocId);
-        _TF_RESULT = { tag: 'fixture.sidebar_delete_action', data: { namedRangeId: sdaNrId } };
+        _TF_RESULT = { tag: 'fixture.sidebar_delete_action', data: { globalId: sdaNrId } };
+        break;
+      }
+
+      case 'ai_n_token_scan': {
+        // Append a bare AI: paragraph, then call syncDocument so the scanner upgrades it
+        // to AI-N: and writes a sheet row.  Returns the assigned globalId and action text
+        // so the Python test can assert format and cross-check the sheet row.
+        var antText = 'ANT: verify AI-N token format and globalId assignment';
+        body.appendParagraph('AI: ' + antText);
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        syncDocument(testDocId);
+        SpreadsheetApp.flush();
+        var antSheet = ss.getSheetByName('Actions');
+        var antData  = antSheet.getDataRange().getValues();
+        var antHdr   = antData[0];
+        var antColId = antHdr.indexOf('globalId');
+        var antColAc = antHdr.indexOf('Action');
+        var antColDo = antHdr.indexOf('Document');
+        var antRow   = null;
+        for (var anti = 1; anti < antData.length; anti++) {
+          if ((antData[anti][antColAc] || '').indexOf(antText) !== -1) {
+            antRow = antData[anti];
+            break;
+          }
+        }
+        var antGlobalId = antRow ? (antRow[antColId] || '') : '';
+        _TF_RESULT = {
+          tag:  'fixture.ai_n_token_scan',
+          data: { globalId: antGlobalId, actionText: antText, docId: testDocId }
+        };
         break;
       }
 
@@ -1662,7 +1852,7 @@ function setupAndSync(scenario) {
  * so all nine ActionSheet columns (including dates and Document formula) are
  * available without going through the WebApp.
  *
- * Checked invariants (floating action ↔ ActionSheet row, keyed by namedRangeId):
+ * Checked invariants (floating action ↔ ActionSheet row, keyed by globalId):
  *   assigneeEmail, assigneeName — exact match
  *   action                      — exact text match
  *   status                      — exact match (default 'Open' on both sides)
@@ -1709,12 +1899,13 @@ function verifyConsistencyForTest(docId) {
     var doc = DocumentApp.openById(resolvedDocId);
     result.docTitle = doc.getName();
 
-    // Collect floating actions with namedRangeIds (reuses VerifySync.js helpers).
+    // Collect floating actions with globalIds (reuses VerifySync.js helpers).
     var floatingActions = _collectFloatingActionState(doc);
     result.counts.floating = floatingActions.length;
 
     var tracker = _readTrackerTableState(doc);
     result.counts.tracker = tracker.rows.length;
+    result.tracker = tracker;
 
     // Read ActionSheet rows directly (all 9 columns) to get dates and Document formula.
     var ss = SpreadsheetApp.openById(testSheetId);
@@ -1729,7 +1920,7 @@ function verifyConsistencyForTest(docId) {
         // Extract display name from =HYPERLINK("url","title")
         var titleMatch = formula.match(/HYPERLINK\s*\(\s*"[^"]*"\s*,\s*"([^"]*)"\s*\)/i);
         sheetRows.push({
-          namedRangeId: data[i][0] || '',
+          globalId: data[i][0] || '',
           id:           data[i][1] || '',
           assigneeEmail: data[i][2] || '',
           assigneeName:  data[i][3] || '',
@@ -1741,9 +1932,29 @@ function verifyConsistencyForTest(docId) {
         });
       }
     }
+    // Scope to the tested doc only — the ActionSheet accumulates rows from all
+    // test runs, and globalId encodes the docId as the leading segment.
+    sheetRows = sheetRows.filter(function(r) {
+      return r.globalId.indexOf(resolvedDocId + '/') === 0;
+    });
     result.counts.sheet = sheetRows.length;
 
-    _runConsistencyChecks(result, floatingActions, tracker, sheetRows, result.docTitle);
+    // Build set of IDs that were archived for this doc so orphan tracker rows
+    // for archived actions are not reported as consistency failures.
+    var archivedIds = {};
+    var archiveSheet = ss.getSheetByName('Archive');
+    if (archiveSheet && archiveSheet.getLastRow() > 1) {
+      var archNumRows = archiveSheet.getLastRow() - 1;
+      var archData    = archiveSheet.getRange(2, 1, archNumRows, 1).getValues();
+      for (var ai = 0; ai < archData.length; ai++) {
+        var archGid = archData[ai][0] || '';
+        if (archGid.indexOf(resolvedDocId + '/') === 0) {
+          archivedIds[archGid.substring(archGid.indexOf('/') + 1)] = true;
+        }
+      }
+    }
+
+    _runConsistencyChecks(result, floatingActions, tracker, sheetRows, result.docTitle, archivedIds);
     result.ok = result.issues.length === 0;
 
     GasLogger.log('verify.consistency.complete', result);
@@ -1767,7 +1978,16 @@ function verifyConsistencyForTest(docId) {
  * @param {Array}    sheetRows       Direct ActionSheet read (all 9 fields + docTitle).
  * @param {string}   docTitle        Current document title from doc.getName().
  */
-function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docTitle) {
+function _isEmailDerivedName(email, name) {
+  if (!email || !name) return false;
+  var derived = email.split('@')[0]
+    .replace(/[._\-]+/g, ' ')
+    .replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+  return derived === name;
+}
+
+function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docTitle, archivedIds) {
+  archivedIds = archivedIds || {};
   var floatingByNrId = {};
   var sheetByNrId    = {};
   var sheetById      = {};
@@ -1776,21 +1996,21 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
 
   for (i = 0; i < floatingActions.length; i++) {
     var f = floatingActions[i];
-    if (!f.namedRangeId) {
-      result.issues.push('Floating action without namedRangeId: ' + (f.action || '(blank)'));
+    if (!f.globalId) {
+      result.issues.push('Floating action without globalId: ' + (f.action || '(blank)'));
       continue;
     }
-    floatingByNrId[f.namedRangeId] = f;
+    floatingByNrId[f.globalId] = f;
   }
 
   for (i = 0; i < sheetRows.length; i++) {
     var s = sheetRows[i];
-    if (!s.namedRangeId) continue;
-    if (sheetByNrId[s.namedRangeId]) {
-      result.issues.push('Duplicate namedRangeId in ActionSheet: ' + s.namedRangeId);
+    if (!s.globalId) continue;
+    if (sheetByNrId[s.globalId]) {
+      result.issues.push('Duplicate globalId in ActionSheet: ' + s.globalId);
       continue;
     }
-    sheetByNrId[s.namedRangeId] = s;
+    sheetByNrId[s.globalId] = s;
     if (s.id) sheetById[String(s.id)] = s;
   }
 
@@ -1820,8 +2040,15 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
         floating.assigneeEmail + '" sheet="' + sheet.assigneeEmail + '"');
     }
     if (floating.assigneeName !== sheet.assigneeName) {
-      result.issues.push('assigneeName mismatch (ID ' + sheet.id + '): doc="' +
-        floating.assigneeName + '" sheet="' + sheet.assigneeName + '"');
+      // When sync converts a plain-text email to a PERSON chip, getName() returns ""
+      // for emails not in the directory.  The sheet keeps the derived username name,
+      // which is correct — skip the mismatch for this case.
+      var docNameEmpty   = floating.assigneeName === '';
+      var sheetDerived   = _isEmailDerivedName(floating.assigneeEmail, sheet.assigneeName);
+      if (!(docNameEmpty && sheetDerived)) {
+        result.issues.push('assigneeName mismatch (ID ' + sheet.id + '): doc="' +
+          floating.assigneeName + '" sheet="' + sheet.assigneeName + '"');
+      }
     }
     if (floating.action !== sheet.action) {
       result.issues.push('action mismatch (ID ' + sheet.id + '): doc="' +
@@ -1874,10 +2101,18 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
   }
 
   // Tracker rows with no ActionSheet row.
+  // Only flag when the floating action still exists — if neither sheet nor doc has it,
+  // the action was fully deleted and the stale tracker row is expected.
   if (tracker.found) {
+    var floatingByAIN = {};
+    for (var fgid in floatingByNrId) {
+      if (!Object.prototype.hasOwnProperty.call(floatingByNrId, fgid)) continue;
+      var ainMatch = fgid.match(/\/?(AI-\d+)$/);
+      if (ainMatch) floatingByAIN[ainMatch[1]] = true;
+    }
     for (var tid in trackerById) {
       if (!Object.prototype.hasOwnProperty.call(trackerById, tid)) continue;
-      if (!sheetById[tid]) {
+      if (!sheetById[tid] && !archivedIds[tid] && floatingByAIN[tid]) {
         result.issues.push('Tracker row ID ' + tid + ' has no ActionSheet row');
       }
     }
@@ -1892,7 +2127,7 @@ function debugDocBody() {
   var props   = PropertiesService.getScriptProperties();
   var testDocId = props.getProperty('TEST_DOC_ID');
   GasLogger.log('debug.props', {
-    webAppUrl:    props.getProperty('WEBAPP_URL'),
+    webAppUrl:    getWebAppUrl(),
     hasSecret:    !!props.getProperty('WEBAPP_SECRET'),
     testSheetId:  props.getProperty('TEST_SHEET_ID'),
     testDocId:    testDocId

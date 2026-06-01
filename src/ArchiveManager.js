@@ -3,21 +3,21 @@
  *
  * Moves eligible rows from the "Actions" sheet to the "Archive" sheet.
  *
- * Eligibility (requirements §13 / §16):
+ * Eligibility (DESIGN.md §Archive Manager):
  *   - Status column == "Closed"  (exact, case-sensitive match)
  *   - Date Modified is more than 30 days before the current sync execution time
  *
  * Rows are processed bottom-to-top so that deleting a row does not shift
  * the indices of rows yet to be processed.
  *
- * All sheet writes are wrapped in WriteGuard to suppress the onEdit trigger
- * (requirements §16.3).  Date Modified is NOT altered during archival (§16.2).
+ * All sheet writes are wrapped in WriteGuard to suppress the onEdit trigger.
+ * Date Modified is NOT altered during archival.
  */
 var ArchiveManager = (function () {
 
   var ARCHIVE_THRESHOLD_DAYS = 30;
 
-  // 1-based column indices (matching SHEET_HEADERS with NamedRangeId as col 1).
+  // 1-based column indices (matching SHEET_HEADERS with globalId as col 1).
   var COL_STATUS        = 6;
   var COL_DATE_MODIFIED = 9;
   var TOTAL_COLS        = 10;

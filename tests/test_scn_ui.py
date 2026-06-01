@@ -1,0 +1,348 @@
+"""
+Unit tests for scn/ui.py — UiDriver + Card (GTaskSheet-5vwu.10).
+
+All tests use mocked Page objects; playwright does not need to be installed.
+AC: scenarios call named intents only; locate targets nth-occurrence and alt-text;
+    gestures carry timeouts; set_status waits out the busy state (§16.8).
+"""
+import warnings
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from scn.ui import Card, UiDriver, _parse_timeout
+from scn.engine import Severity
+
+
+# ---------------------------------------------------------------------------
+# _parse_timeout
+# ---------------------------------------------------------------------------
+
+class TestParseTimeout:
+    def test_seconds(self):
+        assert _parse_timeout("5s") == 5000
+
+    def test_milliseconds(self):
+        assert _parse_timeout("500ms") == 500
+
+    def test_decimal_seconds(self):
+        assert _parse_timeout("1.5s") == 1500
+
+    def test_zero_seconds(self):
+        assert _parse_timeout("0s") == 0
+
+    def test_invalid_unit_raises(self):
+        with pytest.raises(ValueError, match="Invalid timeout"):
+            _parse_timeout("5x")
+
+    def test_bare_number_raises(self):
+        with pytest.raises(ValueError):
+            _parse_timeout("5")
+
+    def test_ms_exact(self):
+        assert _parse_timeout("250ms") == 250
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mock_page():
+    page = MagicMock()
+    page.url = "https://docs.google.com/document/d/DOCID123/edit"
+    return page
+
+
+@pytest.fixture
+def driver(mock_page):
+    return UiDriver(mock_page, doc_id="DOCID123")
+
+
+# ---------------------------------------------------------------------------
+# locate()
+# ---------------------------------------------------------------------------
+
+class TestLocate:
+    def test_text_calls_get_by_text_with_nth(self, driver, mock_page):
+        driver.locate(text="AI-1", occurrence=1)
+        mock_page.get_by_text.assert_called_once_with("AI-1", exact=False)
+        mock_page.get_by_text.return_value.nth.assert_called_once_with(0)
+
+    def test_occurrence_n_maps_to_nth_index_n_minus_1(self, driver, mock_page):
+        driver.locate(text="AI-3", occurrence=3)
+        mock_page.get_by_text.return_value.nth.assert_called_once_with(2)
+
+    def test_alt_builds_combined_selector(self, driver, mock_page):
+        driver.locate(alt="In Progress")
+        call_arg = mock_page.locator.call_args[0][0]
+        assert 'aria-label="In Progress"' in call_arg
+        assert 'alt="In Progress"' in call_arg
+        assert 'title="In Progress"' in call_arg
+
+    def test_alt_returns_first_match(self, driver, mock_page):
+        result = driver.locate(alt="In Progress")
+        assert result is mock_page.locator.return_value.first
+
+    def test_next_true_scopes_to_card_frame(self, driver):
+        card_frame = MagicMock()
+        driver._current_card = Card(card_frame)
+        driver.locate(text="AI-1", next=True)
+        card_frame.get_by_text.assert_called_once_with("AI-1", exact=False)
+
+    def test_next_true_without_card_falls_back_to_page(self, driver, mock_page):
+        driver._current_card = None
+        driver.locate(text="AI-1", next=True)
+        mock_page.get_by_text.assert_called_once()
+
+    def test_no_args_raises_value_error(self, driver):
+        with pytest.raises(ValueError, match="locate\\(\\) requires text= or alt="):
+            driver.locate()
+
+    def test_text_default_occurrence_is_first(self, driver, mock_page):
+        driver.locate(text="AI-5")
+        mock_page.get_by_text.return_value.nth.assert_called_once_with(0)
+
+
+# ---------------------------------------------------------------------------
+# hover()
+# ---------------------------------------------------------------------------
+
+class TestHover:
+    def _setup_card_frame(self, mock_page):
+        """Wire frame_locator so hover() finds a card body."""
+        frame = MagicMock()
+        frame.locator.return_value.first = MagicMock()
+        mock_page.frame_locator.return_value.first = frame
+        return frame
+
+    def test_waits_for_locator_visible(self, driver, mock_page):
+        self._setup_card_frame(mock_page)
+        locator = MagicMock()
+        driver.hover(locator, timeout="5s")
+        locator.wait_for.assert_called_once_with(state="visible", timeout=5000)
+
+    def test_calls_hover_on_locator(self, driver, mock_page):
+        self._setup_card_frame(mock_page)
+        locator = MagicMock()
+        driver.hover(locator, timeout="3s")
+        locator.hover.assert_called_once()
+
+    def test_returns_card_instance(self, driver, mock_page):
+        self._setup_card_frame(mock_page)
+        locator = MagicMock()
+        result = driver.hover(locator, timeout="5s")
+        assert isinstance(result, Card)
+
+    def test_sets_current_card_context(self, driver, mock_page):
+        self._setup_card_frame(mock_page)
+        locator = MagicMock()
+        card = driver.hover(locator, timeout="5s")
+        assert driver._current_card is card
+
+    def test_waits_for_card_body_with_timeout(self, driver, mock_page):
+        frame = self._setup_card_frame(mock_page)
+        locator = MagicMock()
+        driver.hover(locator, timeout="7s")
+        frame.locator.return_value.first.wait_for.assert_called_once_with(
+            state="visible", timeout=7000
+        )
+
+    def test_hover_until_delegates_to_hover(self, driver):
+        with patch.object(driver, "hover", return_value=MagicMock()) as mock_hover:
+            locator = MagicMock()
+            driver.hover_until(locator, timeout="8s")
+            mock_hover.assert_called_once_with(locator, timeout="8s")
+
+
+# ---------------------------------------------------------------------------
+# click() and mouse_down_hold()
+# ---------------------------------------------------------------------------
+
+class TestGestures:
+    def test_click_waits_then_clicks(self, driver):
+        locator = MagicMock()
+        driver.click(locator, timeout="3s")
+        locator.wait_for.assert_called_once_with(state="visible", timeout=3000)
+        locator.click.assert_called_once_with()
+
+    def test_click_respects_ms_timeout(self, driver):
+        locator = MagicMock()
+        driver.click(locator, timeout="250ms")
+        locator.wait_for.assert_called_with(state="visible", timeout=250)
+
+    def test_mouse_down_hold_waits_then_holds(self, driver):
+        locator = MagicMock()
+        driver.mouse_down_hold(locator, timeout="2s")
+        locator.wait_for.assert_called_once_with(state="visible", timeout=2000)
+        locator.click.assert_called_once()
+
+    def test_mouse_down_hold_passes_delay(self, driver):
+        locator = MagicMock()
+        driver.mouse_down_hold(locator, timeout="2s")
+        _, kwargs = locator.click.call_args
+        assert "delay" in kwargs
+
+
+# ---------------------------------------------------------------------------
+# set_status()
+# ---------------------------------------------------------------------------
+
+class TestSetStatus:
+    def _make_card(self):
+        """Card whose frame returns status_btn then busy on successive locator() calls."""
+        frame = MagicMock()
+        status_btn = MagicMock()
+        busy = MagicMock()
+        frame.locator.side_effect = [status_btn, busy]
+        return Card(frame), status_btn, busy
+
+    def test_finds_status_button_by_aria_label(self, driver):
+        card, status_btn, _ = self._make_card()
+        driver.set_status(card, "In Progress")
+        call_arg = card.frame.locator.call_args_list[0][0][0]
+        assert 'aria-label="In Progress"' in call_arg
+
+    def test_waits_for_status_button_visibility(self, driver):
+        card, status_btn, _ = self._make_card()
+        driver.set_status(card, "In Progress")
+        status_btn.wait_for.assert_called_with(state="visible", timeout=10000)
+
+    def test_clicks_status_button(self, driver):
+        card, status_btn, _ = self._make_card()
+        driver.set_status(card, "In Progress")
+        status_btn.click.assert_called_once()
+
+    def test_checks_for_busy_state(self, driver):
+        card, _, busy = self._make_card()
+        driver.set_status(card, "Open")
+        # At least one wait_for call on the busy locator
+        assert busy.wait_for.call_count >= 1
+
+    def test_no_spinner_does_not_raise(self, driver):
+        card, status_btn, busy = self._make_card()
+        # Spinner never appears — timeout exception should be swallowed
+        busy.wait_for.side_effect = Exception("Timeout — no spinner appeared")
+        driver.set_status(card, "Open")  # must not raise
+        status_btn.click.assert_called_once()
+
+    def test_spinner_appears_then_clears(self, driver):
+        card, _, busy = self._make_card()
+        busy.wait_for.side_effect = [None, None]  # visible, then hidden
+        driver.set_status(card, "Open")
+        assert busy.wait_for.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# expect_visible()
+# ---------------------------------------------------------------------------
+
+class TestExpectVisible:
+    def test_waits_for_card_body_visible(self, driver):
+        frame = MagicMock()
+        inner = MagicMock()
+        frame.locator.return_value.first = inner
+        card = Card(frame)
+
+        driver.expect_visible(card, timeout="5s")
+
+        inner.wait_for.assert_called_once_with(state="visible", timeout=5000)
+
+    def test_respects_custom_timeout(self, driver):
+        frame = MagicMock()
+        inner = MagicMock()
+        frame.locator.return_value.first = inner
+        card = Card(frame)
+
+        driver.expect_visible(card, timeout="10s")
+
+        inner.wait_for.assert_called_once_with(state="visible", timeout=10000)
+
+
+# ---------------------------------------------------------------------------
+# expect_alt()
+# ---------------------------------------------------------------------------
+
+class TestExpectAlt:
+    def test_passes_when_aria_label_matches(self, driver):
+        locator = MagicMock()
+        locator.get_attribute.side_effect = lambda a: "In Progress" if a == "aria-label" else None
+        driver.expect_alt(locator, "In Progress")  # no exception
+
+    def test_passes_when_alt_attribute_matches(self, driver):
+        locator = MagicMock()
+        locator.get_attribute.side_effect = lambda a: "In Progress" if a == "alt" else None
+        driver.expect_alt(locator, "In Progress")
+
+    def test_passes_when_title_matches(self, driver):
+        locator = MagicMock()
+        locator.get_attribute.side_effect = lambda a: "In Progress" if a == "title" else None
+        driver.expect_alt(locator, "In Progress")
+
+    def test_fails_on_mismatch_severity_fail(self, driver):
+        locator = MagicMock()
+        locator.get_attribute.side_effect = lambda a: "Open" if a == "aria-label" else None
+        with pytest.raises(AssertionError, match="expect_alt"):
+            driver.expect_alt(locator, "In Progress", severity=Severity.FAIL)
+
+    def test_warns_on_mismatch_severity_warn(self, driver):
+        locator = MagicMock()
+        locator.get_attribute.side_effect = lambda a: "Open" if a == "aria-label" else None
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            driver.expect_alt(locator, "In Progress", severity=Severity.WARN)
+        assert len(caught) == 1
+        assert "expect_alt" in str(caught[0].message)
+
+    def test_fails_no_attribute_found_severity_fail(self, driver):
+        locator = MagicMock()
+        locator.get_attribute.return_value = None
+        with pytest.raises(AssertionError, match="no aria-label"):
+            driver.expect_alt(locator, "In Progress")
+
+    def test_warns_no_attribute_found_severity_warn(self, driver):
+        locator = MagicMock()
+        locator.get_attribute.return_value = None
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            driver.expect_alt(locator, "In Progress", severity=Severity.WARN)
+        assert len(caught) == 1
+
+
+# ---------------------------------------------------------------------------
+# ScenarioSession.expect_visible / .expect_alt delegation
+# ---------------------------------------------------------------------------
+
+class TestSessionUiDelegation:
+    """expect_visible and expect_alt on the session delegate to scn.ui."""
+
+    def test_session_expect_visible_requires_ui(self):
+        from scn.session import ScenarioSession
+        scn = ScenarioSession(doc_id="D", sheet_id="S", settings={})
+        with pytest.raises(RuntimeError, match="scn.expect_visible requires scn.ui"):
+            scn.expect_visible(MagicMock())
+
+    def test_session_expect_alt_requires_ui(self):
+        from scn.session import ScenarioSession
+        scn = ScenarioSession(doc_id="D", sheet_id="S", settings={})
+        with pytest.raises(RuntimeError, match="scn.expect_alt requires scn.ui"):
+            scn.expect_alt(MagicMock(), "In Progress")
+
+    def test_session_expect_visible_delegates_to_ui(self, mock_page):
+        from scn.session import ScenarioSession
+        scn = ScenarioSession(doc_id="DOCID123", sheet_id="S", settings={})
+        scn.ui = UiDriver(mock_page, doc_id="DOCID123")
+        card = Card(MagicMock())
+        card.frame.locator.return_value.first = MagicMock()
+        with patch.object(scn.ui, "expect_visible") as mock_ev:
+            scn.expect_visible(card, timeout="3s")
+            mock_ev.assert_called_once_with(card, timeout="3s")
+
+    def test_session_expect_alt_delegates_to_ui(self, mock_page):
+        from scn.session import ScenarioSession
+        scn = ScenarioSession(doc_id="DOCID123", sheet_id="S", settings={})
+        scn.ui = UiDriver(mock_page, doc_id="DOCID123")
+        locator = MagicMock()
+        with patch.object(scn.ui, "expect_alt") as mock_ea:
+            scn.expect_alt(locator, "Open", severity=Severity.WARN)
+            mock_ea.assert_called_once_with(locator, "Open", severity=Severity.WARN)

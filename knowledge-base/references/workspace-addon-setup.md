@@ -368,7 +368,27 @@ Both `addOns` and `webapp` sections must coexist in `appsscript.json`:
 
 ### Authentication
 
-Bearer token forwarding does not work for Apps Script Web App endpoints — Google does not propagate the caller's identity. Use a **shared secret** instead:
+**Two separate auth layers apply to every Web App call:**
+
+**Layer 1 — GAS HTTP auth gate (Bearer token required):**
+`UrlFetchApp` does not carry the calling script's Google session automatically. Every `UrlFetchApp.fetch()` to a GAS Web App endpoint must include an explicit `Authorization: Bearer` header, regardless of deployment type:
+
+```javascript
+var oauthToken = ScriptApp.getOAuthToken();
+UrlFetchApp.fetch(webAppUrl, {
+  method:  'post',
+  headers: { 'Authorization': 'Bearer ' + oauthToken },
+  payload: JSON.stringify({ secret: secret, ... })
+});
+```
+
+This applies to both `/dev` (HEAD) and versioned `/exec` deployments with `access: ANYONE`. The `/dev` endpoint always enforces this. The `/exec` endpoint with `ANYONE` access also requires a valid Google account credential at the HTTP layer. The `/exec` endpoint with `ANYONE_ANONYMOUS` access does not require it, but including the Bearer token is harmless — add it unconditionally so the same call works against all deployment types.
+
+**`ANYONE_ANONYMOUS` vs `ANYONE` for versioned `/exec` deployments:** `ANYONE_ANONYMOUS` is the better choice when non-GAS callers (e.g. Node.js test infrastructure) need to POST to the endpoint without OAuth. `WEBAPP_SECRET` in the payload provides application-level auth, making the HTTP-layer credential unnecessary for security. `ANYONE` provides one extra layer (requires a Google account) but breaks non-GAS callers that cannot obtain a Bearer token.
+
+Note: the Bearer token satisfies GAS's own auth gate only — `doPost` cannot read it to identify the caller (Google does not propagate caller identity through headers). Application-level auth is handled separately by the shared secret in the payload (Layer 2).
+
+**Layer 2 — Application auth (shared secret in payload):**
 
 ```javascript
 // doPost

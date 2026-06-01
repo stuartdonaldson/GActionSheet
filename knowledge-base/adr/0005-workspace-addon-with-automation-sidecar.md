@@ -1,8 +1,15 @@
 # ADR-0005: Workspace Add-on with Automation Sidecar
 
-Status: Accepted
+Status: Superseded by ADR-0008
 Date: 2026-05-23
 Supersedes: ADR-0001
+Superseded: 2026-05-29
+
+> Superseded by ADR-0008. Two of this record's decisions were not adopted: (a) the two-project
+> "automation sidecar" — the system is a single dual-deployed project (ADR-0007); and (b)
+> REST named-range identity — action identity is an in-text `AI-N:` token (ADR-0008). The
+> `SYNC_IN_PROGRESS` cross-execution guard described here is also unused (see ADR-0008
+> consequences). The decision below is retained for history.
 
 ## Context
 

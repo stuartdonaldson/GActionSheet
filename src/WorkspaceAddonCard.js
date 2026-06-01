@@ -1,8 +1,10 @@
 /**
- * Addon.js
+ * WorkspaceAddonCard.js
  *
- * Workspace Add-on card builder and button handlers.
- * Entry point: buildHomepageCard() — registered as homepageTrigger in appsscript.json.
+ * Google Workspace add-on: homepage card builder and button/mutation handlers
+ * (surface ① in DESIGN.md). Entry point: buildHomepageCard() — registered as
+ * homepageTrigger in appsscript.json. Status/delete handlers rewrite the doc
+ * via the shared REST flush in SyncManager.js (_flushActionParagraph).
  */
 
 /**
@@ -87,37 +89,6 @@ function _resolveActiveDocForRead(doc) {
   }
 }
 
-function onOpenSidebar() {
-  var doc = DocumentApp.getActiveDocument();
-  if (!doc) {
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('No active document'))
-      .build();
-  }
-
-  try {
-    var template = HtmlService.createTemplateFromFile('Sidebar');
-    template.docName = doc.getName();
-    template.buildVersion = BUILD_INFO.version;
-
-    DocumentApp.getUi().showSidebar(
-      template.evaluate().setTitle('Action Sync')
-    );
-
-    GasLogger.log('sidebar.open.complete', { docId: doc.getId() });
-    GasLogger.flush();
-
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Sidebar opened'))
-      .build();
-  } catch (e) {
-    GasLogger.log('addon.sidebar.error', { msg: e.message });
-    GasLogger.flush();
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Open Sidebar failed: ' + e.message))
-      .build();
-  }
-}
 
 function onInsertTrackerTable() {
   var doc = DocumentApp.getActiveDocument();
@@ -317,19 +288,19 @@ function _buildActionButtonsSection(homepageState) {
       CardService.newTextButton()
         .setText('Sync now')
         .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-        .setOnClickAction(_buildSidebarAction('onSyncNow'))
+        .setOnClickAction(_buildCardAction('onSyncNow'))
     )
     .addButton(
       CardService.newTextButton()
         .setText('VerifySync')
-        .setOnClickAction(_buildSidebarAction('onVerifySync'))
+        .setOnClickAction(_buildCardAction('onVerifySync'))
     );
 
   if (!homepageState.trackerFound) {
     buttonSet.addButton(
       CardService.newTextButton()
         .setText('Insert tracker')
-        .setOnClickAction(_buildSidebarAction('onInsertTrackerTable'))
+        .setOnClickAction(_buildCardAction('onInsertTrackerTable'))
     );
   }
 
@@ -357,17 +328,24 @@ function _buildActionListSection(homepageState) {
   for (var i = 0; i < homepageState.floatingActions.length; i++) {
     var action = homepageState.floatingActions[i];
     var assignee = action.assigneeName || action.assigneeEmail || 'Unassigned';
-    var anchorState = action.namedRangeId ? 'Anchored' : 'Needs sync';
+    var actionId = action.globalId ? parseGlobalId(action.globalId).actionId : '';
+    // Compact: AI-N • Assignee • Status on the top label line
+    var topParts = [];
+    if (actionId) topParts.push(actionId);
+    topParts.push(assignee);
+    topParts.push(action.status || 'Open');
+    var topLabel = topParts.join(' • ');
+    var bottomLabel = action.globalId ? '' : 'Needs sync';
     section.addWidget(
       CardService.newDecoratedText()
-        .setTopLabel(assignee)
+        .setTopLabel(topLabel)
         .setText(_escapeAddonHtml(action.action || '(blank action)'))
-        .setBottomLabel('Status: ' + (action.status || 'Open') + ' • ' + anchorState)
+        .setBottomLabel(bottomLabel)
         .setWrapText(true)
     );
 
     // Per-action mutations — only shown when the action is anchored.
-    if (action.namedRangeId) {
+    if (action.globalId) {
       // One ImageButton per status + one delete button, all in a single row.
       var _ICON_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/';
       var _STATUS_ICONS = [
@@ -387,7 +365,7 @@ function _buildActionListSection(homepageState) {
             .setOnClickAction(
               CardService.newAction()
                 .setFunctionName('onSetActionStatus')
-                .setParameters({ namedRangeId: action.namedRangeId, newStatus: sIcon.status })
+                .setParameters({ globalId: action.globalId, newStatus: sIcon.status })
             )
         );
       }
@@ -398,7 +376,7 @@ function _buildActionListSection(homepageState) {
           .setOnClickAction(
             CardService.newAction()
               .setFunctionName('onDeleteAction')
-              .setParameters({ namedRangeId: action.namedRangeId })
+              .setParameters({ globalId: action.globalId })
           )
       );
       section.addWidget(mutationRow);
@@ -411,7 +389,7 @@ function _buildActionListSection(homepageState) {
 function _countMissingAnchors(floatingActions) {
   var count = 0;
   for (var i = 0; i < floatingActions.length; i++) {
-    if (!floatingActions[i].namedRangeId) {
+    if (!floatingActions[i].globalId) {
       count++;
     }
   }
@@ -475,7 +453,7 @@ function _isVerificationResult(value) {
   );
 }
 
-function _buildSidebarAction(functionName) {
+function _buildCardAction(functionName) {
   var action = CardService.newAction().setFunctionName(functionName);
   if (action.setLoadIndicator && CardService.LoadIndicator) {
     action.setLoadIndicator(CardService.LoadIndicator.SPINNER);
@@ -488,16 +466,38 @@ function _buildSidebarAction(functionName) {
 // ---------------------------------------------------------------------------
 
 /**
- * Updates the status of a floating action by namedRangeId and syncs to the
- * ActionSheet.  Complete round-trip: doc + sheet updated before returning.
+ * Finds a floating action paragraph by its globalId (format: {docId}/AI-{N}).
+ * Returns the paragraph/list-item element, or null if not found.
+ *
+ * @param {GoogleAppsScript.Document.Document} doc
+ * @param {string} globalId
+ * @returns {GoogleAppsScript.Document.Paragraph|GoogleAppsScript.Document.ListItem|null}
+ */
+function _findParaByGlobalId(doc, globalId) {
+  var parsed = parseGlobalId(globalId);
+  if (isNaN(parsed.N)) return null;
+  var tokenPrefix = parsed.actionId + ':';
+  var body = doc.getBody();
+  for (var i = 0; i < body.getNumChildren(); i++) {
+    var child = body.getChild(i);
+    var t = child.getType();
+    if (t !== DocumentApp.ElementType.PARAGRAPH && t !== DocumentApp.ElementType.LIST_ITEM) continue;
+    if (child.getText().replace(/\n$/, '').indexOf(tokenPrefix) === 0) return child;
+  }
+  return null;
+}
+
+/**
+ * Updates the status of a floating action by globalId and syncs to the
+ * ActionSheet.  Uses REST flush to rewrite the paragraph with the new status.
  *
  * Log tag: sidebar.status-set.complete
  *
- * @param {string} namedRangeId
+ * @param {string} globalId  globalId (format: {docId}/AI-{N})
  * @param {string} newStatus
  * @param {string=} docId  Optional — resolved from getActiveDocument() when omitted.
  */
-function sidebarSetStatus(namedRangeId, newStatus, docId) {
+function sidebarSetStatus(globalId, newStatus, docId) {
   var t0 = Date.now();
   if (!docId) {
     var activeDoc = DocumentApp.getActiveDocument();
@@ -505,165 +505,89 @@ function sidebarSetStatus(namedRangeId, newStatus, docId) {
   }
 
   var doc = DocumentApp.openById(docId);
-  var t1 = Date.now(); // after openById
+  var t1  = Date.now();
 
-  var namedRanges = doc.getNamedRanges();
-  var found = false;
-  var hasTracker = false;
-  for (var i = 0; i < namedRanges.length; i++) {
-    var nr = namedRanges[i];
-    if (nr.getId() !== namedRangeId) continue;
-
-    var elements = nr.getRange().getRangeElements();
-    if (elements.length === 0) break;
-
-    var el     = elements[0].getElement();
-    var type   = el.getType();
-    var para   = null;
-    if (type === DocumentApp.ElementType.LIST_ITEM) {
-      para = el.asListItem();
-    } else if (type === DocumentApp.ElementType.PARAGRAPH) {
-      para = el.asParagraph();
-    } else if (type === DocumentApp.ElementType.TEXT) {
-      var parent = el.getParent();
-      var pType  = parent.getType();
-      if (pType === DocumentApp.ElementType.LIST_ITEM)  para = parent.asListItem();
-      else if (pType === DocumentApp.ElementType.PARAGRAPH) para = parent.asParagraph();
+  // Scan to get current action state for the flush
+  var floatingActions = _scanFloatingActions(doc);
+  var currentAction   = null;
+  for (var i = 0; i < floatingActions.length; i++) {
+    if (floatingActions[i].globalId === globalId) {
+      currentAction = floatingActions[i];
+      break;
     }
-
-    if (para) {
-      var currentAction = _readActionTextFromPara(para);
-      _updateParaTextFromSheet(para, currentAction, newStatus, '');
-      hasTracker = _readTrackerTableState(doc).found;
-      found = true;
-    }
-    break;
   }
-  var t2 = Date.now(); // after para update + tracker check
 
-  doc.saveAndClose();
-  var t3 = Date.now(); // after saveAndClose
+  var hasTracker = currentAction ? _readTrackerTableState(doc).found : false;
+  doc.saveAndClose(); // close before REST calls
+  var t2 = Date.now();
 
-  if (found) {
-    _patchActionStatus(namedRangeId, newStatus);
-    var t4 = Date.now(); // after patch HTTP call
+  if (currentAction) {
+    var N     = parseGlobalId(globalId).N;
+    var token = ScriptApp.getOAuthToken();
+    _flushActionParagraph(docId, token, N, globalId,
+      currentAction.actionText, newStatus, currentAction.assigneeEmail, currentAction.assigneeName);
+    var t3 = Date.now();
 
-    if (hasTracker) {
-      insertTrackerTable(docId);
-    }
-    var t5 = Date.now(); // after tracker refresh (or same as t4 when no tracker)
+    _patchActionStatus(globalId, newStatus);
+    var t4 = Date.now();
+
+    if (hasTracker) insertTrackerTable(docId);
+    var t5 = Date.now();
 
     GasLogger.log('sidebar.status-set.complete', {
-      namedRangeId: namedRangeId,
+      globalId: globalId,
       newStatus:    newStatus,
       hasTracker:   hasTracker,
       ms: {
         openById:       t1 - t0,
-        findAndUpdate:  t2 - t1,
-        saveAndClose:   t3 - t2,
+        scanAndClose:   t2 - t1,
+        restFlush:      t3 - t2,
         patchHttp:      t4 - t3,
         trackerRefresh: t5 - t4,
         total:          t5 - t0
       }
     });
   } else {
-    GasLogger.log('sidebar.status-set.warn', { msg: 'Named range not found', namedRangeId: namedRangeId });
+    GasLogger.log('sidebar.status-set.warn', { msg: 'Action not found', globalId: globalId });
   }
   GasLogger.flush();
 }
 
 /**
- * Deletes a floating action (paragraph + named range) from the doc and removes
- * the corresponding ActionSheet row.  Complete round-trip before returning.
+ * Deletes a floating action paragraph from the doc and removes the
+ * corresponding ActionSheet row.  Complete round-trip before returning.
  *
  * Log tag: sidebar.delete.complete
  *
- * @param {string} namedRangeId
+ * @param {string} globalId  globalId (format: {docId}/AI-{N})
  * @param {string=} docId  Optional — resolved from getActiveDocument() when omitted.
  */
-function sidebarDeleteAction(namedRangeId, docId) {
+function sidebarDeleteAction(globalId, docId) {
   if (!docId) {
     var activeDoc = DocumentApp.getActiveDocument();
     docId = activeDoc ? activeDoc.getId() : '';
   }
-  var doc = DocumentApp.openById(docId);
+  var doc  = DocumentApp.openById(docId);
+  var para = _findParaByGlobalId(doc, globalId);
 
-  var namedRanges = doc.getNamedRanges();
   var deleted = false;
-  for (var i = 0; i < namedRanges.length; i++) {
-    var nr = namedRanges[i];
-    if (nr.getId() !== namedRangeId) continue;
-
-    var elements = nr.getRange().getRangeElements();
-    nr.remove(); // delete the named range first
-
-    if (elements.length > 0) {
-      var el     = elements[0].getElement();
-      var type   = el.getType();
-      var para   = null;
-      if (type === DocumentApp.ElementType.LIST_ITEM) {
-        para = el.asListItem();
-      } else if (type === DocumentApp.ElementType.PARAGRAPH) {
-        para = el.asParagraph();
-      } else if (type === DocumentApp.ElementType.TEXT) {
-        var parent = el.getParent();
-        var pType  = parent.getType();
-        if (pType === DocumentApp.ElementType.LIST_ITEM)  para = parent.asListItem();
-        else if (pType === DocumentApp.ElementType.PARAGRAPH) para = parent.asParagraph();
-      }
-      if (para) {
-        // Guard: append a blank paragraph so the target is never the last
-        // element in the body section. GAS throws "Can't remove the last
-        // paragraph in a document section" without this guard.
-        doc.getBody().appendParagraph('');
-        para.removeFromParent();
-      }
-    }
+  if (para) {
+    // Guard: append a blank paragraph so the target is never the last element
+    // in the body section. GAS throws without this when removing the last paragraph.
+    doc.getBody().appendParagraph('');
+    para.removeFromParent();
     deleted = true;
-    break;
   }
 
   doc.saveAndClose();
 
   if (deleted) {
-    _deleteActionRowFromSheet(namedRangeId);
-    GasLogger.log('sidebar.delete.complete', { namedRangeId: namedRangeId });
+    _deleteActionRowFromSheet(globalId);
+    GasLogger.log('sidebar.delete.complete', { globalId: globalId });
   } else {
-    GasLogger.log('sidebar.delete.warn', { msg: 'Named range not found', namedRangeId: namedRangeId });
+    GasLogger.log('sidebar.delete.warn', { msg: 'Action not found', globalId: globalId });
   }
   GasLogger.flush();
-}
-
-/**
- * Extracts the action text from a floating action paragraph (strips the
- * leading chip/email and the trailing (Status) token).
- */
-function _readActionTextFromPara(para) {
-  var rawText = '';
-  var startIdx = 0;
-  var firstChild = para.getNumChildren() > 0 ? para.getChild(0) : null;
-
-  if (firstChild && firstChild.getType() === DocumentApp.ElementType.PERSON) {
-    startIdx = 1; // skip the chip
-  }
-
-  for (var j = startIdx; j < para.getNumChildren(); j++) {
-    var c = para.getChild(j);
-    if (c.getType() === DocumentApp.ElementType.TEXT) {
-      rawText += c.asText().getText();
-    }
-  }
-  rawText = rawText.trim();
-
-  // Strip leading email prefix for email-led items
-  var emailMatch = rawText.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s+/i);
-  if (emailMatch) rawText = rawText.slice(emailMatch[0].length).trim();
-
-  // Strip trailing (Status) token
-  var m = rawText.match(/\(([^)]*)\)\s*$/);
-  if (m) rawText = rawText.slice(0, rawText.length - m[0].length).trim();
-
-  return rawText;
 }
 
 /**
@@ -671,10 +595,9 @@ function _readActionTextFromPara(para) {
  * row, and clears any stale 'Dirty' Sync Status flag.  Used by sidebarSetStatus in
  * place of the full syncDocument round-trip.
  */
-function _patchActionStatus(namedRangeId, newStatus) {
-  var props     = PropertiesService.getScriptProperties();
-  var webAppUrl = props.getProperty('WEBAPP_URL');
-  var secret    = props.getProperty('WEBAPP_SECRET');
+function _patchActionStatus(globalId, newStatus) {
+  var webAppUrl = getWebAppUrl();
+  var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
 
   if (!webAppUrl) {
     GasLogger.log('sidebar.patch.error', { msg: 'WEBAPP_URL not set' });
@@ -690,7 +613,8 @@ function _patchActionStatus(namedRangeId, newStatus) {
     payload:            JSON.stringify({
       secret:        secret || '',
       action:        'patch_action_status',
-      namedRangeId:  namedRangeId,
+      clientVersion: BUILD_INFO.version,
+      globalId:      globalId,
       newStatus:     newStatus
     })
   });
@@ -701,12 +625,11 @@ function _patchActionStatus(namedRangeId, newStatus) {
 }
 
 /**
- * Calls the Web App proxy to permanently delete an ActionSheet row by namedRangeId.
+ * Calls the Web App proxy to permanently delete an ActionSheet row by globalId.
  */
-function _deleteActionRowFromSheet(namedRangeId) {
-  var props     = PropertiesService.getScriptProperties();
-  var webAppUrl = props.getProperty('WEBAPP_URL');
-  var secret    = props.getProperty('WEBAPP_SECRET');
+function _deleteActionRowFromSheet(globalId) {
+  var webAppUrl = getWebAppUrl();
+  var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
 
   if (!webAppUrl) {
     GasLogger.log('sidebar.delete.error', { msg: 'WEBAPP_URL not set' });
@@ -722,7 +645,8 @@ function _deleteActionRowFromSheet(namedRangeId) {
     payload:            JSON.stringify({
       secret:        secret || '',
       action:        'delete_action_row',
-      namedRangeId:  namedRangeId
+      clientVersion: BUILD_INFO.version,
+      globalId:      globalId
     })
   });
 
@@ -741,8 +665,8 @@ function _deleteActionRowFromSheet(namedRangeId) {
  * the button's action parameters at render time.
  */
 function onSetActionStatus(e) {
-  var namedRangeId = e.parameters.namedRangeId;
-  var newStatus    = e.parameters.newStatus;
+  var globalId  = e.parameters.globalId;
+  var newStatus = e.parameters.newStatus;
 
   if (!newStatus) {
     return CardService.newActionResponseBuilder()
@@ -752,7 +676,7 @@ function onSetActionStatus(e) {
 
   try {
     var tA = Date.now();
-    sidebarSetStatus(namedRangeId, newStatus);
+    sidebarSetStatus(globalId, newStatus);
     var tB = Date.now();
     var card = buildHomepageCard(null, { skipSheetFetch: true });
     var tC = Date.now();
@@ -775,11 +699,11 @@ function onSetActionStatus(e) {
 
 /**
  * Card button handler: delete the action from doc and ActionSheet.
- * Called with e.parameters.namedRangeId.
+ * Called with e.parameters.globalId.
  */
 function onDeleteAction(e) {
-  var namedRangeId = e.parameters.namedRangeId;
-  sidebarDeleteAction(namedRangeId);
+  var globalId = e.parameters.globalId;
+  sidebarDeleteAction(globalId);
   return CardService.newActionResponseBuilder()
     .setNotification(CardService.newNotification().setText('Action deleted'))
     .setNavigation(CardService.newNavigation().updateCard(

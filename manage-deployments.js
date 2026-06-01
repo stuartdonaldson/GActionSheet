@@ -3,18 +3,19 @@
 /**
  * Google Apps Script Deployment Manager — GActionSheet
  *
- * Run via npm — do not call directly, as that skips update-revision:
- *   npm run deploy:test          # stamp revision + redeploy TEST-WEB-APP
- *   npm run deploy:prod          # stamp revision + redeploy PROD-WEB-APP
- *   npm run manage-deployments   # interactive menu (list/archive/deploy)
+ * Run via npm:
+ *   npm run push                 # stamp (DEV) + push to HEAD
+ *   npm run deploy:test          # stamp (TEST) + URL + redeploy TEST-WEB-APP
+ *   npm run deploy:prod          # stamp URL + redeploy PROD-WEB-APP
+ *   npm run manage-deployments   # interactive menu (all targets + list/archive)
  *
  * ONE-TIME SETUP
  *   1. Create TEST-WEB-APP and PROD-WEB-APP deployments once in the Apps Script
  *      editor (Deploy > New Deployment > Web App), with description containing
  *      the anchor string. This script never creates new deployments.
  *   2. Ensure appsscript.json has a "webapp" section (access/executeAs).
- *   3. After deploy:test, visit the TEST URL once — doGet self-registers
- *      WEBAPP_URL in script properties.
+ *   3. For DEV (HEAD) pushes, WEBAPP_URL falls back to the script property.
+ *      Named deployments (TEST/PROD) have the URL stamped into Version.js.
  *
  * Deployment URLs are stable for the lifetime of the deployment. Redeploying
  * with `clasp deploy -i <id>` bumps the version but keeps the same URL.
@@ -41,6 +42,27 @@ function getVersionFromBuildInfo() {
 
 function buildDeploymentDescription(anchor) {
   return `${anchor} ${getVersionFromBuildInfo()}`;
+}
+
+function stampVersionInfo(target, deploymentId) {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+  const appVersion = `v${pkg.version}`;
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const suffix = target === 'test' ? ' (TEST)' : target === 'dev' ? ' (DEV)' : '';
+  const versionStr = `${appVersion} (Rev. ${dateStr} ${timeStr})${suffix}`;
+  const url = deploymentId ? webAppUrl(deploymentId) : '';
+
+  const versionPath = path.join(__dirname, 'src', 'Version.js');
+  let data = fs.readFileSync(versionPath, 'utf8');
+  data = data.replace(/version: "[^"]*"/, `version: "${versionStr}"`);
+  data = data.replace(/buildDate: "[^"]*"/, `buildDate: "${now.toISOString()}"`);
+  data = data.replace(/webappUrl: "[^"]*"/, `webappUrl: "${url}"`);
+  fs.writeFileSync(versionPath, data, 'utf8');
+
+  console.log(`\n📝 Version stamped: ${versionStr}`);
+  if (url) console.log(`   WebApp URL:      ${url}`);
 }
 
 function webAppUrl(deploymentId) {
@@ -97,6 +119,7 @@ async function deployToTarget(target, deployments, nonInteractive) {
     if (!proceed) { console.log('❌ Cancelled.'); return; }
   }
 
+  stampVersionInfo(target, match.deploymentId);
   console.log('\n📤 Pushing src/ to Apps Script...');
   execSync('clasp push -f', { stdio: 'inherit' });
 
@@ -114,8 +137,7 @@ async function deployToTarget(target, deployments, nonInteractive) {
   }
 
   console.log(`\n✅ ${label} deploy complete.`);
-  console.log(`🔗 ${label} URL: ${webAppUrl(match.deploymentId)}`);
-  console.log(`   Visit that URL once in a browser to self-register WEBAPP_URL in script properties.\n`);
+  console.log(`🔗 ${label} URL: ${webAppUrl(match.deploymentId)}\n`);
 
   if (target === 'test') {
     await registerTestToken(match.deploymentId);
@@ -140,7 +162,9 @@ async function registerTestToken(deploymentId) {
     return;
   }
 
-  const url    = settings.webappTestUrl || webAppUrl(deploymentId);
+  // Always derive the URL from the deployment ID — never trust a manually-set
+  // webappTestUrl, which may be stale from a previous deployment cycle.
+  const url = webAppUrl(deploymentId);
   const secret = settings.webappSecret;
   if (!secret) {
     console.warn('⚠️  webappSecret not set in local.settings.json — skipping test token registration.');
@@ -169,26 +193,44 @@ async function registerTestToken(deploymentId) {
     return;
   }
 
-  // Persist token to local.settings.json for Python tests.
+  // Persist token + derived URL to local.settings.json for Python tests.
+  // webappTestUrl is always overwritten with the authoritative derived URL so
+  // it can never become stale from a previous deployment cycle.
+  settings.webappTestUrl      = url;
   settings.testToken          = testToken;
   settings.testTokenExpiresAt = expiresAt;
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
   console.log(`✅ Test token registered. Expires: ${expiresAt}`);
 }
 
+async function deployDev(nonInteractive) {
+  console.log('\n🛠️  DEV push to HEAD');
+  stampVersionInfo('dev', null);
+
+  if (!nonInteractive) {
+    const proceed = await confirm({ message: 'Push to HEAD?', default: true });
+    if (!proceed) { console.log('❌ Cancelled.'); return; }
+  }
+
+  console.log('\n📤 Pushing src/ to Apps Script...');
+  execSync('clasp push -f', { stdio: 'inherit' });
+
+  console.log('\n✅ Push complete.');
+  console.log('\n📋 To load changes in Google Docs:');
+  console.log('   Script editor → Deploy → Test deployments → Uninstall → Install\n');
+}
+
 async function main() {
   try {
-    if (!process.env.npm_lifecycle_event) {
-      console.warn('⚠️  Warning: called directly, not via npm. update-revision will NOT run.\n');
-    }
-
     const args = process.argv.slice(2);
-    let action = args.includes('--deploy-test') ? 'deploy-test'
+    let action = args.includes('--deploy-dev')  ? 'deploy-dev'
+                : args.includes('--deploy-test') ? 'deploy-test'
                 : args.includes('--deploy-prod') ? 'deploy-prod'
-                : args.includes('--manage')       ? 'manage'
+                : args.includes('--manage')      ? 'manage'
                 : await select({
                     message: 'What would you like to do?',
                     choices: [
+                      { name: '🛠️  Push to DEV (HEAD)',   value: 'deploy-dev' },
                       { name: '🧪 Deploy to TEST',        value: 'deploy-test' },
                       { name: '🚀 Deploy to PRODUCTION',  value: 'deploy-prod' },
                       { name: '📦 List / archive',        value: 'manage' },
@@ -198,10 +240,16 @@ async function main() {
 
     if (action === 'exit') return;
 
-    const deployments = await getDeployments();
     const nonInteractive = args.length > 0;
 
-    if (action === 'deploy-test')  await deployToTarget('test', deployments, nonInteractive);
+    if (action === 'deploy-dev') {
+      await deployDev(nonInteractive);
+      return;
+    }
+
+    const deployments = await getDeployments();
+
+    if (action === 'deploy-test')      await deployToTarget('test', deployments, nonInteractive);
     else if (action === 'deploy-prod') await deployToTarget('production', deployments, nonInteractive);
     else if (action === 'manage') {
       displayDeployments(deployments);

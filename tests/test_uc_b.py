@@ -154,8 +154,8 @@ def _verify_consistency(doc_fas: list, sheet_rows: list,
             mismatches.append(
                 f"  status mismatch {key}: FA={fa_status!r} sheet={row_status!r}"
             )
-        if not (row.get("NamedRangeId") or "").strip():
-            mismatches.append(f"  NamedRangeId empty for {key}")
+        if not (row.get("globalId") or "").strip():
+            mismatches.append(f"  globalId empty for {key}")
 
     assert not mismatches, (
         f"{prefix}Consistency violations:\n" + "\n".join(mismatches)
@@ -203,8 +203,8 @@ def test_uc_b_doc_wins(uc_b_state, settings):
     )
 
     for row in chip_rows:
-        assert row.get("NamedRangeId") not in (None, ""), (
-            f"[uc_b_doc_wins] NamedRangeId missing after doc mutation — anchor lost. Row: {row}"
+        assert row.get("globalId") not in (None, ""), (
+            f"[uc_b_doc_wins] globalId missing after doc mutation — anchor lost. Row: {row}"
         )
 
     var1_rows = [r for r in chip_rows
@@ -278,8 +278,8 @@ def test_uc_b_sheet_wins(uc_b_state, settings):
     _assert_negative_absent(rows, "uc_b_sheet_wins")
 
     for row in rows:
-        assert row.get("NamedRangeId") not in (None, ""), (
-            f"[uc_b_sheet_wins] NamedRangeId missing — anchor lost. Row: {row}"
+        assert row.get("globalId") not in (None, ""), (
+            f"[uc_b_sheet_wins] globalId missing — anchor lost. Row: {row}"
         )
 
     doc = load_doc(uc_b_state["docx_bytes"])
@@ -422,7 +422,7 @@ def test_uc_b_conflict_resolution(uc_b_state, settings):
                      sync timestamp (~now) and no doc change was made — sheet is
                      "newer" → sheet Status propagates to doc paragraph.
 
-    No duplicate rows created; all NamedRangeIds preserved (AC3).
+    No duplicate rows created; all globalIds preserved (AC3).
     """
     chip_email = settings["testAssigneeEmail"]
 
@@ -436,8 +436,8 @@ def test_uc_b_conflict_resolution(uc_b_state, settings):
     _assert_negative_absent(rows, "uc_b_conflict")
 
     for row in rows:
-        assert row.get("NamedRangeId") not in (None, ""), (
-            f"[uc_b_conflict] NamedRangeId missing — anchor lost. Row: {row}"
+        assert row.get("globalId") not in (None, ""), (
+            f"[uc_b_conflict] globalId missing — anchor lost. Row: {row}"
         )
 
     chip_rows = [r for r in rows if r.get("Assignee Email") == chip_email]

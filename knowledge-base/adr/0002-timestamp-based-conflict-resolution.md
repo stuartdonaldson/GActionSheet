@@ -1,7 +1,12 @@
 # ADR-0002: Timestamp-Based Conflict Resolution
 
-Status: Accepted
+Status: Superseded by ADR-0009
 Date: 2026-05-19
+Superseded: 2026-05-29
+
+> Superseded by ADR-0009. The implemented sync resolves conflicts on a one-bit `Sync Status =
+> 'Dirty'` flag set by `onActionSheetEdit`, not on a `Date Modified` timestamp comparison. The
+> decision below is retained for history; `Date Modified` survives only for archival age and audit.
 
 ## Context
 Both the Google Sheet and Google Docs can be edited independently between sync runs. A conflict occurs when the same action record has different values on each side. A deterministic, simple rule is needed that non-technical users can reason about.

@@ -204,8 +204,8 @@ def _verify_full_consistency(doc_fas: list, sheet_rows: list,
                 f"  status mismatch {key}: "
                 f"FA={(fa.get('status') or 'Open')!r} sheet={row.get('Status')!r}"
             )
-        if not (row.get("NamedRangeId") or "").strip():
-            mismatches.append(f"  NamedRangeId empty for {key}")
+        if not (row.get("globalId") or "").strip():
+            mismatches.append(f"  globalId empty for {key}")
     assert not mismatches, f"{prefix}FA ↔ sheet violations:\n" + "\n".join(mismatches)
 
     if tracker_rows is None:

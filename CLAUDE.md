@@ -103,10 +103,14 @@ bd close <id>         # Complete work
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+<!-- END BEADS INTEGRATION -->
+
+## python
+`/mnt/c/dev/venvs/uv1/bin/python3` is the best python interpreter to use with it's virtual environment
 
 ## Testing Strategy & Issue Conventions
 
-This project follows the ATDD lifecycle defined in `docs/proposed-atdd-lifecycle.md`. Key rules for every session:
+This project follows the ATDD lifecycle defined in `docs/atdd/atdd-lifecycle.md`. Key rules for every session:
 
 **Issue title prefixes (required on all new issues):**
 - `[IMP]` — GAS implementation work
@@ -144,8 +148,8 @@ Use the npm scripts in `package.json` — never invoke `clasp` directly.
 | Deploy to production | `npm run deploy:prod` |
 | Push only (no redeploy) | `npm run push` |
 
+`clasp logs | tail -50` to look at the last 50 lines of the logs in the cloud google apps server environment
 `npm run deploy:test` runs `update-revision.js` + `manage-deployments.js --deploy-prod`
 in one step. Running `clasp push` (or `npm run push`) alone leaves the versioned
 WebApp deployment stale — the test suite will call the old revision and produce
 `sync.warn: Non-JSON response` failures.
-<!-- END BEADS INTEGRATION -->
