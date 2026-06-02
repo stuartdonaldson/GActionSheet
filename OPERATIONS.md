@@ -43,6 +43,42 @@ If clasp reports `Skipping push.` (hash cache) during a deploy, run:
 clasp push --force && npm run deploy:test
 ```
 
+### Checking deployment status
+
+**Live health check** — verify a running deployment is reachable, on the expected version,
+and has correct script properties:
+
+```bash
+npm run verify:test   # TEST deployment (full check — health, version, config, token)
+npm run verify:dev    # DEV /dev endpoint (requires .auth/user.json from auth.setup.js)
+npm run verify        # interactive — pick target
+```
+
+Output includes version, WEBAPP_URL registration, TEST_DOC_ID/TEST_SHEET_ID match against
+`local.settings.json`, test token validity, and a reminder to run `npm run probe` for
+surface-level checks (sidebar, chip hover, menu).
+
+**Deployment history** — every `deploy:test` / `deploy:prod` / `push` commits `Version.js`
+with the environment tag and revision timestamp. The full deploy history is in git:
+
+```bash
+git log --format="%h %ai %s" -- src/Version.js
+```
+
+To see what version is currently live in each environment:
+
+```bash
+# What's in the git working tree right now
+grep version src/Version.js
+
+# What was at a specific commit
+git show <hash>:src/Version.js | grep version
+```
+
+The revision timestamp in the version string (e.g. `Rev. Jun 2, 2026 10:22`) is the
+moment `deploy:test` stamped the code — effectively the deploy time. GCP Marketplace SDK
+publish time is not captured automatically and must be noted manually if needed.
+
 ## Deployment Steps (one-time per environment)
 
 ### 1. Deploy the Web App
