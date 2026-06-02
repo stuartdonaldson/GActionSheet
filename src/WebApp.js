@@ -149,6 +149,24 @@ function doPost(e) {
     return _handleSetTestToken(payload);
   }
 
+  // Deployment health-check routes — called by manage-deployments.js after deploy:test.
+  if (payload.action === 'get_test_config') {
+    var props = PropertiesService.getScriptProperties();
+    return _jsonResponse({
+      testDocId:        props.getProperty('TEST_DOC_ID')          || '',
+      testSheetId:      props.getProperty('TEST_SHEET_ID')        || '',
+      gasLoggerFolderId: props.getProperty('GAS_LOGGER_FOLDER_ID') || '',
+      webappUrl:        props.getProperty('WEBAPP_URL')           || '',
+      version:          BUILD_INFO.version
+    }, 200);
+  }
+
+  if (payload.action === 'bootstrap') {
+    bootstrap();
+    GasLogger.flush();
+    return _jsonResponse({ ok: true, version: BUILD_INFO.version }, 200);
+  }
+
   var result;
   if (payload.action === 'upsert_action_rows') {
     result = _handleUpsertActionRows(payload);

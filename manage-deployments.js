@@ -145,6 +145,8 @@ async function deployToTarget(target, deployments, nonInteractive) {
 
   if (target === 'test') {
     await registerTestToken(match.deploymentId);
+    const _settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+    await verifyTestConfig(webAppUrl(match.deploymentId), _settings.webappSecret);
   }
 }
 
@@ -231,6 +233,88 @@ async function registerTestToken(deploymentId) {
   console.log(`✅ Test token registered. Expires: ${expiresAt}`);
 }
 
+/**
+ * Verifies GAS script properties match local.settings.json after a test deployment.
+ * Surfaces any drift as a diff table and offers an interactive bootstrap option.
+ *
+ * @param {string} url     WebApp URL
+ * @param {string} secret  WEBAPP_SECRET from local.settings.json
+ */
+async function verifyTestConfig(url, secret) {
+  console.log('\n🔍 Verifying test configuration...');
+
+  let remote;
+  try {
+    const resp = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ secret, action: 'get_test_config' }),
+    });
+    remote = await resp.json();
+  } catch (err) {
+    console.warn(`⚠️  Could not fetch test config: ${err.message}`);
+    return;
+  }
+
+  let settings;
+  try { settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')); }
+  catch { console.warn('⚠️  Cannot read local.settings.json — skipping config check.'); return; }
+
+  // Only check properties present in both local.settings.json and GAS script properties.
+  // GAS_LOGGER_FOLDER_ID is intentionally excluded — it's a Drive folder ID not stored
+  // in local.settings.json (local has gasLogDir, the Drive Desktop path, not the ID).
+  const checks = [
+    { label: 'TEST_DOC_ID',   remote: remote.testDocId,   local: settings.testDocId },
+    { label: 'TEST_SHEET_ID', remote: remote.testSheetId, local: settings.testSheetId },
+  ];
+
+  const drifted = checks.filter(c => c.remote !== c.local);
+
+  if (drifted.length === 0) {
+    console.log('✅ Test config verified — all properties match local.settings.json');
+    return;
+  }
+
+  console.warn('\n⚠️  Script property drift detected:\n');
+  console.warn('  Property              GAS (remote)                              local.settings.json');
+  console.warn('  ─────────────────────────────────────────────────────────────────────────────────');
+  for (const d of drifted) {
+    const r = (d.remote || '(not set)').padEnd(40);
+    const l = d.local   || '(not set)';
+    console.warn(`  ${d.label.padEnd(22)} ${r}  ${l}`);
+  }
+  console.warn('');
+  console.warn('  This can happen if a test session (beginTestSession/endTestSession) updated');
+  console.warn('  TEST_DOC_ID, or if script properties were manually changed.');
+  console.warn('  Running bootstrap will reset all properties to the values in local.settings.json.\n');
+
+  const shouldBootstrap = await confirm({
+    message: 'Run bootstrap to reset GAS properties to match local.settings.json?',
+    default: false,
+  });
+
+  if (!shouldBootstrap) {
+    console.log('  Skipped. Investigate before running tests.');
+    return;
+  }
+
+  try {
+    const bresp = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ secret, action: 'bootstrap' }),
+    });
+    const bresult = await bresp.json();
+    if (bresult.ok) {
+      console.log('✅ Bootstrap complete — GAS properties reset to canonical values.');
+    } else {
+      console.warn(`⚠️  Bootstrap returned unexpected response: ${JSON.stringify(bresult)}`);
+    }
+  } catch (err) {
+    console.warn(`⚠️  Bootstrap failed: ${err.message}`);
+  }
+}
+
 async function deployDev(nonInteractive) {
   console.log('\n🛠️  DEV push to HEAD');
   stampVersionInfo('dev', null);
@@ -254,7 +338,9 @@ async function deployDev(nonInteractive) {
   } catch { /* settings not available */ }
 
   console.log('   2. Script editor → Deploy → Test deployments → Uninstall → Install');
-  console.log('      (only needed if the sidebar panel icon is in use)\n');
+  console.log('      (only needed if the sidebar panel icon is in use)');
+  console.log('   3. Run npm run deploy:test before running the test suite');
+  console.log('      (deploy:test verifies GAS config matches local.settings.json)\n');
 }
 
 async function main() {
