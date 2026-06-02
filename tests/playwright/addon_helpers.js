@@ -8,7 +8,8 @@
  *   0  — sync.complete log entry detected within timeout
  *   1  — error (message written to stderr)
  *
- * The sidebar is opened via Extensions > Action Sync > Open.
+ * The sidebar is opened via the add-on panel icon in the Google Docs right-hand
+ * column. The icon's aria-label matches addOns.common.name in src/appsscript.json.
  * "Sync now" is clicked inside the sidebar iframe.
  * Completion is detected by polling gasLogDir for a sync.complete entry.
  */
@@ -22,6 +23,13 @@ const settings = JSON.parse(
 );
 const storageState = path.join(__dirname, '..', '..', '.auth', 'user.json');
 const gasLogDir = settings.gasLogDir;
+
+// Add-on display name — must match addOns.common.name in src/appsscript.json.
+// Google Docs uses this as the aria-label for the panel icon in the right column.
+const manifest = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'appsscript.json'), 'utf8')
+);
+const ADDON_NAME = manifest.addOns.common.name;
 
 // ---------------------------------------------------------------------------
 // Log polling
@@ -82,36 +90,11 @@ async function openDocSidebar(page, docId) {
   }
   await page.waitForSelector('.docs-title-outer', { timeout: 30000 });
 
-  // Try panel icon first (Marketplace install registers it in the right-panel column).
-  // Fall back to Extensions menu (works with direct test deployment install).
-  const panelIcon = page.locator('[aria-label="Action Sync"]').first();
-  const iconVisible = await panelIcon.isVisible().catch(() => false);
-  if (iconVisible) {
-    await panelIcon.click();
-    console.log('  openDocSidebar: opened via panel icon');
-  } else {
-    // Extensions → Action Sync → Open
-    const extMenuBtn = page.locator('#docs-extensions-menu').or(
-      page.getByRole('menuitem', { name: 'Extensions' })
-    ).or(page.locator('[aria-label="Extensions"]')).first();
-    await extMenuBtn.waitFor({ state: 'visible', timeout: 10000 });
-    await extMenuBtn.click();
-    // Add-on manifest name is "Northlake Doc Tools"
-    const addonItem = page.locator('[role="menuitem"]').filter({ hasText: 'Northlake Doc Tools' }).first();
-    await addonItem.waitFor({ timeout: 5000 });
-    // May open directly or have an "Open" submenu item
-    const hasSubmenu = await addonItem.locator('[aria-haspopup]').count() > 0;
-    if (hasSubmenu) {
-      await addonItem.hover();
-      await page.waitForTimeout(300);
-      const openItem = page.locator('[role="menuitem"]').filter({ hasText: /^Open$/ }).first();
-      await openItem.waitFor({ timeout: 5000 });
-      await openItem.click();
-    } else {
-      await addonItem.click();
-    }
-    console.log('  openDocSidebar: opened via Extensions → Northlake Doc Tools');
-  }
+  // The panel icon aria-label matches addOns.common.name in src/appsscript.json.
+  // If that name ever changes, update ADDON_NAME here or derive it dynamically.
+  const panelIcon = page.locator(`[aria-label="${ADDON_NAME}"]`).first();
+  await panelIcon.waitFor({ state: 'visible', timeout: 15000 });
+  await panelIcon.click();
 
   // Allow sidebar iframe to load — GAS cold start can take 15-20s.
   await page.waitForTimeout(5000);
