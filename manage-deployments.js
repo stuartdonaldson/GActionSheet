@@ -139,8 +139,36 @@ async function deployToTarget(target, deployments, nonInteractive) {
   console.log(`\n✅ ${label} deploy complete.`);
   console.log(`🔗 ${label} URL: ${webAppUrl(match.deploymentId)}\n`);
 
+  // Ping the deployed URL so doGet() registers WEBAPP_URL in Script Properties
+  // immediately — before any test token or other caller reads getWebAppUrl().
+  await pingWebappUrl(webAppUrl(match.deploymentId), label);
+
   if (target === 'test') {
     await registerTestToken(match.deploymentId);
+  }
+}
+
+/**
+ * Hit the WebApp's doGet endpoint to trigger WEBAPP_URL self-registration.
+ * Ensures Script Properties['WEBAPP_URL'] is set to the correct URL for this
+ * deployment immediately after push/deploy, before anything else reads it.
+ *
+ * Uses a plain unauthenticated fetch — access=ANYONE means the function runs
+ * regardless of auth; the script runs as USER_DEPLOYING.
+ *
+ * @param {string} url  The full WebApp URL to ping.
+ * @param {string} label  Human-readable label for console output.
+ */
+async function pingWebappUrl(url, label) {
+  console.log(`\n🌐 Pinging ${label} to register WEBAPP_URL...`);
+  try {
+    const resp = await fetch(url);
+    const body = await resp.text();
+    const firstLine = body.split('\n')[0].slice(0, 80);
+    console.log(`✅ WEBAPP_URL registered. Response: ${firstLine}`);
+  } catch (err) {
+    console.warn(`⚠️  Could not ping ${label} WebApp (${err.message}) — WEBAPP_URL may be stale.`);
+    console.warn(`   Run manually: curl "${url}"`);
   }
 }
 
@@ -216,8 +244,17 @@ async function deployDev(nonInteractive) {
   execSync('clasp push -f', { stdio: 'inherit' });
 
   console.log('\n✅ Push complete.');
-  console.log('\n📋 To load changes in Google Docs:');
-  console.log('   Script editor → Deploy → Test deployments → Uninstall → Install\n');
+  console.log('\n📋 To activate changes:');
+  console.log('   1. Open the /dev WebApp URL in a browser to register WEBAPP_URL:');
+
+  // Load the DEV deployment URL from local.settings.json if available
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+    if (s.webappDevUrl) console.log(`      ${s.webappDevUrl}`);
+  } catch { /* settings not available */ }
+
+  console.log('   2. Script editor → Deploy → Test deployments → Uninstall → Install');
+  console.log('      (only needed if the sidebar panel icon is in use)\n');
 }
 
 async function main() {
