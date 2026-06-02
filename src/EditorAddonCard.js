@@ -20,7 +20,7 @@
 var _ACTION_STATUSES = ['Open', 'In Progress', 'In Review', 'Done', 'Closed'];
 
 var _BRAND_NUTS_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/brand-NUTS/';
-var _ACTION_DEFAULT_IMAGE = _BRAND_NUTS_BASE + 'gactionsheet-32.png';
+var _ACTION_DEFAULT_IMAGE = _BRAND_NUTS_BASE + 'status-other.png';
 var _ACTION_STATUS_IMAGES = {
   'Open':        _BRAND_NUTS_BASE + 'status-open.png',
   'In Progress': _BRAND_NUTS_BASE + 'status-inprogress.png',

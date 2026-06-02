@@ -48,6 +48,7 @@ from tests.helpers.fixture_invoke import invoke_fixture
 from tests.helpers.sheet_inspect import load_sheet, rows_for_doc, rows_as_dicts, headers
 from tests.helpers.doc_inspect import (
     load_doc, floating_actions, tracked_actions_table, _iter_block_items,
+    verify_doc_chip_integrity,
 )
 
 
@@ -100,8 +101,14 @@ def uc_c_state(settings, test_sheet_id, test_doc_id):
     Yields a dict with keys: docx_bytes, xlsx_bytes, doc_id.
     """
     invoke_fixture("uc_c_first_insert", test_doc_id, settings)
+    assert verify_doc_chip_integrity(test_doc_id, settings) == [], \
+        "chip integrity violations after uc_c_first_insert"
     invoke_fixture("uc_c_refresh",      test_doc_id, settings)
+    assert verify_doc_chip_integrity(test_doc_id, settings) == [], \
+        "chip integrity violations after uc_c_refresh"
     invoke_fixture("uc_c_view_only",    test_doc_id, settings)
+    assert verify_doc_chip_integrity(test_doc_id, settings) == [], \
+        "chip integrity violations after uc_c_view_only"
 
     yield {
         "docx_bytes": download_docx(test_doc_id),

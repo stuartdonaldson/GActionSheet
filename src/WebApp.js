@@ -126,6 +126,9 @@ function doPost(e) {
   if (payload.action === 'verify_action_rows') {
     return _handleVerifyActionRows(payload);
   }
+  if (payload.action === 'verify_chip_integrity') {
+    return _handleVerifyChipIntegrity(payload);
+  }
   // patch_action_status and delete_action_row are production routes (WEBAPP_SECRET-gated
   // when called by the add-on). When called by the ATDD harness they arrive with a
   // testToken and snake_case field names per ContractSchema.js messages (§16.11 #3).
@@ -555,6 +558,104 @@ function _handleVerifyActionRows(payload) {
   return _jsonResponse({
     rows: _loadRowsForDocUrl(actionsSheet, docUrl)
   });
+}
+
+/**
+ * Walks every paragraph in the Docs REST JSON for the given doc.
+ * For each AI-N: paragraph checks:
+ *   1. Leading inlineObjectElement sourceUri matches a brand-NUTS status image.
+ *   2. AI-N: textRun link.url contains the expected globalId.
+ *   3. Trailing (Status) token is consistent with the icon status.
+ *
+ * Payload: { testToken, action: 'verify_chip_integrity', docId }
+ * Response: { violations: [{ paragraph, issue }] }
+ */
+function _handleVerifyChipIntegrity(payload) {
+  var docId = payload.docId || '';
+  if (!docId) return _jsonResponse({ error: 'docId required', violations: [] });
+
+  var token = ScriptApp.getOAuthToken();
+  var baseUrl = 'https://docs.googleapis.com/v1/documents/';
+
+  var resp = UrlFetchApp.fetch(
+    baseUrl + docId + '?fields=body.content(paragraph/elements(inlineObjectElement,textRun)),inlineObjects',
+    { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+  );
+  if (resp.getResponseCode() !== 200) {
+    return _jsonResponse({ error: 'Docs API error: ' + resp.getResponseCode(), violations: [] });
+  }
+
+  var doc = JSON.parse(resp.getContentText());
+  var content = (doc.body || {}).content || [];
+  var inlineObjects = doc.inlineObjects || {};
+
+  // Build reverse map: imageUrl → status label (lowercase)
+  var urlToStatus = {};
+  var statusKeys = Object.keys(_ACTION_STATUS_IMAGES);
+  for (var si = 0; si < statusKeys.length; si++) {
+    urlToStatus[_ACTION_STATUS_IMAGES[statusKeys[si]]] = statusKeys[si].toLowerCase();
+  }
+  urlToStatus[_ACTION_DEFAULT_IMAGE] = 'other'; // status-other.png = any non-standard status
+
+  var violations = [];
+
+  for (var i = 0; i < content.length; i++) {
+    var para = content[i].paragraph;
+    if (!para) continue;
+    var elements = para.elements || [];
+
+    // Build plain text from textRuns only to detect AI-N: token
+    var builtText = '';
+    for (var j = 0; j < elements.length; j++) {
+      if (elements[j].textRun) builtText += elements[j].textRun.content || '';
+    }
+    var plainText = builtText.replace(/\n$/, '');
+    var tokenMatch = plainText.match(/^AI-(\d+):\s/);
+    if (!tokenMatch) continue;
+
+    var N = tokenMatch[1];
+    var expectedGlobalId = docId + '/AI-' + N;
+
+    // Check 1: leading element must be inlineObjectElement with brand-NUTS sourceUri
+    var firstEl = elements[0] || {};
+    if (!firstEl.inlineObjectElement) {
+      violations.push({ paragraph: 'AI-' + N, issue: 'no leading inlineObjectElement' });
+      continue;
+    }
+    var inlineObjId = firstEl.inlineObjectElement.inlineObjectId || '';
+    var inlineObj = inlineObjects[inlineObjId] || {};
+    var sourceUri = (((inlineObj.inlineObjectProperties || {}).embeddedObject || {}).imageProperties || {}).sourceUri || '';
+    var iconStatus = Object.prototype.hasOwnProperty.call(urlToStatus, sourceUri) ? urlToStatus[sourceUri] : null;
+    if (iconStatus === null) {
+      violations.push({ paragraph: 'AI-' + N, issue: 'sourceUri not a brand-NUTS image: ' + sourceUri });
+    }
+
+    // Check 2: AI-N: textRun (element[1]) link.url must contain the globalId
+    var tokenEl = elements[1] || {};
+    var linkUrl = (((tokenEl.textRun || {}).textStyle || {}).link || {}).url || '';
+    var encoded = encodeURIComponent(expectedGlobalId);
+    if (!linkUrl || (linkUrl.indexOf(encoded) === -1 && linkUrl.indexOf(expectedGlobalId) === -1)) {
+      violations.push({ paragraph: 'AI-' + N, issue: 'AI-N: link.url missing globalId — got: ' + linkUrl });
+    }
+
+    // Check 3: trailing (Status) token must be consistent with icon
+    if (iconStatus !== null) {
+      var statusMatch = plainText.match(/\(([^)]*)\)\s*$/);
+      if (statusMatch) {
+        var docStatus = statusMatch[1].trim().toLowerCase();
+        if (iconStatus !== 'other' && iconStatus !== docStatus) {
+          violations.push({
+            paragraph: 'AI-' + N,
+            issue: 'icon status "' + iconStatus + '" != doc status "' + docStatus + '"'
+          });
+        }
+        // iconStatus === 'other' accepts any non-standard status (e.g. 'backlog')
+      }
+    }
+  }
+
+  GasLogger.log('verify_chip_integrity.done', { docId: docId, violations: violations.length });
+  return _jsonResponse({ violations: violations });
 }
 
 function _loadRowsForDocUrl(actionsSheet, docUrl) {

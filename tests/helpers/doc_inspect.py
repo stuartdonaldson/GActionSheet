@@ -159,3 +159,61 @@ def find_table_row(document: docx.Document, action_id: int) -> dict | None:
         if str(row.get("ID", "")) == str(action_id):
             return row
     return None
+
+
+def verify_doc_chip_integrity(doc_id: str, settings: dict) -> list[dict]:
+    """POST verify_chip_integrity to the GAS WebApp; return violations list.
+
+    Each violation is a dict with 'paragraph' (e.g. 'AI-3') and 'issue' keys.
+    Empty list means all AI-N: chips have a brand-NUTS status icon, a valid
+    globalId link, and a consistent (Status) token.
+    Raises RuntimeError on network or GAS errors.
+    """
+    import json as _json
+    import pathlib as _pathlib
+    import urllib.request as _req
+    import urllib.error as _uerr
+
+    url   = settings.get("webappTestUrl") or ""
+    token = settings.get("testToken") or ""
+    if not url:
+        raise RuntimeError("webappTestUrl not set in local.settings.json")
+
+    payload = _json.dumps({
+        "action":    "verify_chip_integrity",
+        "testToken": token,
+        "docId":     doc_id,
+    }).encode("utf-8")
+
+    headers: dict = {"Content-Type": "application/json"}
+    if url.endswith("/dev"):
+        _auth = _pathlib.Path(__file__).parent.parent.parent / ".auth" / "user.json"
+        if _auth.exists():
+            _state = _json.loads(_auth.read_text())
+            _domains = {"script.google.com", ".google.com", "accounts.google.com"}
+            _parts = [
+                f"{c['name']}={c['value']}"
+                for c in _state.get("cookies", [])
+                if any(c.get("domain", "") == d or c.get("domain", "").endswith(d)
+                       for d in _domains)
+            ]
+            if _parts:
+                headers["Cookie"] = "; ".join(_parts)
+
+    request = _req.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with _req.urlopen(request, timeout=90) as resp:
+            raw = resp.read().decode("utf-8")
+    except _uerr.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {exc.code} from verify_chip_integrity: {raw!r}") from exc
+    except _uerr.URLError as exc:
+        raise RuntimeError(f"Network error calling verify_chip_integrity: {exc.reason}") from exc
+
+    if raw in ("test-token-unauthorized", "test-token-expired"):
+        raise RuntimeError(f"GAS rejected test token for verify_chip_integrity: {raw}")
+
+    result = _json.loads(raw)
+    if "error" in result:
+        raise RuntimeError(f"GAS verify_chip_integrity error: {result['error']}")
+    return result.get("violations", [])

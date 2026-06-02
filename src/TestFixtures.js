@@ -953,6 +953,7 @@ function setupTestFixtures(scenario) {
       //   Var 5: email + "Approve the budget proposal"  (→ Open)  jane.smith@example.com
       //   Var 6: email + "Review the Q2 report"  (→ Open)         bob_jones@example.com
       //   Var 7: plain text (negative) — never appears in ActionSheet
+      //   Var 8: chip + "Prioritize the backlog items (Backlog)"  testAssigneeEmail  → status-other.png
       // -----------------------------------------------------------------------
 
       case 'uc_b_doc_wins':
@@ -990,6 +991,9 @@ function setupTestFixtures(scenario) {
         // Var 6: underscore email + action text (no status → Open)
         _tfAppendTextListItem(ucbToken, testDocId,
                               'bob_jones@example.com ' + ucbPrefix + 'Review the Q2 report');
+        // Var 8: chip + action text + non-standard status → exercises status-other.png fallback
+        _tfAppendPersonChipListItem(ucbToken, testDocId, ucbEmail,
+                                    ucbPrefix + 'Prioritize the backlog items (Backlog)');
         // Var 7: plain text (negative — no chip, no email)
         _tfAppendTextListItem(ucbToken, testDocId,
                               ucbPrefix + 'Complete the project documentation');

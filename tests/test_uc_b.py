@@ -21,6 +21,7 @@ Canonical floating action variants per scenario (base text; prefix prepended in 
   Var 5: email + "<prefix>Approve the budget proposal"  (→ Open) jane.smith@example.com
   Var 6: email + "<prefix>Review the Q2 report"  (→ Open)       bob_jones@example.com
   Var 7: plain text (negative — must never appear in ActionSheet)
+  Var 8: chip  + "<prefix>Prioritize the backlog items (Backlog)"  testAssigneeEmail  → status-other.png
 
 Tests are active; UC-B bidirectional sync is implemented (GTaskSheet-5vk).
 
@@ -39,7 +40,7 @@ import pytest
 from tests.helpers.download import download_xlsx, download_docx
 from tests.helpers.fixture_invoke import invoke_fixture
 from tests.helpers.sheet_inspect import load_sheet, rows_for_doc
-from tests.helpers.doc_inspect import load_doc, floating_actions
+from tests.helpers.doc_inspect import load_doc, floating_actions, verify_doc_chip_integrity
 
 # ---------------------------------------------------------------------------
 # Scenario prefixes — must match ucbPrefix logic in TestFixtures.js
@@ -91,12 +92,18 @@ _VAR7_ACTION_BASE = "Complete the project documentation"
 
 @pytest.fixture(scope="module")
 def uc_b_state(test_sheet_id, test_doc_id, settings):
-    invoke_fixture("uc_b_doc_wins",  test_doc_id, settings, timeout=300)
-    invoke_fixture("sync_document",  test_doc_id, settings, timeout=180)
+    invoke_fixture("uc_b_doc_wins",   test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document",   test_doc_id, settings, timeout=180)
+    assert verify_doc_chip_integrity(test_doc_id, settings) == [], \
+        "chip integrity violations after uc_b_doc_wins sync"
     invoke_fixture("uc_b_sheet_wins", test_doc_id, settings, timeout=300)
-    invoke_fixture("sync_document",  test_doc_id, settings, timeout=180)
-    invoke_fixture("uc_b_conflict",  test_doc_id, settings, timeout=300)
-    invoke_fixture("sync_document",  test_doc_id, settings, timeout=180)
+    invoke_fixture("sync_document",   test_doc_id, settings, timeout=180)
+    assert verify_doc_chip_integrity(test_doc_id, settings) == [], \
+        "chip integrity violations after uc_b_sheet_wins sync"
+    invoke_fixture("uc_b_conflict",   test_doc_id, settings, timeout=300)
+    invoke_fixture("sync_document",   test_doc_id, settings, timeout=180)
+    assert verify_doc_chip_integrity(test_doc_id, settings) == [], \
+        "chip integrity violations after uc_b_conflict sync"
     yield {
         "xlsx_bytes": download_xlsx(test_sheet_id),
         "docx_bytes": download_docx(test_doc_id),

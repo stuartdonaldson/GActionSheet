@@ -77,8 +77,9 @@ var CONTRACT_SCHEMA = Object.freeze({
     // of routeNames so production route enumeration stays clean. Gated to the test
     // token. Pre-code contract for GTaskSheet-5vwu.2; implemented by .9.
     testRouteNames: Object.freeze([
-      'edit_action_row',     // the §16.9 `edit_sheet` act
-      'find_sheet_actions'   // the §16.9 `find_sheet_actions` read query
+      'edit_action_row',       // the §16.9 `edit_sheet` act
+      'find_sheet_actions',    // the §16.9 `find_sheet_actions` read query
+      'verify_chip_integrity'  // post-sync doc chip assertion (6ov.8)
     ]),
 
     // Per-route request/response shapes + completion signals. Field names that
