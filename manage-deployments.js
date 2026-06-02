@@ -234,22 +234,57 @@ async function registerTestToken(deploymentId) {
 }
 
 /**
- * Verifies GAS script properties match local.settings.json after a test deployment.
+ * Loads cookies from a Playwright storageState file for use in authenticated requests.
+ * Returns a Cookie header string, or null if the file is missing or unreadable.
+ * Used to authenticate requests to the /dev endpoint, which requires editor access.
+ *
+ * @param {string} [authPath]  Path to storageState JSON. Defaults to .auth/user.json.
+ * @returns {string|null}
+ */
+function loadAuthCookies(authPath) {
+  const p = authPath || path.join(__dirname, '.auth', 'user.json');
+  if (!fs.existsSync(p)) return null;
+  try {
+    const state = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const now = Date.now() / 1000;
+    const cookieStr = (state.cookies || [])
+      .filter(c => c.name && c.value && (!c.expires || c.expires > now))
+      .map(c => `${c.name}=${c.value}`)
+      .join('; ');
+    return cookieStr || null;
+  } catch { return null; }
+}
+
+/**
+ * Verifies GAS script properties match local.settings.json after a deployment.
  * Surfaces any drift as a diff table and offers an interactive bootstrap option.
  *
- * @param {string} url     WebApp URL
- * @param {string} secret  WEBAPP_SECRET from local.settings.json
+ * @param {string}      url          WebApp URL (/exec for test, /dev for dev)
+ * @param {string}      secret       WEBAPP_SECRET from local.settings.json
+ * @param {Object}      [opts]
+ * @param {string|null} [opts.cookies]  Cookie header string for /dev auth (from loadAuthCookies())
+ * @param {boolean}     [opts.warnOnly] If true, skip the bootstrap prompt on drift (just warn)
  */
-async function verifyTestConfig(url, secret) {
+async function verifyTestConfig(url, secret, opts = {}) {
+  const { cookies = null, warnOnly = false } = opts;
   console.log('\n🔍 Verifying test configuration...');
+
+  const authHeaders = { 'Content-Type': 'application/json' };
+  if (cookies) authHeaders['Cookie'] = cookies;
 
   let remote;
   try {
     const resp = await fetch(url, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body:    JSON.stringify({ secret, action: 'get_test_config' }),
     });
+    // /dev with expired/missing auth returns a redirect (302) or HTML login page
+    const contentType = resp.headers.get('content-type') || '';
+    if (resp.status !== 200 || !contentType.includes('application/json')) {
+      console.warn('⚠️  Config check skipped — auth may be expired (re-run: node tests/playwright/auth.setup.js)');
+      return;
+    }
     remote = await resp.json();
   } catch (err) {
     console.warn(`⚠️  Could not fetch test config: ${err.message}`);
@@ -288,6 +323,11 @@ async function verifyTestConfig(url, secret) {
   console.warn('  TEST_DOC_ID, or if script properties were manually changed.');
   console.warn('  Running bootstrap will reset all properties to the values in local.settings.json.\n');
 
+  if (warnOnly) {
+    console.warn('  ⚠️  Run npm run deploy:test to get the interactive bootstrap prompt.\n');
+    return;
+  }
+
   const shouldBootstrap = await confirm({
     message: 'Run bootstrap to reset GAS properties to match local.settings.json?',
     default: false,
@@ -301,7 +341,7 @@ async function verifyTestConfig(url, secret) {
   try {
     const bresp = await fetch(url, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body:    JSON.stringify({ secret, action: 'bootstrap' }),
     });
     const bresult = await bresp.json();
@@ -328,10 +368,26 @@ async function deployDev(nonInteractive) {
   execSync('clasp push -f', { stdio: 'inherit' });
 
   console.log('\n✅ Push complete.');
+
+  // Verify config using /dev URL + Playwright auth cookies (warn-only — no interactive prompt).
+  // Catches drift early without requiring a full deploy:test cycle.
+  try {
+    const s      = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+    const devUrl = s.webappDevUrl;
+    const secret = s.webappSecret;
+    if (devUrl && secret) {
+      const cookies = loadAuthCookies();
+      if (cookies) {
+        await verifyTestConfig(devUrl, secret, { cookies, warnOnly: true });
+      } else {
+        console.log('  (Config check skipped — no .auth/user.json found)');
+      }
+    }
+  } catch { /* non-fatal — settings may not be available */ }
+
   console.log('\n📋 To activate changes:');
   console.log('   1. Open the /dev WebApp URL in a browser to register WEBAPP_URL:');
 
-  // Load the DEV deployment URL from local.settings.json if available
   try {
     const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
     if (s.webappDevUrl) console.log(`      ${s.webappDevUrl}`);
@@ -340,7 +396,7 @@ async function deployDev(nonInteractive) {
   console.log('   2. Script editor → Deploy → Test deployments → Uninstall → Install');
   console.log('      (only needed if the sidebar panel icon is in use)');
   console.log('   3. Run npm run deploy:test before running the test suite');
-  console.log('      (deploy:test verifies GAS config matches local.settings.json)\n');
+  console.log('      (deploy:test offers interactive bootstrap if config has drifted)\n');
 }
 
 async function main() {
