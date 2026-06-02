@@ -1760,7 +1760,8 @@ function setupTestFixtures(scenario) {
         var antColDo = antHdr.indexOf('Document');
         var antRow   = null;
         for (var anti = 1; anti < antData.length; anti++) {
-          if ((antData[anti][antColAc] || '').indexOf(antText) !== -1) {
+          if ((antData[anti][antColAc] || '').indexOf(antText) !== -1 &&
+              (antData[anti][antColId] || '').indexOf(testDocId) !== -1) {
             antRow = antData[anti];
             break;
           }

@@ -57,9 +57,12 @@ def test_ai_n_doc_id_prefix(ai_n_state):
 
 def test_ai_n_sheet_row_col1(ai_n_state):
     """AC2: Sheet col-1 (globalId) for the new row equals the returned globalId."""
-    gid  = ai_n_state["global_id"]
-    ws   = load_sheet(ai_n_state["xlsx"], sheet_name="Actions")
-    rows = [r for r in rows_as_dicts(ws) if _ACTION_TEXT in (r.get("Action") or "")]
+    gid     = ai_n_state["global_id"]
+    doc_id  = ai_n_state["doc_id"]
+    ws      = load_sheet(ai_n_state["xlsx"], sheet_name="Actions")
+    rows    = [r for r in rows_as_dicts(ws)
+               if _ACTION_TEXT in (r.get("Action") or "")
+               and doc_id in (r.get("Document") or "")]
 
     assert rows, (
         f"[sjj AC2] No sheet row found with action text {_ACTION_TEXT!r} — "

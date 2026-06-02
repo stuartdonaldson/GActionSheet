@@ -239,18 +239,18 @@ def test_find_sheet_actions_empty_rows(monkeypatch):
 
 
 def test_verify_consistency_posts_verify_route(monkeypatch):
-    captured = {}
+    calls = []
 
     def fake_http(url, payload, timeout=360):
-        captured.update(payload)
-        return {"ok": True, "consistent": True}
+        calls.append(payload.get("action"))
+        return {"ok": True, "consistent": True, "violations": []}
 
     _patch_http(monkeypatch, fake_http)
     scn = _make_session()
     result = scn.verify_consistency()
 
-    assert captured["action"] == "verify_action_rows"
-    assert captured["docId"] == DOC_ID
+    assert "verify_action_rows" in calls
+    assert "verify_chip_integrity" in calls
     assert result["ok"] is True
 
 
