@@ -29,7 +29,10 @@ module.exports = defineConfig({
   use: {
     baseURL: getSheetUrl(),
     headless: process.env.PWHEADFUL !== '1',
-    storageState: path.join(__dirname, '..', '..', '.auth', 'user.json'),
+    // Override with PROBE_AUTH_STATE env var to run as a different account.
+    storageState: process.env.PROBE_AUTH_STATE
+      ? path.resolve(process.cwd(), process.env.PROBE_AUTH_STATE)
+      : path.join(__dirname, '..', '..', '.auth', 'user.json'),
     viewport: { width: 1280, height: 900 },
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

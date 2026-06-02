@@ -30,7 +30,10 @@ function doGet(e) {
   GasLogger.log('webapp.doGet', { url: url, urlStatus: urlStatus, version: BUILD_INFO.version });
   GasLogger.flush();
 
-  // [PROBE]
+  // [PROBE] — note: hitting this URL also updates WEBAPP_URL (above) as a side effect.
+  // Since getWebAppUrl() checks BUILD_INFO.webappUrl first, this only affects DEV context
+  // where BUILD_INFO.webappUrl is empty. Test ordering (doGet.dev then doGet.test) leaves
+  // WEBAPP_URL = /exec by the time any sync runs, so impact is contained.
   var _probeRun     = (e && e.parameter && e.parameter.probe_run)     || '';
   var _probeSurface = (e && e.parameter && e.parameter.probe_surface) || 'doGet';
   PROBE_setRunId(_probeRun);
