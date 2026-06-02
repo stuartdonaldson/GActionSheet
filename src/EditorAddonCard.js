@@ -60,9 +60,12 @@ function onLinkPreview(e) { // eslint-disable-line no-unused-vars
     globalId:   _globalIdFromChipUrl(url)
   });
   try {
-    return _buildPreviewCard(url);
+    var card = _buildPreviewCard(url);
+    GasLogger.flush();
+    return card;
   } catch (err) {
     GasLogger.log('LINK_PREVIEW.error', { msg: String(err) });
+    GasLogger.flush();
     return _buildMessageCard('Preview error', 'Could not load action preview. Please report this to your administrator.\n\n' + String(err));
   }
 }
