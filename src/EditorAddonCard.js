@@ -53,6 +53,12 @@ function createActionTrigger(e) { // eslint-disable-line no-unused-vars
 function onLinkPreview(e) { // eslint-disable-line no-unused-vars
   var url = (e && e.docs && e.docs.matchedUrl && e.docs.matchedUrl.url) || '';
   GasLogger.log('LINK_PREVIEW', { url: url, version: BUILD_INFO.version });
+
+  // [PROBE]
+  PROBE_log('chipHover.' + PROBE_docState(DocumentApp.getActiveDocument()), {
+    matchedUrl: url,
+    globalId:   _globalIdFromChipUrl(url)
+  });
   try {
     return _buildPreviewCard(url);
   } catch (err) {
@@ -294,6 +300,17 @@ function _addPeopleSuggestions(suggestions, people, query) {
 }
 
 /**
+ * Extracts the globalId from a chip URL.
+ * Supports ?c=view&globalId=<encoded> (current) and legacy path-suffix form.
+ */
+function _globalIdFromChipUrl(url) {
+  var m = url.match(/[?&]globalId=([^&]+)/);
+  if (m) return decodeURIComponent(m[1]);
+  // Legacy: https://…/NUTS/action/{globalId}
+  return url.replace(ACTION_CHIP_URL_BASE + '/', '').replace(ACTION_CHIP_URL_BASE, '');
+}
+
+/**
  * Builds the smart-chip hover preview card for an action URL.
  * Looks up the action in the ActionSheet by globalId.
  *
@@ -301,7 +318,7 @@ function _addPeopleSuggestions(suggestions, people, query) {
  * @returns {GoogleAppsScript.Card_Service.Card}
  */
 function _buildPreviewCard(url, statusOverride) {
-  var globalId  = url.replace(ACTION_CHIP_URL_BASE, '');
+  var globalId  = _globalIdFromChipUrl(url);
   var actionId  = parseGlobalId(globalId).actionId;
   GasLogger.log('PREVIEW_CARD.lookup', { globalId: globalId, actionId: actionId });
   var doc      = DocumentApp.getActiveDocument();
@@ -399,7 +416,7 @@ function _setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
   var url       = (e && e.parameters && e.parameters.url)       || '';
   var newStatus = (e && e.parameters && e.parameters.newStatus) || 'Open';
 
-  var globalId = url.replace(ACTION_CHIP_URL_BASE, '');
+  var globalId = _globalIdFromChipUrl(url);
   var N        = parseGlobalId(globalId).N || 0;
 
   // Use getActiveDocument() (already loaded, no network) instead of openById
@@ -647,7 +664,7 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
   var paraText = cursorPara.getText();
 
   var docId   = doc.getId();
-  var chipUrl = ACTION_CHIP_URL_BASE + globalId;
+  var chipUrl = ACTION_CHIP_URL_BASE + '?c=view&globalId=' + encodeURIComponent(globalId);
   var imgUrl  = _ACTION_STATUS_IMAGES[status] || _ACTION_DEFAULT_IMAGE;
   var token   = ScriptApp.getOAuthToken();
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';

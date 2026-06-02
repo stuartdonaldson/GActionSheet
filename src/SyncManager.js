@@ -28,7 +28,7 @@
  * (`NUTS/action`) in appsscript.json must be kept in sync with this value by
  * hand — the manifest cannot read script globals.
  */
-var ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUTS/action/';
+var ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUTS/action';
 
 // ---------------------------------------------------------------------------
 // Public entry points
@@ -814,7 +814,7 @@ function _chipBadgeStyleRequest(startIndex, endIndex) {
  */
 function _flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail, assigneeName) {
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
-  var chipUrl = ACTION_CHIP_URL_BASE + globalId;
+  var chipUrl = ACTION_CHIP_URL_BASE + '?c=view&globalId=' + encodeURIComponent(globalId);
   // Docs REST API insertInlineImage does not support SVG — use PNG until PNG status icons exist.
   var imgUrl = 'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
 

@@ -1,0 +1,13 @@
+PROBE responses — runId: 7fb4a13c-4a5a-450f-8d02-cd3e4a783aed
+Date: 2026-06-02T05:30:10.109Z
+DEV_URL:  https://script.google.com/macros/s/AKfycbyeJ17mneRRCILErvxkNEJo6pojFQS01YrHGNYClfA/dev
+TEST_URL: https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec
+
+--- doPost.dev authed (HTTP 200) ---
+{"probe":"ok","version":"v0.2.0 (Rev. Jun 1, 2026 22:28) (TEST)","serverVersion":"v0.2.0 (Rev. Jun 1, 2026 22:28) (TEST)"}
+
+--- doPost.test authed (HTTP 200) ---
+{"probe":"ok","version":"v0.2.0 (Rev. Jun 1, 2026 22:28) (TEST)","serverVersion":"v0.2.0 (Rev. Jun 1, 2026 22:28) (TEST)"}
+
+--- sidebar ERROR (HTTP 0) ---
+Action Sync side-panel icon was not available

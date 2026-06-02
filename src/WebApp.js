@@ -30,11 +30,27 @@ function doGet(e) {
   GasLogger.log('webapp.doGet', { url: url, urlStatus: urlStatus, version: BUILD_INFO.version });
   GasLogger.flush();
 
+  // [PROBE]
+  var _probeRun     = (e && e.parameter && e.parameter.probe_run)     || '';
+  var _probeSurface = (e && e.parameter && e.parameter.probe_surface) || 'doGet';
+  PROBE_setRunId(_probeRun);
+  PROBE_log(_probeSurface, {
+    queryString: (e && e.queryString)  || '',
+    parameter:   JSON.stringify((e && e.parameter) || {}),
+    pathInfo:    (e && e.pathInfo)     || ''
+  });
+
+  var params = (e && e.parameter) ? JSON.stringify(e.parameter) : '{}';
   return ContentService.createTextOutput(
     'GActionSheet ' + BUILD_INFO.version + '\n' +
-    'Build:   ' + BUILD_INFO.buildDate + '\n' +
-    'WebApp:  ' + url + '\n' +
-    'URL:     ' + urlStatus
+    'Build:      ' + BUILD_INFO.buildDate + '\n' +
+    'WebApp:     ' + url + '\n' +
+    'URL:        ' + urlStatus + '\n' +
+    '\n--- Request ---\n' +
+    'queryString:   ' + ((e && e.queryString)  || '(none)') + '\n' +
+    'parameter:     ' + params + '\n' +
+    'pathInfo:      ' + ((e && e.pathInfo)     || '(none)') + '\n' +
+    'contentLength: ' + ((e && e.contentLength != null) ? e.contentLength : '-1')
   );
 }
 
@@ -44,6 +60,16 @@ function doPost(e) {
     payload = JSON.parse(e.postData.contents);
   } catch (ex) {
     return _jsonResponse({ error: 'bad JSON' }, 200);
+  }
+
+  // [PROBE] — gated only on probe_run presence; bypasses secret gate intentionally.
+  if (payload.action === 'probe' && payload.probe_run) {
+    PROBE_setRunId(payload.probe_run);
+    PROBE_log(payload.probe_surface || 'doPost', {
+      action:        'probe',
+      senderVersion: payload.probe_version || ''
+    });
+    return _jsonResponse({ probe: 'ok', version: BUILD_INFO.version }, 200);
   }
 
   // Test-token-gated routes — authenticated by per-deployment TEST_TOKEN, not WEBAPP_SECRET.

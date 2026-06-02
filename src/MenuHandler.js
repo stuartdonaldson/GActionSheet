@@ -6,6 +6,15 @@
  */
 
 function onOpen() {
+  // [PROBE] — simple trigger: authorized services unavailable; Logger only.
+  if (PROBE_ENABLED) {
+    Logger.log(JSON.stringify({
+      tag:     'PROBE.onOpen',
+      version: BUILD_INFO.version,
+      ts:      new Date().toISOString()
+    }));
+  }
+
   // onOpen is a Sheets simple trigger. When this script also runs as a Docs/
   // Slides/Forms add-on, SpreadsheetApp.getUi() is not available in that
   // context. getActiveSpreadsheet() returns null rather than throwing, so
@@ -50,6 +59,7 @@ function menuBootstrap() {
 }
 
 function menuSync() {
+  PROBE_log('menu', { menuItem: 'menuSync' }); // [PROBE]
   syncAll();
 }
 

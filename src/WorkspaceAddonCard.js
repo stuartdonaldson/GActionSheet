@@ -22,6 +22,9 @@ function buildHomepageCard(eventOrVerificationResult, opts) {
 
   try {
     var doc = _resolveActiveDocForRead(DocumentApp.getActiveDocument());
+
+    // [PROBE]
+    PROBE_log('sidebar.' + PROBE_docState(doc), { docId: doc ? doc.getId() : '' });
     var card = CardService.newCardBuilder()
       .setHeader(_buildHomepageHeader(doc));
 
