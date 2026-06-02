@@ -71,9 +71,12 @@ def test_b7_write_routes(scn):
     _pin_ids(scn, [target_edit, target_status, target_delete])
 
     # AC2 (sjj): verify the auto-assigned globalIds match the expected format {docId}/AI-{N}
+    # action_id holds only the AI-N suffix; the session assembles the full globalId as
+    # "{doc_id}/{action_id}" when addressing write routes (§16.11 #3).
     for label, a in [("edit", target_edit), ("status", target_status), ("delete", target_delete)]:
-        assert _GLOBAL_ID_RE.match(a.action_id or ""), (
-            f"[B7 AC2] {label} action_id globalId format invalid: {a.action_id!r} "
+        assembled = f"{scn.doc_id}/{a.action_id or ''}"
+        assert _GLOBAL_ID_RE.match(assembled), (
+            f"[B7 AC2] {label} assembled globalId format invalid: {assembled!r} "
             "(expected '{docId}/AI-{N}')"
         )
 
