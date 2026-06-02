@@ -82,12 +82,35 @@ async function openDocSidebar(page, docId) {
   }
   await page.waitForSelector('.docs-title-outer', { timeout: 30000 });
 
+  // Try panel icon first (Marketplace install registers it in the right-panel column).
+  // Fall back to Extensions menu (works with direct test deployment install).
   const panelIcon = page.locator('[aria-label="Action Sync"]').first();
-  try {
-    await panelIcon.waitFor({ state: 'visible', timeout: 15000 });
+  const iconVisible = await panelIcon.isVisible().catch(() => false);
+  if (iconVisible) {
     await panelIcon.click();
-  } catch {
-    throw new Error('Action Sync side-panel icon was not available');
+    console.log('  openDocSidebar: opened via panel icon');
+  } else {
+    // Extensions → Action Sync → Open
+    const extMenuBtn = page.locator('#docs-extensions-menu').or(
+      page.getByRole('menuitem', { name: 'Extensions' })
+    ).or(page.locator('[aria-label="Extensions"]')).first();
+    await extMenuBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await extMenuBtn.click();
+    // Add-on manifest name is "Northlake Doc Tools"
+    const addonItem = page.locator('[role="menuitem"]').filter({ hasText: 'Northlake Doc Tools' }).first();
+    await addonItem.waitFor({ timeout: 5000 });
+    // May open directly or have an "Open" submenu item
+    const hasSubmenu = await addonItem.locator('[aria-haspopup]').count() > 0;
+    if (hasSubmenu) {
+      await addonItem.hover();
+      await page.waitForTimeout(300);
+      const openItem = page.locator('[role="menuitem"]').filter({ hasText: /^Open$/ }).first();
+      await openItem.waitFor({ timeout: 5000 });
+      await openItem.click();
+    } else {
+      await addonItem.click();
+    }
+    console.log('  openDocSidebar: opened via Extensions → Northlake Doc Tools');
   }
 
   // Allow sidebar iframe to load — GAS cold start can take 15-20s.
