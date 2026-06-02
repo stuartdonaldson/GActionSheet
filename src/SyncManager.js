@@ -235,10 +235,8 @@ function syncDocument(docId) {
  *   - 30-minute time-based trigger
  */
 function syncAll() {
-  var _syncEu = ''; var _syncAu = '';
-  try { _syncEu = Session.getEffectiveUser().getEmail(); } catch (_) {}
-  try { _syncAu = Session.getActiveUser().getEmail();    } catch (_) {}
-  GasLogger.log('sync.all.start.identity', { eu: _syncEu, au: _syncAu, version: BUILD_INFO.version });
+  var _syncId = _getIdentity();
+  GasLogger.log('sync.all.start.identity', { eu: _syncId.eu, au: _syncId.au, version: BUILD_INFO.version });
   try {
     var ss           = SpreadsheetApp.getActiveSpreadsheet();
     var actionsSheet = ss.getSheetByName('Actions');
@@ -633,6 +631,7 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
       secret:             secret || '',
       action:             'sync_action_rows',
       clientVersion:      BUILD_INFO.version,
+      caller:             _getIdentity(),
       docUrl:             docUrl,
       docTitle:           docTitle,
       docId:              docId || '',
@@ -680,7 +679,8 @@ function _markDocNotFound(docId) {
       secret:        secret || '',
       action:        'mark_doc_not_found',
       clientVersion: BUILD_INFO.version,
-      docId:  docId
+      caller:        _getIdentity(),
+      docId:         docId
     })
   });
   GasLogger.flush();

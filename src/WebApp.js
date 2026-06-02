@@ -8,6 +8,23 @@
  * (which runs as the active user) can write to the restricted ActionSheet.
  */
 
+/**
+ * Returns the effective and active user emails for the current execution context.
+ * Safe to call from any surface — catches and ignores unavailable identity APIs
+ * (e.g. simple triggers where Session is restricted).
+ *
+ * On WebApp surfaces (doGet/doPost): eu = deployer, au = caller.
+ * On add-on trigger surfaces (sidebar, chipHover, menu): eu = au = active user.
+ *
+ * @returns {{ eu: string, au: string }}
+ */
+function _getIdentity() {
+  var eu = ''; var au = '';
+  try { eu = Session.getEffectiveUser().getEmail(); } catch (_) {}
+  try { au = Session.getActiveUser().getEmail();    } catch (_) {}
+  return { eu: eu, au: au, version: BUILD_INFO.version };
+}
+
 function doGet(e) {
   var url = ScriptApp.getService().getUrl();
   // Normalize org-specific URL to the canonical form stored in script properties
@@ -64,6 +81,17 @@ function doPost(e) {
   } catch (ex) {
     return _jsonResponse({ error: 'bad JSON' }, 200);
   }
+
+  // Log identity and caller context for every request so errors can be
+  // attributed to a specific user and surface without needing PROBE.
+  var _id = _getIdentity();
+  GasLogger.log('webapp.request', {
+    action:  payload.action || '(unknown)',
+    eu:      _id.eu,
+    au:      _id.au,
+    caller:  payload.caller || {},
+    version: BUILD_INFO.version
+  });
 
   // [PROBE] — gated only on probe_run presence; bypasses secret gate intentionally.
   if (payload.action === 'probe' && payload.probe_run) {

@@ -52,10 +52,8 @@ function createActionTrigger(e) { // eslint-disable-line no-unused-vars
  */
 function onLinkPreview(e) { // eslint-disable-line no-unused-vars
   var url = (e && e.docs && e.docs.matchedUrl && e.docs.matchedUrl.url) || '';
-  var _eu = ''; var _au = '';
-  try { _eu = Session.getEffectiveUser().getEmail(); } catch (_) {}
-  try { _au = Session.getActiveUser().getEmail();    } catch (_) {}
-  GasLogger.log('LINK_PREVIEW', { url: url, version: BUILD_INFO.version, eu: _eu, au: _au });
+  var _id = _getIdentity();
+  GasLogger.log('LINK_PREVIEW', { url: url, version: BUILD_INFO.version, eu: _id.eu, au: _id.au });
 
   // [PROBE]
   PROBE_log('chipHover.' + PROBE_docState(DocumentApp.getActiveDocument()), {
@@ -67,7 +65,7 @@ function onLinkPreview(e) { // eslint-disable-line no-unused-vars
     GasLogger.flush();
     return card;
   } catch (err) {
-    GasLogger.log('LINK_PREVIEW.error', { msg: String(err), eu: _eu, au: _au });
+    GasLogger.log('LINK_PREVIEW.error', { msg: String(err), eu: _id.eu, au: _id.au });
     GasLogger.flush();
     return _buildMessageCard('Preview error', 'Could not load action preview. Please report this to your administrator.\n\n' + String(err));
   }
@@ -824,6 +822,7 @@ function _callWebApp(action, payload) {
   payload.action         = action;
   payload.secret         = secret || '';
   payload.clientVersion  = BUILD_INFO.version;
+  payload.caller         = _getIdentity();
 
   var resp = UrlFetchApp.fetch(webAppUrl, {
     method:             'post',

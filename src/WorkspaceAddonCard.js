@@ -617,6 +617,7 @@ function _patchActionStatus(globalId, newStatus) {
       secret:        secret || '',
       action:        'patch_action_status',
       clientVersion: BUILD_INFO.version,
+      caller:        _getIdentity(),
       globalId:      globalId,
       newStatus:     newStatus
     })
@@ -649,6 +650,7 @@ function _deleteActionRowFromSheet(globalId) {
       secret:        secret || '',
       action:        'delete_action_row',
       clientVersion: BUILD_INFO.version,
+      caller:        _getIdentity(),
       globalId:      globalId
     })
   });
