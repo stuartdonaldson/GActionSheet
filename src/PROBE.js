@@ -11,7 +11,7 @@
  * See staging/probe-deployment-identity-spec.md for full protocol.
  */
 
-var PROBE_ENABLED = true;
+var PROBE_ENABLED = false;
 var PROBE_RUN_ID_KEY = 'PROBE_RUN_ID';
 
 /**
