@@ -52,7 +52,10 @@ function createActionTrigger(e) { // eslint-disable-line no-unused-vars
  */
 function onLinkPreview(e) { // eslint-disable-line no-unused-vars
   var url = (e && e.docs && e.docs.matchedUrl && e.docs.matchedUrl.url) || '';
-  GasLogger.log('LINK_PREVIEW', { url: url, version: BUILD_INFO.version });
+  var _eu = ''; var _au = '';
+  try { _eu = Session.getEffectiveUser().getEmail(); } catch (_) {}
+  try { _au = Session.getActiveUser().getEmail();    } catch (_) {}
+  GasLogger.log('LINK_PREVIEW', { url: url, version: BUILD_INFO.version, eu: _eu, au: _au });
 
   // [PROBE]
   PROBE_log('chipHover.' + PROBE_docState(DocumentApp.getActiveDocument()), {
@@ -64,7 +67,7 @@ function onLinkPreview(e) { // eslint-disable-line no-unused-vars
     GasLogger.flush();
     return card;
   } catch (err) {
-    GasLogger.log('LINK_PREVIEW.error', { msg: String(err) });
+    GasLogger.log('LINK_PREVIEW.error', { msg: String(err), eu: _eu, au: _au });
     GasLogger.flush();
     return _buildMessageCard('Preview error', 'Could not load action preview. Please report this to your administrator.\n\n' + String(err));
   }
@@ -309,7 +312,7 @@ function _addPeopleSuggestions(suggestions, people, query) {
 function _globalIdFromChipUrl(url) {
   var m = url.match(/[?&]globalId=([^&]+)/);
   if (m) return decodeURIComponent(m[1]);
-  // Legacy: https://…/NUTS/action/{globalId}
+  // Legacy: https://…/NUTS/action/{globalId} (path-based, pre query-param format)
   return url.replace(ACTION_CHIP_URL_BASE + '/', '').replace(ACTION_CHIP_URL_BASE, '');
 }
 

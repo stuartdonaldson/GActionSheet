@@ -21,11 +21,13 @@ Adopt **Northlake Unitarian Tool Suite (NUTS)** as the internal umbrella name an
 suite tool URLs under `https://northlakeuu.org/NUTS/<tool>/…` — one host, one `pathPrefix` per
 tool, so each tool registers a distinct `linkPreview` (and future `@`-menu) pattern.
 
-- The action tool uses `NUTS/action`; the chip link base is
-  `https://northlakeuu.org/NUTS/action/{globalId}`, defined once as `ACTION_CHIP_URL_BASE`
-  (`SyncManager.js`). The `appsscript.json` `linkPreview` `hostPattern` (`northlakeuu.org`) /
-  `pathPrefix` (`NUTS/action`) is hand-synced to it — the manifest cannot read script globals.
-- Sibling tools take sibling paths, e.g. `NUTS/llm`.
+- The action chip URL base is `https://northlakeuu.org/NUTS/action`, defined as
+  `ACTION_CHIP_URL_BASE` (`SyncManager.js`). The `appsscript.json` `linkPreview`
+  `hostPattern` (`northlakeuu.org`) / `pathPrefix` (`NUTS` — the suite root) is
+  hand-synced — the manifest cannot read script globals.
+- The `pathPrefix` is `NUTS` (not `NUTS/action`) so that Google's URL validation
+  succeeds for the action chip URL and all future sibling tools with one pattern.
+- Sibling tools take sibling paths under `NUTS/`, e.g. `NUTS/llm`.
 - `NUTS` is the preferred top-level scoping prefix for any suite-wide identifier; `GActionSheet`
   continues to denote the action tool specifically.
 
@@ -43,6 +45,11 @@ tool, so each tool registers a distinct `linkPreview` (and future `@`-menu) patt
 - **Refines ADR-0008 §Consequences "Single-tenant chip URL":** the chip link path changes from
   `…/GActionSheet/action/{globalId}` to `…/NUTS/action/{globalId}`. ADR-0008's identity decision
   (the in-text `AI-N:` token and `globalId` key) is unchanged and not superseded.
+- **pathPrefix amendment (2026-06-02):** changed from `NUTS/action` to `NUTS`. Root cause:
+  Google validates the chip URL (fetches it) before calling `onLinkPreview`; a narrower prefix
+  that points at a redirect to an auth-gated endpoint causes a system error for non-editor users.
+  The suite-root prefix `NUTS` is broader, leaves room for sibling tools, and the northlakeuu.org
+  redirect at `/NUTS/action` points to the `/exec` deployment (publicly accessible).
 - **Migration:** chips inserted under the old `GActionSheet/action` path stop firing
   `onLinkPreview` until re-flushed; a sync rewrites each chip to the new `NUTS/action` URL.
   Acceptable pre-production — no live deployment yet (GTaskSheet-erc). The manifest change takes

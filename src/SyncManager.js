@@ -19,14 +19,16 @@
  * (TrackerTable).
  *
  * Path is namespaced under `NUTS/` — the suite-level scope (Northlake Unitarian
- * Tool Suite). `NUTS/action` is this tool; future tools take sibling paths (e.g.
- * `NUTS/llm` for an @-menu LLM trigger), so each tool gets a distinct linkPreview
- * pattern under one host. See knowledge-base/ROADMAP.md for the planned
- * multi-tenant form `…/action/{sheetId}/{globalId}`.
+ * Tool Suite). The action chip URL lives at `NUTS/action`; future tools take
+ * sibling paths (e.g. `NUTS/llm` for an @-menu LLM trigger).
  *
- * NOTE: the linkPreview `hostPattern` (`northlakeuu.org`) / `pathPrefix`
- * (`NUTS/action`) in appsscript.json must be kept in sync with this value by
- * hand — the manifest cannot read script globals.
+ * The linkPreview `pathPrefix` in appsscript.json is `NUTS` (the suite root),
+ * so any northlakeuu.org/NUTS/... URL triggers the preview. The redirect at
+ * northlakeuu.org/NUTS/action → the /exec deployment must point to /exec (not
+ * /dev) so Google's URL validation fetch succeeds for non-editor users.
+ *
+ * NOTE: `hostPattern` (`northlakeuu.org`) in appsscript.json must be kept in
+ * sync manually — the manifest cannot read script globals.
  */
 var ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUTS/action';
 
@@ -233,11 +235,15 @@ function syncDocument(docId) {
  *   - 30-minute time-based trigger
  */
 function syncAll() {
+  var _syncEu = ''; var _syncAu = '';
+  try { _syncEu = Session.getEffectiveUser().getEmail(); } catch (_) {}
+  try { _syncAu = Session.getActiveUser().getEmail();    } catch (_) {}
+  GasLogger.log('sync.all.start.identity', { eu: _syncEu, au: _syncAu, version: BUILD_INFO.version });
   try {
     var ss           = SpreadsheetApp.getActiveSpreadsheet();
     var actionsSheet = ss.getSheetByName('Actions');
     if (!actionsSheet) {
-      GasLogger.log('sync.all.error', { msg: 'Actions sheet not found' });
+      GasLogger.log('sync.all.error', { msg: 'Actions sheet not found', eu: _syncEu, au: _syncAu });
       return;
     }
 
