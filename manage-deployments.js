@@ -7,6 +7,10 @@
  *   npm run push                 # stamp (DEV) + push to HEAD
  *   npm run deploy:test          # stamp (TEST) + URL + redeploy TEST-WEB-APP
  *   npm run deploy:prod          # stamp URL + redeploy PROD-WEB-APP
+ *   npm run verify               # interactive config verification (pick target)
+ *   npm run verify:dev           # verify DEV deployment
+ *   npm run verify:test          # verify TEST deployment
+ *   npm run verify:prod          # verify PROD deployment
  *   npm run manage-deployments   # interactive menu (all targets + list/archive)
  *
  * ONE-TIME SETUP
@@ -145,8 +149,7 @@ async function deployToTarget(target, deployments, nonInteractive) {
 
   if (target === 'test') {
     await registerTestToken(match.deploymentId);
-    const _settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
-    await verifyTestConfig(webAppUrl(match.deploymentId), _settings.webappSecret);
+    await verifyConfig('test');
   }
 }
 
@@ -256,103 +259,163 @@ function loadAuthCookies(authPath) {
 }
 
 /**
- * Verifies GAS script properties match local.settings.json after a deployment.
- * Surfaces any drift as a diff table and offers an interactive bootstrap option.
+ * Verifies a deployment end-to-end: health, version, WEBAPP_URL registration,
+ * script property config, and (for test) token validity. Surfaces drift and
+ * offers an interactive bootstrap when config properties are out of sync.
  *
- * @param {string}      url          WebApp URL (/exec for test, /dev for dev)
- * @param {string}      secret       WEBAPP_SECRET from local.settings.json
- * @param {Object}      [opts]
- * @param {string|null} [opts.cookies]  Cookie header string for /dev auth (from loadAuthCookies())
- * @param {boolean}     [opts.warnOnly] If true, skip the bootstrap prompt on drift (just warn)
+ * Can be called from the deploy pipeline or independently via:
+ *   npm run verify:dev | verify:test | verify:prod
+ *
+ * @param {'dev'|'test'|'prod'} target
+ * @param {Object} [opts]
+ * @param {boolean} [opts.warnOnly]  Suppress interactive bootstrap prompt (just warn).
  */
-async function verifyTestConfig(url, secret, opts = {}) {
-  const { cookies = null, warnOnly = false } = opts;
-  console.log('\n🔍 Verifying test configuration...');
+async function verifyConfig(target, opts = {}) {
+  const { warnOnly = false } = opts;
+
+  let settings;
+  try { settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')); }
+  catch { console.error('❌ Cannot read local.settings.json'); return; }
+
+  if (target === 'prod') {
+    console.log('\n⚠️  PROD has not been deployed with current code.');
+    console.log('   Run npm run deploy:prod first, then verify:prod will be meaningful.\n');
+    return;
+  }
+
+  const urlMap = { dev: settings.webappDevUrl, test: settings.webappTestUrl };
+  const url    = urlMap[target];
+  const secret = settings.webappSecret;
+
+  if (!url) { console.error(`❌ No URL for target "${target}" in local.settings.json`); return; }
+  if (!secret) { console.error('❌ webappSecret not set in local.settings.json'); return; }
+
+  const label = target.toUpperCase();
+  console.log(`\n🔍 Verifying ${label} deployment`);
+  console.log(`   URL: ${url}\n`);
 
   const authHeaders = { 'Content-Type': 'application/json' };
-  if (cookies) authHeaders['Cookie'] = cookies;
+
+  // ── DEV: /dev blocks unauthenticated requests — use cookie auth for everything ──
+
+  if (target === 'dev') {
+    const cookies = loadAuthCookies();
+    if (!cookies) {
+      console.log('  ⚠️  Skipped — no .auth/user.json  (run: node tests/playwright/auth.setup.js)');
+      _printSurfaceHint(target);
+      return;
+    }
+    authHeaders['Cookie'] = cookies;
+  }
+
+  // ── Level 1: Health check ──────────────────────────────────────────────────
+  // For TEST: unauthenticated GET (access=ANYONE, returns plain-text response).
+  // For DEV:  skip plain GET (blocked without auth); health confirmed by config POST below.
+
+  let remoteVersion = '', remoteWebappUrl = '';
+  if (target === 'test') {
+    try {
+      const resp = await fetch(url);
+      const body = await resp.text();
+      console.log(resp.status === 200 ? '  ✅ WebApp responds (200 OK)' : `  ❌ WebApp unhealthy — HTTP ${resp.status}`);
+      const vLine = body.split('\n').find(l => l.startsWith('GActionSheet'));
+      remoteVersion   = vLine ? vLine.replace('GActionSheet ', '').trim() : '';
+      const wLine = body.split('\n').find(l => l.startsWith('WebApp:'));
+      remoteWebappUrl = wLine ? wLine.replace('WebApp:', '').trim() : '';
+      if (remoteVersion)   console.log(`  ✅ Version:   ${remoteVersion}`);
+      if (remoteWebappUrl) {
+        const deployId = url.split('/macros/s/')[1]?.split('/')[0] || '';
+        console.log(`  ${deployId && remoteWebappUrl.includes(deployId) ? '✅' : '⚠️ '} WEBAPP_URL: ${remoteWebappUrl}`);
+      }
+    } catch (err) { console.log(`  ❌ WebApp unreachable: ${err.message}`); }
+  }
+
+  // ── Level 2: Config check (WEBAPP_SECRET POST) ────────────────────────────
 
   let remote;
   try {
     const resp = await fetch(url, {
-      method:  'POST',
-      headers: authHeaders,
-      body:    JSON.stringify({ secret, action: 'get_test_config' }),
+      method: 'POST', headers: authHeaders,
+      body: JSON.stringify({ secret, action: 'get_test_config' }),
     });
-    // /dev with expired/missing auth returns a redirect (302) or HTML login page
-    const contentType = resp.headers.get('content-type') || '';
-    if (resp.status !== 200 || !contentType.includes('application/json')) {
-      console.warn('⚠️  Config check skipped — auth may be expired (re-run: node tests/playwright/auth.setup.js)');
+    const ct = resp.headers.get('content-type') || '';
+    if (resp.status !== 200 || !ct.includes('application/json')) {
+      const hint = target === 'dev'
+        ? 'auth may be expired — re-run: node tests/playwright/auth.setup.js'
+        : `unexpected response (HTTP ${resp.status})`;
+      console.log(`  ⚠️  Config check skipped — ${hint}`);
+      _printSurfaceHint(target);
       return;
     }
     remote = await resp.json();
-  } catch (err) {
-    console.warn(`⚠️  Could not fetch test config: ${err.message}`);
-    return;
-  }
-
-  let settings;
-  try { settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')); }
-  catch { console.warn('⚠️  Cannot read local.settings.json — skipping config check.'); return; }
-
-  // Only check properties present in both local.settings.json and GAS script properties.
-  // GAS_LOGGER_FOLDER_ID is intentionally excluded — it's a Drive folder ID not stored
-  // in local.settings.json (local has gasLogDir, the Drive Desktop path, not the ID).
-  const checks = [
-    { label: 'TEST_DOC_ID',   remote: remote.testDocId,   local: settings.testDocId },
-    { label: 'TEST_SHEET_ID', remote: remote.testSheetId, local: settings.testSheetId },
-  ];
-
-  const drifted = checks.filter(c => c.remote !== c.local);
-
-  if (drifted.length === 0) {
-    console.log('✅ Test config verified — all properties match local.settings.json');
-    return;
-  }
-
-  console.warn('\n⚠️  Script property drift detected:\n');
-  console.warn('  Property              GAS (remote)                              local.settings.json');
-  console.warn('  ─────────────────────────────────────────────────────────────────────────────────');
-  for (const d of drifted) {
-    const r = (d.remote || '(not set)').padEnd(40);
-    const l = d.local   || '(not set)';
-    console.warn(`  ${d.label.padEnd(22)} ${r}  ${l}`);
-  }
-  console.warn('');
-  console.warn('  This can happen if a test session (beginTestSession/endTestSession) updated');
-  console.warn('  TEST_DOC_ID, or if script properties were manually changed.');
-  console.warn('  Running bootstrap will reset all properties to the values in local.settings.json.\n');
-
-  if (warnOnly) {
-    console.warn('  ⚠️  Run npm run deploy:test to get the interactive bootstrap prompt.\n');
-    return;
-  }
-
-  const shouldBootstrap = await confirm({
-    message: 'Run bootstrap to reset GAS properties to match local.settings.json?',
-    default: false,
-  });
-
-  if (!shouldBootstrap) {
-    console.log('  Skipped. Investigate before running tests.');
-    return;
-  }
-
-  try {
-    const bresp = await fetch(url, {
-      method:  'POST',
-      headers: authHeaders,
-      body:    JSON.stringify({ secret, action: 'bootstrap' }),
-    });
-    const bresult = await bresp.json();
-    if (bresult.ok) {
-      console.log('✅ Bootstrap complete — GAS properties reset to canonical values.');
-    } else {
-      console.warn(`⚠️  Bootstrap returned unexpected response: ${JSON.stringify(bresult)}`);
+    if (target === 'dev') {
+      // For /dev, the config POST confirms reachability — report version here
+      remoteVersion = remote.version || '';
+      if (remoteVersion) console.log(`  ✅ WebApp responds (authed) — ${remoteVersion}`);
     }
   } catch (err) {
-    console.warn(`⚠️  Bootstrap failed: ${err.message}`);
+    console.log(`  ⚠️  Config fetch failed: ${err.message}`);
+    _printSurfaceHint(target);
+    return;
   }
+
+  // Script property checks — only for dev/test where these are meaningful
+  if (target !== 'prod') {
+    const checks = [
+      { label: 'TEST_DOC_ID',   remote: remote.testDocId,   local: settings.testDocId },
+      { label: 'TEST_SHEET_ID', remote: remote.testSheetId, local: settings.testSheetId },
+    ];
+    const drifted = checks.filter(c => c.remote !== c.local);
+    if (drifted.length === 0) {
+      console.log('  ✅ TEST_DOC_ID   matches local.settings.json');
+      console.log('  ✅ TEST_SHEET_ID matches local.settings.json');
+    } else {
+      console.warn('\n  ⚠️  Script property drift detected:');
+      console.warn('  ────────────────────────────────────────────────────────────────────────');
+      console.warn('  Property              GAS (remote)                        local.settings.json');
+      console.warn('  ────────────────────────────────────────────────────────────────────────');
+      for (const d of drifted) {
+        console.warn(`  ${d.label.padEnd(22)} ${(d.remote||'(not set)').padEnd(36)}  ${d.local||'(not set)'}`);
+      }
+      console.warn('');
+      console.warn('  Drift can occur when beginTestSession/endTestSession updates TEST_DOC_ID');
+      console.warn('  or script properties are manually changed.\n');
+
+      if (warnOnly) {
+        console.warn(`  ⚠️  Run npm run verify:${target} for the interactive bootstrap prompt.\n`);
+      } else {
+        const shouldBootstrap = await confirm({
+          message: 'Run bootstrap to reset GAS properties to canonical values?',
+          default: false,
+        });
+        if (shouldBootstrap) {
+          try {
+            const br = await fetch(url, {
+              method: 'POST', headers: authHeaders,
+              body: JSON.stringify({ secret, action: 'bootstrap' }),
+            });
+            const bj = await br.json();
+            console.log(bj.ok ? '  ✅ Bootstrap complete.' : `  ⚠️  Unexpected: ${JSON.stringify(bj)}`);
+          } catch (err) { console.warn(`  ⚠️  Bootstrap failed: ${err.message}`); }
+        } else {
+          console.log('  Skipped. Investigate the drift before running tests.');
+        }
+      }
+    }
+  }
+
+  // Test token validity
+  if (target === 'test' && settings.testTokenExpiresAt) {
+    const expires = new Date(settings.testTokenExpiresAt);
+    const valid   = expires > new Date();
+    console.log(`  ${valid ? '✅' : '❌'} Test token ${valid ? `valid until ${settings.testTokenExpiresAt}` : 'EXPIRED — run npm run deploy:test to refresh'}`);
+  }
+
+  _printSurfaceHint(target);
+}
+
+function _printSurfaceHint(target) {
+  console.log(`\n  ℹ  Surface checks (sidebar/chipHover/menu): npm run probe${target === 'prod' ? '  (ensure correct add-on installed)' : ''}`);
 }
 
 async function deployDev(nonInteractive) {
@@ -372,18 +435,8 @@ async function deployDev(nonInteractive) {
   // Verify config using /dev URL + Playwright auth cookies (warn-only — no interactive prompt).
   // Catches drift early without requiring a full deploy:test cycle.
   try {
-    const s      = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
-    const devUrl = s.webappDevUrl;
-    const secret = s.webappSecret;
-    if (devUrl && secret) {
-      const cookies = loadAuthCookies();
-      if (cookies) {
-        await verifyTestConfig(devUrl, secret, { cookies, warnOnly: true });
-      } else {
-        console.log('  (Config check skipped — no .auth/user.json found)');
-      }
-    }
-  } catch { /* non-fatal — settings may not be available */ }
+    await verifyConfig('dev', { warnOnly: true });
+  } catch { /* non-fatal */ }
 
   console.log('\n📋 To activate changes:');
   console.log('   1. Open the /dev WebApp URL in a browser to register WEBAPP_URL:');
@@ -402,18 +455,24 @@ async function deployDev(nonInteractive) {
 async function main() {
   try {
     const args = process.argv.slice(2);
-    let action = args.includes('--deploy-dev')  ? 'deploy-dev'
-                : args.includes('--deploy-test') ? 'deploy-test'
-                : args.includes('--deploy-prod') ? 'deploy-prod'
-                : args.includes('--manage')      ? 'manage'
+    let action = args.includes('--deploy-dev')   ? 'deploy-dev'
+                : args.includes('--deploy-test')  ? 'deploy-test'
+                : args.includes('--deploy-prod')  ? 'deploy-prod'
+                : args.includes('--verify-dev')   ? 'verify-dev'
+                : args.includes('--verify-test')  ? 'verify-test'
+                : args.includes('--verify-prod')  ? 'verify-prod'
+                : args.includes('--verify')       ? 'verify'
+                : args.includes('--manage')       ? 'manage'
                 : await select({
                     message: 'What would you like to do?',
                     choices: [
-                      { name: '🛠️  Push to DEV (HEAD)',   value: 'deploy-dev' },
-                      { name: '🧪 Deploy to TEST',        value: 'deploy-test' },
-                      { name: '🚀 Deploy to PRODUCTION',  value: 'deploy-prod' },
-                      { name: '📦 List / archive',        value: 'manage' },
-                      { name: '❌ Exit',                  value: 'exit' },
+                      { name: '🛠️  Push to DEV (HEAD)',      value: 'deploy-dev' },
+                      { name: '🧪 Deploy to TEST',            value: 'deploy-test' },
+                      { name: '🚀 Deploy to PRODUCTION',      value: 'deploy-prod' },
+                      { name: '🔍 Verify DEV',                value: 'verify-dev' },
+                      { name: '🔍 Verify TEST',               value: 'verify-test' },
+                      { name: '📦 List / archive',            value: 'manage' },
+                      { name: '❌ Exit',                      value: 'exit' },
                     ],
                   });
 
@@ -421,8 +480,19 @@ async function main() {
 
     const nonInteractive = args.length > 0;
 
-    if (action === 'deploy-dev') {
-      await deployDev(nonInteractive);
+    if (action === 'deploy-dev')  { await deployDev(nonInteractive); return; }
+    if (action === 'verify-dev')  { await verifyConfig('dev');  return; }
+    if (action === 'verify-test') { await verifyConfig('test'); return; }
+    if (action === 'verify-prod') { await verifyConfig('prod'); return; }
+    if (action === 'verify') {
+      const target = await select({
+        message: 'Which deployment to verify?',
+        choices: [
+          { name: '🛠️  DEV  (/dev)',   value: 'dev' },
+          { name: '🧪 TEST (/exec)',   value: 'test' },
+        ],
+      });
+      await verifyConfig(target);
       return;
     }
 

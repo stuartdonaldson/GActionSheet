@@ -15,7 +15,11 @@
     "test:playwright:debug": "npx playwright test --config tests/playwright/playwright.config.js --retries=0",
     "test:playwright:blank-doc": "npx playwright test tests/playwright/sidebar_shell.test.js -g \"brand-new blank doc\" --config tests/playwright/playwright.config.js --retries=0",
     "probe": "PROBE_RUN_ID=$(node -e \"process.stdout.write(require('crypto').randomUUID())\") PWHEADFUL=1 npx playwright test tests/playwright/probe.test.js --config tests/playwright/playwright.config.js --retries=0",
-    "probe:user2": "PROBE_RUN_ID=$(node -e \"process.stdout.write(require('crypto').randomUUID())\") PROBE_AUTH_STATE=.auth/user2.json PWHEADFUL=1 npx playwright test tests/playwright/probe.test.js --config tests/playwright/playwright.config.js --retries=0"
+    "probe:user2": "PROBE_RUN_ID=$(node -e \"process.stdout.write(require('crypto').randomUUID())\") PROBE_AUTH_STATE=.auth/user2.json PWHEADFUL=1 npx playwright test tests/playwright/probe.test.js --config tests/playwright/playwright.config.js --retries=0",
+    "verify": "node manage-deployments.js --verify",
+    "verify:dev": "node manage-deployments.js --verify-dev",
+    "verify:test": "node manage-deployments.js --verify-test",
+    "verify:prod": "node manage-deployments.js --verify-prod"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.4.1"
