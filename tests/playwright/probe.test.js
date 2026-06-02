@@ -28,7 +28,12 @@ const { runViaSheetMenu }                  = require('./editor_helpers');
 
 const settingsPath = path.join(__dirname, '..', '..', 'local.settings.json');
 const settings     = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-const storageState = path.join(__dirname, '..', '..', '.auth', 'user.json');
+
+// Auth state file — override with PROBE_AUTH_STATE env var to run as a different account.
+// Default: .auth/user.json (deployer account). For second-user probes: .auth/user2.json
+const storageState = process.env.PROBE_AUTH_STATE
+  ? path.resolve(process.cwd(), process.env.PROBE_AUTH_STATE)
+  : path.join(__dirname, '..', '..', '.auth', 'user.json');
 
 const DEV_URL  = settings.webappDevUrl;   // @HEAD — has PROBE.js after push
 const TEST_URL = settings.webappTestUrl;  // versioned — may or may not have PROBE.js
@@ -267,7 +272,7 @@ test.describe('PROBE session', () => {
     }
   });
 
-  // ── 6. Menu ──────────────────────────────────────────────────────────────
+  // ── 6. Menu (Sync) ───────────────────────────────────────────────────────
 
   test('menu — Sync', async ({ page }) => {
     try {
@@ -277,6 +282,21 @@ test.describe('PROBE session', () => {
     } catch (err) {
       console.log('  menu: FAILED — ' + err.message);
       saveResponse('menu ERROR', 0, err.message);
+    }
+  });
+
+  // ── 7. Menu (Probe Identity) — full identity in authorized context ────────
+  // Captures effectiveUser + activeUser from an authorized menu trigger,
+  // replacing the onOpen surface which is limited to Logger.log only.
+
+  test('menu — Probe Identity', async ({ page }) => {
+    try {
+      await runViaSheetMenu(page, 'Action Sync', 'Test: Probe Identity');
+      const entry = await waitForProbe('menu.identity', 30000);
+      logFound('menu.identity', entry && entry.data);
+    } catch (err) {
+      console.log('  menu.identity: FAILED — ' + err.message);
+      saveResponse('menu.identity ERROR', 0, err.message);
     }
   });
 

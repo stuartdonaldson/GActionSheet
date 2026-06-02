@@ -1,6 +1,6 @@
 var BUILD_INFO = {
-  version: "v0.2.0 (Rev. Jun 2, 2026 01:44) (DEV)",
-  buildDate: "2026-06-02T08:44:33.826Z",
+  version: "v0.2.0 (Rev. Jun 2, 2026 02:10) (DEV)",
+  buildDate: "2026-06-02T09:10:09.744Z",
   webappUrl: ""
 };
 

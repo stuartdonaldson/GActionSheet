@@ -21,7 +21,10 @@ const fs = require('fs');
 const settings = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', '..', 'local.settings.json'), 'utf8')
 );
-const storageState = path.join(__dirname, '..', '..', '.auth', 'user.json');
+// Override with PROBE_AUTH_STATE to run as a different account (e.g. user2.json).
+const storageState = process.env.PROBE_AUTH_STATE
+  ? path.resolve(process.cwd(), process.env.PROBE_AUTH_STATE)
+  : path.join(__dirname, '..', '..', '.auth', 'user.json');
 const gasLogDir = settings.gasLogDir;
 
 // Add-on display name — must match addOns.common.name in src/appsscript.json.

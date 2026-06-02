@@ -40,6 +40,7 @@ function onOpen() {
       .addItem('Test: Insert Tracker Table', 'menuInsertTrackerTable')
       .addItem('Test: Run Archive', 'menuRunArchive')
       .addItem('Test: Debug Doc Body', 'menuDebugDocBody')
+      .addItem('Test: Probe Identity', 'menuProbeIdentity') // [PROBE]
       .addToUi();
   } catch (e) {
     // Not a Sheets context (e.g. running as a Docs add-on) — exit silently.
@@ -61,6 +62,13 @@ function menuBootstrap() {
 function menuSync() {
   PROBE_log('menu', { menuItem: 'menuSync' }); // [PROBE]
   syncAll();
+}
+
+// [PROBE] — dedicated identity probe callable from the sheet menu and Playwright.
+// Captures full identity in an authorized context, filling the onOpen gap.
+// Surface tag 'menu.identity' distinguishes it from the operational menuSync probe.
+function menuProbeIdentity() {
+  PROBE_log('menu.identity', { menuItem: 'menuProbeIdentity' });
 }
 
 function menuBeginTestSession() {
