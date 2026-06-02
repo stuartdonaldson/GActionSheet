@@ -41,6 +41,28 @@ sidecar of ADR-0005 is not adopted.
 - Re-anchoring and orphan detection key off `globalId`, which is stable across edits because it is
   literal text the scanner reads directly.
 
+## Synced document representation
+
+The plain-text contract a user sees (with or without the add-on installed):
+
+```
+AI-N: assignee@email.com action text (Status)
+```
+
+- `AI-N:` or `AI:` at paragraph start — triggers the scanner
+- Email address or person chip immediately after — assignee (optional)
+- `(Status)` at end — current status (optional; materialised as `(Open)` on first sync if absent)
+
+When the add-on syncs or creates an action, the paragraph is rewritten via REST batchUpdate to its canonical synced form:
+
+```
+[status PNG, 16pt, linked to chipUrl] AI-N: [person chip] action text (Status)
+```
+
+The status icon (a 32×32 PNG from `assets/brand-NUTS/`) is always the icon for the **current** status. It is updated on every flush so the visual state in the document matches the ActionSheet. Icon URLs live in `_ACTION_STATUS_IMAGES` (EditorAddonCard.js), shared with the flush path in SyncManager.js via GAS global scope.
+
+Non-add-on users see the linked AI-N: token as a plain hyperlink and the status icon as an inline image — the action text and status remain readable as plain text.
+
 ## Consequences
 
 - **Retained alias name.** The ActionSheet column and the in-code field are still named

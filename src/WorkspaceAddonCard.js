@@ -350,13 +350,12 @@ function _buildActionListSection(homepageState) {
     // Per-action mutations — only shown when the action is anchored.
     if (action.globalId) {
       // One ImageButton per status + one delete button, all in a single row.
-      var _ICON_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/';
       var _STATUS_ICONS = [
-        { status: 'Open',        icon: _ICON_BASE + 'status-open.svg',        alt: 'Set Open' },
-        { status: 'In Progress', icon: _ICON_BASE + 'status-inprogress.svg',  alt: 'Set In Progress' },
-        { status: 'In Review',   icon: _ICON_BASE + 'status-inreview.svg',    alt: 'Set In Review' },
-        { status: 'Done',        icon: _ICON_BASE + 'status-done.svg',        alt: 'Set Done' },
-        { status: 'Closed',      icon: _ICON_BASE + 'status-closed.svg',      alt: 'Set Closed' }
+        { status: 'Open',        icon: _ACTION_STATUS_IMAGES['Open'],        alt: 'Set Open' },
+        { status: 'In Progress', icon: _ACTION_STATUS_IMAGES['In Progress'], alt: 'Set In Progress' },
+        { status: 'In Review',   icon: _ACTION_STATUS_IMAGES['In Review'],   alt: 'Set In Review' },
+        { status: 'Done',        icon: _ACTION_STATUS_IMAGES['Done'],        alt: 'Set Done' },
+        { status: 'Closed',      icon: _ACTION_STATUS_IMAGES['Closed'],      alt: 'Set Closed' }
       ];
       var mutationRow = CardService.newButtonSet();
       for (var si = 0; si < _STATUS_ICONS.length; si++) {

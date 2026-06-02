@@ -821,8 +821,7 @@ function _chipBadgeStyleRequest(startIndex, endIndex) {
 function _flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail, assigneeName) {
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
   var chipUrl = ACTION_CHIP_URL_BASE + '?c=view&globalId=' + encodeURIComponent(globalId);
-  // Docs REST API insertInlineImage does not support SVG — use PNG until PNG status icons exist.
-  var imgUrl = 'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
+  var imgUrl = _ACTION_STATUS_IMAGES[status] || _ACTION_DEFAULT_IMAGE;
 
   var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);
   var tokenLen   = ('AI-' + N + ': ').length;

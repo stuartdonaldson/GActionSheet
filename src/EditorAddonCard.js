@@ -19,9 +19,15 @@
 /** Status values matching the ActionSheet dropdown. */
 var _ACTION_STATUSES = ['Open', 'In Progress', 'In Review', 'Done', 'Closed'];
 
-// Docs REST API insertInlineImage does not support SVG — use PNG until PNG status icons exist.
-var _ACTION_DEFAULT_IMAGE = 'https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-32.png';
-var _ACTION_STATUS_IMAGES = {}; // empty: all statuses fall through to _ACTION_DEFAULT_IMAGE
+var _BRAND_NUTS_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/brand-NUTS/';
+var _ACTION_DEFAULT_IMAGE = _BRAND_NUTS_BASE + 'gactionsheet-32.png';
+var _ACTION_STATUS_IMAGES = {
+  'Open':        _BRAND_NUTS_BASE + 'status-open.png',
+  'In Progress': _BRAND_NUTS_BASE + 'status-inprogress.png',
+  'In Review':   _BRAND_NUTS_BASE + 'status-inreview.png',
+  'Done':        _BRAND_NUTS_BASE + 'status-done.png',
+  'Closed':      _BRAND_NUTS_BASE + 'status-closed.png'
+};
 
 // ---------------------------------------------------------------------------
 // Entry points
@@ -373,13 +379,12 @@ function _buildPreviewCard(url, statusOverride) {
 
   // Status icon buttons — one per status, fire directly without an intermediate card
   if (globalId) {
-    var _ICON_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/';
     var _STATUS_ICONS = [
-      { status: 'Open',        icon: _ICON_BASE + 'status-open.svg',       alt: 'Set Open' },
-      { status: 'In Progress', icon: _ICON_BASE + 'status-inprogress.svg', alt: 'Set In Progress' },
-      { status: 'In Review',   icon: _ICON_BASE + 'status-inreview.svg',   alt: 'Set In Review' },
-      { status: 'Done',        icon: _ICON_BASE + 'status-done.svg',       alt: 'Set Done' },
-      { status: 'Closed',      icon: _ICON_BASE + 'status-closed.svg',     alt: 'Set Closed' }
+      { status: 'Open',        icon: _ACTION_STATUS_IMAGES['Open'],        alt: 'Set Open' },
+      { status: 'In Progress', icon: _ACTION_STATUS_IMAGES['In Progress'], alt: 'Set In Progress' },
+      { status: 'In Review',   icon: _ACTION_STATUS_IMAGES['In Review'],   alt: 'Set In Review' },
+      { status: 'Done',        icon: _ACTION_STATUS_IMAGES['Done'],        alt: 'Set Done' },
+      { status: 'Closed',      icon: _ACTION_STATUS_IMAGES['Closed'],      alt: 'Set Closed' }
     ];
     var statusRow = CardService.newButtonSet();
     for (var si = 0; si < _STATUS_ICONS.length; si++) {
@@ -640,7 +645,7 @@ function _getNextActionN(doc) {
 function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName) {
   var cursor = doc.getCursor();
   if (!cursor) {
-    GasLogger.log('POC_INSERT_CHIP.warn', { msg: 'no cursor' });
+    GasLogger.log('INSERT_CHIP.warn', { msg: 'no cursor' });
     return 'No cursor position found — click in the document to place your cursor, then try again.';
   }
 
@@ -680,7 +685,7 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
   );
   if (getResp.getResponseCode() !== 200) {
     var getErr = 'Could not read document (HTTP ' + getResp.getResponseCode() + ')';
-    GasLogger.log('POC_INSERT_CHIP.error', { msg: getErr });
+    GasLogger.log('INSERT_CHIP.error', { msg: getErr });
     return getErr;
   }
 
@@ -689,7 +694,7 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
 
   if (cursorIndex === null) {
     var errMsg = 'cursor position not found in document';
-    GasLogger.log('POC_INSERT_CHIP.error', { msg: errMsg, paraText: paraText.slice(0, 60), paraOffset: paraOffset });
+    GasLogger.log('INSERT_CHIP.error', { msg: errMsg, paraText: paraText.slice(0, 60), paraOffset: paraOffset });
     return errMsg;
   }
 
@@ -742,14 +747,14 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
 
   if (batchResp.getResponseCode() !== 200) {
     var batchErr = 'HTTP ' + batchResp.getResponseCode() + ': ' + batchResp.getContentText().substring(0, 200);
-    GasLogger.log('POC_INSERT_CHIP.error', {
+    GasLogger.log('INSERT_CHIP.error', {
       msg:  'batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
       body: batchResp.getContentText().substring(0, 300)
     });
     return batchErr;
   }
 
-  GasLogger.log('POC_INSERT_CHIP.done', { globalId: globalId, cursorIndex: cursorIndex });
+  GasLogger.log('INSERT_CHIP.done', { globalId: globalId, cursorIndex: cursorIndex });
   return null;
 }
 
