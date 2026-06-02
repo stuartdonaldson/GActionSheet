@@ -160,9 +160,11 @@ function _tfInsertPersonChipListItem(token, docId, email, actionText) {
     throw new Error('_tfInsertPersonChipListItem: no paragraph found in doc body');
   }
 
-  // Append a chip-led bullet item before the mandatory terminal paragraph.
-  // Same split-last-para pattern as _tfAppendPersonChipListItem.
+  // Insert a chip-led bullet item: 'AI: ' placeholder + PERSON chip + action text.
+  // _assignPlaceholderTokens (called during sync) converts 'AI: ' → 'AI-N:'.
   var insertAt = lastParaEndIndex - 1;
+  var aiPlaceholder = 'AI: ';
+  var aiPlaceholderLen = aiPlaceholder.length;
   var requests = [
     { insertText: { location: { index: insertAt }, text: '\n' } },
     { createParagraphBullets: {
@@ -170,13 +172,18 @@ function _tfInsertPersonChipListItem(token, docId, email, actionText) {
         bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE'
       }
     },
+    { insertText: {
+        location: { index: lastParaEndIndex },
+        text: aiPlaceholder
+      }
+    },
     { insertPerson: {
         personProperties: { email: email },
-        location: { index: lastParaEndIndex }
+        location: { index: lastParaEndIndex + aiPlaceholderLen }
       }
     },
     { insertText: {
-        location: { index: lastParaEndIndex + 1 },
+        location: { index: lastParaEndIndex + aiPlaceholderLen + 1 },
         text: ' ' + actionText
       }
     }
@@ -386,9 +393,12 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
   // Mirror _tfAppendTextListItem's splitting strategy:
   //   1. Insert \n at (lastParaEndIndex - 1) to split the last (mandatory) paragraph.
   //   2. Apply bullet formatting to the new paragraph starting at lastParaEndIndex.
-  //   3. Insert the person chip at lastParaEndIndex.
-  //   4. Insert the action text at (lastParaEndIndex + 1), after the chip (1 index).
-  var insertAt = lastParaEndIndex - 1;
+  //   3. Insert 'AI: ' placeholder text at lastParaEndIndex (_assignPlaceholderTokens converts → AI-N:).
+  //   4. Insert the person chip after the placeholder.
+  //   5. Insert the action text after the chip.
+  var insertAt  = lastParaEndIndex - 1;
+  var aiPlaceholder = 'AI: ';
+  var aiPlaceholderLen = aiPlaceholder.length;
 
   var requests = [
     { insertText: { location: { index: insertAt }, text: '\n' } },
@@ -397,13 +407,18 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
         bulletPreset: 'BULLET_DISC_CIRCLE_SQUARE'
       }
     },
+    { insertText: {
+        location: { index: lastParaEndIndex },
+        text: aiPlaceholder
+      }
+    },
     { insertPerson: {
         personProperties: { email: email },
-        location: { index: lastParaEndIndex }
+        location: { index: lastParaEndIndex + aiPlaceholderLen }
       }
     },
     { insertText: {
-        location: { index: lastParaEndIndex + 1 },
+        location: { index: lastParaEndIndex + aiPlaceholderLen + 1 },
         text: ' ' + actionText
       }
     }

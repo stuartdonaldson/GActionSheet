@@ -308,8 +308,18 @@ class ScenarioSession:
         return [_row_dict_to_ai(r) for r in rows]
 
     def verify_consistency(self, scope: Surface = Surface.DOC) -> dict:
-        """Run the §16.7 consistency checklist (docId-scoped); also called by INTEGRITY drain."""
-        return self._post_route("verify_action_rows", {"docId": self.doc_id})
+        """Run the §16.7 consistency checklist (docId-scoped); also called by INTEGRITY drain.
+
+        Also asserts chip document contract: every AI-N: paragraph must have a brand-NUTS
+        status icon and a valid globalId link (6ov.8).  Raises AssertionError on violations.
+        """
+        result = self._post_route("verify_action_rows", {"docId": self.doc_id})
+        chip = self._post_route("verify_chip_integrity", {"docId": self.doc_id})
+        violations = chip.get("violations", [])
+        if violations:
+            lines = "\n".join(f"  {v['paragraph']}: {v['issue']}" for v in violations)
+            raise AssertionError(f"Chip integrity violations ({len(violations)}):\n{lines}")
+        return result
 
     # ------------------------------------------------------------------
     # Expectation delegation — thin enqueuers (§16.9 / §3.6)

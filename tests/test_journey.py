@@ -88,8 +88,9 @@ def test_journey(scn):
         action_id="AI-9",
     )
     started_ip = ai(action="An action the author starts in progress", status="In Progress")
+    backlogged = ai(action="An action with a non-standard status", status="Backlog")
 
-    for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
+    for a in (unassigned, with_email, explicit_5, domain_usr, started_ip, backlogged):
         scn.append_paragraph(a.as_text())  # pure doc mutation; no action implied yet
 
     # ── Act 2 — sync converts the lines into actions (Scenario C) ─────────────
@@ -101,6 +102,7 @@ def test_journey(scn):
     explicit_5.status = "Open"
     domain_usr.status = "Open"
     # explicit_5 / domain_usr already carry AI-5 / AI-9; started_ip keeps In Progress
+    # backlogged keeps "Backlog" — non-standard status, exercises status-other.png chip path
 
     # Resolve auto-assigned action_ids from the sheet — §16.10 shows "AI-1" / "AI-2" but
     # those assume a clean sheet; the live sheet accumulates IDs across runs.
@@ -112,9 +114,9 @@ def test_journey(scn):
     assert unassigned.action_id is not None, "unassigned action not found in sheet after sync"
     assert with_email.action_id is not None, "with_email action not found in sheet after sync"
 
-    for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
+    for a in (unassigned, with_email, explicit_5, domain_usr, started_ip, backlogged):
         scn.verify_all_expectations(a)     # doc+sheet (+tracker when present); all fields
-    scn.verify_consistency(scope=DOC)      # §16.7 checklist, this doc only
+    scn.verify_consistency(scope=DOC)      # §16.7 checklist + chip integrity (6ov.8)
     scn.checkpoint(INTEGRITY)             # capture docx+xlsx; drain the above
 
     # ── Act 3 — insert the tracker table and re-sync ──────────────────────────
