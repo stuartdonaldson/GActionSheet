@@ -1,0 +1,82 @@
+PROBE responses — runId: 77a4b35d-ff24-457b-a07e-1e60c22996e1
+Date: 2026-06-02T09:36:15.290Z
+DEV_URL:  https://script.google.com/macros/s/AKfycbyeJ17mneRRCILErvxkNEJo6pojFQS01YrHGNYClfA/dev
+TEST_URL: https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec
+
+--- doGet.dev authed (HTTP 200) ---
+GActionSheet v0.2.0 (Rev. Jun 2, 2026 02:10) (DEV)
+Build:      2026-06-02T09:10:09.744Z
+WebApp:     https://script.google.com/macros/s/AKfycbyeJ17mneRRCILErvxkNEJo6pojFQS01YrHGNYClfA/dev
+URL:        updated (was: https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec)
+
+--- Request ---
+queryString:   probe_run=77a4b35d-ff24-457b-a07e-1e60c22996e1&probe_surface=doGet.dev
+parameter:     {"probe_run":"77a4b35d-ff24-457b-a07e-1e60c22996e1","probe_surface":"doGet.dev"}
+pathInfo:      (none)
+contentLength: -1
+
+--- doGet.test authed (HTTP 200) ---
+GActionSheet v0.2.0 (Rev. Jun 2, 2026 01:44) (TEST)
+Build:      2026-06-02T08:44:08.807Z
+WebApp:     https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec
+URL:        updated (was: https://script.google.com/macros/s/AKfycbyeJ17mneRRCILErvxkNEJo6pojFQS01YrHGNYClfA/dev)
+
+--- Request ---
+queryString:   probe_run=77a4b35d-ff24-457b-a07e-1e60c22996e1&probe_surface=doGet.test
+parameter:     {"probe_run":"77a4b35d-ff24-457b-a07e-1e60c22996e1","probe_surface":"doGet.test"}
+pathInfo:      (none)
+contentLength: -1
+
+--- doGet.dev unauthed (HTTP 302) ---
+<HTML>
+<HEAD>
+<TITLE>Moved Temporarily</TITLE>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000">
+<!-- GSE Default Error -->
+<H1>Moved Temporarily</H1>
+The document has moved <A HREF="https://accounts.google.com/ServiceLogin?service=wise&amp;passive=1209600&amp;continue=https%3A%2F%2Fscript.google.com%2Fmacros%2Fs%2FAKfycbyeJ17mneRRCILErvxkNEJo6pojFQS01YrHGNYClfA%2Fdev%3Fprobe_run%3D77a4b35d-ff24-457b-a07e-1e60c22996e1%26probe_surface%3DdoGet.dev.unauthed&amp;followup=https%3A%2F%2Fscript.google.com%2Fmacros%2Fs%2FAKfycbyeJ17mneRRCILErvxkNEJo6pojFQS01YrHGNYClfA%2Fdev%3Fprobe_run%3D77a4b35d-ff24-457b-a07e-1e60c22996e1%26probe_surface%3DdoGet.dev.unauthed">here</A>.
+</BODY>
+</HTML>
+
+
+--- doGet.test unauthed (HTTP 302) ---
+<HTML>
+<HEAD>
+<TITLE>Moved Temporarily</TITLE>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000">
+<!-- GSE Default Error -->
+<H1>Moved Temporarily</H1>
+The document has moved <A HREF="https://script.googleusercontent.com/macros/echo?user_content_key=AUkAhnTIwFaNdwQNELKRW3-LdStG3A17zeb3xmh29Mj1Rf2FUdF4vMbCdQHSsS1hr-ZAYNQugUwhG5D2-pusH87U3PejYaer_BCdfMF57aQ2B-S9rQCRcAxSqxfKIaemP4UKdEsQiezPGSX4xO_Yk97ZiapUiulgL_UCpzudXAw5t05QSqr4mHoOKgocKTlanM8tkubBStgVwFRATv6M5xIux6kivsloee-kOMZrWFHdEziHi_gxrrbXNzEgr2j8zGsPmB2DKl5b1BhVFM3psyBNOBOOgabdg_INLlYerD8rYDZA1LmSTmQfocwngNLvmM2-RwJ2C2dCCAH-bp5_ydZF_uwXkJOvUDVgNF4zCzI7rFiksdxRWRhZPVoN5KG6Mnm6WaBcB8_4&amp;lib=M1zrxenTSETPDepjSC6FJRY3kGGdWVv__">here</A>.
+</BODY>
+</HTML>
+
+
+--- doPost.dev unauthed (HTTP 401) ---
+<!DOCTYPE html><html lang="en"><head><meta name="description" content="Web word processing, presentations and spreadsheets"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"><link rel="shortcut icon" href="//docs.google.com/favicon.ico"><title>Page Not Found</title><meta name="referrer" content="origin"><link href="//fonts.googleapis.com/css?family=Product+Sans" rel="stylesheet" type="text/css" nonce="MhOd9kpfjf378dVSAJhDtA"><style nonce="MhOd9kpfjf378dVSAJhDtA">#drive-logo{margin:18px 0;position:absolute;white-space:nowrap}.docs-drivelogo-img{background-image:url(//ssl.gstatic.com/images/branding/googlelogo/1x/googlelogo_color_116x41dp.png);-webkit-background-size:116px 41px;background-size:116px 41px;display:inline-block;height:41px;vertical-align:bottom;width:116px}.docs-drivelogo-text{color:var(--gm3-sys-color-on-surface,#1f1f1f);display:inline-block;opacity:.54;text-decoration:none;font-family:Product Sans,Arial,Helvetica,sans-serif;font-size:32px;text-rendering:optimizeLegibility;position:relative;top:-6px;left:-7px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}@media (-webkit-min-device-pixel-ratio:1.5),(min-resolution:144dpi){.docs-drivelogo-img{background-image:url(//ssl.gstatic.com/images/branding/googlelogo/2x/googlelogo_color_116x41dp.png)}}.goog-inline-block{position:relative;display:-moz-inline-box;display:inline-block}* html .goog-inline-block{display:inline}:first-child+html .goog-inline-block{display:inline}sentinel{}</style><style type="text/css" nonce="MhOd9kpfjf378dVSAJhDtA">body {background-color: #fff; font-family: Arial,sans-serif; font-size: 13px; margin: 0; padding: 0;}a, a:link, a:visited {color: #112ABB;}</style><style type="text/css" nonce="MhOd9kpfjf378dVSAJhDtA">.errorMessage {font-size: 12pt; font-weight: bold; line-height: 150%;}</style></head><body><div id="outerContainer"><div id="innerContainer"><div style="position: absolute; top: -80px;"><div id="drive-logo"><a href="/"><span class="docs-drivelogo-img" title="Google logo"></span><span class="docs-drivelogo-text">&nbsp;Drive</span></a></div></div><div align="center"><p class="errorMessage" style="padding-top: 50px">Sorry, unable to open the file at this time.</p><p> Please check the address and try again. </p><div style="background: #F0F6FF; border: 1px solid black; margin-top: 35px; padding: 10px 125px; width: 300px;"><p><strong>Get stuff done with Google Drive</strong></p><p>Apps in Google Drive make it easy to create, store and share online documents, spreadsheets, presentations and more.</p><p>Learn more at <a href="https://drive.google.com/start/apps">drive.google.com/start/apps</a>.</p></div></div></div></div></body><style nonce="MhOd9kpfjf378dVSAJhDtA">html {height: 100%; overflow: auto;}body {height: 100%; overflow: auto;}#outerContainer {margin: auto; max-width: 750px;}#innerContainer {margin-bottom: 20px; margin-left: 40px; margin-right: 40px; margin-top: 80px; position: relative;}</style></html>
+
+--- doPost.test unauthed (HTTP 302) ---
+<HTML>
+<HEAD>
+<TITLE>Moved Temporarily</TITLE>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000">
+<!-- GSE Default Error -->
+<H1>Moved Temporarily</H1>
+The document has moved <A HREF="https://script.googleusercontent.com/macros/echo?user_content_key=AUkAhnSr4gDNAUNvkJIKTULntykGtP57GA_54SGuFjnE1FUNH9wPBbQyG783ATg9OEikvEjii5hmPo7c5cnfG4PwureI9STtNDjcA3JjNe_FnjdebQiLAt2RlYrU4hs1mypJYu0QpuQBcZM2zfBDcB-1wMY_ud28kNGi1ej-fC3SBcxXxlpCqjEEDv1ktpCLr6G5kscEzfkzVz-T1lgNkRpjybHT0Q_ycIKJTIfVBjSiofHFgre9MBsZGVln4esZrX6zEEz2j-B7_D3gTWkqmaA&amp;lib=M1zrxenTSETPDepjSC6FJRY3kGGdWVv__">here</A>.
+</BODY>
+</HTML>
+
+
+--- doPost.dev authed (HTTP 200) ---
+{"probe":"ok","version":"v0.2.0 (Rev. Jun 2, 2026 02:10) (DEV)","serverVersion":"v0.2.0 (Rev. Jun 2, 2026 02:10) (DEV)"}
+
+--- doPost.test authed (HTTP 200) ---
+{"probe":"ok","version":"v0.2.0 (Rev. Jun 2, 2026 01:44) (TEST)","serverVersion":"v0.2.0 (Rev. Jun 2, 2026 01:44) (TEST)"}
+
+--- sidebar ERROR (HTTP 0) ---
+locator.waitFor: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('[aria-label="Northlake Doc Tools"]').first() to be visible[22m
+
