@@ -20,6 +20,7 @@ var ArchiveManager = (function () {
   // 1-based column indices (matching SHEET_HEADERS with globalId as col 1).
   var COL_STATUS        = 6;
   var COL_DATE_MODIFIED = 9;
+  var COL_SYNC_STATUS   = 10;
   var TOTAL_COLS        = 10;
 
   /**
@@ -43,8 +44,9 @@ var ArchiveManager = (function () {
    * @returns {boolean}
    */
   function _isEligible(rowValues, now) {
-    var status = rowValues[COL_STATUS - 1];
-    if (status !== 'Closed') return false;
+    var status     = rowValues[COL_STATUS - 1];
+    var syncStatus = rowValues[COL_SYNC_STATUS - 1];
+    if (status !== 'Closed' && syncStatus !== 'Doc Not Found') return false;
 
     var dateModified = _toDate(rowValues[COL_DATE_MODIFIED - 1]);
     if (!dateModified) return false;
@@ -85,23 +87,29 @@ var ArchiveManager = (function () {
       }
 
       var numDataRows = lastRow - 1;
-      var allValues = actionsSheet.getRange(2, 1, numDataRows, TOTAL_COLS).getValues();
+      var dataRange   = actionsSheet.getRange(2, 1, numDataRows, TOTAL_COLS);
+      var allValues   = dataRange.getValues();
+      var allFormulas = dataRange.getFormulas();
 
       // Iterate bottom-to-top to keep row indices stable during deletion.
       for (var r = numDataRows - 1; r >= 0; r--) {
-        var rowValues = allValues[r];
+        var rowValues   = allValues[r];
+        var rowFormulas = allFormulas[r];
 
         if (!_isEligible(rowValues, now)) continue;
 
         var sheetRow = r + 2;  // 1-based; row 1 is the header
 
+        // Build rowData: use formula string where one exists so that column 7's
+        // HYPERLINK is preserved in Archive (getValues() would lose it to display text).
+        // appendRow() treats strings starting with '=' as formulas.
+        var rowData = rowValues.map(function(val, i) {
+          return rowFormulas[i] ? rowFormulas[i] : val;
+        });
+
         var originalDateModified = rowValues[COL_DATE_MODIFIED - 1];
         WriteGuard.wrap(function () {
-          // Append a copy of the row to Archive (preserves all values including
-          // Date Modified without alteration).
-          archiveSheet.appendRow(rowValues);
-
-          // Remove from Actions.
+          archiveSheet.appendRow(rowData);
           actionsSheet.deleteRow(sheetRow);
         });
 

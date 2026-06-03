@@ -275,7 +275,7 @@ function syncAll() {
     var dirtyDocIds = {};
     var alreadyDocNotFound = {};
     for (var d = 0; d < actionData.length; d++) {
-      var gidD  = actionData[d][0];
+      var gidD  = String(actionData[d][0] || '');
       var slashD = gidD.indexOf('/');
       if (actionData[d][9] === 'Dirty' && slashD > 0) {
         dirtyDocIds[gidD.substring(0, slashD)] = true;
@@ -285,9 +285,24 @@ function syncAll() {
       }
     }
 
+    // Archive rows that were ALREADY marked 'Doc Not Found' before this sweep starts.
+    // Running archive BEFORE the main loop is the grace-period mechanism: rows first
+    // marked 'Doc Not Found' in this sweep cannot be archived in the same pass because
+    // ArchiveManager runs before those marks are written.
+    if (Object.keys(alreadyDocNotFound).length > 0) {
+      ArchiveManager.archive(ss);
+      GasLogger.log('sync.archive.doc_not_found', { docIds: Object.keys(alreadyDocNotFound) });
+    }
+
     var synced = 0, skipped = 0;
     for (var j = 0; j < docIds.length; j++) {
       var docId = docIds[j];
+
+      // Skip docs already permanently marked Doc Not Found — no Drive call needed.
+      if (alreadyDocNotFound[docId]) {
+        skipped++;
+        continue;
+      }
 
       // Single Drive call: trash check + last-modified timestamp.
       var driveFile, isTrashed, lastModified, docTitle;
@@ -323,14 +338,6 @@ function syncAll() {
     }
 
     GasLogger.log('sync.all.complete', { docCount: docIds.length, synced: synced, skipped: skipped });
-
-    // Archive rows that carried 'Doc Not Found' BEFORE this sweep (grace period:
-    // rows first marked on this sweep are not yet in alreadyDocNotFound).
-    var alreadyIds = Object.keys(alreadyDocNotFound);
-    for (var m = 0; m < alreadyIds.length; m++) {
-      ArchiveManager.archive(ss);
-      GasLogger.log('sync.archive.doc_not_found', { docId: alreadyIds[m] });
-    }
   } catch (e) {
     GasLogger.log('sync.all.error', { msg: e.message });
   } finally {
