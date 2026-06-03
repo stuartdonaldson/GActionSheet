@@ -214,3 +214,8 @@ def test_journey(scn):
     for a in (unassigned, with_email, explicit_5, domain_usr, started_ip, backlogged, created):
         scn.verify_all_expectations(a)
     scn.checkpoint(INTEGRITY)
+
+    # ── ckj: M2 sheet consistency after idempotency pass ─────────────────────
+    # doc_formula (col7) and sync_status (col10) must be set on every row;
+    # verify_consistency(scope=SHEET) raises AssertionError if either is missing.
+    scn.verify_consistency(scope=SHEET)
