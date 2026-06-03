@@ -7,6 +7,8 @@
  * via the shared REST flush in SyncManager.js (_flushActionParagraph).
  */
 
+var _ICON_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/brand-NUTS/';
+
 /**
  * @param {object=} eventOrVerificationResult
  * @param {object=} opts
