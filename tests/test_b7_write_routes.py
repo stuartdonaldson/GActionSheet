@@ -8,7 +8,11 @@ Covers the §15 test_03-07/12 conflict matrix at the HTTP-act layer:
   - set_status: async unconditional upsert; converges durable on next sync (§16.11 #4)
   - delete: stamps Sync Status='Deleted'; sync removes floating action from doc
 
-Bead: GTaskSheet-5vwu.12
+Also covers:
+  - [45k] upsert_action_rows UPDATE path writes assignee email (col3) and name (col4)
+  - [wpe1] seed_row with both URL formats; SheetReader parses both without orphan detection
+
+Beads: GTaskSheet-5vwu.12, GTaskSheet-45k, GTaskSheet-wpe1
 """
 import re
 import pytest
@@ -16,6 +20,8 @@ import pytest
 from scn.ai import ai
 from scn.engine import CheckpointKind, Severity, Surface
 from scn.session import ScenarioSession
+from scn.surfaces import SheetReader
+from tests.helpers.download import download_xlsx
 
 _GLOBAL_ID_RE = re.compile(r'^[A-Za-z0-9_-]{25,44}/AI-\d+$')
 
@@ -174,4 +180,148 @@ def test_b7_write_routes(scn):
     ]:
         assert a.action_id, (
             f"[B7 AC all] {label}: action_id not pinned — globalId addressing could not have fired"
+        )
+
+
+# ---------------------------------------------------------------------------
+# [45k] upsert_action_rows UPDATE path — cols 3+4 written
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def scn_45k(settings):
+    s = ScenarioSession.new_doc(settings)
+    yield s
+    s.close()
+
+
+def test_45k_upsert_update_writes_email_and_name(scn_45k, settings):
+    """GTaskSheet-45k: POST upsert_action_rows UPDATE path writes col3 (assignee email)
+    and col4 (assignee name). Does NOT stamp Dirty — that is the point of this route."""
+    target = ai(
+        action="45k action to verify upsert UPDATE path writes assignee cols",
+        assignee="original@example.com",
+    )
+    scn_45k.append_paragraph(target.as_text())
+    scn_45k.sync()
+
+    # Pin action_id from the sheet
+    rows = scn_45k.find_sheet_actions()
+    matching = [r for r in rows if r.action == target.action]
+    assert len(matching) == 1, f"[45k setup] action not found in sheet after sync"
+    target.action_id = matching[0].action_id
+
+    # Verify initial state before UPDATE
+    initial_row = matching[0]
+    assert getattr(initial_row, "sync_status", None) not in ("Dirty",), (
+        f"[45k] row should not be Dirty before upsert UPDATE"
+    )
+
+    # POST upsert_action_rows directly (WEBAPP_SECRET-gated production route).
+    # Deliberately does NOT stamp Dirty — this is the programmatic write path
+    # (scn._post_route sends testToken; this route needs secret instead).
+    new_email = "updated_45k@example.com"
+    new_name = "Updated Assignee"
+    global_id = f"{scn_45k.doc_id}/{target.action_id}"
+    resp = scn_45k._post({
+        "secret": settings["webappSecret"],
+        "action": "upsert_action_rows",
+        "docUrl": f"https://docs.google.com/document/d/{scn_45k.doc_id}/edit",
+        "docTitle": "Test doc",
+        "rows": [{
+            "globalId": global_id,
+            "assigneeEmail": new_email,
+            "assigneeName": new_name,
+            "actionText": target.action,
+            "status": "Open",
+        }],
+    })
+    assert resp.get("updated") == 1, (
+        f"[45k] upsert UPDATE expected updated=1, got {resp!r}"
+    )
+
+    # Assert col3 (assignee email) and col4 (assignee name) reflect the update.
+    # upsert does NOT stamp Dirty, so sync_status must NOT be 'Dirty'.
+    updated_rows = scn_45k.find_sheet_actions()
+    updated_row = next((r for r in updated_rows if r.action == target.action), None)
+    assert updated_row is not None, f"[45k] row not found after upsert UPDATE"
+    assert getattr(updated_row, "assignee", None) == new_email, (
+        f"[45k] col3 assignee_email expected {new_email!r}, "
+        f"got {getattr(updated_row, 'assignee', None)!r}"
+    )
+    assert getattr(updated_row, "assignee_name", None) == new_name, (
+        f"[45k] col4 assignee_name expected {new_name!r}, "
+        f"got {getattr(updated_row, 'assignee_name', None)!r}"
+    )
+    assert getattr(updated_row, "sync_status", None) not in ("Dirty",), (
+        f"[45k] upsert UPDATE must not stamp Dirty; got {getattr(updated_row, 'sync_status', None)!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# [wpe1] M4: seed_row with /d/ and open?id= URL formats — reader parses both
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def scn_wpe1(settings):
+    s = ScenarioSession.new_doc(settings)
+    yield s
+    s.close()
+
+
+def test_wpe1_url_format_agnostic_matching(scn_wpe1, settings):
+    """GTaskSheet-wpe1: seed two rows with different document URL formats for the
+    same docId; assert SheetReader finds both and sync leaves neither orphaned."""
+    doc_id = scn_wpe1.doc_id
+    sheet_id = settings["testSheetId"]
+
+    # Seed row with /d/ format (standard URL)
+    slash_d_formula = (
+        f'=HYPERLINK("https://docs.google.com/document/d/{doc_id}/edit","wpe1 slash-d doc")'
+    )
+    scn_wpe1._post_fixture("seed_row", {
+        "actionId": "WPE1-D",
+        "actionText": "wpe1 slash-d URL format action",
+        "status": "Open",
+        "documentFormula": slash_d_formula,
+    })
+
+    # Seed row with open?id= format
+    open_id_formula = (
+        f'=HYPERLINK("https://docs.google.com/open?id={doc_id}","wpe1 open-id doc")'
+    )
+    scn_wpe1._post_fixture("seed_row", {
+        "actionId": "WPE1-Q",
+        "actionText": "wpe1 open?id URL format action",
+        "status": "Open",
+        "documentFormula": open_id_formula,
+    })
+
+    # SheetReader must parse both URL formats → both rows resolved to the same doc_id
+    xlsx = download_xlsx(sheet_id)
+    rows = SheetReader().read(xlsx, doc_id)
+
+    slash_d_row = next((r for r in rows if "slash-d" in r.action), None)
+    open_id_row = next((r for r in rows if "open?id" in r.action), None)
+
+    assert slash_d_row is not None, (
+        "[wpe1] /d/ URL format row not found in sheet — SheetReader could not parse it"
+    )
+    assert open_id_row is not None, (
+        "[wpe1] open?id= URL format row not found in sheet — SheetReader could not parse it"
+    )
+    assert slash_d_row.doc_id == doc_id, (
+        f"[wpe1] /d/ row doc_id mismatch: expected {doc_id!r}, got {slash_d_row.doc_id!r}"
+    )
+    assert open_id_row.doc_id == doc_id, (
+        f"[wpe1] open?id= row doc_id mismatch: expected {doc_id!r}, got {open_id_row.doc_id!r}"
+    )
+
+    # Sync the doc — neither row should be orphaned (marked Deleted or Doc Not Found)
+    scn_wpe1.sync()
+    xlsx2 = download_xlsx(sheet_id)
+    rows2 = SheetReader().read(xlsx2, doc_id)
+    for row in rows2:
+        assert getattr(row, "sync_status", None) not in ("Deleted", "Doc Not Found"), (
+            f"[wpe1] row orphaned/marked after sync: action={row.action!r}, "
+            f"sync_status={row.sync_status!r}"
         )
