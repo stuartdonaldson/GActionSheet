@@ -51,6 +51,8 @@ _CARD_IFRAME = (
 _CARD_BODY = 'body, [role="main"]'
 # Busy/loading spinner that may appear after a card status click
 _BUSY = '[aria-label="Loading"], .A8Shqc, [role="progressbar"]'
+# Workspace Add-on icon button in the Google Docs right side-panel
+_SIDEBAR_ICON_TMPL = '[aria-label*="{name}"], [data-tooltip*="{name}"]'
 # Google Docs content editable area
 _DOC_CONTENT = '.kix-appview-editor'
 # @-menu "Create action" item
@@ -220,6 +222,26 @@ class UiDriver:
     def hover_until(self, locator: _PwLocator, *, timeout: str = "5s") -> Card:
         """Hover and wait until the preview card appears (semantic alias of hover)."""
         return self.hover(locator, timeout=timeout)
+
+    def open_sidebar(self, addon_name: str = "GActionSheet", *, timeout: str = "15s") -> Card:
+        """Click the add-on icon to open the homepage card; return a Card handle.
+
+        The homepage card renders in the right side panel. Uses the same _CARD_IFRAME
+        selector as hover() — if the side-panel iframe has a different src, add a
+        _SIDEBAR_IFRAME constant and swap it in here.
+        """
+        self._ensure_doc()
+        ms = _parse_timeout(timeout)
+        btn = self._page.locator(
+            _SIDEBAR_ICON_TMPL.format(name=addon_name)
+        ).first
+        btn.wait_for(state="visible", timeout=ms)
+        btn.click()
+        card_frame = self._page.frame_locator(_CARD_IFRAME).first
+        card_frame.locator(_CARD_BODY).first.wait_for(state="visible", timeout=ms)
+        card = Card(card_frame)
+        self._current_card = card
+        return card
 
     def click(self, locator: _PwLocator, *, timeout: str = "5s") -> None:
         """Click a locator after waiting up to timeout for it to be visible."""

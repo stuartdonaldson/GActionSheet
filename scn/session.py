@@ -307,6 +307,14 @@ class ScenarioSession:
         rows = resp.get("rows") or []
         return [_row_dict_to_ai(r) for r in rows]
 
+    def tracker_id_urls(self) -> dict:
+        """Return {action_id: id_url} for tracker rows that have an ID-column hyperlink."""
+        from tests.helpers.download import download_docx
+        from scn.surfaces import TrackerReader
+        docx = download_docx(self.doc_id)
+        rows = TrackerReader().read(docx, self.doc_id)
+        return {r.action_id: r.id_url for r in rows if getattr(r, "id_url", None)}
+
     def verify_consistency(self, scope: Surface = Surface.DOC) -> dict:
         """Run the §16.7 consistency checklist (docId-scoped); also called by INTEGRITY drain.
 

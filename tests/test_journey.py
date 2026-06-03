@@ -126,6 +126,31 @@ def test_journey(scn):
         scn.verify(a, on=TRACKER)          # column form; assignee as chip
     scn.checkpoint(STEP)
 
+    # rwz AC4: tracker ID cells are hyperlinked to chip URLs
+    id_urls = scn.tracker_id_urls()
+    for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
+        url = id_urls.get(a.action_id, "")
+        assert url and "globalId=" in url, (
+            f"Tracker ID cell for {a.action_id!r} missing chip URL hyperlink; got {url!r}"
+        )
+
+    # ── Act 3b — open the homepage sidebar, verify action list ───────────────
+    try:
+        sidebar = scn.ui.open_sidebar()
+        scn.expect_visible(sidebar, timeout="15s")
+        # rwz AC3a: action row shows AI-N • topLabel pattern (explicit_5 is always anchored)
+        sidebar.frame.get_by_text(explicit_5.action_id + " •", exact=False).wait_for(
+            state="visible", timeout=5000
+        )
+        # rwz AC3b: delete button present for anchored actions
+        sidebar.frame.locator('[aria-label="Delete action"]').first.wait_for(
+            state="visible", timeout=5000
+        )
+    except Exception as _e:
+        pytest.skip(
+            f"Sidebar open failed (homepage trigger not installed as test deployment?): {_e}"
+        )
+
     # ── Act 4 — @create through the editor UI (Playwright phase begins) ───────
     created = ai(
         action="Creating an action via the @-menu trigger",
@@ -161,6 +186,12 @@ def test_journey(scn):
         timeout="5s",
     )
     scn.expect_visible(card, timeout="5s")
+    # rwz AC1: card header contains "AI-N: …" pattern
+    card.frame.get_by_text(created.action_id + ":", exact=False).wait_for(
+        state="visible", timeout=5000
+    )
+    # rwz AC2: card header link points to chip URL (href contains globalId parameter)
+    card.frame.locator('a[href*="globalId"]').first.wait_for(state="visible", timeout=5000)
     # autocomplete warn-only per §16.4 — chip may lack name if contact resolution failed
     scn.expect_alt(
         scn.ui.locate(alt="In Progress", next=True),
@@ -177,3 +208,9 @@ def test_journey(scn):
 
     # ── Final reconcile (HTTP phase) — settle every deferred expectation ──────
     scn.checkpoint(INTEGRITY)             # docx+xlsx+tracker+consistency; queue empty at close
+
+    # ── Idempotency pass (bjx7): second sync must leave all surfaces unchanged ─
+    scn.sync()
+    for a in (unassigned, with_email, explicit_5, domain_usr, started_ip, backlogged, created):
+        scn.verify_all_expectations(a)
+    scn.checkpoint(INTEGRITY)

@@ -95,6 +95,21 @@ def _find_chip_in_cell(cell) -> str | None:
     return None
 
 
+def _find_action_url_in_cell(cell) -> str | None:
+    """Return the first non-email hyperlink URL from a table cell, or None."""
+    try:
+        part = cell.part
+        for rel in part.rels.values():
+            if "hyperlink" not in rel.reltype:
+                continue
+            url = rel.target_ref or ""
+            if not url.startswith("mailto:") and "email=" not in url:
+                return url
+    except Exception:
+        pass
+    return None
+
+
 class DocReader:
     """Read floating-action ai records from a .docx (DOC surface, §16.5).
 
@@ -312,6 +327,9 @@ class TrackerReader:
             action_id = _col_text(cells, col_idx, "ID") or None
             action_text = _col_text(cells, col_idx, "Action") or ""
             status = _col_text(cells, col_idx, "Status") or None
+            id_url = None
+            if "ID" in col_idx:
+                id_url = _find_action_url_in_cell(cells[col_idx["ID"]])
 
             # Assignee: prefer chip in 'Assignee Name' (legacy schema) or 'Assignee'
             # (current GAS schema = ['ID','Assignee','Action','Status']).
@@ -341,6 +359,7 @@ class TrackerReader:
                 assignee_source=assignee_source,
             )
             obj.assignee_name = assignee_name_text or _col_text(cells, col_idx, "Assignee Name")
+            obj.id_url = id_url
             results.append(obj)
 
         return results
