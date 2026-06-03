@@ -212,9 +212,9 @@ class SheetReader:
     columns (Coordination Log §.1 finding #1).
     """
 
-    def read(self, xlsx_bytes: bytes, doc_id: str) -> list[ai]:
+    def read(self, xlsx_bytes: bytes, doc_id: str, tab_name: str = "Actions") -> list[ai]:
         wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
-        ws = wb["Actions"] if "Actions" in wb.sheetnames else wb.active
+        ws = wb[tab_name] if tab_name in wb.sheetnames else wb.active
 
         # Build 1-based column index from contract (authoritative)
         col = _contract.COLUMNS_BY_FIELD  # e.g. {"global_id": 1, "action_id": 2, ...}

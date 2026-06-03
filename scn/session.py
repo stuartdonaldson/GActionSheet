@@ -301,6 +301,12 @@ class ScenarioSession:
         xlsx = download_xlsx(self.sheet_id)
         return SheetReader().read(xlsx, self.doc_id)
 
+    def archive_rows(self, doc_id: str) -> list[ai]:
+        """Download the ActionSheet (.xlsx), parse Archive-tab rows scoped to doc_id."""
+        from tests.helpers.download import download_xlsx
+        xlsx = download_xlsx(self.sheet_id)
+        return SheetReader().read(xlsx, doc_id, tab_name="Archive")
+
     def find_sheet_actions(self) -> list[ai]:
         """Fetch current-doc sheet rows via the find_sheet_actions webapp route."""
         resp = self._post_route("find_sheet_actions", {"docId": self.doc_id})
@@ -321,6 +327,20 @@ class ScenarioSession:
         Also asserts chip document contract: every AI-N: paragraph must have a brand-NUTS
         status icon and a valid globalId link (6ov.8).  Raises AssertionError on violations.
         """
+        if scope == Surface.SHEET:
+            from tests.helpers.download import download_xlsx
+            xlsx = download_xlsx(self.sheet_id)
+            rows = SheetReader().read(xlsx, self.doc_id)
+            for row in rows:
+                # M2-guarded col 7: document_formula must resolve to a doc_id and doc_name
+                assert row.doc_name is not None, (
+                    f"col7 document_formula missing doc_name for {row.global_id!r}"
+                )
+                # M2-guarded col 10: sync_status must be set
+                assert row.sync_status is not None, (
+                    f"col10 sync_status None for {row.global_id!r}"
+                )
+            return {"scope": "SHEET", "rows": len(rows)}
         result = self._post_route("verify_action_rows", {"docId": self.doc_id})
         chip = self._post_route("verify_chip_integrity", {"docId": self.doc_id})
         violations = chip.get("violations", [])
