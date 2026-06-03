@@ -1804,6 +1804,60 @@ function setupTestFixtures(scenario) {
         break;
       }
 
+      case 'sync_all': {
+        syncAll();
+        SpreadsheetApp.flush();
+        _TF_RESULT = { tag: 'fixture.sync_all', data: { ok: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'trash_doc': {
+        var trashDocId = data.docId || testDocId;
+        DriveApp.getFileById(trashDocId).setTrashed(true);
+        _TF_RESULT = { tag: 'fixture.trash_doc', data: { trashed: trashDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'archive_journey': {
+        ArchiveManager.archive(ss);
+        _TF_RESULT = { tag: 'fixture.archive_journey', data: { archiveTriggered: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'seed_row': {
+        _tfAppendSheetRow(ss, _tfSheetRow({
+          id:            data.actionId        || 1,
+          assigneeEmail: data.assigneeEmail   || '',
+          assigneeName:  data.assigneeName    || '',
+          action:        data.action          || 'Seeded action',
+          status:        data.status          || 'Open',
+          docFormula:    data.documentFormula || '',
+          dateCreated:   new Date(),
+          dateModified:  new Date()
+        }));
+        _TF_RESULT = { tag: 'fixture.seed_row', data: { appended: true } };
+        break;
+      }
+
+      case 'set_status_from_preview': {
+        var sspE = { parameters: { url: data.url || '', newStatus: data.newStatus || 'Open' } };
+        _setStatusFromPreview(sspE);
+        _TF_RESULT = { tag: 'fixture.set_status_from_preview', data: { ok: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'process_pending_sheet_updates': {
+        var ppsuE = { triggerUid: null };
+        _processPendingSheetUpdates(ppsuE);
+        _TF_RESULT = { tag: 'fixture.process_pending_sheet_updates', data: { ok: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
       default:
         // Unknown scenario — fall through to default (uc1_new_floating) behaviour.
         GasLogger.log('fixture.warn', {

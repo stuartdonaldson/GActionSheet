@@ -273,11 +273,15 @@ function syncAll() {
 
     // Pre-build dirty-doc set in one pass — avoids O(docs × rows) scan per doc.
     var dirtyDocIds = {};
+    var alreadyDocNotFound = {};
     for (var d = 0; d < actionData.length; d++) {
-      if (actionData[d][9] === 'Dirty') {
-        var gid   = actionData[d][0];
-        var slash = gid.indexOf('/');
-        if (slash > 0) dirtyDocIds[gid.substring(0, slash)] = true;
+      var gidD  = actionData[d][0];
+      var slashD = gidD.indexOf('/');
+      if (actionData[d][9] === 'Dirty' && slashD > 0) {
+        dirtyDocIds[gidD.substring(0, slashD)] = true;
+      }
+      if (actionData[d][9] === 'Doc Not Found' && slashD > 0) {
+        alreadyDocNotFound[gidD.substring(0, slashD)] = true;
       }
     }
 
@@ -319,6 +323,14 @@ function syncAll() {
     }
 
     GasLogger.log('sync.all.complete', { docCount: docIds.length, synced: synced, skipped: skipped });
+
+    // Archive rows that carried 'Doc Not Found' BEFORE this sweep (grace period:
+    // rows first marked on this sweep are not yet in alreadyDocNotFound).
+    var alreadyIds = Object.keys(alreadyDocNotFound);
+    for (var m = 0; m < alreadyIds.length; m++) {
+      ArchiveManager.archive(ss);
+      GasLogger.log('sync.archive.doc_not_found', { docId: alreadyIds[m] });
+    }
   } catch (e) {
     GasLogger.log('sync.all.error', { msg: e.message });
   } finally {
