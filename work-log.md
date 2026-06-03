@@ -1549,3 +1549,48 @@ Lessons-learned capture session following 6ov.8 completion. Four staging files w
 - Filing a P3 ticket is not a proceed decision — it is the opening of a conversation that was never held; the distinction between "understood and intentionally deferred" vs "plausible explanation, unverified root cause" needs to be a merge-gate check
 - The four LLs share lever targets (merge-gate skill, session-start-check skill, CLAUDE.md testing strategy) and must be resolved as a group, not individually, to produce one coherent set of changes rather than four overlapping patches
 - Better titles are a passive fallback: encoding debt-class + mechanism + scope in the title makes the list scannable even when the synthesis skill is not run
+
+## 2026-06-02 18:28:25
+
+### Summary
+GTaskSheet-m00 closed (POC lessons learned); test suite fixed (3 bugs); sidebar bug found and fixed; journey coverage gap identified.
+
+### Details
+
+**GTaskSheet-m00 — POC lessons-learned captured (closed)**
+- Created 3 LL files from editor add-on POC:
+  - `smart-chip-rendering-is-publish-gated.md` — chip pill requires Marketplace publish; programmatic insertion creates hyperlink not pill; `CardService.newSmartChipConfig()` is a Gemini hallucination; Marketplace SDK draft version must be updated after every deploy
+  - `webapp-url-deployment-stamping-and-reuse-boundaries.md` — WebApp URL must be stamped at build time; ScriptProperties is shared across deployments; manual registration is unreliable
+- Deleted spurious LL (`smart-chip-pill-invisible-to-gettext-forces-token-scanner.md`) — user pointed out this was a platform constraint documented in ADR-0008, not an incident with a failure event
+- m00 closed, pushed
+
+**Test suite fixes**
+- `src/TestFixtures.js` — `ai_n_token_scan` sheet row search now filters by `globalId` prefix (docId) instead of action text alone; accumulate-without-reset sheet had 7 stale rows from prior sessions
+- `tests/test_ai_n_token.py` — sheet row lookup scoped by `doc_id` in Document formula to avoid prior-session matches
+- `tests/test_scn_session.py` — `test_verify_consistency_posts_verify_route` updated to assert both `verify_action_rows` and `verify_chip_integrity` routes are called (6ov.8 wired both into `verify_consistency`)
+
+**Sidebar bug — `_ICON_BASE` not defined (fixed)**
+- `WorkspaceAddonCard.js:376` used `_ICON_BASE` for delete button icon URL; constant was dropped in M6/M7 refactor file split
+- Defined `_ICON_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/brand-NUTS/'` at top of `WorkspaceAddonCard.js`
+- Bug caused `ReferenceError → "Unable to load document state"` on every sidebar open
+- Deployed and confirmed fixed by user
+
+**`.clasp.json` project ID corrected**
+- Was `640030365693` (numeric project number); updated to `cloud-logging-test-494622` (alphanumeric project ID) from `local.settings.json`
+- `clasp logs` now references the correct project
+
+**Journey test investigation**
+- 25s pre-wait + 8s @-menu pre-wait tried; journey test skips (not fails) when `createActionTriggers` @-menu not found
+- Root cause of earlier FAIL (not SKIP): `_ICON_BASE` error was crashing `buildHomepageCard` whenever the add-on was initialized; once fixed, the @-menu behavior improved
+- `LINK_PREVIEW` log entries confirmed Marketplace SDK is current (version matches deployed version) — SDK staleness hypothesis was wrong
+- Correct diagnostic: scan for error-tagged log entries first before hypothesizing about deployment state
+
+**[TST] coverage review**
+- Journey gaps identified: sidebar Act missing (rwz #3), preview card AI-N header assertion (rwz #1-2), tracker AI-N link assertion (rwz #4), idempotency sync (bjx7)
+- Standalone tests: 45k M1, ckj M2, dm7 M3, wpe1 M4, r3d Doc Not Found, d33z archive, 0n3 edit action, 5u2v/grxl syncAll paths
+- w6vg (11 pre-existing failures) needs verification — likely fixed by today's docId scoping fixes
+
+### Key Learnings
+- `_ICON_BASE` was undetectable by automated tests because `buildHomepageCard` (Workspace Add-on sidebar, surface ①) is never opened by any test. The `_ICON_BASE` incident is evidence that rwz (sidebar Playwright coverage) is a blocker, not P2 nice-to-have.
+- When debugging unexplained failures, scan `grep -i error` across all GAS logs before forming any deployment-state hypothesis. We hypothesized Marketplace SDK staleness and spent cycles there before finding the actual error in the logs.
+- The accumulate-without-reset sheet design requires `docId` filters in all fixture row searches — action text alone will match rows from prior test sessions.

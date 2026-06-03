@@ -281,7 +281,7 @@ class UiDriver:
         )
         self._page.keyboard.type("Create")
         # GAS add-on items are fetched server-side; cold start can take 5-15s.
-        self._page.wait_for_timeout(3000)
+        self._page.wait_for_timeout(8000)
 
         item = self._page.locator(_AT_MENU_CREATE).first
         try:
@@ -295,7 +295,7 @@ class UiDriver:
         item.click()
 
         # Wait for the action creation form to appear.
-        self._page.wait_for_selector(_FORM_ASSIGNEE, timeout=10000)
+        self._page.wait_for_selector(_FORM_ASSIGNEE, timeout=25000)
 
         if target.assignee:
             inp = self._page.locator(_FORM_ASSIGNEE).first
