@@ -502,8 +502,9 @@ function _tfAppendSheetRow(ss, rowData) {
  *
  * @param {string} [scenario] - Name of the fixture scenario to set up.
  */
-function setupTestFixtures(scenario) {
+function setupTestFixtures(scenario, data) {
   var resolvedScenario = scenario || 'default';
+  data = data || {};
   _TF_RESULT = null; // reset for this invocation
   try {
     // -- Read test IDs from script properties --------------------------------
@@ -1308,7 +1309,8 @@ function setupTestFixtures(scenario) {
           if (!ucCVOHdg) {
             if ((ucCVOChild.getType() === DocumentApp.ElementType.PARAGRAPH ||
                  ucCVOChild.getType() === DocumentApp.ElementType.LIST_ITEM) &&
-                ucCVOChild.getText().trim() === '=== Tracked Actions ===') {
+                (ucCVOChild.getText().trim() === 'Action Item Summary' ||
+                 ucCVOChild.getText().trim() === '=== Tracked Actions ===')) {
               ucCVOHdg = true;
             }
           } else if (ucCVOChild.getType() === DocumentApp.ElementType.TABLE) {
@@ -1832,11 +1834,11 @@ function setupTestFixtures(scenario) {
           id:            data.actionId        || 1,
           assigneeEmail: data.assigneeEmail   || '',
           assigneeName:  data.assigneeName    || '',
-          action:        data.action          || 'Seeded action',
+          action:        data.actionText      || 'Seeded action',
           status:        data.status          || 'Open',
           docFormula:    data.documentFormula || '',
           dateCreated:   new Date(),
-          dateModified:  new Date()
+          dateModified:  data.dateModified ? new Date(data.dateModified) : new Date()
         }));
         _TF_RESULT = { tag: 'fixture.seed_row', data: { appended: true } };
         break;

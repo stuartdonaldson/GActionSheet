@@ -93,7 +93,16 @@ function _handleRunFixture(payload) {
       props.setProperty('TEST_DOC_ID', testDocId);
     }
 
-    var result = setupTestFixtures(fixtureName);
+    // Extract caller-supplied fixture data: everything except framework keys.
+    var fixtureData = {};
+    var _reserved = ['action', 'testToken', 'fixture', 'testDocId'];
+    for (var _k in payload) {
+      if (_reserved.indexOf(_k) === -1) {
+        fixtureData[_k] = payload[_k];
+      }
+    }
+
+    var result = setupTestFixtures(fixtureName, fixtureData);
     return _jsonResponse(result || { tag: 'fixture.' + fixtureName, data: {} });
   } finally {
     if (shouldRestoreTestDocId) {
