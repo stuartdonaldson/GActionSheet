@@ -1996,7 +1996,7 @@ function verifyConsistencyForTest(docId) {
         // Extract display name from =HYPERLINK("url","title")
         var titleMatch = formula.match(/HYPERLINK\s*\(\s*"[^"]*"\s*,\s*"([^"]*)"\s*\)/i);
         sheetRows.push({
-          globalId: data[i][0] || '',
+          globalId: data[i][0] ? String(data[i][0]) : '',
           id:           data[i][1] || '',
           assigneeEmail: data[i][2] || '',
           assigneeName:  data[i][3] || '',

@@ -133,16 +133,18 @@ test('sidebar Insert tracker button inserts table and consistency passes', async
   await expect(addonFrame.getByText(/tracker already present in this document/i))
     .toBeVisible({ timeout: 30000 });
 
-  // Full consistency: ok=true, no issues, all 3 actions present in tracker with correct fields.
+  // Full consistency: ok=true, no issues.
+  // uc_a_permutations seeds 1 chip-led floating action (AI: placeholder → AI-N: after sync).
+  // The 2 email-only text items have no AI-N: prefix so are not detected by the scanner.
   const consistency = await invokeFixture('verify_consistency', docId, settings);
   expect(consistency.data.ok, consistency.data.issues?.join('\n')).toBe(true);
   expect(consistency.data.issues).toHaveLength(0);
-  expect(consistency.data.counts.floating).toBe(3);
-  expect(consistency.data.counts.tracker).toBe(3);
-  expect(consistency.data.counts.matched).toBe(3);
+  expect(consistency.data.counts.floating).toBe(1);
+  expect(consistency.data.counts.tracker).toBe(1);
+  expect(consistency.data.counts.matched).toBe(1);
 
   // Per-row field check — tracker.rows must have non-empty id, action, status.
-  expect(consistency.data.tracker.rows).toHaveLength(3);
+  expect(consistency.data.tracker.rows).toHaveLength(1);
   for (const row of consistency.data.tracker.rows) {
     expect(row.id).toBeTruthy();
     expect(row.action).toBeTruthy();
@@ -163,8 +165,18 @@ test('sync refreshes tracker after status mutation and only mutated row differs'
   await invokeFixture('uc_c_pending_sync_refresh', docId, settings);
 
   await openDocSidebar(page, docId);
-  const addonFrame = await findAddonFrame(page);
+  let addonFrame = await findAddonFrame(page);
 
+  // Sync the 3rd pending floating action; insertTrackerTable runs as part of
+  // sync, so the tracker grows from 2 → 3 rows before we take the baseline.
+  clearLogs();
+  await addonFrame.getByRole('button', { name: /sync now/i }).click();
+  await waitForLogEntry(
+    e => e.tag === 'sync.complete' && (!e.data?.docId || e.data.docId === docId),
+    60000
+  );
+
+  addonFrame = await findAddonFrame(page);
   await expect(addonFrame.getByText(/tracker already present in this document/i))
     .toBeVisible({ timeout: 10000 });
 
