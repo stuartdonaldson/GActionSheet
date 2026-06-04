@@ -591,11 +591,11 @@ function setupTestFixtures(scenario, data) {
           var permErrors = [];
           try {
             _tfAppendTextListItem(permToken, testDocId,
-              'jane.smith@example.com Perm: Draft the committee agenda');
+              'AI: jane.smith@example.com Perm: Draft the committee agenda');
           } catch (e2) { permErrors.push('email-no-status: ' + e2.message); }
           try {
             _tfAppendTextListItem(permToken, testDocId,
-              'bob_jones@example.com Perm: Review the meeting minutes');
+              'AI: bob_jones@example.com Perm: Review the meeting minutes');
           } catch (e3) { permErrors.push('underscore-email: ' + e3.message); }
           try {
             _tfAppendTextListItem(permToken, testDocId,

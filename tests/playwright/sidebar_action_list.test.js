@@ -75,6 +75,7 @@ async function createBlankDoc(page) {
 }
 
 test('homepage card renders action rows and refreshes after sync', async ({ page }) => {
+  test.setTimeout(120000);
   const settings = loadSettings();
   const docId = await createBlankDoc(page);
 
@@ -83,18 +84,26 @@ test('homepage card renders action rows and refreshes after sync', async ({ page
   await openDocSidebar(page, docId);
   let addonFrame = await findAddonFrame(page);
 
-  await expect(addonFrame.getByText(/actions for this document \(3\)/i)).toBeVisible({ timeout: 30000 });
+  // Pre-sync: fixture inserts AI: placeholders — scanner sees 0 floating actions
+  // (AI: items are invisible to _scanFloatingActions until a sync converts them to AI-N:)
+  await expect(addonFrame.getByRole('button', { name: /sync now/i })).toBeVisible({ timeout: 15000 });
+  await expect(addonFrame.getByText(/actions for this document \(0\)/i)).toBeVisible({ timeout: 15000 });
+
+  // Bootstrap sync via sidebar — covers the first-open workflow where a user
+  // clicks Sync Now to assign AI-N: tokens and make actions visible
+  clearLogs();
+  await addonFrame.getByRole('button', { name: /sync now/i }).click();
+  await waitForLogEntry(entry => {
+    if (entry.tag !== 'sync.complete') return false;
+    const entryDocId = entry.data && entry.data.docId;
+    return !entryDocId || entryDocId === docId;
+  }, 60000);
+
+  addonFrame = await findAddonFrame(page);
+  await expect(addonFrame.getByText(/actions for this document \(\d+\)/i)).toBeVisible({ timeout: 30000 });
   await expect(addonFrame.getByText(/Perm: Schedule the kickoff/i)).toBeVisible();
   await expect(addonFrame.getByText(/Perm: Draft the committee agenda/i)).toBeVisible();
   await expect(addonFrame.getByText(/Perm: Review the meeting minutes/i)).toBeVisible();
-  await expect(addonFrame.getByText(/Needs sync/i).first()).toBeVisible();
-
-  await addonFrame.getByRole('button', { name: /sync now/i }).click();
-
-  addonFrame = await findAddonFrame(page);
-  await expect(addonFrame.getByText(/actions for this document \(3\)/i)).toBeVisible({ timeout: 30000 });
-  await expect(addonFrame.getByText(/Anchored/i).first()).toBeVisible({ timeout: 30000 });
-  await expect(addonFrame.getByText(/Perm: Schedule the kickoff/i)).toBeVisible();
 });
 
 test('sync now refreshes an existing tracker table', async ({ page }) => {

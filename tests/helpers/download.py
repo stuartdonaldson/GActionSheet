@@ -1,6 +1,7 @@
 """Download Google Sheet (.xlsx) and Google Doc (.docx) for local inspection."""
 import json
 import pathlib
+import time
 import requests
 
 _OOXML_MAGIC = b"PK\x03\x04"
@@ -22,13 +23,18 @@ def _authed_session() -> requests.Session:
     return s
 
 
-def download_xlsx(spreadsheet_id: str, timeout: int = 60) -> bytes:
+def download_xlsx(spreadsheet_id: str, timeout: int = 60, retries: int = 3) -> bytes:
     url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=xlsx"
-    resp = _authed_session().get(url, timeout=timeout, allow_redirects=True)
-    resp.raise_for_status()
-    if not resp.content.startswith(_OOXML_MAGIC):
-        raise DownloadError(f"Response is not xlsx (got {resp.content[:20]!r})")
-    return resp.content
+    session = _authed_session()
+    for attempt in range(retries):
+        resp = session.get(url, timeout=timeout, allow_redirects=True)
+        if resp.status_code == 429 and attempt < retries - 1:
+            time.sleep(5 * (attempt + 1))
+            continue
+        resp.raise_for_status()
+        if not resp.content.startswith(_OOXML_MAGIC):
+            raise DownloadError(f"Response is not xlsx (got {resp.content[:20]!r})")
+        return resp.content
 
 
 def download_docx(doc_id: str, timeout: int = 60) -> bytes:
