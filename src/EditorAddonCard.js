@@ -327,11 +327,11 @@ function _globalIdFromChipUrl(url) {
  * @param {string} url  The matched action URL
  * @returns {GoogleAppsScript.Card_Service.Card}
  */
-function _buildPreviewCard(url, statusOverride) {
+function _buildPreviewCard(url, statusOverride, docOverride) {
   var globalId  = _globalIdFromChipUrl(url);
   var actionId  = parseGlobalId(globalId).actionId;
   GasLogger.log('PREVIEW_CARD.lookup', { globalId: globalId, actionId: actionId });
-  var doc      = DocumentApp.getActiveDocument();
+  var doc      = docOverride || DocumentApp.getActiveDocument();
   var scanned  = _scanFloatingActions(doc);
   var match    = null;
   for (var fi = 0; fi < scanned.length; fi++) {
@@ -421,15 +421,14 @@ function _buildPreviewCard(url, statusOverride) {
  * @param {GoogleAppsScript.Addons.EventObject} e
  * @returns {GoogleAppsScript.Card_Service.ActionResponse}
  */
-function _setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
+function _setStatusFromPreview(e, docOverride) { // eslint-disable-line no-unused-vars
   var url       = (e && e.parameters && e.parameters.url)       || '';
   var newStatus = (e && e.parameters && e.parameters.newStatus) || 'Open';
 
   var globalId = _globalIdFromChipUrl(url);
   var N        = parseGlobalId(globalId).N || 0;
 
-  // Use getActiveDocument() (already loaded, no network) instead of openById
-  var doc    = DocumentApp.getActiveDocument();
+  var doc    = docOverride || DocumentApp.getActiveDocument();
   var docId  = doc.getId();
   var token  = ScriptApp.getOAuthToken();
   var hasTracker = _readTrackerTableState(doc).found;
@@ -469,7 +468,7 @@ function _setStatusFromPreview(e) { // eslint-disable-line no-unused-vars
   GasLogger.log('POC_EDIT_ACTION.complete', { globalId: globalId, status: newStatus });
 
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(_buildPreviewCard(url, newStatus)))
+    .setNavigation(CardService.newNavigation().updateCard(_buildPreviewCard(url, newStatus, doc)))
     .build();
 }
 

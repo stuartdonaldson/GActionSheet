@@ -1846,7 +1846,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'set_status_from_preview': {
         var sspE = { parameters: { url: data.url || '', newStatus: data.newStatus || 'Open' } };
-        _setStatusFromPreview(sspE);
+        _setStatusFromPreview(sspE, doc);
         _TF_RESULT = { tag: 'fixture.set_status_from_preview', data: { ok: true } };
         docAlreadyClosed = true;
         break;

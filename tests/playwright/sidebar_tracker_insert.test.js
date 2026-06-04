@@ -200,6 +200,7 @@ test('sync refreshes tracker after status mutation and only mutated row differs'
 
   // Re-sync: propagates the sheet mutation to the doc and refreshes the tracker.
   clearLogs();
+  addonFrame = await findAddonFrame(page);
   await addonFrame.getByRole('button', { name: /sync now/i }).click();
   await waitForLogEntry(
     e => e.tag === 'sync.complete' && (!e.data?.docId || e.data.docId === docId),
