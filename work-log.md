@@ -1667,3 +1667,67 @@ needs a careful cross-ref pass. Banner makes canonical sources win where they di
   the [TST] issue contract so the weaker model executes rather than designs.
 - entry-point coverage is already enforced as a verification gate in the project code-review skill
   (steps 4-5, blocks merge); the missing half was design-time authoring guidance.
+
+## 2026-06-03 20:40:24
+
+### Summary:
+Committed the ATDD extraction across repos and handled a hardlink-revert incident.
+
+- GActionSheet master `872ba46`: atdd-lifecycle.md canonical-source banner, CLAUDE.md
+  methodology declaration (`Testing: atdd-bdd`), work-log.
+- DevStandard `methodology/atdd-extraction` `9be0b34`: Tier A (atdd-bdd.md universal
+  principles) + the two repointed skills — the canonical record (isolated from feature WIP).
+- DevStandard `feature/fixture-bootstrap-telemetry` `8153c69`: the two skill edits committed
+  on the live-deploy branch so the runtime ~/.claude skills carry the entry-point guidance.
+- GAS-Practices: tier-B `gas-acceptance-testing/` + index row left on disk, UNVERSIONED
+  (chose "hold" on git init).
+- Nothing pushed — pushes left to the user.
+
+### Key Learnings:
+- **Hardlink-revert hazard.** `~/.claude/skills/*` are HARDLINKED into
+  `DevStandard/dot-claude/skills/*` (same inode). The deployed skill content therefore follows
+  DevStandard's *current branch working tree*. Twice this session edits were silently lost:
+  (1) a concurrent git op in DevStandard discarded the uncommitted `atdd-bdd.md` edit; (2)
+  switching DevStandard back to the feature branch reverted the live ~/.claude skills via the
+  hardlink. Lesson: when editing skills while DevStandard is mid-WIP, COMMIT EARLY on the
+  branch whose working tree is the live deploy source — uncommitted skill edits are not safe.
+- A dedicated branch cleanly isolates a normal doc (atdd-bdd.md) but does NOT work for
+  hardlink-deployed skills: they must live on the deploy branch's working tree, so they were
+  committed on the feature branch, not the methodology branch.
+
+### Recommended next step — version-control GAS-Practices tier-B (currently exposed):
+GAS-Practices is not a git repo; the tier-B docs reverted once already and will be lost if it
+happens again. Put it under git:
+
+```bash
+cd /mnt/c/dev/GAS-Practices
+git init
+git add best-practices/gas-acceptance-testing/README.md best-practices/README.md
+git commit -m "best-practice: add gas-acceptance-testing (GAS stack adapter for atdd-bdd)
+
+End-to-end acceptance/scenario testing of a GAS app from Python: entry-point-as-call-site
+technique (incl. single-shot scheduled triggers, installable-trigger replicate rule),
+run_fixture dispatcher, completion-signal + artifact download, doc-scoped isolation, 6-min
+batching, programmatic-write-suppression gotcha. Indexed in best-practices/README.md.
+Stack adapter for DevStandard knowledge-base/methodology/testing/atdd-bdd.md.
+Source: GActionSheet.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+# then add the rest of the repo as a follow-up commit, and set a remote.
+```
+
+### Pending pushes (left to the user):
+```bash
+# GActionSheet (master, doc commit only):
+git push            # pushes 872ba46
+
+# DevStandard (two branches — your WIP repo, your call):
+cd /mnt/c/dev/DevStandard
+git push -u origin methodology/atdd-extraction    # 9be0b34 — canonical record
+git push origin feature/fixture-bootstrap-telemetry  # incl. 8153c69 skills
+```
+
+### Still open:
+- GTaskSheet-ym61 — thin atdd-lifecycle.md Parts 1-3 to pointers; repoint §16 internal cross-refs.
+- Consider whether ~/.claude skills should be a *copy/deploy* of DevStandard rather than a
+  hardlink, to remove the silent-revert coupling.
