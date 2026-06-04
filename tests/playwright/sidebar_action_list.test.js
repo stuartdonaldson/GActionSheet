@@ -117,6 +117,8 @@ test('sync now refreshes an existing tracker table', async ({ page }) => {
   }, 60000);
 
   const consistency = await invokeFixture('verify_consistency', docId, settings);
+  expect(consistency.data.ok, consistency.data.issues?.join('\n')).toBe(true);
+  expect(consistency.data.issues).toHaveLength(0);
   expect(consistency.data.counts.floating).toBe(3);
   expect(consistency.data.counts.tracker).toBe(3);
   expect(consistency.data.counts.matched).toBe(3);
