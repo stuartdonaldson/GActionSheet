@@ -1,5 +1,20 @@
 # ATDD Testing & Lifecycle Strategy
 
+> **Canonical sources (extracted 2026-06-03).** The portable principles and the GAS
+> mechanics in this document have been extracted to shared repos and are **canonical there**:
+> - **Universal scenario-testing principles** → DevStandard
+>   `knowledge-base/methodology/testing/atdd-bdd.md` § *Universal Scenario-Testing Engineering Principles*.
+> - **GAS+Python acceptance-testing mechanics** → GAS-Practices
+>   `best-practices/gas-acceptance-testing/`.
+>
+> This document is now the **project realization layer** — §15–§16 (the `scn/` scenario
+> model, the canonical journey, the `ContractSchema.js` contract) are GActionSheet-specific
+> and stay here. Parts 1–3 and the inline "GAS/Python note" callouts below are retained for
+> continuity but are **superseded by the canonical sources above**; consult those for the
+> authoritative statement of each principle. A follow-up (bd) will repoint §16's internal
+> cross-references and thin Parts 1–3 to pointers — until then, where this doc and the
+> canonical sources differ, the canonical sources win.
+
 This document has two layers:
 
 - **Universal principles** — apply to any project regardless of language or platform.

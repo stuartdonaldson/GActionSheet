@@ -1594,3 +1594,76 @@ GTaskSheet-m00 closed (POC lessons learned); test suite fixed (3 bugs); sidebar 
 - `_ICON_BASE` was undetectable by automated tests because `buildHomepageCard` (Workspace Add-on sidebar, surface ①) is never opened by any test. The `_ICON_BASE` incident is evidence that rwz (sidebar Playwright coverage) is a blocker, not P2 nice-to-have.
 - When debugging unexplained failures, scan `grep -i error` across all GAS logs before forming any deployment-state hypothesis. We hypothesized Marketplace SDK staleness and spent cycles there before finding the actual error in the logs.
 - The accumulate-without-reset sheet design requires `docId` filters in all fixture row searches — action text alone will match rows from prior test sessions.
+
+## 2026-06-03 20:02:02
+
+### Summary:
+Reviewed the remaining [TST] plan (analyze-the-remaining-tst-fluttering-giraffe.md) for ATDD
+compliance, found it factually stale against the tree, and migrated the whole thing into bd
+with enforced dependencies. Then extracted ATDD testing best-practices out of GActionSheet into
+the shared DevStandard and GAS-Practices repos, repointed the skills, and reduced the project
+plan file to a bd pointer.
+
+**bd restructure (single source of truth):**
+- Created 7 prerequisite issues: hnes (sync_all fixture), elnv (trash route), vx91 (journey
+  archive trigger), sma8 (URL-seed route), por0 (POC handler wrappers), hie7 (SheetReader
+  tab_name + archive_rows), cwm0 (verify_consistency scope=SHEET).
+- Wired 12 `bd dep` links so gated [TST] items drop out of `bd ready` until their enablers close.
+- Corrected stale descriptions: w6vg (named two deleted test files), d33z (the `archive` fixture
+  only seeds; sweep is `sync_status_archive`), 0n3 (POC handler names + they are CardService
+  event handlers, not doPost routes), wpe1 (reader already URL-format-agnostic), grxl (no
+  `sync.warn.trashed` tag — it's `sync.warn` + err string).
+- Added design notes consolidating r3d/grxl/5u2v/nv6g into ONE seeded sweep (§6 batching) and
+  d33z/0n3 as lean self-contained scenarios.
+- bd memories: `no-sync-all-fixture`, `archive-fixture-seeds-only`, `syncall-one-scenario`.
+- Confirmed via code: syncAll already implements trash detection (:303), mod-date skip (:310),
+  _markDocNotFound (:305) — so r3d/grxl/5u2v/d33z are retroactive regression; NO missing [IMP]
+  twins. Only genuine new [IMP] is eg8x (auto-archive 2nd sweep).
+- Reduced the plan file to a pointer at bd.
+
+**ATDD best-practice extraction (3 repos):**
+- Tier A (portable principles) → DevStandard `knowledge-base/methodology/testing/atdd-bdd.md`:
+  appended "Universal Scenario-Testing Engineering Principles" — entry-point coverage invariant
+  + type-keyed call-site-technique table, durable-state-not-logs, negatives, idempotency,
+  named-clone isolation, permutation batching, expectation-queue/checkpoints, twin-track independence.
+- Tier B (GAS mechanics) → GAS-Practices `best-practices/gas-acceptance-testing/` (new folder +
+  index row): GAS call-site table (single-shot scheduled triggers, installable-trigger replicate
+  rule), run_fixture dispatcher, completion-signal→download, doc-scoped isolation, 6-min batching,
+  programmatic-write-suppression gotcha.
+- Tier C (project realization) stays in GActionSheet `docs/atdd/atdd-lifecycle.md` — added a
+  canonical-sources banner; §15–16 (scn/ model, journey, ContractSchema) remain authoritative here.
+- Skills repointed: test-strategy gained a design-time entry-point-call-site check (new Step 6);
+  test-functional gained a Methodology-source block + entry-point success criterion.
+- GActionSheet CLAUDE.md now declares `Testing: atdd-bdd` and points at all three tiers.
+
+### Deferred (tracked):
+GTaskSheet-ym61 — thin atdd-lifecycle.md Parts 1-3 to pointers and repoint §16's internal
+cross-refs. Deferred because §16 references Parts 1-3 by section number and this session's bd
+notes cite `§6/§16`; a blind strip would dangle them. Additive extraction is safe; the strip
+needs a careful cross-ref pass. Banner makes canonical sources win where they differ in the meantime.
+
+### Plan for atdd-lifecycle.md (next steps, in order):
+1. **Verify-before-cut:** for each principle in Parts 1-3 and each "GAS/Python note", confirm the
+   equivalent exists in the canonical source (DevStandard atdd-bdd.md / GAS-Practices
+   gas-acceptance-testing) — no content lost.
+2. **Inventory §16 internal anchors:** grep every `§N`/`§16.x rule` reference in the doc; build a
+   map of which point at soon-to-be-removed sections.
+3. **Repoint:** rewrite those refs to either the surviving §15–16 anchors or the canonical source.
+4. **Thin Parts 1-3 + GAS notes to short pointers** ("see DevStandard atdd-bdd.md §X / GAS-Practices
+   gas-acceptance-testing") — leaving §14 seed strings and §15–16 realization intact.
+5. **Sweep external citations:** update bd notes/skills that say `docs/atdd/atdd-lifecycle.md §6`
+   to the new home (or a surviving anchor).
+6. **Verify:** no dangling `§N`; the canonical-sources banner can drop its "follow-up pending" line.
+7. **Commit each repo separately** (GActionSheet, DevStandard, GAS-Practices) — currently all
+   three are modified but uncommitted, plus the two user-scoped skills.
+
+### Key Learnings:
+- The recurring "tests authored without the scenario/journey model" failure is a *forcing-function*
+  gap, not a content gap: implementation-gate explicitly exempts "test-only changes", so test
+  authoring is the one ungated phase — drift is only caught late at the code-review merge gate.
+- Gates/checklists catch *omission* failures; they do NOT catch *judgment/insight* failures
+  (extend-vs-new scenario; "test a time trigger by single-shot invoking the handler"). Those need
+  (a) technique tables that turn a principle into a lookup, and (b) pinning the scenario design in
+  the [TST] issue contract so the weaker model executes rather than designs.
+- entry-point coverage is already enforced as a verification gate in the project code-review skill
+  (steps 4-5, blocks merge); the missing half was design-time authoring guidance.
