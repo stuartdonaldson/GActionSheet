@@ -10,6 +10,8 @@ Public API consumed by scn/session.py (.7) thin enqueuers:
   - CheckpointEngine  (enqueue, drain, close, queue)
   - DrainInvariantError
 """
+import re
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
@@ -71,6 +73,47 @@ class DrainInvariantError(Exception):
 
 _ALL_AUTHOR_SURFACES = frozenset(Surface)
 
+# UI is LIVE-ONLY and drained at a STEP; INTEGRITY never observes it (R1-impl G2)
+_INTEGRITY_OBS = frozenset({Surface.DOC, Surface.SHEET, Surface.TRACKER})
+
+_WITHIN_RE = re.compile(r"^(\d+(?:\.\d+)?)(s|ms)$")
+
+
+def _parse_within(within: str) -> float:
+    """Parse a within string ('10s', '500ms') to seconds (float)."""
+    m = _WITHIN_RE.match(within)
+    if not m:
+        raise ValueError(f"Invalid within value: {within!r}. Expected e.g. '10s' or '500ms'.")
+    val, unit = m.groups()
+    return float(val) * (1.0 if unit == "s" else 0.001)
+
+
+def _poll_until_pass(
+    read: Callable,
+    surface: "Surface",
+    check_fn: Callable,
+    expected: dict,
+    tag: str,
+    within: str,
+) -> "str | None":
+    """Poll read(surface) until check_fn passes or the within deadline expires.
+
+    Returns None on pass, last error string on timeout.
+    Each iteration calls read() directly — bypasses the per-drain cache so the
+    live DOM is re-captured (required for within= on Surface.UI).
+    """
+    seconds = _parse_within(within)
+    deadline = time.monotonic() + seconds
+    interval = 0.5
+    while True:
+        actuals = read(surface)
+        err = check_fn(expected, actuals, surface, tag)
+        if err is None:
+            return None
+        if time.monotonic() >= deadline:
+            return err
+        time.sleep(interval)
+
 
 def _is_targetable(e: Expectation, kind: CheckpointKind, label: str | None) -> bool:
     """True iff expectation E may be evaluated at checkpoint (kind, label) — §4.5 step 1."""
@@ -131,7 +174,7 @@ class CheckpointEngine:
 
         # §4.4 OBS computation
         if kind == CheckpointKind.INTEGRITY:
-            obs = _ALL_AUTHOR_SURFACES          # CONSISTENCY handled via needs_consistency flag
+            obs = _INTEGRITY_OBS                # UI excluded: live-only, STEP-drained (R1-impl G2)
         elif on is not None:
             obs = on
         else:
@@ -156,12 +199,17 @@ class CheckpointEngine:
             observable_here = e.remaining & obs
 
             for surface in list(observable_here):
-                actuals = get_actuals(surface)
-                error = (
-                    check_present_consistent(e.expected, actuals, surface, e.tag)
+                check_fn = (
+                    check_present_consistent
                     if e.kind == "PRESENT_CONSISTENT"
-                    else check_absent(e.expected, actuals, surface, e.tag)
+                    else check_absent
                 )
+                # within= bounded poll: UI surface only; bypasses _cache for live DOM re-read
+                if e.within is not None and surface == Surface.UI:
+                    error = _poll_until_pass(read, surface, check_fn, e.expected, e.tag, e.within)
+                else:
+                    actuals = get_actuals(surface)
+                    error = check_fn(e.expected, actuals, surface, e.tag)
 
                 if error is None:
                     e.remaining.discard(surface)

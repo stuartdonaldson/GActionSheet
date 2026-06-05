@@ -7,13 +7,10 @@ Each act maps to one entry point; every expectation declares intent on an ai.
 Bead: GTaskSheet-5vwu.13
 Canonical source: docs/atdd/atdd-lifecycle.md §16.10
 
-Deviations from §16.10 (both mechanical, not design):
+Deviations from §16.10 (mechanical, not design):
   D1 — Coordination Log (bead .1): Act 4 "Open" SHEET probe and Act 5 "In Progress"
        SHEET probe cannot share the same final INTEGRITY.  An intermediate INTEGRITY
        after Act 4 drains the Open expectation before set_status changes it.
-  D2 — UI surface not implemented in session._checkpoint read() (returns []).
-       scn.verify(on=UI, …) replaced with scn.expect_alt() — same intent, available
-       mechanism (session.py:392-405 delegates to scn.ui.expect_alt).
   D3 — created.action_id is ambiguous until post-sync (§16.10 note: "next id is
        ambiguous after AI-1,2,5,9"). Resolved from scn.doc_items() after Act 4
        INTEGRITY before the Act 5 hover.
@@ -217,9 +214,9 @@ def test_journey(scn):
         scn.ui.set_status(card, "In Progress")  # click; driver waits out gray/busy (≤10s)
         created.status = "In Progress"
 
-        # D2: verify(on=UI) not implemented — direct card assertion covers the same intent
-        scn.expect_alt(scn.ui.locate(alt="In Progress", next=True), "In Progress")
-        scn.verify(created, on=SHEET, at=INTEGRITY)  # durable, async (13–60s) → defer
+        scn.verify(created, on=Surface.UI, within="10s")            # enqueue; bounded live poll
+        scn.checkpoint(STEP, on=frozenset({Surface.UI}))            # drain UI live, in-browser
+        scn.verify(created, on=SHEET, at=INTEGRITY)                 # durable, async (13–60s) → defer
 
         # ── Final reconcile (HTTP phase) — settle every deferred expectation ──
         scn.checkpoint(INTEGRITY)         # docx+xlsx+tracker+consistency; queue empty at close

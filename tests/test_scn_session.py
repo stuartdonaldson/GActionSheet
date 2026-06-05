@@ -422,3 +422,44 @@ def test_snapshot_excludes_none_fields():
     assert "assignee" not in snap
     assert "action_id" not in snap
     assert snap["action"] == "go"
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint read closure — Surface.UI delegation (R1-impl §1)
+# ---------------------------------------------------------------------------
+
+def test_checkpoint_read_ui_delegates_to_ui_read_current():
+    """read(Surface.UI) calls self.ui.read_current() when ui is attached."""
+    expected_list = [ai(action="", action_id="AI-1", status="In Progress")]
+    mock_ui = MagicMock()
+    mock_ui.read_current.return_value = expected_list
+
+    captured = {}
+
+    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None):
+        captured["result"] = read(Surface.UI)
+        return []
+
+    scn = _make_session()
+    scn.ui = mock_ui
+    scn.engine.drain = fake_drain
+    scn.checkpoint(CheckpointKind.STEP)
+
+    mock_ui.read_current.assert_called_once()
+    assert captured["result"] == expected_list
+
+
+def test_checkpoint_read_ui_returns_empty_when_no_ui_driver():
+    """read(Surface.UI) returns [] when self.ui is None."""
+    captured = {}
+
+    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None):
+        captured["result"] = read(Surface.UI)
+        return []
+
+    scn = _make_session()
+    scn.ui = None
+    scn.engine.drain = fake_drain
+    scn.checkpoint(CheckpointKind.STEP)
+
+    assert captured["result"] == []

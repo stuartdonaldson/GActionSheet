@@ -675,3 +675,181 @@ class TestCheckAbsent:
         other = ai(action="Different thing", action_id="AI-2", status="Open")
         result = check_absent(expected, [other], Surface.SHEET, "[uc T]")
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestUIDrainableAndWithin — R1-impl: UI as first-class drained surface (§3)
+# ---------------------------------------------------------------------------
+
+def _ui_ai(*, action_id="AI-1", status="Open"):
+    """Minimal ai as returned by UiDriver.read_current(): action='', id+status set."""
+    return ai(action="", action_id=action_id, status=status)
+
+
+def _ui_exp(
+    *,
+    action_id="AI-1",
+    status="Open",
+    within=None,
+    severity=Severity.FAIL,
+    tag="[uc TEST]",
+):
+    """Build an Expectation for Surface.UI with an action_id+status snapshot."""
+    surfaces = frozenset({Surface.UI})
+    expected = {"action": "the action text", "action_id": action_id, "status": status}
+    return Expectation(
+        seq=_seq(),
+        expected=expected,
+        surfaces=surfaces,
+        remaining=set(surfaces),
+        target=AUTO,
+        kind="PRESENT_CONSISTENT",
+        within=within,
+        severity=severity,
+        needs_consistency=False,
+        tag=tag,
+    )
+
+
+class TestUIDrainableAndWithin:
+    """verify(on=UI) drains at STEP; within= polls live; INTEGRITY excludes UI (R1-impl §3)."""
+
+    def test_ui_drains_at_step_with_ui_in_obs(self):
+        """verify(on=UI) drains at STEP when obs includes UI and read returns matching ai."""
+        engine = CheckpointEngine()
+        engine.enqueue(_ui_exp(action_id="AI-1", status="Open"))
+        warns = engine.drain(
+            CheckpointKind.STEP,
+            on=frozenset({Surface.UI}),
+            read=lambda s: [_ui_ai(action_id="AI-1", status="Open")],
+        )
+        assert warns == []
+        assert engine.queue == []
+
+    def test_ui_does_not_drain_at_step_without_ui_obs(self):
+        """verify(on=UI) stays queued at a SHEET-only STEP."""
+        engine = CheckpointEngine()
+        engine.enqueue(_ui_exp(action_id="AI-1", status="Open"))
+        engine.drain(
+            CheckpointKind.STEP,
+            on=frozenset({Surface.SHEET}),
+            read=lambda s: [_ui_ai(action_id="AI-1", status="Open")],
+        )
+        assert len(engine.queue) == 1
+
+    def test_integrity_excludes_ui_expectation(self):
+        """INTEGRITY does NOT drain a queued UI expectation → rides to close() → DrainInvariantError."""
+        engine = CheckpointEngine()
+        engine.enqueue(_ui_exp(action_id="AI-1", status="Open"))
+        engine.drain(
+            CheckpointKind.INTEGRITY,
+            read=lambda s: [_ui_ai(action_id="AI-1", status="Open")],
+        )
+        assert len(engine.queue) == 1  # still queued
+        with pytest.raises(DrainInvariantError):
+            engine.close()
+
+    def test_within_retries_until_status_matches(self):
+        """within poll: read returns wrong status first, correct on 2nd call → drains; read called >1."""
+        from unittest.mock import MagicMock, patch
+
+        engine = CheckpointEngine()
+        engine.enqueue(_ui_exp(action_id="AI-1", status="In Progress", within="1s"))
+
+        reads = []
+
+        def read(surface):
+            reads.append(surface)
+            if len(reads) == 1:
+                return [_ui_ai(action_id="AI-1", status="Open")]  # wrong status
+            return [_ui_ai(action_id="AI-1", status="In Progress")]  # correct
+
+        with patch("scn.engine.time") as m:
+            m.monotonic.side_effect = [0.0, 0.1]  # deadline=1.0s; 2nd monotonic check at 0.1s < 1.0
+            m.sleep = MagicMock()
+            warns = engine.drain(
+                CheckpointKind.STEP,
+                on=frozenset({Surface.UI}),
+                read=read,
+            )
+
+        assert warns == []
+        assert len(reads) == 2  # read called twice (cache bypassed)
+        assert engine.queue == []
+
+    def test_within_fails_on_timeout(self):
+        """within poll: read never matches → AssertionError (FAIL severity) at timeout."""
+        from unittest.mock import MagicMock, patch
+
+        engine = CheckpointEngine()
+        engine.enqueue(_ui_exp(action_id="AI-1", status="Done", within="200ms"))
+
+        with patch("scn.engine.time") as m:
+            m.monotonic.side_effect = [0.0, 1.0]  # deadline=0.2s; check at 1.0s > deadline
+            m.sleep = MagicMock()
+            with pytest.raises(AssertionError):
+                engine.drain(
+                    CheckpointKind.STEP,
+                    on=frozenset({Surface.UI}),
+                    read=lambda s: [_ui_ai(action_id="AI-1", status="Open")],
+                )
+
+    def test_within_warn_drops_surface_and_records_warning(self):
+        """within poll: WARN severity records warning + drops surface at timeout."""
+        from unittest.mock import MagicMock, patch
+
+        engine = CheckpointEngine()
+        engine.enqueue(_ui_exp(action_id="AI-1", status="Done", within="200ms", severity=Severity.WARN))
+
+        with patch("scn.engine.time") as m:
+            m.monotonic.side_effect = [0.0, 1.0]
+            m.sleep = MagicMock()
+            warns = engine.drain(
+                CheckpointKind.STEP,
+                on=frozenset({Surface.UI}),
+                read=lambda s: [_ui_ai(action_id="AI-1", status="Open")],
+            )
+
+        assert len(warns) == 1
+        assert "WARN" in warns[0]
+        assert engine.queue == []  # surface dropped; no dangle
+
+
+# ---------------------------------------------------------------------------
+# TestCheckPresentConsistentUI — UI surface assertion carve-out (R1-impl §2)
+# ---------------------------------------------------------------------------
+
+class TestCheckPresentConsistentUI:
+    """UI surface: only action_id + status enforced; text/assignee/name skipped."""
+
+    def _actual(self, action_id="AI-1", status="Open", assignee=None):
+        return ai(action="", action_id=action_id, status=status, assignee=assignee)
+
+    def test_pass_action_id_and_status_match(self):
+        expected = {"action": "does not matter for UI check", "action_id": "AI-1", "status": "In Progress"}
+        result = check_present_consistent(expected, [self._actual(status="In Progress")], Surface.UI, "[t]")
+        assert result is None
+
+    def test_fail_status_mismatch(self):
+        expected = {"action": "x", "action_id": "AI-1", "status": "In Progress"}
+        result = check_present_consistent(expected, [self._actual(status="Open")], Surface.UI, "[t]")
+        assert result is not None
+        assert "status" in result.lower()
+
+    def test_fail_action_id_not_found(self):
+        """Action not in actuals → 'not found' error."""
+        expected = {"action": "x", "action_id": "AI-99", "status": "Open"}
+        result = check_present_consistent(expected, [self._actual(action_id="AI-1")], Surface.UI, "[t]")
+        assert result is not None
+
+    def test_pass_action_text_mismatch_ignored(self):
+        """UI carve-out: action text mismatch is not enforced."""
+        expected = {"action": "completely different text", "action_id": "AI-1", "status": "Open"}
+        result = check_present_consistent(expected, [self._actual(status="Open")], Surface.UI, "[t]")
+        assert result is None
+
+    def test_pass_assignee_mismatch_ignored(self):
+        """UI carve-out: assignee is not enforced."""
+        expected = {"action": "x", "action_id": "AI-1", "status": "Open", "assignee": "someone@example.com"}
+        result = check_present_consistent(expected, [self._actual(assignee=None)], Surface.UI, "[t]")
+        assert result is None

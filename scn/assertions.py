@@ -61,6 +61,27 @@ def check_present_consistent(
 
     actual = matches[0]
 
+    # UI surface carve-out: enforce identity + status only; skip text, assignee, name (R1-impl §2)
+    if surface == Surface.UI:
+        if "action_id" in expected:
+            if actual.action_id != expected["action_id"]:
+                return (
+                    f"[{tag}] UI: action_id mismatch: "
+                    f"expected={expected['action_id']!r}, actual={actual.action_id!r}"
+                )
+        else:
+            if not actual.action_id or not _AI_N_RE.match(actual.action_id):
+                return (
+                    f"[{tag}] UI: expected a valid AI-N, got: {actual.action_id!r}"
+                )
+        if "status" in expected:
+            if actual.status != expected["status"]:
+                return (
+                    f"[{tag}] UI: status mismatch: "
+                    f"expected={expected['status']!r}, actual={actual.status!r}"
+                )
+        return None
+
     # action text
     if actual.action != expected["action"]:
         return (

@@ -385,3 +385,50 @@ class UiDriver:
         if severity == Severity.FAIL:
             raise AssertionError(msg)
         warnings.warn(msg, stacklevel=2)
+
+    def read_current(self) -> list[ai]:
+        """Read the currently-rendered card as list[ai] for queue-drain (R1-impl §1).
+
+        Returns [] if no card context or no 'AI-N:' header found.
+        Reads action_id from the 'AI-N:' card header text and status from the rendered
+        brand-NUTS status icon (img[alt] preferred over non-button [aria-label], per G1).
+        """
+        if self._current_card is None:
+            return []
+
+        frame = self._current_card.frame
+        action_id = None
+        status = None
+
+        try:
+            header = frame.get_by_text(re.compile(r"AI-\d+:")).first
+            header_text = header.text_content(timeout=2000) or ""
+            m = re.search(r"\b(AI-\d+)\b", header_text)
+            if m:
+                action_id = m.group(1)
+        except Exception:
+            pass
+
+        if not action_id:
+            return []
+
+        try:
+            for img in frame.locator("img[alt]").all():
+                alt = img.get_attribute("alt", timeout=1000)
+                if alt and alt.strip():
+                    status = alt.strip()
+                    break
+        except Exception:
+            pass
+
+        if status is None:
+            try:
+                for el in frame.locator('[aria-label]:not(button):not([role="button"])').all():
+                    lbl = el.get_attribute("aria-label", timeout=1000)
+                    if lbl and lbl.strip():
+                        status = lbl.strip()
+                        break
+            except Exception:
+                pass
+
+        return [ai(action="", action_id=action_id, status=status)]

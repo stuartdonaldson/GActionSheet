@@ -331,14 +331,16 @@ class ScenarioSession:
             from tests.helpers.download import download_xlsx
             xlsx = download_xlsx(self.sheet_id)
             rows = SheetReader().read(xlsx, self.doc_id)
+            _SYNC_ERROR_STATES = {"Dirty", "Deleted", "Doc Not Found"}
             for row in rows:
                 # M2-guarded col 7: document_formula must resolve to a doc_id and doc_name
                 assert row.doc_name is not None, (
                     f"col7 document_formula missing doc_name for {row.global_id!r}"
                 )
-                # M2-guarded col 10: sync_status must be set
-                assert row.sync_status is not None, (
-                    f"col10 sync_status None for {row.global_id!r}"
+                # M2-guarded col 10: after a clean sync no row should be in an error state.
+                # Blank ("") is the normal post-sync value; Dirty/Deleted/Doc Not Found are errors.
+                assert row.sync_status not in _SYNC_ERROR_STATES, (
+                    f"col10 sync_status {row.sync_status!r} for {row.global_id!r}"
                 )
             return {"scope": "SHEET", "rows": len(rows)}
         result = self._post_route("verify_action_rows", {"docId": self.doc_id})
@@ -502,6 +504,8 @@ class ScenarioSession:
                 if "xlsx" not in _bytes_cache:
                     _bytes_cache["xlsx"] = download_xlsx(self.sheet_id)
                 return SheetReader().read(_bytes_cache["xlsx"], self.doc_id)
+            if surface == Surface.UI:
+                return self.ui.read_current() if self.ui is not None else []
             return []
 
         def read_consistency() -> dict:
