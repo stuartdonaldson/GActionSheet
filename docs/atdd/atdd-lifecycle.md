@@ -528,7 +528,7 @@ Acts at the **entry-point** altitude; expectations at the **observable-state** a
 2. **Declare intent in data, not prose.** Mutate the `ai` to what you expect, then enqueue it — the scenario reads as a specification; the assertion code is generic.
 3. **Assert observable state only.** Sheet rows from the `.xlsx`, paragraph state from the `.docx`/scan, tracker rows from the rendered table, UI evidence for interactive acts. Never a return value or a log tag (§5).
 4. **Scope every read and invariant to the journey's own `docId`.** The ActionSheet accumulates rows across runs; `globalId` carries the doc prefix, so doc-scoping is the clean filter. A whole-sheet count or uniqueness check will read polluted cross-session state.
-5. **Checkpoint by cost, never mid-Playwright.** Full `INTEGRITY` reconciliation is expensive and would balloon UI runs. During the Playwright phase prefer **targeted single-surface expectations** (a probe of one `ai` on the docx or xlsx) and reserve `INTEGRITY` for HTTP-phase boundaries and the journey end.
+5. **Checkpoint by cost, never mid-Playwright.** Full `INTEGRITY` reconciliation is expensive and would balloon UI runs. During the Playwright phase prefer **targeted single-surface expectations** (a probe of one `ai` on the docx or xlsx) and reserve `INTEGRITY` for HTTP-phase boundaries and the journey end. **COST RULE** (Python-drives-Playwright pattern): Reserve Playwright for surfaces only the UI can show, and for exercising a real UI entry point as the call-site. Everything that does not require the browser stays on the HTTP fixture path (far cheaper). The browser cold start is amortized across all UI acts of one journey — one launch, many acts. During the Playwright phase prefer TARGETED single-surface expectations (verify(on=UI, within=) drained by checkpoint(STEP, on=UI), or a cheap verify(on=DOC) probe) and reserve INTEGRITY for HTTP-phase boundaries and the journey end. This is the explicit answer to "Playwright is expensive to spin up": amortize the one cold start, and keep non-UI acts off the browser entirely.
 6. **Seed all, then sync once.** You *could* sync-and-verify after each append, but it adds execution time for little value; append the full set, then sync.
 7. **Respect the 6-minute GAS ceiling / start clean-room.** Batch input variants into one fixture (§6); split into a new scenario only when the operation model materially changes (e.g. HTTP phase vs. Playwright phase). Let the act sequence build state; don't encode incidental preconditions.
 
@@ -628,6 +628,19 @@ scn.checkpoint(STEP, on=frozenset({Surface.UI}))            # drain UI, in-brows
 scn.verify(created, on=SHEET, at=INTEGRITY)                 # sheet update deferred to later INTEGRITY
 ```
 
+**Python-drives-Playwright UI acts (sidebar interactions).** In addition to the HTTP fixture shortcuts for state mutations, a scenario may exercise real UI entry points through the sidebar add-on card. These acts fire Playwright gestures as the true call-sites, not the HTTP fixtures. Each is a real-UI twin of an HTTP shortcut, satisfying the entry-point coverage invariant:
+
+| UI Act | HTTP Shortcut it replaces | Entry point |
+|---|---|---|
+| `scn.ui.sidebar_sync(timeout="60s")` | `scn.sync()` | Sync Now button in sidebar card |
+| `scn.ui.insert_tracker_button(timeout="30s")` | `scn.insert_tracker()` | Insert tracker button in sidebar card |
+| `scn.ui.sidebar_delete(target, timeout="15s")` | `scn.delete(ai)` | Per-row Delete action button in sidebar card |
+| `scn.ui.sidebar_set_status(target, status, timeout="15s")` | `scn.set_status(ai, status)` | Per-row status control in sidebar card |
+
+Note: the existing `scn.ui.set_status(card, status)` (which operates on a hovered preview card) is distinct from the new `scn.ui.sidebar_set_status(target, status)` (which operates on the sidebar card). Keep both.
+
+**One-browser-per-journey fixture.** All UI acts within a journey share a single module-scoped browser instance, launched once at the journey start and torn down at the end. This pattern amortizes the Chromium cold-start cost across multiple acts. The canonical fixture is `browser_page` in `tests/test_journey.py` (scope="module"), with `.auth/user.json` storage state for authentication. Non-UI acts (append_paragraph, edit_sheet, HTTP sync via doPost, queries, INTEGRITY checks) remain entirely on the HTTP/fixture path and do not touch the browser.
+
 ### 16.9 Support-function catalog
 
 The author writes against a thin driver (`ScenarioSession`, "scn") plus standalone assertion helpers; the driver owns lifecycle, fixture invocation, captures, and `ai`-state accumulation, but **not** assertion logic (§15). The catalog below is the **as-built API** implemented in `scn/session.py`. Reuse hints are retained for traceability.
@@ -644,17 +657,21 @@ The author writes against a thin driver (`ScenarioSession`, "scn") plus standalo
 | Act | Entry point | Sync scenario |
 |---|---|---|
 | `scn.append_paragraph(ai.as_text())` | doc paragraph insert (no action implied until sync) | — |
-| `scn.insert_tracker()` | tracker insert/refresh | — |
+| `scn.insert_tracker()` | tracker insert/refresh via HTTP fixture | — |
 | `scn.sync()` | `syncDocument` via doPost — bidirectional reconcile | C |
 | `scn.edit_sheet(ai, **fields)` | sheet-cell edit (Dirty stamp, sheet-wins) | B |
-| `scn.set_status(ai, status)` | sidebar status action | A |
-| `scn.delete(ai)` | sidebar delete | — |
+| `scn.set_status(ai, status)` | sheet status action via HTTP fixture | A |
+| `scn.delete(ai)` | sheet delete via HTTP fixture | — |
 | `scn.ui.create_action(ai)` | `@`-menu Create-action form (autocomplete per §16.4) | — |
-| `scn.ui.hover` / `set_status` / gestures | live preview-card interaction (§16.8) | — |
+| `scn.ui.sidebar_sync(timeout="60s")` | Sync Now button in sidebar card (UI entry point) | C |
+| `scn.ui.insert_tracker_button(timeout="30s")` | Insert tracker button in sidebar card (UI entry point) | — |
+| `scn.ui.sidebar_delete(target, timeout="15s")` | Per-row Delete action button in sidebar card (UI entry point) | — |
+| `scn.ui.sidebar_set_status(target, status, timeout="15s")` | Per-row status control in sidebar card (UI entry point) | A |
+| `scn.ui.hover` / `set_status` (card) / gestures | live preview-card interaction (§16.8) | — |
 
 > Document-text deletion (removing the `AI-N:` paragraph) and the `syncAll` sweep are **distinct entry points** with their own acts when those journeys are written.
 
-**Write-route semantics (resolved, §16.11).** `edit_sheet`, `set_status`, and `delete` address their target row by `globalId` (#3). `edit_sheet` over the API/fixture path replicates `onActionSheetEdit`'s Dirty + Date-Modified stamp so the act faithfully simulates a user edit (#2); the same gesture driven through the Playwright UI fires the real trigger and needs no replication. `sync()` blocks until the script-properties message queue drains, so a following `sync()` is how the scenario forces an async act (a sidebar `set_status`) to convergence (#4).
+**Write-route semantics (resolved, §16.11).** HTTP fixture acts (`set_status`, `delete`, `insert_tracker`) address their target row by `globalId` (#3) and execute synchronously via `doPost`. UI sidebar acts (`sidebar_set_status`, `sidebar_delete`, `insert_tracker_button`) fire Playwright gestures and execute asynchronously — the scenario must follow with an HTTP `sync()` call to force convergence before verifying durable state on DOC/SHEET/TRACKER (#4). `edit_sheet` over the API/fixture path replicates `onActionSheetEdit`'s Dirty + Date-Modified stamp so the act faithfully simulates a user edit (#2). A scenario may mix HTTP fixtures and UI acts; the choice depends on whether you are testing the HTTP integration (use fixtures) or exercising a real UI entry point (use sidebar UI acts) — but both exercise the same underlying Sync engine, so the observable outcomes are identical.
 
 **Queries (read, no mutation)** — `scn.doc_items()`, `scn.sheet_rows()` (docId-scoped), `scn.find_sheet_actions()`, `scn.verify_consistency(scope=doc)` (§16.7; also run by `INTEGRITY`).
 

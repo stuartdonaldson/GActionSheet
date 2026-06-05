@@ -159,6 +159,18 @@ Apps Script editor → Run → initializeTriggers
 
 The `scn/` package provides the scenario harness (`ai`, `engine`, `session`, `surfaces`, `ui`, `contract` modules). Architecture: `docs/atdd/scenario-harness-design.md`. Strategy: `docs/atdd/atdd-lifecycle.md`.
 
+### Test Patterns
+
+**Python-drives-Playwright pattern.** Scenarios exercise two kinds of entry points:
+1. **HTTP fixture shortcuts** (`scn.sync()`, `scn.set_status(ai, status)`, `scn.insert_tracker()`, `scn.delete(ai)`) — fast, synchronous, no browser required. Use for testing the HTTP integration path and internal consistency.
+2. **UI sidebar acts** (`scn.ui.sidebar_sync()`, `scn.ui.sidebar_set_status(target, status)`, `scn.ui.insert_tracker_button()`, `scn.ui.sidebar_delete(target)`) — exercise real user entry points through Playwright. Use to verify the UI integration and fire the true add-on code path.
+
+**Cost rule.** Reserve Playwright for surfaces only the UI can show, and for exercising a real UI entry point as the call-site. Everything that does not require the browser stays on the HTTP fixture path (far cheaper). The browser cold start is amortized across all UI acts of one journey — one launch, many acts. During the Playwright phase prefer TARGETED single-surface expectations (verify(on=UI, within=) drained by checkpoint(STEP, on=UI), or a cheap verify(on=DOC) probe) and reserve INTEGRITY for HTTP-phase boundaries and the journey end. This is the explicit answer to "Playwright is expensive to spin up": amortize the one cold start, and keep non-UI acts off the browser entirely.
+
+**One-browser-per-journey fixture.** All UI sidebar acts within a journey share a single module-scoped browser instance, launched once at the journey start and torn down at the end. This pattern amortizes the Chromium cold-start cost across multiple acts. The canonical fixture is `browser_page` in `tests/test_journey.py` (scope="module"), with `.auth/user.json` storage state for authentication. Non-UI acts remain entirely on the HTTP/fixture path and do not touch the browser.
+
+### Running the Tests
+
 ```bash
 # Always use -x (fail-fast): stop after the first test that fails.
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/ -x -v
