@@ -1,0 +1,25 @@
+
+
+===== 2026-06-05T13:26:26.459245 GTaskSheet-80mo.8 model=sonnet =====
+GTaskSheet-80mo.8 is complete. Here's what was delivered:
+
+**New files:**
+- `tests/test_sidebar.py` — 5 browser-backed tests (module-scoped Chromium, per-test named-clone doc):
+  - `test_sidebar_bootstrap_sync` — sidebar `Sync Now` entry point; `(0)→(N)` refresh
+  - `test_tracker_insert_button` — `Insert tracker` button entry point
+  - `test_status_mutation_only_mutated_row` — per-row status control; only-mutated-row via queue pattern; D4 guard with HTTP fallback
+  - `test_sidebar_shell_controls` — raw frame assertions on UI shell structure (G1: not ai state)
+  - `test_sidebar_blank_doc_no_error` — no-crash on blank doc open
+
+- `tests/test_tracker_view_only.py` — HTTP-only AC3; `uc_c_view_only` fixture; `-EDITED` sentinel check via `TrackerReader`
+
+**Modified:** `tests/test_journey.py` Act 3b — `sidebar_sync()` call-site added for entry-point matrix coverage.
+
+**Deleted:** `sidebar_action_list.test.js`, `sidebar_shell.test.js`, `sidebar_tracker_insert.test.js`. `smoke.test.js` + `probe.test.js` retained.
+
+147 unit tests pass. Commit `2864daf` staged locally (push deferred to orchestrator per bead instructions).
+
+2026-06-05 20:37 UTC | ~12k tokens
+
+
+===== 2026-06-05T13:37:18.548319 GTaskSheet-80mo.9 model=haiku =====

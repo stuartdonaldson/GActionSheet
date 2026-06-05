@@ -2,6 +2,7 @@ const { defineConfig } = require('@playwright/test');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { loadSettings } = require('./_helpers');
 
 function getSheetUrl() {
   if (process.env.SHEET_ID) return sheetUrl(process.env.SHEET_ID);
@@ -11,12 +12,6 @@ function getSheetUrl() {
 
 function sheetUrl(sheetId) {
   return `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
-}
-
-function loadSettings() {
-  const p = path.join(__dirname, '..', '..', 'local.settings.json');
-  if (!fs.existsSync(p)) throw new Error('local.settings.json not found');
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
 module.exports = defineConfig({

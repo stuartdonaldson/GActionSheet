@@ -273,34 +273,4 @@ if (require.main === module) {
   }
 }
 
-/**
- * Poll all page frames until one contains the "Sync now" button, handling
- * the GAS cold-start "Refresh" button if it appears first.
- */
-async function findAddonFrame(page, timeoutMs = 30000) {
-  const deadline = Date.now() + timeoutMs;
-  let refreshAttempted = false;
-
-  while (Date.now() < deadline) {
-    for (const frame of page.frames()) {
-      const syncNow = frame.getByRole('button', { name: /sync now/i });
-      if (await syncNow.count().catch(() => 0)) return frame;
-    }
-
-    if (!refreshAttempted) {
-      const refreshButton = page.getByRole('button', { name: /^Refresh$/i });
-      if (await refreshButton.count().catch(() => 0)) {
-        refreshAttempted = true;
-        await refreshButton.click();
-        await page.waitForTimeout(4000);
-        continue;
-      }
-    }
-
-    await page.waitForTimeout(500);
-  }
-
-  throw new Error('Timed out locating add-on frame with Sync now control');
-}
-
-module.exports = { openDocSidebar, clickSyncNow, sidebarActionRows, clearLogs, waitForLogEntry, verifyConsistency, findAddonFrame };
+module.exports = { openDocSidebar, clickSyncNow, sidebarActionRows, clearLogs, waitForLogEntry, verifyConsistency };

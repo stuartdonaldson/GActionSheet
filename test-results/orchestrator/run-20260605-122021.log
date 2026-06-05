@@ -1,3 +1,27 @@
 
 
 ===== 2026-06-05T12:20:31.955763 GTaskSheet-80mo.7 model=opus =====
+Done. GTaskSheet-80mo.7 complete.
+
+**Deliverable:** Populated GTaskSheet-80mo.8 (R3-impl) `--design` with a per-test JS→scn migration spec. No production code (design bead).
+
+**Acceptance (.7) — all met:**
+1. **Per-JS-test map** — each of `sidebar_action_list` (T1→`test_sidebar_bootstrap_sync`; T2 folded into AC2 baseline), `sidebar_shell` (→shell-controls + blank-doc tests), and `sidebar_tracker_insert` AC1/AC2/AC3 has a named target scn artifact plus its act/verify/checkpoint shape, using the verbatim R2-impl act names (`sidebar_sync`, `insert_tracker_button`, `sidebar_set_status`).
+2. **Stays in JS** — `smoke.test.js` + `probe.test.js` retained, with rationale (deployment/auth/transport probes below the scenario model).
+3. **Only-mutated-row (AC2)** — expressed via enqueuing the unchanged `ai`s at baseline `verify(on=TRACKER)` plus the changed one with `status=new`, drained at `checkpoint(INTEGRITY)`; no hand-rolled diff.
+4. **R5 single consistency authority** — `scn.verify_consistency()` (GAS routes) = server truth; `verify(on=TRACKER/SHEET/DOC)` = artifact truth; smoke/probe invoke no consistency route (no third notion).
+5. No code written.
+
+**Key design calls honoring G1/G2:** sidebar row text / count text / control presence are UI shell (raw frame asserts, never enqueued); multi-row truth routes through TRACKER since `read_current()` reads one card; UI evidence is identity+status only via `verify(on=UI)`+`checkpoint(STEP,on=UI)`, never through INTEGRITY.
+
+Cross-cutting facts appended to the epic Coordination Log (seeds R5 stub .11). Closed and committed locally (`bbaa0f5`); did **not** push — orchestrator owns that.
+
+2026-06-05 12:42 · ~58k tokens
+
+
+===== 2026-06-05T12:24:52.881708 GTaskSheet-80mo.8 model=sonnet =====
+You've hit your monthly spend limit · raise it at claude.ai/settings/usage
+
+
+===== 2026-06-05T12:25:12.233797 GTaskSheet-80mo.8 model=sonnet =====
+You've hit your monthly spend limit · raise it at claude.ai/settings/usage

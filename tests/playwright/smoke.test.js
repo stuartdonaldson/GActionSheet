@@ -14,15 +14,8 @@
  */
 
 const { test, expect } = require('@playwright/test');
-const path = require('path');
-const fs = require('fs');
-const { openDocSidebar, findAddonFrame } = require('./addon_helpers');
-
-function loadSettings() {
-  return JSON.parse(
-    fs.readFileSync(path.join(__dirname, '..', '..', 'local.settings.json'), 'utf8')
-  );
-}
+const { openDocSidebar } = require('./addon_helpers');
+const { loadSettings, findAddonFrame } = require('./_helpers');
 
 test('@smoke sidebar opens on test doc and deployed version is visible', async ({ page }) => {
   const settings = loadSettings();
