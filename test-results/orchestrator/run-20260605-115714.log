@@ -1,0 +1,67 @@
+
+
+===== 2026-06-05T11:57:24.165973 GTaskSheet-80mo.4 model=opus =====
+Done. **GTaskSheet-80mo.4 (R2-design)** is complete and closed.
+
+## What was delivered
+
+This was a **design bead** — deliverable was populating the paired build bead's (`GTaskSheet-80mo.5`, R2-impl) `--design` field. No production code.
+
+The spec I wrote into `.5 --design`:
+
+1. **Four normalized `scn.ui` acts**, each a real-UI call-site twin of an HTTP shortcut (entry-point coverage invariant):
+   - `sidebar_sync()` ← `scn.sync()` (Sync Now button, Scenario C)
+   - `insert_tracker_button()` ← `scn.insert_tracker()`
+   - `sidebar_delete(ai)` ← `scn.delete(ai)` (per-row Delete action button)
+   - `sidebar_set_status(ai, status)` ← `scn.set_status(ai, status)` (per-row status control, Scenario A) — kept distinct from the existing preview-card `set_status(card, status)`.
+
+2. **One-browser-per-journey fixture contract** — the module-scoped `browser_page` fixture is the documented standard; non-UI acts stay on the cheap HTTP path.
+
+3. **Cost rule (§16.3 #5)** written verbatim for R2-docs (`.6`) to transcribe.
+
+4. **Queue-routed UI verification** per R1's contract: `verify(on=Surface.UI, within=)` + `checkpoint(STEP, on=UI)`, with G2 honored (never route `on=UI` through INTEGRITY) and the `read_current()` single-ai constraint flagged for the impl owner.
+
+Cross-cutting facts appended to the epic Coordination Log; AC4's exact act names handed to R3 (`.7`/`.8`). bd state committed locally (`5c64c6d`); not pushed — the orchestrator owns the push.
+
+2026-06-05 · ~30.5K tokens this session.
+
+
+===== 2026-06-05T12:05:57.706600 GTaskSheet-80mo.5 model=sonnet =====
+Done. Summary of changes:
+
+**`scn/ui.py`** — added 3 private selector constants (`_SIDEBAR_SYNC`, `_SIDEBAR_INSERT_TRACKER`, `_SIDEBAR_DELETE`), 2 private helpers (`_sidebar_card()`, `_sidebar_row()`), and 4 new public acts: `sidebar_sync`, `insert_tracker_button`, `sidebar_delete`, `sidebar_set_status`. Each act is a real-UI call-site that drives the entry point itself, not an HTTP shortcut.
+
+**`tests/test_scn_ui.py`** — 25 new unit tests (4 new test classes, one per act) covering: selector targeting inside card frame, click/busy-wait behavior, no-spinner resilience, None return type, sidebar auto-open, and signature distinctness from the existing `set_status(card)`.
+
+**`tests/test_journey.py`** — Act 3 now tries `insert_tracker_button()` as the real call-site; a D4 guard falls back to `scn.insert_tracker()` if the add-on isn't installed as a test deployment.
+
+2026-06-05 17:45 · ~9k tokens
+
+
+===== 2026-06-05T12:15:43.800757 GTaskSheet-80mo.6 model=haiku =====
+Completed! I've documented the R2 Python-drives-Playwright pattern in the strategy docs:
+
+**Changes made:**
+
+1. **docs/atdd/atdd-lifecycle.md §16.3** — Added the cost rule explaining how Playwright is reserved for UI-only surfaces and everything else stays on the HTTP path, amortizing the browser cold start across multiple acts.
+
+2. **docs/atdd/atdd-lifecycle.md §16.8** — Added a new subsection documenting the sidebar UI acts as real entry points:
+   - `scn.ui.sidebar_sync(timeout="60s")`
+   - `scn.ui.insert_tracker_button(timeout="30s")`
+   - `scn.ui.sidebar_delete(target, timeout="15s")`
+   - `scn.ui.sidebar_set_status(target, status, timeout="15s")`
+   
+   Also documented the one-browser-per-journey fixture contract (module-scoped `browser_page` in `tests/test_journey.py`).
+
+3. **docs/atdd/atdd-lifecycle.md §16.9** — Expanded the acts table to include the new sidebar UI acts and clarified the distinction between HTTP fixtures and UI entry points.
+
+4. **docs/OPERATIONS.md §Running Tests** — Added a "Test Patterns" section documenting the Python-drives-Playwright pattern, cost rule, and one-browser-per-journey fixture.
+
+All documentation is consistent; no stale guidance contradicts the pattern. Bead closed and changes committed locally. Ready for R2 testing.
+
+----- test block R2 rc=0 -----
+........................................................................ [ 48%]
+........................................................................ [ 97%]
+...                                                                      [100%]
+147 passed in 4.50s
+
