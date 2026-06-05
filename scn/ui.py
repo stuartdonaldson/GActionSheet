@@ -78,6 +78,21 @@ _FORM_SUBMIT = (
     'button:has-text("Insert"), '
     'button[type="submit"]'
 )
+# Sidebar homepage card — Sync Now button
+_SIDEBAR_SYNC = (
+    'button:has-text("Sync"), '
+    '[aria-label*="Sync"], '
+    '[aria-label*="sync"]'
+)
+# Sidebar homepage card — Insert tracker button
+_SIDEBAR_INSERT_TRACKER = (
+    'button:has-text("Insert tracker"), '
+    'button:has-text("tracker"), '
+    '[aria-label*="Insert tracker"], '
+    '[aria-label*="tracker"]'
+)
+# Sidebar homepage card — per-row Delete action button
+_SIDEBAR_DELETE = '[aria-label="Delete action"]'
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +400,115 @@ class UiDriver:
         if severity == Severity.FAIL:
             raise AssertionError(msg)
         warnings.warn(msg, stacklevel=2)
+
+    # ------------------------------------------------------------------
+    # Private sidebar helpers
+    # ------------------------------------------------------------------
+
+    def _sidebar_card(self) -> Card:
+        """Idempotently ensure the sidebar is open; return the current card."""
+        if self._current_card is None:
+            self._current_card = self.open_sidebar()
+        return self._current_card
+
+    def _sidebar_row(self, action_id: str) -> _PwLocator:
+        """Return a Locator scoped to the sidebar row whose text starts with action_id."""
+        assert self._current_card is not None
+        return self._current_card.frame.get_by_text(
+            f"{action_id} •", exact=False
+        )
+
+    # ------------------------------------------------------------------
+    # Sidebar acts — real UI entry points (R2-impl §16.3 #1)
+    # ------------------------------------------------------------------
+
+    def sidebar_sync(self, *, timeout: str = "60s") -> None:
+        """Click the homepage sidebar Sync Now button; wait out busy.
+
+        Real call-site for scn.sync() (Sync Scenario C). Cold sync can be
+        slow — 60s default. Does NOT poll the sheet; durable convergence is
+        the journey's responsibility (§16.11 #4).
+        """
+        ms = _parse_timeout(timeout)
+        self._sidebar_card()
+        assert self._current_card is not None
+        sync_btn = self._current_card.frame.locator(_SIDEBAR_SYNC)
+        sync_btn.wait_for(state="visible", timeout=ms)
+        sync_btn.click()
+
+        busy = self._current_card.frame.locator(_BUSY)
+        try:
+            busy.wait_for(state="visible", timeout=2000)
+            busy.wait_for(state="hidden", timeout=ms)
+        except Exception:
+            pass
+
+    def insert_tracker_button(self, *, timeout: str = "30s") -> None:
+        """Click the homepage sidebar Insert tracker button; wait out busy.
+
+        Real call-site for scn.insert_tracker(). Mutates the doc (tracker
+        table inserted/refreshed).
+        """
+        ms = _parse_timeout(timeout)
+        self._sidebar_card()
+        assert self._current_card is not None
+        insert_btn = self._current_card.frame.locator(_SIDEBAR_INSERT_TRACKER)
+        insert_btn.wait_for(state="visible", timeout=ms)
+        insert_btn.click()
+
+        busy = self._current_card.frame.locator(_BUSY)
+        try:
+            busy.wait_for(state="visible", timeout=2000)
+            busy.wait_for(state="hidden", timeout=ms)
+        except Exception:
+            pass
+
+    def sidebar_delete(self, target: ai, *, timeout: str = "15s") -> None:
+        """Click the per-row Delete action button for target.action_id; wait out busy.
+
+        Real call-site for scn.delete(ai) (per-row sidebar Delete button).
+        Identity addressing is by action_id (§16.11 #3).
+        """
+        ms = _parse_timeout(timeout)
+        self._sidebar_card()
+        assert self._current_card is not None
+        row = self._sidebar_row(target.action_id or "")
+        delete_btn = row.locator(_SIDEBAR_DELETE)
+        delete_btn.wait_for(state="visible", timeout=ms)
+        delete_btn.click()
+
+        busy = self._current_card.frame.locator(_BUSY)
+        try:
+            busy.wait_for(state="visible", timeout=2000)
+            busy.wait_for(state="hidden", timeout=ms)
+        except Exception:
+            pass
+
+    def sidebar_set_status(
+        self, target: ai, status: str, *, timeout: str = "15s"
+    ) -> None:
+        """Click the per-row status control for target.action_id; select status; wait out busy.
+
+        Real call-site for scn.set_status(ai, status) (Sync Scenario A, per-row
+        sidebar status control). DISTINCT from set_status(card, status), which
+        operates on a hovered preview Card.
+        """
+        ms = _parse_timeout(timeout)
+        self._sidebar_card()
+        assert self._current_card is not None
+        row = self._sidebar_row(target.action_id or "")
+        status_btn = row.locator(
+            f'[aria-label="{status}"], button:has-text("{status}")'
+        )
+        status_btn.wait_for(state="visible", timeout=ms)
+        status_btn.click()
+
+        busy = self._current_card.frame.locator(_BUSY)
+        try:
+            busy.wait_for(state="visible", timeout=2000)
+            busy.wait_for(state="hidden", timeout=ms)
+        except Exception:
+            pass
 
     def read_current(self) -> list[ai]:
         """Read the currently-rendered card as list[ai] for queue-drain (R1-impl §1).

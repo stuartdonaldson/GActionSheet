@@ -310,6 +310,308 @@ class TestExpectAlt:
 
 
 # ---------------------------------------------------------------------------
+# open_sidebar() — existing; referenced by new sidebar acts
+# ---------------------------------------------------------------------------
+
+class TestOpenSidebar:
+    def _setup_sidebar_frame(self, mock_page):
+        frame = MagicMock()
+        frame.locator.return_value.first = MagicMock()
+        mock_page.frame_locator.return_value.first = frame
+        mock_page.locator.return_value.first = MagicMock()
+        return frame
+
+    def test_sets_current_card(self, driver, mock_page):
+        self._setup_sidebar_frame(mock_page)
+        result = driver.open_sidebar()
+        assert driver._current_card is not None
+        assert isinstance(result, Card)
+
+    def test_current_card_is_returned_card(self, driver, mock_page):
+        self._setup_sidebar_frame(mock_page)
+        card = driver.open_sidebar()
+        assert driver._current_card is card
+
+
+# ---------------------------------------------------------------------------
+# sidebar_sync()
+# ---------------------------------------------------------------------------
+
+class TestSidebarSync:
+    def _make_driver_with_sidebar(self, mock_page):
+        """Driver with _current_card pre-set (sidebar already open)."""
+        frame = MagicMock()
+        sync_btn = MagicMock()
+        busy = MagicMock()
+        # card frame: locator calls → [sync_btn, busy]
+        frame.locator.side_effect = [sync_btn, busy]
+        card = Card(frame)
+        driver = UiDriver(mock_page, doc_id="DOCID123")
+        driver._current_card = card
+        return driver, frame, sync_btn, busy
+
+    def test_locates_sync_button_inside_card_frame(self, mock_page):
+        driver, frame, sync_btn, busy = self._make_driver_with_sidebar(mock_page)
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_sync(timeout="60s")
+        selector = frame.locator.call_args_list[0][0][0]
+        assert "sync" in selector.lower() or "Sync" in selector
+
+    def test_clicks_sync_button(self, mock_page):
+        driver, frame, sync_btn, busy = self._make_driver_with_sidebar(mock_page)
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_sync(timeout="60s")
+        sync_btn.click.assert_called_once()
+
+    def test_waits_for_busy_state(self, mock_page):
+        driver, frame, sync_btn, busy = self._make_driver_with_sidebar(mock_page)
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_sync(timeout="60s")
+        assert busy.wait_for.call_count >= 1
+
+    def test_no_spinner_does_not_raise(self, mock_page):
+        driver, frame, sync_btn, busy = self._make_driver_with_sidebar(mock_page)
+        busy.wait_for.side_effect = Exception("Timeout — no spinner")
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_sync(timeout="60s")  # must not raise
+        sync_btn.click.assert_called_once()
+
+    def test_returns_none(self, mock_page):
+        driver, frame, sync_btn, busy = self._make_driver_with_sidebar(mock_page)
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            result = driver.sidebar_sync(timeout="60s")
+        assert result is None
+
+    def test_opens_sidebar_if_no_current_card(self, mock_page):
+        frame = MagicMock()
+        frame.locator.return_value = MagicMock()
+        card = Card(frame)
+        driver = UiDriver(mock_page, doc_id="DOCID123")
+        driver._current_card = None
+        with patch.object(driver, "open_sidebar", return_value=card) as mock_open:
+            driver.sidebar_sync(timeout="5s")
+        mock_open.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# insert_tracker_button()
+# ---------------------------------------------------------------------------
+
+class TestInsertTrackerButton:
+    def _make_driver_with_sidebar(self, mock_page):
+        frame = MagicMock()
+        insert_btn = MagicMock()
+        busy = MagicMock()
+        frame.locator.side_effect = [insert_btn, busy]
+        card = Card(frame)
+        driver = UiDriver(mock_page, doc_id="DOCID123")
+        driver._current_card = card
+        return driver, frame, insert_btn, busy
+
+    def test_locates_insert_tracker_button_inside_card_frame(self, mock_page):
+        driver, frame, insert_btn, busy = self._make_driver_with_sidebar(mock_page)
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.insert_tracker_button(timeout="30s")
+        selector = frame.locator.call_args_list[0][0][0]
+        assert "tracker" in selector.lower() or "insert" in selector.lower()
+
+    def test_clicks_insert_button(self, mock_page):
+        driver, frame, insert_btn, busy = self._make_driver_with_sidebar(mock_page)
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.insert_tracker_button(timeout="30s")
+        insert_btn.click.assert_called_once()
+
+    def test_waits_for_busy_state(self, mock_page):
+        driver, frame, insert_btn, busy = self._make_driver_with_sidebar(mock_page)
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.insert_tracker_button(timeout="30s")
+        assert busy.wait_for.call_count >= 1
+
+    def test_no_spinner_does_not_raise(self, mock_page):
+        driver, frame, insert_btn, busy = self._make_driver_with_sidebar(mock_page)
+        busy.wait_for.side_effect = Exception("no spinner")
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.insert_tracker_button(timeout="30s")  # must not raise
+        insert_btn.click.assert_called_once()
+
+    def test_returns_none(self, mock_page):
+        driver, frame, insert_btn, busy = self._make_driver_with_sidebar(mock_page)
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            result = driver.insert_tracker_button(timeout="30s")
+        assert result is None
+
+    def test_opens_sidebar_if_no_current_card(self, mock_page):
+        frame = MagicMock()
+        frame.locator.return_value = MagicMock()
+        card = Card(frame)
+        driver = UiDriver(mock_page, doc_id="DOCID123")
+        driver._current_card = None
+        with patch.object(driver, "open_sidebar", return_value=card) as mock_open:
+            driver.insert_tracker_button(timeout="5s")
+        mock_open.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# sidebar_delete()
+# ---------------------------------------------------------------------------
+
+class TestSidebarDelete:
+    def _make_driver_for_delete(self, mock_page, action_id="AI-3"):
+        from scn.ai import ai as Ai
+        target = Ai(action="some action", action_id=action_id)
+
+        frame = MagicMock()
+        row_locator = MagicMock()
+        delete_btn = MagicMock()
+        busy = MagicMock()
+        # _sidebar_row returns row_locator; row_locator.locator returns delete_btn
+        row_locator.locator.return_value = delete_btn
+        frame.get_by_text.return_value = row_locator
+        frame.locator.return_value = busy
+
+        card = Card(frame)
+        driver = UiDriver(mock_page, doc_id="DOCID123")
+        driver._current_card = card
+        return driver, frame, row_locator, delete_btn, busy, target
+
+    def test_scopes_to_action_id_row(self, mock_page):
+        driver, frame, row_locator, delete_btn, busy, target = (
+            self._make_driver_for_delete(mock_page)
+        )
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_delete(target, timeout="15s")
+        call_args = frame.get_by_text.call_args
+        assert "AI-3" in str(call_args)
+
+    def test_locates_delete_button_by_aria_label(self, mock_page):
+        driver, frame, row_locator, delete_btn, busy, target = (
+            self._make_driver_for_delete(mock_page)
+        )
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_delete(target, timeout="15s")
+        selector = row_locator.locator.call_args[0][0]
+        assert "Delete action" in selector or "delete" in selector.lower()
+
+    def test_clicks_delete_button(self, mock_page):
+        driver, frame, row_locator, delete_btn, busy, target = (
+            self._make_driver_for_delete(mock_page)
+        )
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_delete(target, timeout="15s")
+        delete_btn.click.assert_called_once()
+
+    def test_waits_for_busy_state(self, mock_page):
+        driver, frame, row_locator, delete_btn, busy, target = (
+            self._make_driver_for_delete(mock_page)
+        )
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_delete(target, timeout="15s")
+        assert busy.wait_for.call_count >= 1
+
+    def test_no_spinner_does_not_raise(self, mock_page):
+        driver, frame, row_locator, delete_btn, busy, target = (
+            self._make_driver_for_delete(mock_page)
+        )
+        busy.wait_for.side_effect = Exception("no spinner")
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_delete(target, timeout="15s")  # must not raise
+        delete_btn.click.assert_called_once()
+
+    def test_returns_none(self, mock_page):
+        driver, frame, row_locator, delete_btn, busy, target = (
+            self._make_driver_for_delete(mock_page)
+        )
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            result = driver.sidebar_delete(target, timeout="15s")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# sidebar_set_status()
+# ---------------------------------------------------------------------------
+
+class TestSidebarSetStatus:
+    def _make_driver_for_set_status(self, mock_page, action_id="AI-2"):
+        from scn.ai import ai as Ai
+        target = Ai(action="some action", action_id=action_id)
+
+        frame = MagicMock()
+        row_locator = MagicMock()
+        status_btn = MagicMock()
+        busy = MagicMock()
+        row_locator.locator.return_value = status_btn
+        frame.get_by_text.return_value = row_locator
+        frame.locator.return_value = busy
+
+        card = Card(frame)
+        driver = UiDriver(mock_page, doc_id="DOCID123")
+        driver._current_card = card
+        return driver, frame, row_locator, status_btn, busy, target
+
+    def test_scopes_to_action_id_row(self, mock_page):
+        driver, frame, row_locator, status_btn, busy, target = (
+            self._make_driver_for_set_status(mock_page)
+        )
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_set_status(target, "In Progress", timeout="15s")
+        call_args = frame.get_by_text.call_args
+        assert "AI-2" in str(call_args)
+
+    def test_locates_status_control_inside_row(self, mock_page):
+        driver, frame, row_locator, status_btn, busy, target = (
+            self._make_driver_for_set_status(mock_page)
+        )
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_set_status(target, "In Progress", timeout="15s")
+        selector = row_locator.locator.call_args[0][0]
+        assert "In Progress" in selector or "status" in selector.lower() or "aria-label" in selector
+
+    def test_clicks_status_control(self, mock_page):
+        driver, frame, row_locator, status_btn, busy, target = (
+            self._make_driver_for_set_status(mock_page)
+        )
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_set_status(target, "In Progress", timeout="15s")
+        status_btn.click.assert_called_once()
+
+    def test_waits_for_busy_state(self, mock_page):
+        driver, frame, row_locator, status_btn, busy, target = (
+            self._make_driver_for_set_status(mock_page)
+        )
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_set_status(target, "In Progress", timeout="15s")
+        assert busy.wait_for.call_count >= 1
+
+    def test_no_spinner_does_not_raise(self, mock_page):
+        driver, frame, row_locator, status_btn, busy, target = (
+            self._make_driver_for_set_status(mock_page)
+        )
+        busy.wait_for.side_effect = Exception("no spinner")
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            driver.sidebar_set_status(target, "In Progress", timeout="15s")  # must not raise
+        status_btn.click.assert_called_once()
+
+    def test_returns_none(self, mock_page):
+        driver, frame, row_locator, status_btn, busy, target = (
+            self._make_driver_for_set_status(mock_page)
+        )
+        with patch.object(driver, "open_sidebar", return_value=driver._current_card):
+            result = driver.sidebar_set_status(target, "In Progress", timeout="15s")
+        assert result is None
+
+    def test_distinct_from_existing_set_status(self, driver):
+        """sidebar_set_status(ai, status) is distinct from set_status(card, status)."""
+        import inspect
+        sig_new = inspect.signature(driver.sidebar_set_status)
+        sig_old = inspect.signature(driver.set_status)
+        # bound methods: parameters list excludes 'self'
+        new_params = list(sig_new.parameters)
+        old_params = list(sig_old.parameters)
+        assert new_params[0] == "target"
+        assert old_params[0] == "card"
+
+
+# ---------------------------------------------------------------------------
 # ScenarioSession.expect_visible / .expect_alt delegation
 # ---------------------------------------------------------------------------
 
