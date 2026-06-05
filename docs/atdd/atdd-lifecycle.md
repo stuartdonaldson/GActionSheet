@@ -470,14 +470,14 @@ A scenario is an ordered journey against **one isolated environment**, expressed
 |---|---|---|
 | **Act** | One state mutation through **one** user-facing entry point (add a paragraph, sync, edit a sheet field, set a status, delete, insert the tracker, a UI gesture). | One act = one entry point = one user gesture. Never bundle two entry points into one act. |
 | **Expect** | A declaration of the outcome an act should produce, enqueued (the §13 queued-verification pattern), with optional arguments for *which surface* and *when* to check it. | State intent where you cause it; if the outcome only becomes true later, target it forward. An act whose outcome is never expected is a coverage hole. |
-| **Checkpoint** | The point where enqueued expectations are evaluated against freshly captured state, draining the ones it can observe. Two kinds (below). | Cheap `STEP` checkpoints inline; full `INTEGRITY` checkpoints at mutation boundaries; the queue must be empty by journey end. |
+| **Checkpoint** | The point where enqueued expectations are evaluated against freshly captured state, draining the ones it can observe. Takes an optional `on=frozenset({Surface.X, ...})` to drain only expectations on specified surfaces. Two kinds (below). | Cheap `STEP` checkpoints inline; full `INTEGRITY` checkpoints at mutation boundaries; the queue must be empty by journey end. Targeted `checkpoint(STEP, on=Surface.UI)` drains live-surface observations without triggering expensive INTEGRITY reconciliation. |
 
 Two checkpoint kinds:
 
 - **`STEP`** — validates only the queued expectations its **lightweight read can observe** (e.g. a single `sheet_rows()` pull sees sheet fields but not doc paragraph state, tracker rows, or `globalId` linkage). Drains the ones it satisfied and **leaves the rest queued**. Fast; use after most acts.
 - **`INTEGRITY`** — captures the doc (`.docx`), sheet (`.xlsx`), and tracker, runs the GAS-side consistency checklist (§16.7), and can evaluate **every** kind of expectation. Reserve for major mutation boundaries and the journey end. Expensive — **do not run mid-Playwright** (see §16.3 rule 5).
 
-**Drain invariant.** An expectation is verified only when a checkpoint that can observe it drains it. A `STEP` may leave expectations queued; an `INTEGRITY` may not — every queued expectation it can observe must be satisfied and drained. Therefore **every expectation must be drained at or before journey end, and the queue must be empty when the session closes.** A non-empty queue at teardown is a test failure (an expectation nobody verified), not a pass. Consequently every journey ends with an `INTEGRITY` checkpoint, and any expectation a `STEP` cannot see simply rides the queue to the next `INTEGRITY`.
+**Drain invariant.** An expectation is verified only when a checkpoint that can observe it drains it. A `STEP` may leave expectations queued; an `INTEGRITY` may not — every queued expectation **it can observe** must be satisfied and drained. Therefore **every expectation must be drained at or before journey end, and the queue must be empty when the session closes.** A non-empty queue at teardown is a test failure (an expectation nobody verified), not a pass. Consequently every journey ends with an `INTEGRITY` checkpoint. Note: `INTEGRITY` observes only {DOC, SHEET, TRACKER} surfaces; UI observations (which are live-only and expensive) are drained separately by targeted `checkpoint(STEP, on=Surface.UI)` calls during the Playwright phase, and an `INTEGRITY` at the phase end will see them already drained. Any expectation an `INTEGRITY` cannot observe (e.g. a UI expectation not yet drained) simply rides the queue to later checkpoints — the invariant is that *every observable expectation drains at its earliest observable checkpoint*.
 
 #### Two reasons an expectation defers — and how to target it
 
@@ -562,7 +562,7 @@ An action is observable on four surfaces. Every expectation targets one or more;
 | `DOC` | `.docx` download / scan | cheap | Floating-action paragraph: `AI-N: {chip} {text} ({status})`. **All occurrences of an id are identical** — `AI-5` may appear in several paragraphs; every occurrence carries the same canonical content. |
 | `SHEET` | `.xlsx` download, scoped to docId | cheap | A row in column form (`globalId`, id, email, name, action, status, …). |
 | `TRACKER` | parse the table in the `.docx` | cheap | The id always exists, but **expanded into table columns** (not a floating-action text form), with the **assignee rendered as a chip**. |
-| `UI` | live Playwright DOM (sidebar card, preview card) | live; only valid mid-session | Card rows, preview-card fields, status icons. |
+| `UI` | live Playwright DOM (sidebar card, preview card); drained via `checkpoint(STEP, on=Surface.UI)` | live; bounded poll with `within=` | Card rows, preview-card fields, status icons. **First-class drainable surface** — expectations on UI are enqueued normally; a `checkpoint(STEP, on=Surface.UI)` drains only the UI-observable subset, leaving non-UI expectations queued. Within-polling applies only to UI observations (other surfaces' `within=` is silently ignored). UI is **live-only** — drained only during the Playwright phase; INTEGRITY excludes UI (§16.7). |
 
 **Assignee is always a chip in a synced document** — in both the floating action and the tracker table. When the test parses a synced document it splits the chip into `email` + `name` for the internal `ai` and records the origin in the **`assignee_source`** field (`chip` | `parsed`, §16.2); for an already-synced document, finding `assignee_source == parsed` (a non-chip assignee) where a chip is expected is itself a consistency error discovered during parsing.
 
@@ -586,9 +586,9 @@ Both accept the targeting/severity options:
 
 ### 16.7 The consistency checklist (what an `INTEGRITY` checkpoint verifies)
 
-`verify_consistency(scope=doc)` — callable standalone at any point, and run internally by every `INTEGRITY` checkpoint — checks, scoped to the journey's `docId`:
+`verify_consistency(scope=doc)` — callable standalone at any point, and run internally by every `INTEGRITY` checkpoint — checks the three authoritative surfaces {DOC, SHEET, TRACKER}, scoped to the journey's `docId`. **UI is excluded** — it is live-only and drained separately by targeted `checkpoint(STEP, on=Surface.UI)` calls (§16.5).
 
-1. **Queued expectations are met** — the specific AIs expected are present; the tracker table is present or absent as expected.
+1. **Queued expectations are met** — the specific AIs expected are present (on DOC/SHEET/TRACKER surfaces); the tracker table is present or absent as expected.
 2. **Every doc AI is internally consistent** — `action_id` present; `status` present; `assignee` email (if present) is a valid address; name is valid-for-email or empty. **Doc-specific:** the status icon is present and correct (today one icon; future: must match the status); the chip link is present and valid; all occurrences identical.
 3. **Every sheet AI (scoped to this doc) is consistent** — standard column consistency. **Sheet-specific:** `globalId` present; the Document column carries the doc name and link.
 4. **Every doc AI is present in the sheet.**
@@ -618,6 +618,14 @@ card = scn.ui.hover(scn.ui.locate(text=created.action_id, occurrence=1), timeout
 scn.expect_visible(card, timeout="5s")
 scn.expect_alt(scn.ui.locate(alt="In Progress", next=True), "In Progress", severity=WARN)
 scn.ui.set_status(card, "In Progress")        # click; driver waits out the gray/busy state (10s)
+```
+
+**Draining UI expectations.** UI observations are first-class and drainable (§16.5). A `checkpoint(STEP, on=Surface.UI)` drains only the queued expectations observable on the live DOM, keeping non-UI expectations queued. This allows scenarios to validate rapid UI feedback (e.g. "the card returned the updated status within 10s") without triggering an expensive full-sheet INTEGRITY round-trip. The `within=` polling parameter applies only to UI — Playwright will keep checking until the expectation becomes true or `within` times out.
+
+```python
+scn.verify(created, on=Surface.UI, within="10s")            # enqueue bounded-poll expectation
+scn.checkpoint(STEP, on=frozenset({Surface.UI}))            # drain UI, in-browser; keep others queued
+scn.verify(created, on=SHEET, at=INTEGRITY)                 # sheet update deferred to later INTEGRITY
 ```
 
 ### 16.9 Support-function catalog
@@ -713,8 +721,9 @@ def test_journey(scn):
 
     scn.ui.set_status(card, "In Progress")    # click; driver waits out gray/busy (≤10s)
     created.status = "In Progress"
-    scn.verify(created, on=UI, within="10s")                      # card/doc returns updated ≤10s
-    scn.verify(created, on=SHEET, at=INTEGRITY)                   # durable, async (13–60s) → defer
+    scn.verify(created, on=Surface.UI, within="10s")            # enqueue; bounded live poll
+    scn.checkpoint(STEP, on=frozenset({Surface.UI}))            # drain UI live, in-browser
+    scn.verify(created, on=SHEET, at=INTEGRITY)                 # durable, async (13–60s) → defer
 
     # ── Final reconcile (HTTP phase) — settle every deferred expectation ──────
     scn.checkpoint(INTEGRITY)                 # docx+xlsx+tracker+consistency; queue empty at close
