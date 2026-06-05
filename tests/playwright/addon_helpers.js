@@ -38,14 +38,40 @@ const ADDON_NAME = manifest.addOns.common.name;
 // Log polling
 // ---------------------------------------------------------------------------
 
+/**
+ * Move all .log files in gasLogDir into gasLogDir/archive/<timestamp>/ and
+ * return a fence epoch-ms value. Pass the returned value to waitForLogEntry as
+ * `after` to ignore stale entries written by a previous or concurrent GAS run.
+ *
+ * Archiving (not deleting) preserves historical runs for trend analysis.
+ * The fence is set 10 s before now to absorb GAS-server / local clock skew.
+ */
 function clearLogs() {
-  if (!gasLogDir || !fs.existsSync(gasLogDir)) return;
-  for (const name of fs.readdirSync(gasLogDir)) {
-    if (name.endsWith('.log')) fs.rmSync(path.join(gasLogDir, name), { force: true });
+  const fence = Date.now() - 10000;
+  if (!gasLogDir || !fs.existsSync(gasLogDir)) return fence;
+  const logs = fs.readdirSync(gasLogDir).filter(n => n.endsWith('.log'));
+  if (logs.length === 0) return fence;
+  const archiveDir = path.join(
+    __dirname, '..', '..', 'test-results', 'gas-logs',
+    new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19),
+  );
+  fs.mkdirSync(archiveDir, { recursive: true });
+  for (const name of logs) {
+    fs.copyFileSync(path.join(gasLogDir, name), path.join(archiveDir, name));
+    fs.rmSync(path.join(gasLogDir, name), { force: true });
   }
+  return fence;
 }
 
-function waitForLogEntry(tagPredicate, timeoutMs = 60000, intervalMs = 500) {
+/**
+ * @param {function} tagPredicate  Predicate applied to each parsed log entry.
+ * @param {number}   timeoutMs     Total wait budget in ms (default 60 000).
+ * @param {number}   intervalMs    Poll interval in ms (default 500).
+ * @param {number}   after         Epoch-ms fence: skip entries whose ts predates
+ *                                 this value. Pass the return value of clearLogs()
+ *                                 to filter out stale entries from concurrent runs.
+ */
+function waitForLogEntry(tagPredicate, timeoutMs = 60000, intervalMs = 500, after = 0) {
   return new Promise((resolve, reject) => {
     if (!gasLogDir || !fs.existsSync(gasLogDir)) {
       return reject(new Error(`gasLogDir not set or does not exist: ${gasLogDir}`));
@@ -65,6 +91,7 @@ function waitForLogEntry(tagPredicate, timeoutMs = 60000, intervalMs = 500) {
             if (!t) continue;
             let entry;
             try { entry = JSON.parse(t); } catch { continue; }
+            if (after && entry.ts && Date.parse(entry.ts) < after) continue;
             if (tagPredicate(entry)) { found = entry; break outer; }
           }
         }
@@ -246,4 +273,34 @@ if (require.main === module) {
   }
 }
 
-module.exports = { openDocSidebar, clickSyncNow, sidebarActionRows, clearLogs, waitForLogEntry, verifyConsistency };
+/**
+ * Poll all page frames until one contains the "Sync now" button, handling
+ * the GAS cold-start "Refresh" button if it appears first.
+ */
+async function findAddonFrame(page, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  let refreshAttempted = false;
+
+  while (Date.now() < deadline) {
+    for (const frame of page.frames()) {
+      const syncNow = frame.getByRole('button', { name: /sync now/i });
+      if (await syncNow.count().catch(() => 0)) return frame;
+    }
+
+    if (!refreshAttempted) {
+      const refreshButton = page.getByRole('button', { name: /^Refresh$/i });
+      if (await refreshButton.count().catch(() => 0)) {
+        refreshAttempted = true;
+        await refreshButton.click();
+        await page.waitForTimeout(4000);
+        continue;
+      }
+    }
+
+    await page.waitForTimeout(500);
+  }
+
+  throw new Error('Timed out locating add-on frame with Sync now control');
+}
+
+module.exports = { openDocSidebar, clickSyncNow, sidebarActionRows, clearLogs, waitForLogEntry, verifyConsistency, findAddonFrame };

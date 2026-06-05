@@ -38,6 +38,14 @@ const TARGETS = {
   production: { anchor: 'PROD-WEB-APP', label: 'PRODUCTION', emoji: '🚀' },
 };
 
+const LEDGER_DIR = path.join(__dirname, 'deployment-ledger');
+
+function writeLedgerEntry(target, entry) {
+  fs.mkdirSync(LEDGER_DIR, { recursive: true });
+  const file = path.join(LEDGER_DIR, `${target}.jsonl`);
+  fs.appendFileSync(file, JSON.stringify({ timestamp: new Date().toISOString(), target, ...entry }) + '\n');
+}
+
 function getVersionFromBuildInfo() {
   const content = fs.readFileSync(path.join(__dirname, 'src', 'Version.js'), 'utf8');
   const match = content.match(/version:\s*"([^"]+)"/);
@@ -48,7 +56,7 @@ function buildDeploymentDescription(anchor) {
   return `${anchor} ${getVersionFromBuildInfo()}`;
 }
 
-function stampVersionInfo(target, deploymentId) {
+function stampVersionInfo(target, url) {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
   const appVersion = `v${pkg.version}`;
   const now = new Date();
@@ -56,7 +64,6 @@ function stampVersionInfo(target, deploymentId) {
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
   const suffix = target === 'test' ? ' (TEST)' : target === 'dev' ? ' (DEV)' : '';
   const versionStr = `${appVersion} (Rev. ${dateStr} ${timeStr})${suffix}`;
-  const url = deploymentId ? webAppUrl(deploymentId) : '';
 
   const versionPath = path.join(__dirname, 'src', 'Version.js');
   let data = fs.readFileSync(versionPath, 'utf8');
@@ -71,6 +78,10 @@ function stampVersionInfo(target, deploymentId) {
 
 function webAppUrl(deploymentId) {
   return `https://script.google.com/macros/s/${deploymentId}/exec`;
+}
+
+function webDevUrl(deploymentId) {
+  return `https://script.google.com/macros/s/${deploymentId}/dev`;
 }
 
 async function getDeployments() {
@@ -123,7 +134,7 @@ async function deployToTarget(target, deployments, nonInteractive) {
     if (!proceed) { console.log('❌ Cancelled.'); return; }
   }
 
-  stampVersionInfo(target, match.deploymentId);
+  stampVersionInfo(target, webAppUrl(match.deploymentId));
   console.log('\n📤 Pushing src/ to Apps Script...');
   execSync('clasp push -f', { stdio: 'inherit' });
 
@@ -139,6 +150,13 @@ async function deployToTarget(target, deployments, nonInteractive) {
       JSON.stringify({ deploymentId: match.deploymentId, version: updated.version, description: updated.description, target: label }, null, 2)
     );
   }
+
+  writeLedgerEntry(target, {
+    deploymentId: match.deploymentId,
+    version: updated ? updated.version : '',
+    description: updated ? updated.description : '',
+    url: webAppUrl(match.deploymentId),
+  });
 
   console.log(`\n✅ ${label} deploy complete.`);
   console.log(`🔗 ${label} URL: ${webAppUrl(match.deploymentId)}\n`);
@@ -420,7 +438,15 @@ function _printSurfaceHint(target) {
 
 async function deployDev(nonInteractive) {
   console.log('\n🛠️  DEV push to HEAD');
-  stampVersionInfo('dev', null);
+
+  const deployments = await getDeployments();
+  const head = deployments.find(d => d.isHead);
+  if (!head) {
+    console.log('❌ No HEAD deployment found in clasp deployments.');
+    return;
+  }
+  const devUrl = webDevUrl(head.deploymentId);
+  stampVersionInfo('dev', devUrl);
 
   if (!nonInteractive) {
     const proceed = await confirm({ message: 'Push to HEAD?', default: true });
@@ -429,6 +455,13 @@ async function deployDev(nonInteractive) {
 
   console.log('\n📤 Pushing src/ to Apps Script...');
   execSync('clasp push -f', { stdio: 'inherit' });
+
+  writeLedgerEntry('dev', {
+    deploymentId: head.deploymentId,
+    version: getVersionFromBuildInfo(),
+    description: '@HEAD',
+    url: devUrl,
+  });
 
   console.log('\n✅ Push complete.');
 

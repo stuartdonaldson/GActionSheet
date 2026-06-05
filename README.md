@@ -47,6 +47,29 @@ npm run deploy:test
 
 `npm run deploy:test` pushes the Apps Script sources and repoints the TEST web-app deployment to the new revision. `npm run deploy:prod` does the same for production.
 
+### Manual test report
+Use this prompt - update for current folder structure:
+Report → write pipeline-report.md ONLY (bdreport style):
+  1. Headline JOIN: match the run's deployment (target + deploymentId + build) to the latest
+     ledger entry; state green/red for the CURRENT deployment and flag if it is still untested.
+  2. Run summary: passed/total (%), failures, errors, skipped, wall time.
+  3. Per-suite table: tests / pass / fail / err / time.
+  4. Failure triage by ROOT-CAUSE bucket (not raw count): Env (add-on/side-panel not installed),
+     Harness/config (token/fixture rejected), Perf/timeout (≥ GAS 6-min ceiling), Product
+     (logic regression). Classify each failing test.
+  5. Deployment ledger: list each deploy as target + deploymentId + version; cadence; current
+     deployment; time-since-last-green.
+  6. Health flags + recommended next action.
+  Parse from: test-results/playwright.xml + test-results/pytest.xml + deployment-ledger/test.jsonl.
+  Note if only one run exists (no trend/flaky analysis yet).
+
+### Allure test reporting
+Project is defining best practices captured in GAS-Practices for test reporting.
+```
+npm run test:report
+npm run test:server
+```
+
 ### First run
 
 1. From the Apps Script editor for the add-on, deploy as a **test deployment** (Deploy → Test deployments → Install). Open any Doc; the sidebar appears under Extensions → GActionSheet.

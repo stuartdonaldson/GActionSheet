@@ -133,19 +133,19 @@ test('sidebar Insert tracker button inserts table and consistency passes', async
   await expect(addonFrame.getByText(/tracker already present in this document/i))
     .toBeVisible({ timeout: 30000 });
 
-  // Full consistency: ok=true, no issues.
-  // uc_a_permutations seeds 1 chip-led floating action (AI: placeholder → AI-N: after sync).
-  // The 2 email-only text items have no AI-N: prefix so are not detected by the scanner.
+  // Full consistency: content correct and structurally complete.
+  // Every floating action must appear in the tracker; every tracker row must match
+  // a floating action. Do not assert a specific count — that is the fixture's concern.
   const consistency = await invokeFixture('verify_consistency', docId, settings);
-  expect(consistency.data.ok, consistency.data.issues?.join('\n')).toBe(true);
-  expect(consistency.data.issues).toHaveLength(0);
-  expect(consistency.data.counts.floating).toBe(1);
-  expect(consistency.data.counts.tracker).toBe(1);
-  expect(consistency.data.counts.matched).toBe(1);
+  const { counts, tracker: ctTracker, issues: ctIssues, ok: ctOk } = consistency.data;
+  expect(ctOk, ctIssues?.join('\n')).toBe(true);
+  expect(ctIssues).toHaveLength(0);
+  expect(counts.tracker).toBe(counts.floating);
+  expect(counts.matched).toBe(counts.floating);
 
-  // Per-row field check — tracker.rows must have non-empty id, action, status.
-  expect(consistency.data.tracker.rows).toHaveLength(1);
-  for (const row of consistency.data.tracker.rows) {
+  // Per-row field check — every tracker row must have non-empty id, action, status.
+  expect(ctTracker.rows.length).toBeGreaterThan(0);
+  for (const row of ctTracker.rows) {
     expect(row.id).toBeTruthy();
     expect(row.action).toBeTruthy();
     expect(row.status).toBeTruthy();
@@ -207,12 +207,12 @@ test('sync refreshes tracker after status mutation and only mutated row differs'
     60000
   );
 
-  // Post-mutation consistency: ok=true, no issues, same row count.
+  // Post-mutation consistency: ok=true, no issues, same row count as baseline.
   const postMutation = await invokeFixture('verify_consistency', docId, settings);
   expect(postMutation.data.ok, postMutation.data.issues?.join('\n')).toBe(true);
   expect(postMutation.data.issues).toHaveLength(0);
-  expect(postMutation.data.counts.tracker).toBe(3);
-  expect(postMutation.data.counts.matched).toBe(3);
+  expect(postMutation.data.counts.tracker).toBe(baselineRows.length);
+  expect(postMutation.data.counts.matched).toBe(baselineRows.length);
 
   // Exactly one row has the new status; all other rows are field-identical to baseline.
   let mutatedCount = 0;

@@ -1731,3 +1731,14 @@ git push origin feature/fixture-bootstrap-telemetry  # incl. 8153c69 skills
 - GTaskSheet-ym61 — thin atdd-lifecycle.md Parts 1-3 to pointers; repoint §16 internal cross-refs.
 - Consider whether ~/.claude skills should be a *copy/deploy* of DevStandard rather than a
   hardlink, to remove the silent-revert coupling.
+
+## 2026-06-05
+
+### [orchestrator] R1 complete — ✓ GTaskSheet-80mo.1 · [TST] R1-design: spec read(UI) + queue-routed UI expectati
+- Beads closed: GTaskSheet-80mo.1 GTaskSheet-80mo.2 GTaskSheet-80mo.3
+- Tests: scn engine/session/ui unit tests → PASS
+- HEAD: 106fdba
+- Test tail:
+  ........................................................................ [ 60%]
+  ................................................                         [100%]
+  120 passed in 4.62s

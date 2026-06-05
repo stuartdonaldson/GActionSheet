@@ -8,6 +8,7 @@ import pytest
 from tests.helpers.download import download_xlsx
 from tests.helpers.sheet_inspect import load_sheet, headers
 from tests.helpers.gas_log import clear_logs, wait_for_log
+from tests.helpers import gas_invoke
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
 _OPEN_SHEET_JS = _REPO_ROOT / "tests" / "playwright" / "open_sheet.js"
@@ -45,10 +46,6 @@ ARCHIVE_HEADERS = [
 class TestInitializeTriggers:
     """dd5 / TriggerManager: idempotency guarantee."""
 
-    @pytest.mark.xfail(
-        reason="initializeTriggers() requires GAS editor invocation — not automatable via sheet menu",
-        strict=False,
-    )
     def test_initialize_triggers_is_idempotent(self, test_sheet_id, gas_log_dir):
         """Calling initializeTriggers() twice must result in exactly 1 onEdit trigger
         and exactly 1 time-based trigger — not 2 of each."""
@@ -56,21 +53,23 @@ class TestInitializeTriggers:
             pytest.skip("gasLogDir not configured")
 
         # First call
-        clear_logs(gas_log_dir)
-        # TODO: invoke initializeTriggers() via Playwright editor helper (first call)
+        fence1 = clear_logs(gas_log_dir)
+        gas_invoke.initialize_triggers()
         entry1 = wait_for_log(
             gas_log_dir,
             lambda e: e.get("tag") == "triggers.initialized",
             timeout_s=30,
+            after=fence1,
         )
 
         # Second call — idempotency check
-        clear_logs(gas_log_dir)
-        # TODO: invoke initializeTriggers() via Playwright editor helper (second call)
+        fence2 = clear_logs(gas_log_dir)
+        gas_invoke.initialize_triggers()
         entry2 = wait_for_log(
             gas_log_dir,
             lambda e: e.get("tag") == "triggers.initialized",
             timeout_s=30,
+            after=fence2,
         )
 
         # The log entry on the second call must report exactly 1 onEdit + 1 time-based

@@ -1,12 +1,11 @@
 var BUILD_INFO = {
-  version: "v0.2.0 (Rev. Jun 3, 2026 16:53) (TEST)",
-  buildDate: "2026-06-03T23:53:31.378Z",
+  version: "v0.2.1 (Rev. Jun 5, 2026 09:08) (TEST)",
+  buildDate: "2026-06-05T16:08:39.229Z",
   webappUrl: "https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec"
 };
 
 function getWebAppUrl() {
-  if (BUILD_INFO.webappUrl) return BUILD_INFO.webappUrl;
-  return PropertiesService.getScriptProperties().getProperty('WEBAPP_URL');
+  return BUILD_INFO.webappUrl;
 }
 
 function _logVersionMismatch(parsed, logTag) {

@@ -249,7 +249,7 @@ class SheetReader:
             )
             obj.global_id = _cell_val("global_id")
             obj.assignee_name = _cell_val("assignee_name")
-            obj.sync_status = _cell_val("sync_status")
+            obj.sync_status = _cell_val("sync_status") or ""
             obj.doc_id = derived_doc_id
             obj.doc_name = derived_doc_name
             results.append(obj)

@@ -8,7 +8,18 @@
 .auth/
 local.settings.json
 bdreport.md
-test-results/
+# allure-results: ignore generated files; keep categories.json and history/
+test-results/allure-results/*.json
+!test-results/allure-results/categories.json
+test-results/allure-results/environment.properties
+# junit XML output and archive
+test-results/junit/
+# playwright test artifacts (screenshots, videos, error-context)
+test-results/playwright/
+# GAS log archives (copied from Drive-mounted gasLogDir before each test run)
+test-results/gas-logs/
+# allure and playwright HTML reports
+allure-report/
 playwright-report/
 node_modules/
 .venv/

@@ -1,0 +1,8 @@
+<testsuites id="" name="" tests="2" failures="0" skipped="0" errors="0" time="138.697627">
+<testsuite name="sidebar_action_list.test.js" timestamp="2026-06-04T19:35:19.613Z" hostname="" tests="2" failures="0" skipped="0" time="105.045" errors="0">
+<testcase name="homepage card renders action rows and refreshes after sync" classname="sidebar_action_list.test.js" time="39.886">
+</testcase>
+<testcase name="sync now refreshes an existing tracker table" classname="sidebar_action_list.test.js" time="65.159">
+</testcase>
+</testsuite>
+</testsuites>

@@ -1,0 +1,22 @@
+[
+  {
+    "name": "ATDD Pending",
+    "matchedStatuses": ["skipped"],
+    "messageRegex": ".*pending:.*"
+  },
+  {
+    "name": "Product Regression",
+    "matchedStatuses": ["failed"],
+    "messageRegex": ".*AssertionError.*|.*toBeVisible.*|.*toHaveText.*"
+  },
+  {
+    "name": "Perf / Timeout",
+    "matchedStatuses": ["failed", "broken"],
+    "messageRegex": ".*[Tt]imeout.*"
+  },
+  {
+    "name": "Environment / Config",
+    "matchedStatuses": ["broken"],
+    "messageRegex": ".*ConnectionError.*|.*HTTPError.*|.*401.*|.*403.*|.*429.*"
+  }
+]

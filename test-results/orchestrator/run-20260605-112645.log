@@ -1,0 +1,54 @@
+
+
+===== 2026-06-05T11:26:55.970459 GTaskSheet-80mo.1 model=opus =====
+Done. Summary of the work on **GTaskSheet-80mo.1** (R1-design, model:opus — design deliverable, no code):
+
+**Deliverable — populated `GTaskSheet-80mo.2` `--design`** with a clean-context-buildable spec covering all four AC items:
+
+1. **read(UI) closure contract** — `session.checkpoint()`'s `read(UI)` (today `return []`) delegates to a new `UiDriver.read_current()` that parses `ai` records (action_id from the `AI-N:` header, status from the active status icon) off the live `_current_card`; returns `[]` when no UI driver/card.
+2. **Matching** — `verify(ai, on=UI)` uses the existing enqueuer; a `Surface.UI` carve-out in `check_present_consistent` scopes UI matching to **identity + status** (mirrors the existing TRACKER `assignee_name` carve-out), so durable text/assignee correctness stays owned by DOC/SHEET/TRACKER.
+3. **`within=` bounded poll** — engine-side poll in `drain()` for UI: fresh `read(UI)` each iteration (cache bypassed), check vs the immutable snapshot until pass or deadline; timeout flows into the existing FAIL/WARN handling. Engine stays playwright-free (local duration parser).
+4. **§4.2 reconciliation** — snapshot governs the *expected* side (frozen pin); `within` re-captures the *actual* live card each poll. No conflict.
+5. **D2 removal** — `test_journey.py` Act 5 swaps the direct `expect_alt` for `verify(created, on=UI, within="10s")` + `checkpoint(STEP, on={UI})`; D2 header note removed.
+
+**Binding model decision (recorded):** INTEGRITY's observable set excludes UI (`{DOC,SHEET,TRACKER}`); UI is live-only, STEP-drained in the Playwright phase — refines harness-design §4.4.
+
+**Coordination Log** — appended G1 (UI card evidence + current-status disambiguation open detail for the impl owner) and G2 (INTEGRITY-excludes-UI binding for R2/R3).
+
+Bead closed; bd state committed locally as `d9d4c47`. **Not pushed** — orchestrator owns the push after the R# block passes.
+
+2026-06-05 · ~58k tokens
+
+
+===== 2026-06-05T11:33:00.667381 GTaskSheet-80mo.2 model=sonnet =====
+Bead GTaskSheet-80mo.2 is closed. Commit `98b1e6e` contains all 7 files.
+
+**What was done:**
+- `scn/ui.py` — `UiDriver.read_current()`: reads `action_id` from the "AI-N:" card header and `status` from `img[alt]` (brand-NUTS icon), falling back to non-button `[aria-label]`
+- `scn/engine.py` — `_INTEGRITY_OBS` excludes `Surface.UI`; `_poll_until_pass()` does bounded re-poll (bypassing the per-drain cache) when `within=` is set on UI; `_parse_within()` engine-local parser
+- `scn/assertions.py` — UI carve-out before the action-text check; only `action_id` + `status` enforced on `Surface.UI`
+- `scn/session.py` — `checkpoint()` read closure routes `Surface.UI` → `self.ui.read_current()`
+- `tests/test_journey.py` — D2 deviation note removed; Act 5 replaced with `verify(on=Surface.UI, within="10s")` + `checkpoint(STEP, on=frozenset({Surface.UI}))`
+- 13 new unit tests across `test_scn_engine.py` and `test_scn_session.py`; 76/76 pass, zero regressions
+
+2026-06-05 — tokens: ~18k
+
+
+===== 2026-06-05T11:47:57.907787 GTaskSheet-80mo.3 model=haiku =====
+**GTaskSheet-80mo.3 completed.**
+
+Documented the UI surface as a first-class drainable surface following R1-impl. Updated:
+- **§16.1**: Drain invariant clarifies INTEGRITY excludes UI; checkpoint now accepts `on=` for selective draining
+- **§16.5**: UI surface table expanded with drainable semantics, within= polling, and live-only scope  
+- **§16.7**: Consistency checklist explicitly excludes UI (drained separately)
+- **§16.8**: New "Draining UI expectations" subsection explains checkpoint(STEP, on=Surface.UI) pattern
+- **§16.10**: Act 5 now shows actual code with `verify(on=Surface.UI, within="10s") + checkpoint(STEP, on=frozenset({Surface.UI}))`
+- **DESIGN.md**: Updated Test Model entry; deviations now D1,D3–D4 (D2 removed as superseded)
+
+All Surface.UI references are consistent with test_journey.py. Commit: `106fdba`.
+
+----- test block R1 rc=0 -----
+........................................................................ [ 60%]
+................................................                         [100%]
+120 passed in 4.62s
+

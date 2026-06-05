@@ -21,6 +21,13 @@ function loadSettings() {
 
 module.exports = defineConfig({
   testDir: '.',
+  testIgnore: ['**/probe.test.js'],
+  outputDir: path.join(__dirname, '..', '..', 'test-results', 'playwright'),
+  reporter: [
+    ['list'],
+    ['allure-playwright', { resultsDir: path.join(__dirname, '..', '..', 'test-results', 'allure-results') }],
+    ['junit', { outputFile: path.join(__dirname, '..', '..', 'test-results', 'junit', 'playwright.xml') }],
+  ],
   timeout: 120000,
   expect: { timeout: 10000 },
   fullyParallel: false,
