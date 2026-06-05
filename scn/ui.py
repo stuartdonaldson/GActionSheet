@@ -26,6 +26,8 @@ Unit tests may mock the Page object; playwright need not be installed.
 """
 from __future__ import annotations
 
+import json
+import pathlib
 import re
 import warnings
 from typing import TYPE_CHECKING
@@ -37,6 +39,17 @@ if TYPE_CHECKING:
 
 from scn.ai import ai
 from scn.engine import Severity
+
+# ---------------------------------------------------------------------------
+# Add-on display name — matches addOns.common.name in src/appsscript.json.
+# Google Docs uses this string as the aria-label for the panel icon.
+# Derived at import time so it stays in sync with the manifest automatically.
+# ---------------------------------------------------------------------------
+_APPSSCRIPT = pathlib.Path(__file__).parent.parent / "src" / "appsscript.json"
+try:
+    _ADDON_NAME: str = json.loads(_APPSSCRIPT.read_text())["addOns"]["common"]["name"]
+except Exception:
+    _ADDON_NAME = "GActionSheet"  # fallback if manifest is unreadable
 
 # ---------------------------------------------------------------------------
 # Private selector constants — scenarios never see these
@@ -238,7 +251,7 @@ class UiDriver:
         """Hover and wait until the preview card appears (semantic alias of hover)."""
         return self.hover(locator, timeout=timeout)
 
-    def open_sidebar(self, addon_name: str = "GActionSheet", *, timeout: str = "15s") -> Card:
+    def open_sidebar(self, addon_name: str = _ADDON_NAME, *, timeout: str = "15s") -> Card:
         """Click the add-on icon to open the homepage card; return a Card handle.
 
         The homepage card renders in the right side panel. Uses the same _CARD_IFRAME
