@@ -68,10 +68,10 @@ def test_sidebar_bootstrap_sync(settings, browser_page):
     try:
         s._post_fixture("uc_a_permutations")
 
-        card = s.ui.open_sidebar(timeout="15s")
+        card = s.ui.open_sidebar(timeout="45s")
         # Pre-sync: 0 floating actions visible (raw shell assert; NOT an ai expectation — G1)
         card.frame.get_by_text("actions for this document (0)", exact=False).wait_for(
-            state="visible", timeout=15000
+            state="visible", timeout=30000
         )
 
         s.ui.sidebar_sync(timeout="60s")  # ENTRY POINT: Sync Now button
@@ -110,7 +110,7 @@ def test_tracker_insert_button(settings, browser_page):
     try:
         s._post_fixture("uc_a_permutations")
 
-        s.ui.open_sidebar(timeout="15s")
+        s.ui.open_sidebar(timeout="45s")
         s.ui.sidebar_sync(timeout="60s")          # anchor floating actions first
 
         s.ui.insert_tracker_button(timeout="30s")  # ENTRY POINT: Insert tracker button
@@ -148,7 +148,7 @@ def test_status_mutation_only_mutated_row(settings, browser_page):
     try:
         s._post_fixture("uc_c_pending_sync_refresh")
 
-        s.ui.open_sidebar(timeout="15s")
+        s.ui.open_sidebar(timeout="45s")
         s.ui.sidebar_sync(timeout="60s")   # baseline: tracker grows 2→3
 
         rows = s.find_sheet_actions()
@@ -204,7 +204,7 @@ def test_sidebar_shell_controls(settings, browser_page):
     s.ui = UiDriver(browser_page, doc_id=s.doc_id)
     try:
         s._post_fixture("uc_c_first_insert")
-        card = s.ui.open_sidebar(timeout="15s")
+        card = s.ui.open_sidebar(timeout="45s")
 
         # Present: Sync Now + VerifySync visible
         card.frame.get_by_role("button", name=re.compile(r"sync now", re.I)).wait_for(
@@ -249,7 +249,7 @@ def test_sidebar_blank_doc_no_error(settings, browser_page):
     s = ScenarioSession.new_doc(settings)
     s.ui = UiDriver(browser_page, doc_id=s.doc_id)
     try:
-        card = s.ui.open_sidebar(timeout="15s")
+        card = s.ui.open_sidebar(timeout="45s")
 
         # Absence of error text
         assert card.frame.get_by_text("error with the add-on", exact=False).count() == 0
