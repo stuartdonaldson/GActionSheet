@@ -154,10 +154,13 @@ def test_journey(scn):
             f"Tracker ID cell for {a.action_id!r} missing chip URL hyperlink; got {url!r}"
         )
 
-    # ── Act 3b — open the homepage sidebar, verify action list ───────────────
+    # ── Act 3b — open the homepage sidebar, sync, verify action list ────────
+    # R3-impl: sidebar_sync() added here so the Sync Now entry point appears as a
+    # scn call-site in the canonical journey matrix (entry-point coverage invariant).
     try:
         sidebar = scn.ui.open_sidebar()
         scn.expect_visible(sidebar, timeout="15s")
+        scn.ui.sidebar_sync(timeout="60s")  # entry-point call-site: Sync Now button
         # rwz AC3a: action row shows AI-N • topLabel pattern (explicit_5 is always anchored)
         sidebar.frame.get_by_text(explicit_5.action_id + " •", exact=False).wait_for(
             state="visible", timeout=5000
