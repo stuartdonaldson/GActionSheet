@@ -59,6 +59,9 @@ completion log tag, output schema) is the only shared artifact between them.
 ### EPIC-A — Adopt TeamData/DocData schema and keep regression green
 Goal: adopt the TeamData + DocData schema and verify existing tests, updated for the new schema, continue to pass.
 
+Review fidelity: **Slice** — sample TeamData/DocData tab + smoke on row round-trip and resolved-count single-authority (ADR-0013).
+Open seam: keep `teamScope` usable as a routing key for future Phase-3 per-team sheets.
+
 Depends on: GTaskSheet-knup (identity-terminology doc fix) must close before this epic is decomposed — see §Future design note. Otherwise first epic; no upstream epic dependency.
 
 Supporting files:
@@ -80,6 +83,8 @@ Acceptance test scenario:
 ### EPIC-B — Add Team Scope document property and bidirectional sync to sheet
 Goal: add Team Scope as a document custom property (Team ID) and synchronize it with sheet-backed TeamData/DocData.
 
+Review fidelity: **Spec** — design error visible from contract prose; test-first from frozen AC (ADR-0013).
+
 Depends on: EPIC-A (schema baseline must be green first).
 
 Supporting files:
@@ -100,6 +105,8 @@ Acceptance test scenario:
 ### EPIC-C — Reassign team from spreadsheet via DocData and sync
 Goal: allow team reassignment from spreadsheet by updating DocData and applying change on sync (`SyncStatus='UpdateDoc'`).
 
+Review fidelity: **Spec** — design error visible from contract prose; test-first from frozen AC (ADR-0013).
+
 Depends on: EPIC-B (property + DocData sync contract must exist).
 
 Supporting files:
@@ -118,6 +125,9 @@ Acceptance test scenario:
 
 ### EPIC-D — Add Import tab and action forwarding workflow
 Goal: add sidebar Import capability to pull open team-scoped actions into the current document and forward source actions safely.
+
+Review fidelity: **Slice** — rendered card placeholder; tabbed sidebar shell co-delivered with EPIC-E (ADR-0013).
+Open seam: tabbed sidebar shell must remain extensible for a Settings tab (Phase 2) without re-architecting the tab model.
 
 Depends on: EPIC-B (teamScope must resolve) and the shared `J-ACCESS-FILTER` journey (see §Shared [TST] structure). Co-delivers the tabbed-sidebar refactor with EPIC-E.
 
@@ -144,6 +154,9 @@ Acceptance test scenario:
 
 ### EPIC-E — Add Notify tab and assignee reminder email flow
 Goal: add sidebar Notify capability to send reminders to selected assignees with unresolved team-scoped actions.
+
+Review fidelity: **Slice** — rendered card placeholder; co-delivers tabbed shell with EPIC-D (ADR-0013).
+Open seam: email-template contract must be reusable for the Assignee Reminder funnel entry when it is promoted.
 
 Depends on: EPIC-D (tabbed-sidebar shell + `J-ACCESS-FILTER` access filter are reused, not rebuilt). Align email-template approach with the Assignee reminder §Funnel entry before the first email bead.
 
@@ -185,6 +198,9 @@ Required documentation updates before implementation starts:
 To avoid duplicated access-rule tests across Import and Notify, define one shared journey
 that both features consume.
 
+Review fidelity: **Slice** — P1 happy-path + account matrix; no per-feature assertions bound until gate freezes the AC (ADR-0013).
+Open seam: journey part structure (P1–P4) must accommodate a third sidebar feature consuming the shared access filter without restructuring.
+
 Shared journey (single source of truth):
 - `J-ACCESS-FILTER`: visibility and authorization journey for team-scoped reads.
 
@@ -219,7 +235,7 @@ Sequencing:
 
 ## Execution
 
-v1 work is managed in beads. Run `bd ready` for actionable items.
+v1 work is managed in beads. Run `bd ready` for actionable items. Slice gates (EPIC-A, J-ACCESS-FILTER, EPIC-D, EPIC-E) each produce a verdict and funnel deltas added to §Funnel; see ADR-0013.
 
 ### Delivering a future feature (v2+)
 
