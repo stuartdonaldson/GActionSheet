@@ -1860,6 +1860,85 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'team_data_slice': {
+        // Slice-BUILD for EPIC-A (GTaskSheet-5r4l.2, ADR-0013).
+        // Creates sample TeamData + DocData tabs and performs the two durable-invariant
+        // smoke checks in-process, returning results for Python assertion:
+        //   (a) round-trip: rows written then read back are identical (non-date cols)
+        //   (b) resolved authority: Resolved Count computed exclusively via isResolved()
+
+        // --- TeamData tab --------------------------------------------------
+        var tdsTeamSheet = _getOrCreateSheet(ss, 'TeamData');
+        tdsTeamSheet.clearContents();
+        var tdsTeamHeaders = [['Team Name', 'Folder Id', 'Contact']];
+        var tdsTeamRows = [
+          ['Board',      'board-folder-001', 'board@northlakeuu.org'],
+          ['Board',      'board-folder-002', 'board@northlakeuu.org'],
+          ['Membership', 'mem-folder-001',   'membership@northlakeuu.org']
+        ];
+        tdsTeamSheet.getRange(1, 1, 1, 3).setValues(tdsTeamHeaders).setFontWeight('bold');
+        tdsTeamSheet.getRange(2, 1, tdsTeamRows.length, 3).setValues(tdsTeamRows);
+
+        // --- DocData rows (action-status sets drive Resolved Count via isResolved()) ---
+        // Row 1: matched-team doc — 2 actions (Done + Open) → 1 resolved
+        // Row 2: no-team doc     — 1 action  (Open)         → 0 resolved
+        // Row 3: UpdateDoc row   — 1 action  (Closed)       → 1 resolved
+        var tdsActionSets = [
+          ['Done', 'Open'],
+          ['Open'],
+          ['Closed']
+        ];
+        function _tdsCountResolved(statuses) {
+          var n = 0;
+          for (var i = 0; i < statuses.length; i++) { if (isResolved(statuses[i])) n++; }
+          return n;
+        }
+        var tdsNow = new Date();
+        var tdsDocDataRows = [
+          ['doc-id-slice-001', 'Board Meeting Notes', tdsNow, tdsNow, '',          'board-folder-001', 2, _tdsCountResolved(tdsActionSets[0])],
+          ['doc-id-slice-002', 'Membership Report',   tdsNow, tdsNow, '',          '',                 1, _tdsCountResolved(tdsActionSets[1])],
+          ['doc-id-slice-003', 'Finance Review',      tdsNow, tdsNow, 'UpdateDoc', 'board-folder-001', 1, _tdsCountResolved(tdsActionSets[2])]
+        ];
+        var tdsDocHeaders = [['DocID', 'Doc Name', 'Doc Modified', 'Doc Updated', 'SyncStatus', 'Team', 'Action Count', 'Resolved Count']];
+
+        var tdsDocSheet = _getOrCreateSheet(ss, 'DocData');
+        tdsDocSheet.clearContents();
+        tdsDocSheet.getRange(1, 1, 1, 8).setValues(tdsDocHeaders).setFontWeight('bold');
+        tdsDocSheet.getRange(2, 1, tdsDocDataRows.length, 8).setValues(tdsDocDataRows);
+
+        // --- Round-trip smoke (a): read back non-date columns ---------------
+        var tdsReadBack = tdsDocSheet.getRange(2, 1, tdsDocDataRows.length, 8).getValues();
+        var tdsRTDiff = [];
+        // Date cols (index 2 and 3) are skipped — GAS serialises dates; values survive.
+        var tdsSkipCols = { 2: true, 3: true };
+        for (var tdsR = 0; tdsR < tdsDocDataRows.length; tdsR++) {
+          for (var tdsC = 0; tdsC < tdsDocDataRows[tdsR].length; tdsC++) {
+            if (tdsSkipCols[tdsC]) continue;
+            var tdsW = String(tdsDocDataRows[tdsR][tdsC]);
+            var tdsV = String(tdsReadBack[tdsR][tdsC]);
+            if (tdsW !== tdsV) {
+              tdsRTDiff.push({ row: tdsR + 1, col: tdsC + 1, written: tdsW, readBack: tdsV });
+            }
+          }
+        }
+
+        _TF_RESULT = {
+          tag: 'fixture.team_data_slice',
+          data: {
+            teamDataRows: tdsTeamRows.length,
+            docDataRows:  tdsDocDataRows.length,
+            resolvedCounts: [
+              _tdsCountResolved(tdsActionSets[0]),
+              _tdsCountResolved(tdsActionSets[1]),
+              _tdsCountResolved(tdsActionSets[2])
+            ],
+            roundTripDiff: tdsRTDiff
+          }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       default:
         // Unknown scenario — fall through to default (uc1_new_floating) behaviour.
         GasLogger.log('fixture.warn', {

@@ -927,3 +927,14 @@ function _flushActionParagraph(docId, token, N, globalId, actionText, status, as
   GasLogger.log('flush.error', { msg: 'batchUpdate failed: HTTP ' + batchResp.getResponseCode(), body: batchResp.getContentText().substring(0, 300), globalId: globalId });
   return false;
 }
+
+/**
+ * Single shared authority for whether an action status counts as resolved.
+ * DocData.Resolved Count must be computed exclusively through this function.
+ *
+ * @param {string} status  The action status string.
+ * @returns {boolean}
+ */
+function isResolved(status) {
+  return status === 'Done' || status === 'Closed';
+}
