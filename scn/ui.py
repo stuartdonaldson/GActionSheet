@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import time
 import warnings
 from typing import TYPE_CHECKING
 
@@ -93,9 +94,9 @@ _FORM_SUBMIT = (
 )
 # Sidebar homepage card — Sync Now button
 _SIDEBAR_SYNC = (
-    'button:has-text("Sync"), '
-    '[aria-label*="Sync"], '
-    '[aria-label*="sync"]'
+    '[aria-label="Sync now"], '
+    '[aria-label="sync now"], '
+    'button:has-text("Sync now")'
 )
 # Sidebar homepage card — Insert tracker button
 _SIDEBAR_INSERT_TRACKER = (
@@ -254,22 +255,54 @@ class UiDriver:
     def open_sidebar(self, addon_name: str = _ADDON_NAME, *, timeout: str = "15s") -> Card:
         """Click the add-on icon to open the homepage card; return a Card handle.
 
-        The homepage card renders in the right side panel. Uses the same _CARD_IFRAME
-        selector as hover() — if the side-panel iframe has a different src, add a
-        _SIDEBAR_IFRAME constant and swap it in here.
+        Polls all page frames for one that contains the 'Sync now' button —
+        the same detection strategy as JS findAddonFrame in _helpers.js.
+        Handles the cold-start 'Refresh' button that can appear before the card
+        loads (clicks it and waits 4 s before resuming the poll).
         """
         self._ensure_doc()
         ms = _parse_timeout(timeout)
-        btn = self._page.locator(
-            _SIDEBAR_ICON_TMPL.format(name=addon_name)
-        ).first
+        btn = self._page.locator(_SIDEBAR_ICON_TMPL.format(name=addon_name)).first
         btn.wait_for(state="visible", timeout=ms)
         btn.click()
-        card_frame = self._page.frame_locator(_CARD_IFRAME).first
-        card_frame.locator(_CARD_BODY).first.wait_for(state="visible", timeout=ms)
-        card = Card(card_frame)
-        self._current_card = card
-        return card
+
+        # Allow the sidebar iframe to begin initialising (GAS cold start can
+        # take 15–20 s; a brief initial wait avoids hammering too early).
+        time.sleep(3.0)
+
+        deadline = time.monotonic() + ms / 1000.0
+        refresh_attempted = False
+        while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"open_sidebar: sidebar card did not load within {timeout}"
+                )
+            for frame in self._page.frames:
+                try:
+                    if frame.get_by_role(
+                        "button", name=re.compile(r"sync now", re.I)
+                    ).count():
+                        card = Card(frame)
+                        self._current_card = card
+                        return card
+                except Exception:
+                    pass
+
+            # Cold-start 'Refresh' button may appear before the card loads
+            if not refresh_attempted:
+                try:
+                    refresh_btn = self._page.get_by_role(
+                        "button", name=re.compile(r"^Refresh$", re.I)
+                    )
+                    if refresh_btn.count() > 0:
+                        refresh_btn.click()
+                        refresh_attempted = True
+                        time.sleep(4.0)
+                        continue
+                except Exception:
+                    pass
+
+            time.sleep(0.5)
 
     def click(self, locator: _PwLocator, *, timeout: str = "5s") -> None:
         """Click a locator after waiting up to timeout for it to be visible."""
@@ -538,7 +571,8 @@ class UiDriver:
         status = None
 
         try:
-            header = frame.get_by_text(re.compile(r"AI-\d+:")).first
+            # Match both preview-card "AI-N:" and homepage-sidebar "AI-N •" formats
+            header = frame.get_by_text(re.compile(r"\bAI-\d+\b")).first
             header_text = header.text_content(timeout=2000) or ""
             m = re.search(r"\b(AI-\d+)\b", header_text)
             if m:
@@ -549,14 +583,31 @@ class UiDriver:
         if not action_id:
             return []
 
+        # Status is read from the row container that holds the action_id text.
+        # Navigate from the action_id element to its closest ancestor that has an
+        # img[alt] descendant (the decorated-text row widget).  This avoids reading
+        # the add-on header logo image which appears earlier in the frame DOM.
         try:
-            for img in frame.locator("img[alt]").all():
+            row_el = frame.get_by_text(re.compile(r"\bAI-\d+\b")).first
+            row_container = row_el.locator("xpath=ancestor::*[.//img[@alt]][1]")
+            for img in row_container.locator("img[alt]").all():
                 alt = img.get_attribute("alt", timeout=1000)
                 if alt and alt.strip():
                     status = alt.strip()
                     break
         except Exception:
             pass
+
+        # Fallback: scan full frame img[alt], skipping the add-on logo image
+        if status is None:
+            try:
+                for img in frame.locator("img[alt]").all():
+                    alt = img.get_attribute("alt", timeout=1000)
+                    if alt and alt.strip() and "logo" not in alt.lower():
+                        status = alt.strip()
+                        break
+            except Exception:
+                pass
 
         if status is None:
             try:

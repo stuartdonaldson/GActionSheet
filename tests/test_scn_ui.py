@@ -315,9 +315,12 @@ class TestExpectAlt:
 
 class TestOpenSidebar:
     def _setup_sidebar_frame(self, mock_page):
+        # Simulate a GAS sidebar frame that has 'Sync now' (findAddonFrame pattern)
         frame = MagicMock()
-        frame.locator.return_value.first = MagicMock()
-        mock_page.frame_locator.return_value.first = frame
+        sync_now_locator = MagicMock()
+        sync_now_locator.count.return_value = 1
+        frame.get_by_role.return_value = sync_now_locator
+        mock_page.frames = [frame]
         mock_page.locator.return_value.first = MagicMock()
         return frame
 

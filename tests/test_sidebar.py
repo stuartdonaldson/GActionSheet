@@ -75,6 +75,7 @@ def test_sidebar_bootstrap_sync(settings, browser_page):
         )
 
         s.ui.sidebar_sync(timeout="60s")  # ENTRY POINT: Sync Now button
+        s.sync()  # durable convergence to ActionSheet (§16.11 #4; sidebar_sync is async)
 
         # Resolve action_ids from live sheet (accumulates across runs; doc-scoped)
         rows = s.find_sheet_actions()
@@ -112,6 +113,7 @@ def test_tracker_insert_button(settings, browser_page):
 
         s.ui.open_sidebar(timeout="45s")
         s.ui.sidebar_sync(timeout="60s")          # anchor floating actions first
+        s.sync()  # durable convergence to ActionSheet (§16.11 #4)
 
         s.ui.insert_tracker_button(timeout="30s")  # ENTRY POINT: Insert tracker button
 
@@ -150,6 +152,7 @@ def test_status_mutation_only_mutated_row(settings, browser_page):
 
         s.ui.open_sidebar(timeout="45s")
         s.ui.sidebar_sync(timeout="60s")   # baseline: tracker grows 2→3
+        s.sync()  # durable convergence to ActionSheet (§16.11 #4)
 
         rows = s.find_sheet_actions()
         assert len(rows) >= 3, (
