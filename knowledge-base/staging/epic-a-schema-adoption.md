@@ -18,23 +18,23 @@ identity change; no per-team sheets.
 
 | Column | Purpose |
 |--------|---------|
-| Team Name | Human-readable team name (e.g. `Board`, `Membership`) |
-| Folder Id | Drive folder ID for this team; **this value is the Team ID** |
+| Team Id | Stable team identifier; currently doubles as display name (e.g. `Board`, `Membership`). Team Name (display) and Team Description are future fields added when notify/import workflows need to distinguish identity from presentation. |
+| Folder Id | Drive folder ID owned by this team; used as the folder-walk match key |
 | Contact | Team contact for coordination/notifications |
 
-Multiple rows may share a Team Name (a team may own several folders). Auto-assignment matches on
-Folder Id.
+Multiple rows may share a Team Id (a team may own several folders). Auto-assignment matches on
+Folder Id, then resolves Team Id from the matching TeamData row.
 
 ### DocData tab (master GActionSheet) — per-document sync state
 
 | Column | Purpose |
 |--------|---------|
-| DocID | Stable document ID (key) |
+| FileId | Google Drive file ID of the document (stable key; matches `File Id` in Actions) |
 | Doc Name | Current document name |
 | Doc Modified | Document modified timestamp (DocWins source-of-truth check) |
 | Doc Updated | Last time the DocData row was written by sync |
 | SyncStatus | Sync control flag (`UpdateDoc` → push team to document on next sync) |
-| Team | Team ID assigned to the document (matches TeamData.Folder Id) |
+| Team Id | Team Id assigned to the document (matches TeamData.Team Id via folder walk) |
 | Action Count | Total actions for the document |
 | Resolved Count | Total actions resolved per the **shared `isResolved()` authority** |
 
@@ -42,7 +42,9 @@ Folder Id.
 
 | Column | Purpose |
 |--------|---------|
-| Team Scope | Team label resolved from the document's `teamScope` property at sync time |
+| File Id | Google Drive file ID of the source document; decomposed from `globalId` prefix; FK → DocData.FileId |
+
+Note: Team Id is NOT stored in Actions (update anomaly: team reassignment would require updating N action rows). Import/notify workflows join Actions → DocData via `File Id` to resolve Team Id.
 
 Rows written before this column existed carry blank; not backfilled automatically.
 

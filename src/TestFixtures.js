@@ -460,8 +460,10 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
  * @returns {Array}  Row array aligned to SHEET_HEADERS.
  */
 function _tfSheetRow(opts) {
+  var fileId = opts.fileId || (opts.globalId ? opts.globalId.split('/AI-')[0] : '');
   return [
     opts.globalId || '',
+    fileId,
     opts.id,
     opts.assigneeEmail || '',
     opts.assigneeName || '',
@@ -1073,17 +1075,17 @@ function setupTestFixtures(scenario, data) {
                   // Var 4: Status Done → Closed; set Dirty so sheet wins conflict resolution.
                   var ucbRow4 = ucbRi + 2;
                   WriteGuard.wrap(function () {
-                    ucbSheet.getRange(ucbRow4, 6).setValue('Closed');
-                    ucbSheet.getRange(ucbRow4, 9).setValue(new Date());
-                    ucbSheet.getRange(ucbRow4, 10).setValue('Dirty');
+                    ucbSheet.getRange(ucbRow4, 7).setValue('Closed');
+                    ucbSheet.getRange(ucbRow4, 10).setValue(new Date());
+                    ucbSheet.getRange(ucbRow4, 11).setValue('Dirty');
                   });
                 } else if (ucbAction.indexOf(ucbPrefix + 'Approve the budget proposal') !== -1) {
                   // Var 5: Action text change; set Dirty so sheet wins conflict resolution.
                   var ucbRow5 = ucbRi + 2;
                   WriteGuard.wrap(function () {
-                    ucbSheet.getRange(ucbRow5, 5).setValue(ucbPrefix + 'Approve the revised budget');
-                    ucbSheet.getRange(ucbRow5, 9).setValue(new Date());
-                    ucbSheet.getRange(ucbRow5, 10).setValue('Dirty');
+                    ucbSheet.getRange(ucbRow5, 6).setValue(ucbPrefix + 'Approve the revised budget');
+                    ucbSheet.getRange(ucbRow5, 10).setValue(new Date());
+                    ucbSheet.getRange(ucbRow5, 11).setValue('Dirty');
                   });
                 }
               } else if (ucbAssignee === 'bob_jones@example.com' &&
@@ -1091,9 +1093,9 @@ function setupTestFixtures(scenario, data) {
                 // Var 6: Status Open → In Review; set Dirty so sheet wins conflict resolution.
                 var ucbRow6 = ucbRi + 2;
                 WriteGuard.wrap(function () {
-                  ucbSheet.getRange(ucbRow6, 6).setValue('In Review');
-                  ucbSheet.getRange(ucbRow6, 9).setValue(new Date());
-                  ucbSheet.getRange(ucbRow6, 10).setValue('Dirty');
+                  ucbSheet.getRange(ucbRow6, 7).setValue('In Review');
+                  ucbSheet.getRange(ucbRow6, 10).setValue(new Date());
+                  ucbSheet.getRange(ucbRow6, 11).setValue('Dirty');
                 });
               }
             }
@@ -1116,10 +1118,10 @@ function setupTestFixtures(scenario, data) {
                   ucbAAction.indexOf(ucbPrefix + 'Review the Q2 report') !== -1) {
                 var ucbARow = ucbARi + 2;
                 WriteGuard.wrap(function () {
-                  ucbASheet.getRange(ucbARow, 3).setValue('jane.smith@example.com');
-                  ucbASheet.getRange(ucbARow, 4).setValue('Jane Smith');
-                  ucbASheet.getRange(ucbARow, 9).setValue(new Date());
-                  ucbASheet.getRange(ucbARow, 10).setValue('Dirty');
+                  ucbASheet.getRange(ucbARow, 4).setValue('jane.smith@example.com');
+                  ucbASheet.getRange(ucbARow, 5).setValue('Jane Smith');
+                  ucbASheet.getRange(ucbARow, 10).setValue(new Date());
+                  ucbASheet.getRange(ucbARow, 11).setValue('Dirty');
                 });
                 break;
               }
@@ -1145,7 +1147,7 @@ function setupTestFixtures(scenario, data) {
                 // Stale sheet Date Modified far in the past so the doc edit wins.
                 var ucbCRowA = ucbCRi + 2;
                 WriteGuard.wrap(function () {
-                  ucbCSheet.getRange(ucbCRowA, 9).setValue(new Date('2020-01-01'));
+                  ucbCSheet.getRange(ucbCRowA, 10).setValue(new Date('2020-01-01'));
                 });
               }
             }
@@ -1182,9 +1184,9 @@ function setupTestFixtures(scenario, data) {
                   ucbCData2[ucbCRi2][4].indexOf(ucbPrefix + 'Schedule the follow-up') !== -1) {
                 var ucbCRowB = ucbCRi2 + 2;
                 WriteGuard.wrap(function () {
-                  ucbCSheet.getRange(ucbCRowB, 6).setValue('Closed');
-                  ucbCSheet.getRange(ucbCRowB, 9).setValue(new Date());
-                  ucbCSheet.getRange(ucbCRowB, 10).setValue('Dirty');
+                  ucbCSheet.getRange(ucbCRowB, 7).setValue('Closed');
+                  ucbCSheet.getRange(ucbCRowB, 10).setValue(new Date());
+                  ucbCSheet.getRange(ucbCRowB, 11).setValue('Dirty');
                 });
                 break;
               }
@@ -1259,8 +1261,8 @@ function setupTestFixtures(scenario, data) {
                 (ucCRefData[ucCRefI][4] || '').indexOf('UCC-REFRESH: Approve') !== -1) {
               var ucCRefRowNum = ucCRefI + 2;
               WriteGuard.wrap(function () {
-                ucCRefActSheet.getRange(ucCRefRowNum, 6).setValue('Closed');
-                ucCRefActSheet.getRange(ucCRefRowNum, 9).setValue(new Date());
+                ucCRefActSheet.getRange(ucCRefRowNum, 7).setValue('Closed');
+                ucCRefActSheet.getRange(ucCRefRowNum, 10).setValue(new Date());
               });
               break;
             }
@@ -1440,6 +1442,7 @@ function setupTestFixtures(scenario, data) {
           if (ssNFSheet) {
             ssNFSheet.appendRow([
               'SS-NF-ANCHOR-FAKE-001',
+              'SS-NF-ANCHOR-FAKE-001',  // fileId == globalId prefix (fake, no /AI-)
               999,
               'test@example.com',
               '',
@@ -1489,7 +1492,7 @@ function setupTestFixtures(scenario, data) {
                 (ssRecData[ssRecI][4] || '').indexOf('SS-REC:') !== -1) {
               var ssRecRowNum = ssRecI + 2;
               WriteGuard.wrap(function () {
-                ssRecSheet.getRange(ssRecRowNum, 10).setValue('Deleted');
+                ssRecSheet.getRange(ssRecRowNum, 11).setValue('Deleted');
               });
               break;
             }
@@ -1504,7 +1507,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'sync_status_on_edit': {
         // Insert a chip-led floating action (SS-EDIT: prefix), sync to stamp a
-        // real Date Modified, then call onEdit() with a synthetic col-10 event to
+        // real Date Modified, then call onEdit() with a synthetic col-11 event to
         // verify that editing Sync Status does NOT update Date Modified.
         // Logs sentinelDateModified so the Python test can assert no change.
         var ssEditToken = ScriptApp.getOAuthToken();
@@ -1524,12 +1527,12 @@ function setupTestFixtures(scenario, data) {
         var ssEditSentinel = null;
         var ssEditRowNum   = -1;
         if (ssEditSheet && ssEditLastR > 1) {
-          var ssEditData = ssEditSheet.getRange(2, 1, ssEditLastR - 1, 9).getValues();
-          var ssEditFmls = ssEditSheet.getRange(2, 7, ssEditLastR - 1, 1).getFormulas();
+          var ssEditData = ssEditSheet.getRange(2, 1, ssEditLastR - 1, 11).getValues();
+          var ssEditFmls = ssEditSheet.getRange(2, 8, ssEditLastR - 1, 1).getFormulas();
           for (var ssEditI = 0; ssEditI < ssEditData.length; ssEditI++) {
             if (ssEditFmls[ssEditI][0].indexOf(testDocId) !== -1 &&
-                (ssEditData[ssEditI][4] || '').indexOf('SS-EDIT:') !== -1) {
-              ssEditSentinel = ssEditData[ssEditI][8]; // col 9 (0-indexed: 8) = Date Modified
+                (ssEditData[ssEditI][5] || '').indexOf('SS-EDIT:') !== -1) {
+              ssEditSentinel = ssEditData[ssEditI][9]; // col 10 (0-indexed: 9) = Date Modified
               ssEditRowNum   = ssEditI + 2;
               break;
             }
@@ -1537,7 +1540,7 @@ function setupTestFixtures(scenario, data) {
         }
 
         if (ssEditRowNum > 0 && ssEditSheet) {
-          var ssEditFakeEvent = { range: ssEditSheet.getRange(ssEditRowNum, 10) };
+          var ssEditFakeEvent = { range: ssEditSheet.getRange(ssEditRowNum, 11) };
           onActionSheetEdit(ssEditFakeEvent);
         }
 
@@ -1577,9 +1580,9 @@ function setupTestFixtures(scenario, data) {
                 (ssArchData[ssArchI][4] || '').indexOf('SS-ARCH:') !== -1) {
               var ssArchRowNum = ssArchI + 2;
               WriteGuard.wrap(function () {
-                ssArchSheet.getRange(ssArchRowNum, 6).setValue('Closed');
-                ssArchSheet.getRange(ssArchRowNum, 9).setValue(ssArchOldDate);
-                ssArchSheet.getRange(ssArchRowNum, 10).setValue('Deleted');
+                ssArchSheet.getRange(ssArchRowNum, 7).setValue('Closed');
+                ssArchSheet.getRange(ssArchRowNum, 10).setValue(ssArchOldDate);
+                ssArchSheet.getRange(ssArchRowNum, 11).setValue('Deleted');
               });
               break;
             }
@@ -1870,7 +1873,7 @@ function setupTestFixtures(scenario, data) {
         // --- TeamData tab --------------------------------------------------
         var tdsTeamSheet = _getOrCreateSheet(ss, 'TeamData');
         tdsTeamSheet.clearContents();
-        var tdsTeamHeaders = [['Team Name', 'Folder Id', 'Contact']];
+        var tdsTeamHeaders = [['Team Id', 'Folder Id', 'Contact']];
         var tdsTeamRows = [
           ['Board',      'board-folder-001', 'board@northlakeuu.org'],
           ['Board',      'board-folder-002', 'board@northlakeuu.org'],
@@ -1899,7 +1902,7 @@ function setupTestFixtures(scenario, data) {
           ['doc-id-slice-002', 'Membership Report',   tdsNow, tdsNow, '',          '',                 1, _tdsCountResolved(tdsActionSets[1])],
           ['doc-id-slice-003', 'Finance Review',      tdsNow, tdsNow, 'UpdateDoc', 'board-folder-001', 1, _tdsCountResolved(tdsActionSets[2])]
         ];
-        var tdsDocHeaders = [['DocID', 'Doc Name', 'Doc Modified', 'Doc Updated', 'SyncStatus', 'Team', 'Action Count', 'Resolved Count']];
+        var tdsDocHeaders = [['FileId', 'Doc Name', 'Doc Modified', 'Doc Updated', 'SyncStatus', 'Team Id', 'Action Count', 'Resolved Count']];
 
         var tdsDocSheet = _getOrCreateSheet(ss, 'DocData');
         tdsDocSheet.clearContents();

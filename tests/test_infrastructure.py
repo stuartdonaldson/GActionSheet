@@ -16,6 +16,7 @@ _OPEN_SHEET_JS = _REPO_ROOT / "tests" / "playwright" / "open_sheet.js"
 # Expected column orders (1-based positions must match this exact left-to-right sequence)
 ACTIONS_HEADERS = [
     "globalId",
+    "File Id",
     "ID",
     "Assignee Email",
     "Assignee Name",
@@ -28,6 +29,7 @@ ACTIONS_HEADERS = [
 
 ARCHIVE_HEADERS = [
     "globalId",
+    "File Id",
     "ID",
     "Assignee Email",
     "Assignee Name",

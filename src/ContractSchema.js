@@ -20,6 +20,7 @@ var CONTRACT_SCHEMA = Object.freeze({
   sheetAction: Object.freeze({
     fields: Object.freeze([
       'global_id',
+      'file_id',
       'action_id',
       'assignee_email',
       'assignee_name',
@@ -35,6 +36,7 @@ var CONTRACT_SCHEMA = Object.freeze({
 
     headers: Object.freeze([
       'globalId',
+      'File Id',
       'ID',
       'Assignee Email',
       'Assignee Name',
@@ -48,15 +50,16 @@ var CONTRACT_SCHEMA = Object.freeze({
 
     columnsByField: Object.freeze({
       global_id: 1,
-      action_id: 2,
-      assignee_email: 3,
-      assignee_name: 4,
-      action_text: 5,
-      status: 6,
-      document_formula: 7,
-      created_date: 8,
-      modified_date: 9,
-      sync_status: 10
+      file_id: 2,
+      action_id: 3,
+      assignee_email: 4,
+      assignee_name: 5,
+      action_text: 6,
+      status: 7,
+      document_formula: 8,
+      created_date: 9,
+      modified_date: 10,
+      sync_status: 11
     })
   }),
 

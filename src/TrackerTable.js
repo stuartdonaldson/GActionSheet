@@ -115,7 +115,7 @@ function _readTrackerSheetRows(ss, docId) {
 
   var numRows  = sheet.getLastRow() - 1;
   var data     = sheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
-  var formulas = sheet.getRange(2, 7, numRows, 1).getFormulas();
+  var formulas = sheet.getRange(2, 8, numRows, 1).getFormulas();
   var result   = {};
 
   for (var i = 0; i < data.length; i++) {
@@ -124,8 +124,8 @@ function _readTrackerSheetRows(ss, docId) {
     var globalId = data[i][0];
     if (!globalId) continue;
     result[globalId] = {
-      id:     data[i][1],
-      status: data[i][5] || 'Open'
+      id:     data[i][2],
+      status: data[i][6] || 'Open'
     };
   }
 

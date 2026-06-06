@@ -251,10 +251,10 @@ function syncAll() {
       return;
     }
 
-    // Extract unique docIds from the HYPERLINK formula in column 7.
+    // Extract unique docIds from the HYPERLINK formula in column 8.
     // Formula shape: =HYPERLINK("https://docs.google.com/document/d/DOCID/edit", "Title")
     var numRows      = lastRow - 1;
-    var formulasCol7 = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
+    var formulasCol7 = actionsSheet.getRange(2, 8, numRows, 1).getFormulas();
     var docIdSet     = {};
     for (var i = 0; i < formulasCol7.length; i++) {
       var formula = formulasCol7[i][0] || '';
@@ -268,8 +268,8 @@ function syncAll() {
     var syncStateSheet = _getOrCreateSyncStateSheet(ss);
     var syncState      = _loadSyncState(syncStateSheet);
 
-    // Read cols 1 + 10 once for dirty-row detection across all docs.
-    var actionData = actionsSheet.getRange(2, 1, numRows, 10).getValues();
+    // Read cols 1 + 11 once for dirty-row detection across all docs.
+    var actionData = actionsSheet.getRange(2, 1, numRows, 11).getValues();
 
     // Pre-build dirty-doc set in one pass — avoids O(docs × rows) scan per doc.
     var dirtyDocIds = {};
@@ -277,10 +277,10 @@ function syncAll() {
     for (var d = 0; d < actionData.length; d++) {
       var gidD  = String(actionData[d][0] || '');
       var slashD = gidD.indexOf('/');
-      if (actionData[d][9] === 'Dirty' && slashD > 0) {
+      if (actionData[d][10] === 'Dirty' && slashD > 0) {
         dirtyDocIds[gidD.substring(0, slashD)] = true;
       }
-      if (actionData[d][9] === 'Doc Not Found' && slashD > 0) {
+      if (actionData[d][10] === 'Doc Not Found' && slashD > 0) {
         alreadyDocNotFound[gidD.substring(0, slashD)] = true;
       }
     }
@@ -351,7 +351,7 @@ function onActionSheetEdit(e) {
   var row   = range.getRow();
   if (row < 2) return;
   var col = range.getColumn();
-  if ([3, 4, 5, 6].indexOf(col) === -1) return; // Assignee Email, Name, Action, Status
+  if ([4, 5, 6, 7].indexOf(col) === -1) return; // Assignee Email, Name, Action, Status
   var sheet = range.getSheet();
   if (sheet.getName() !== 'Actions') return;
 
@@ -364,8 +364,8 @@ function onActionSheetEdit(e) {
   var dateModified = new Date();
   WriteGuard.wrap(function () {
     if (numRows === 1) {
-      sheet.getRange(row, 9).setValue(dateModified);
-      sheet.getRange(row, 10).setValue('Dirty');
+      sheet.getRange(row, 10).setValue(dateModified);
+      sheet.getRange(row, 11).setValue('Dirty');
     } else {
       var dates    = [];
       var dirtyCol = [];
@@ -373,8 +373,8 @@ function onActionSheetEdit(e) {
         dates.push([dateModified]);
         dirtyCol.push(['Dirty']);
       }
-      sheet.getRange(row, 9, numRows, 1).setValues(dates);
-      sheet.getRange(row, 10, numRows, 1).setValues(dirtyCol);
+      sheet.getRange(row, 10, numRows, 1).setValues(dates);
+      sheet.getRange(row, 11, numRows, 1).setValues(dirtyCol);
     }
   });
 
@@ -385,7 +385,7 @@ function onActionSheetEdit(e) {
  * Propagates a single ActionSheet row edit to the corresponding floating action
  * in the source document via REST batchUpdate.
  *
- * Reads: globalId (col 1), Action (col 5), Status (col 6), Document URL (col 7)
+ * Reads: globalId (col 1), Action (col 6), Status (col 7), Document URL (col 8)
  * Extracts docId from the Document hyperlink formula.
  * Extracts N from the globalId (format: {docId}/AI-{N}).
  *
@@ -396,11 +396,11 @@ function _syncSheetRowToDoc(sheet, row) {
   try {
     var rowData       = sheet.getRange(row, 1, 1, SHEET_HEADERS.length).getValues()[0];
     var globalId      = rowData[0];  // Col 1: globalId (format: {docId}/AI-{N})
-    var assigneeEmail = rowData[2];  // Col 3: Assignee Email
-    var assigneeName  = rowData[3];  // Col 4: Assignee Name
-    var action        = rowData[4];  // Col 5: Action
-    var status        = rowData[5];  // Col 6: Status
-    var docFormula    = sheet.getRange(row, 7).getFormula();
+    var assigneeEmail = rowData[3];  // Col 4: Assignee Email
+    var assigneeName  = rowData[4];  // Col 5: Assignee Name
+    var action        = rowData[5];  // Col 6: Action
+    var status        = rowData[6];  // Col 7: Status
+    var docFormula    = sheet.getRange(row, 8).getFormula();
 
     if (!globalId) return;
     if (!docFormula) return;
@@ -417,7 +417,7 @@ function _syncSheetRowToDoc(sheet, row) {
     var ok = _flushActionParagraph(docId, token, N, globalId, action, status, assigneeEmail, assigneeName || '');
     if (ok) {
       // Flush confirmed — clear Dirty immediately rather than waiting for WebApp round-trip.
-      WriteGuard.wrap(function () { sheet.getRange(row, 10).setValue(''); });
+      WriteGuard.wrap(function () { sheet.getRange(row, 11).setValue(''); });
       GasLogger.log('sync.sheet-to-doc.done', { globalId: globalId });
 
       // Full doc scan: writes chip-resolved assigneeName back to sheet (docWins branch),
@@ -722,7 +722,7 @@ function _remarkRowDirty(globalId) {
     var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
     for (var i = 0; i < ids.length; i++) {
       if (ids[i][0] === globalId) {
-        sheet.getRange(i + 2, 10).setValue('Dirty');
+        sheet.getRange(i + 2, 11).setValue('Dirty');
         GasLogger.log('flush.remarked-dirty', { globalId: globalId });
         return;
       }
@@ -928,13 +928,55 @@ function _flushActionParagraph(docId, token, N, globalId, actionText, status, as
   return false;
 }
 
+
 /**
- * Single shared authority for whether an action status counts as resolved.
- * DocData.Resolved Count must be computed exclusively through this function.
+ * Single shared authority for canonical action status states and resolution.
+ * Five canonical states: Open, InProgress, Waiting, Delegated, Closed.
+ * isResolved() returns true for Delegated or Closed states only—meaning no further action is required.
+ * DocData.Resolved Count must be computed exclusively through isResolved().
+ * All status matching is case-insensitive.
+ *
+ * @param {string} status  The action status string.
+ * @returns {boolean}
+ */
+
+function isOpen(status) {
+  const words = ["open", "pending", "planned", "queued", "unstarted", "new"];
+  return typeof status === "string" &&
+    words.includes(status.trim().toLowerCase());
+}
+
+function isInProgress(status) {
+  const words = ["active", "in-progress", "working", "running", "executing", "processing"];
+  return typeof status === "string" &&
+    words.includes(status.trim().toLowerCase());
+}
+
+function isWaiting(status) {
+  const words = ["waiting", "blocked", "on-hold", "stalled", "paused"];
+  return typeof status === "string" &&
+    words.includes(status.trim().toLowerCase());
+}
+
+function isDelegated(status) {
+  const words = ["delegated", "routed", "forwarded", "escalated", "handed-off", "transferred"];
+  return typeof status === "string" &&
+    words.includes(status.trim().toLowerCase());
+}
+
+function isClosed(status) {
+  const words = ["done", "complete", "finished", "closed", "resolved", "finalized"];
+  return typeof status === "string" &&
+    words.includes(status.trim().toLowerCase());
+}
+
+/**
+ * Determines if an action is resolved (no longer tracked in this document).
+ * Returns true for Delegated or Closed states—meaning no further action is required.
  *
  * @param {string} status  The action status string.
  * @returns {boolean}
  */
 function isResolved(status) {
-  return status === 'Done' || status === 'Closed';
+  return isDelegated(status) || isClosed(status);
 }
