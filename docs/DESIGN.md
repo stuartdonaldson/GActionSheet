@@ -517,43 +517,41 @@ sequenceDiagram
 
 | Scope | Established once per | What it provides |
 |---|---|---|
-| **Session** | Test run | Authenticated Playwright browser session (`.auth/user.json`); `local.settings.json` loaded (test doc ID, test ActionSheet ID, add-on script ID, automation script ID, log dir) |
-| **Suite** | Use-case group | Known doc and ActionSheet state reset via a `setupTestFixtures()` function in the add-on project |
-| **Workflow** | Individual UC scenario | Specific chip-led checklist items inserted and/or ActionSheet rows seeded to the exact precondition state |
+| **Session** | Test run | Authenticated Playwright browser session (`.auth/user.json`); `local.settings.json` loaded (test doc ID, test ActionSheet ID, add-on script ID, automation script ID, log dir); journey doc created via `begin_journey_session` (test-support route) |
+| **Journey** | Canonical end-to-end scenario | Single test document with a known initial state (empty or seeded with floating actions) used across all five acts of the §16.10 journey test; state reset via HTTP fixture routes (not a GAS setup function) |
+| **Atomic test** | Individual concern (chip extraction, token parsing, orphan reconciliation, etc.) | Specific floating actions or ActionSheet rows seeded to the exact precondition state via HTTP fixture routes; assertions on the scanned output without a full round-trip Sync |
 | **Function** | Individual assertion | Fresh `.xlsx` snapshot of the ActionSheet and `.docx` snapshot of the doc after the user action completes |
 
-### End-to-End Scenarios
+### Canonical Journey
 
-Each Use Case has **one** end-to-end test that asserts the user-visible outcome only (sidebar contents + downloaded `.docx` + downloaded `.xlsx`):
+The **§16.10 Journey** (`tests/test_journey.py`) is the single end-to-end test that asserts user-visible outcomes across all four Sync scenarios (Scenario A: chip-tap, Scenario B: sheet-edit, Scenario C: sidebar sync, Scenario D: archive sweep):
 
-| UC | What the test does | What it asserts |
-|---|---|---|
-| **§16.10 Journey** (`tests/test_journey.py`) | Acts 1–5: empty-create doc → sync-with-actions → sheet-edit + queue-drain → set_status + conflict → editor UI chip hover/preview. Acts 4–5 require add-on test deployment installed. | Full surface coverage: DOC, SHEET, TRACKER, UI per §16.7 consistency checklist and §16.5 first-class UI surface. Mechanical deviations D1, D3–D4 documented in test file header. See `docs/atdd/atdd-lifecycle.md §16.10`. |
-| **UC-A** | Insert one `AI-N:` item with a person-chip assignee AND one with a bare-email assignee in the same doc, click Sync, then click Sync again with no changes | Both items appear in ActionSheet with correct email, name, action text, and status (AC1); second Sync produces no new rows, all `globalId` values unchanged, sheet and doc content byte-for-byte identical (AC2) |
-| **UC-B** | Four flows: (1) edit the sheet row's Status/Action/Assignee, then Sync; (2) edit the floating action's trailing `(Status)`, then Sync; (3) edit the floating action's text after the chip, then Sync; (4) replace the chip with a different person, then Sync. Plus a negative case (5): type into the tracker table cell, then Sync | (1)–(4) the *other* authoritative side reflects the edit, no duplicate ActionSheet row, the `AI-N` token / `globalId` preserved across all four; (5) the ActionSheet is unchanged and the next tracker refresh restores the rendered values |
-| **UC-C** | Click **Insert / refresh tracker** twice, with intervening action changes; include a refresh after a tracker-cell edit | First click produces instructional paragraph + N-row table; second click reflects added/removed/closed actions in place; no stale rows remain; tracker-cell edits are overwritten on refresh |
-| **UC-D** | Seed a Closed row with `Last Modified > 30d`, invoke the sweep | The row appears in the archive sheet with `Last Modified` preserved; no doc content changed |
+- **Acts 1–5:** empty-create doc → populate with floating actions → sheet-edit + queue-drain → set_status + conflict resolution → editor UI chip hover/preview
+- **Entry points covered:** Sidebar Sync (Act 3), Sheet edit + `onActionSheetEdit` trigger (Act 4), Status tap in chip preview (Act 5), time-based archive sweep (separate scenario)
+- **Assertions:** Full surface coverage per §16.7 (DOC, SHEET, TRACKER, UI consistency); mechanical deviations D1, D3–D4 documented in test file header
+- **Fixture approach:** HTTP test-support routes (`begin_journey_session`, `end_journey_session`, `append_doc_paragraph`, `edit_action_row`) provide setup without calling a GAS setup function
 
 ### Atomic Tests
 
-Atomic tests run with `-x` fail-fast and are owned per concern. They isolate root causes that would otherwise cascade through the slow end-to-end suite:
+Focused tests isolate root causes that would otherwise cascade through the slow journey scenario. Each test exercises one concern:
 
-| Category | Example |
+| Concern | What it tests |
 |---|---|
 | Chip extraction | A PERSON chip as the first inline child resolves to `(email, name)`; a paragraph without a chip is correctly rejected |
 | Status token parsing | `... (Open)`, `... (In Review)`, `...   (  Closed  )`, missing token, multiple parens — all parse to the right `(status, actionText)` pair |
 | Token survival | After an edit inserts text above an action, the `AI-N:` token is still scanned from the paragraph and resolves to the same `globalId` |
 | Free-form status preservation | `(In Review)` round-trips through Sync without normalization to `Open` or `Closed` |
-| Duplicate / orphan reconciliation | A row whose `globalId` is gone from the doc but whose `(assigneeEmail, actionText)` reappears under a different `AI-N` is removed as a stale duplicate, not left orphaned; a genuinely removed action is stamped `Deleted` |
-| Write Guard | A programmatic ActionSheet write performed with `SYNC_IN_PROGRESS` set does not bump `Last Modified` |
+| Duplicate / orphan reconciliation | A row whose `globalId` is gone from the doc but whose `(assigneeEmail, actionText)` reappears under a different `AI-N` is removed as a stale duplicate; a genuinely removed action is stamped `Deleted` |
+| Write Guard | A programmatic ActionSheet write performed with `WriteGuard.wrap()` does not fire `onActionSheetEdit` |
 
 ### Anti-Patterns
 
-- **Branch on visual checked state.** It is not readable; tests must never assert on `isChecked()` and code must never call it as a source of truth.
-- **Assert on execution log alone.** The log proves the script ran; the `.docx` / `.xlsx` / sidebar contents prove the output is correct. Both are required for UC verification.
+- **Branch on visual checked state.** Checkbox state is not readable; code must never call `isChecked()` as a source of truth. The trailing `(Status)` token is the authoritative status.
+- **Assert on execution log alone.** The log proves the script ran; the `.docx` / `.xlsx` / sidebar contents prove the output is correct. Both are required.
 - **Hard-code IDs in tests.** All IDs come from `local.settings.json`; no IDs in committed test code.
 - **Re-authenticate per test.** Auth state is expensive; establish once per session via `.auth/user.json`.
-- **Skip the atomic tier before running E2E.** A root-cause failure in chip extraction will fail every UC; fix atomic tests first, then run E2E.
+- **Skip the atomic tier before running the journey.** A root-cause failure in chip extraction will fail the journey; fix atomic tests first, then run the journey test.
+- **Use a GAS setup function to establish fixture state.** All test setup happens via HTTP fixture routes (HTTP calls to the Web App's test-support routes). This keeps setup transparent and auditable.
 
 ---
 

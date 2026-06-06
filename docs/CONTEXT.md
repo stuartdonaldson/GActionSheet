@@ -10,7 +10,7 @@ GActionSheet captures and tracks action items inside Google Docs and aggregates 
 |----------|-------------|----------|
 | 1 | Idempotence | Clicking **Sync now** twice in succession with no edits produces no further writes to the doc or the ActionSheet |
 | 2 | Data integrity | No action record is silently overwritten; `Last Modified` precedence determines the winner on every conflict |
-| 3 | Operability | A document author can capture an action by adding a checklist item that begins with a person chip — no typed prefix, no separate sheet interaction |
+| 3 | Operability | A document author can capture an action by adding a checklist item with an `AI:` token, optional person chip, and action text — no separate sheet interaction needed |
 | 4 | Stable identity | An action's `AI-N:` text token survives edits elsewhere in the doc; no duplicate ActionSheet rows are produced |
 
 ### Stakeholders
@@ -144,7 +144,7 @@ Acceptance Criteria:
 Actor: Action owner (ActionSheet side) **or** Document author (floating action side)
 
 Preconditions:
-- The action already exists with a row on the ActionSheet and a chip-led checklist paragraph in the doc, sharing a `globalId`
+- The action already exists with a row on the ActionSheet and a floating action paragraph in the doc (identified by the `AI-N:` token), sharing a `globalId`
 
 Authoritative edit surfaces:
 - The **floating action paragraph** (chip + action text + trailing `(Status)`) is the doc-side authority.
@@ -213,7 +213,7 @@ Acceptance Criteria:
 Errors are surfaced in the sidebar (for add-on operations) or logged to the automation script's execution transcript (for sweep/archive). The full sync run is never aborted by a single-doc failure; other docs continue.
 
 - **Checklist item with no detectable assignee** — no PERSON chip and no email-at-start text; the item is silently skipped by the scanner and does not appear in the ActionSheet. The sidebar only shows detected floating actions.
-- **Named range lost or deleted** — the scanner attempts to re-anchor if the action text and assignee still match a chip-led checklist item; otherwise the orphaned ActionSheet row is flagged in the sidebar for human resolution.
+- **Orphaned ActionSheet row** — if a row's `globalId` (from an `AI-N:` token) is no longer found in the document, the scanner checks if the action text and assignee match a different action (indicating a copy/paste duplicate). If so, the stale row is deleted. Otherwise it is marked `Deleted` on the ActionSheet for human review or archival.
 - **Doc inaccessible during sweep** — that doc is skipped with a logged error; other docs continue.
 - **Docs REST API quota / scope error** — surfaced in the sidebar with the underlying message; no doc or sheet writes are made for that Sync.
 

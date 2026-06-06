@@ -1,6 +1,6 @@
 # GActionSheet
 
-Workspace Add-on that tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Actions are recognized natively as checklist items led by a person chip — no typed prefix syntax — and anchored with named ranges so identity survives edits.
+Workspace Add-on that tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Actions are identified by an in-text `AI-N:` token at the start of each checklist item, followed by a person chip (assignee) and the action text; status is a trailing parenthesized token, e.g., `(Open)`, `(Closed)`. Identity survives edits because the token embeds the durable `AI-N` prefix unique per document.
 
 **Status:** Active prototype
 
@@ -8,15 +8,14 @@ Workspace Add-on that tracks action items inside Google Docs and aggregates them
 
 ## How It Works
 
-1. In any Google Doc, type a checklist item that begins with a person chip (`@name`). The chip's email is the assignee.
-2. Open the GActionSheet sidebar (Extensions → GActionSheet).
-3. Click **Sync now**. The sidebar lists every action in the doc; the ActionSheet receives a row for each, anchored by a named range.
-4. Later edits on either authoritative side converge on the next Sync: ActionSheet edits to `Status`, `Action`, or `Assignee` update the floating action paragraph, and doc-side edits update the matching ActionSheet row without leaving duplicate rows behind.
-5. Status lives at the end of the line in parentheses, e.g. `(Open)`, `(Closed)`, or any free-form value you prefer. `(Open)` is the default.
-6. Click **VerifySync** to compare the doc's floating actions, the in-doc tracker table when present, and the ActionSheet rows for this document. The sidebar shows the verification steps and any mismatches it finds.
-7. Click **Insert / refresh tracker** to write a summary table into the doc, prefixed with the sync rules.
+1. In any Google Doc, create a checklist item with the pattern: `AI: @name action text (Status)`. The scanner auto-assigns `N` on the next Sync (e.g., `AI-1: @name …`). You may also type just `AI: text` and add the person chip and status later.
+2. Open the GActionSheet sidebar (Extensions → GActionSheet) and click **Sync now**. The sidebar lists every action in the doc; the ActionSheet receives a row for each, identified by the `AI-N` token.
+3. Edit either the floating action (doc-side) or the ActionSheet row (sheet-side). On the next Sync, changes converge: if the ActionSheet row was edited after the last sync, it wins and updates the doc paragraph; otherwise the doc's state overwrites the sheet row. The `Sync Status` (Dirty) flag decides the winner per row.
+4. Status is the trailing parenthesized token, e.g., `(Open)`, `(Closed)`, or any free-form value. If omitted, Sync adds an explicit `(Open)` token.
+5. Click **VerifySync** to compare the doc's floating actions, the in-doc tracker table when present, and the ActionSheet rows for this document. The sidebar shows the verification steps and any mismatches it finds.
+6. Click **Insert / refresh tracker** to write a summary table into the doc, prefixed with the sync rules. The tracker is a rendered view and is overwritten on each refresh.
 
-A timed sweep on the ActionSheet picks up changes in docs no one opened recently. Closed actions older than 30 days are moved to an archive sheet.
+A timed sweep on the ActionSheet (every 30 minutes) picks up changes in docs no one opened recently. Closed actions older than 30 days are moved to an archive sheet.
 
 ---
 
