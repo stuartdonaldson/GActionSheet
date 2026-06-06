@@ -123,11 +123,27 @@ Methodology declaration — Testing: `atdd-bdd` (DevStandard). Key rules for eve
 - `[FIX]` — bug or regression fix
 - `[INF]` — infrastructure, deployment, CI
 
-**Twin-ticket rule:** every new feature AC gets a paired `[IMP]` + `[TST]` issue created at the same time. Neither merges until both are green.
+**Twin-ticket rule:** every new feature AC, once frozen, gets a paired `[IMP]` + `[TST]` issue created at the same time. Neither merges until both are green. Test-first is preserved: "first" is relative to the frozen AC. If an AC-validation slice phase was used (see below), the hardening `[TST]` is created at the freeze gate, not at slice start.
 
 **Pre-code contract:** before either ticket starts coding, document in the issue description: (1) GAS entry-point signature, (2) GAS log tag that signals completion, (3) output schema (XLSX columns / DOCX structure) the test will assert against.
 
 **No shared context:** the `[TST]` owner must not read GAS implementation; the `[IMP]` owner must not read test assertions. The contract is the only shared artifact.
+
+**Review-fidelity phasing (ADR-0013):** an optional AC-validation phase may be inserted *upstream* of the twin-ticket cycle. Use the lowest fidelity that can surface design error:
+
+| Fidelity | Review artifact | Default? |
+|----------|-----------------|----------|
+| Spec | written design / contract prose | ✓ default |
+| Slice | thin concrete instance (sample schema, stub interface, happy-path journey) + smoke on durable invariants | justify |
+| Hardened | full test matrix + industrialised build | twin-ticket phase |
+
+Rules when choosing Slice:
+- **Justification required:** state explicitly why Spec review is insufficient — that the design error is only visible in a concrete artifact.
+- **Smoke asserts durable invariants only.** Volatile surface (field list, column set, UI copy, journey edge cases) stays untested until the gate freezes the AC.
+- **The gate has three outputs:** (a) verdict (approve → harden, or redesign); (b) funnel deltas — newly-seen opportunities captured as one-liners in ROADMAP §Funnel, non-committal; (c) open-seams register — recorded in the hardening bead's `design` field so hardening tests assert the invariant a known future direction will share.
+- **"Keep open" ≠ "build now."** An open seam must be expressible as a one-liner + a test parameter. Anything larger goes to ROADMAP §Funnel for value/risk evaluation — not pulled into the current slice.
+- **No-shared-context preserved at hardening.** The slice implementation is throwaway, or the hardening `[TST]` is authored by a fresh-context agent against the frozen contract only — never reading slice code.
+- **Blocking hardening bead required.** The gate produces a *created, blocking* hardening bead. Slice is not done until its hardening `[TST]` is green; the entry-point coverage invariant still holds.
 
 **Existing open issues** are not retroactively renamed — apply the prefix convention to all issues created from this point forward.
 
