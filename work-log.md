@@ -1762,3 +1762,16 @@ git push origin feature/fixture-bootstrap-telemetry  # incl. 8153c69 skills
   ........................................................................ [ 97%]
   ...                                                                      [100%]
   147 passed in 11.02s
+
+## 2026-06-05 (session end)
+
+### Summary
+Realized fkl7.3: annotated ROADMAP.md with ADR-0013 review-fidelity pilot assignments across EPIC-A–E + J-ACCESS-FILTER shared journey. Tagged Slice-fidelity units (A, D, E, shared journey) with concrete-artifact requirements and one-line open-seam candidates to preserve optionality at hardening phase. Spec-fidelity units (B, C) noted for test-first from frozen AC. Added §Execution note explaining slice-gate→§Funnel loop.
+
+### Changes
+- knowledge-base/ROADMAP.md: 6 annotation sites + 1 §Execution note, all ADR-0013-referenced
+- Commit: docs(ROADMAP): annotate EPIC-A–E pilot fidelities + open-seam candidates
+- Issue fkl7.3 closed; beads interactions updated and pushed
+
+### Key Learnings
+Fidelity-level annotation at planning time makes ADR-0013 pilot commitments visible to future agents and prevents drifting into unvalidated Spec assumptions when a concrete artifact (Slice) is required to surface design error.
