@@ -48,6 +48,8 @@ Merge rules:
 * The `[TST]` ticket is opened in the red state intentionally — a failing test is the expected and correct starting point.
 * A passing `[IMP]` against a failing `[TST]` is not done. A passing `[TST]` against a failing `[IMP]` is not done. Both green = done.
 
+> **AC-validation phase (optional).** An optional pre-freeze phase sits upstream of this cycle. It validates that the acceptance criteria describe the right design before the twin-ticket pair locks in. See **§18 — AC-Validation Phase** for the decision rule, fidelity levels, and gate outputs. The twin-ticket workflow in this section is unchanged; it runs downstream of the §18 gate against the frozen contract.
+
 ---
 
 ## Part 2: The ATDD Workflow
@@ -223,6 +225,80 @@ See **§16.10** for the canonical structured journey (acts, expectations, checkp
 
 * **No mocking of external platform APIs** — platform behaviors and quotas shift silently; mocking introduces a dangerous divergence from production reality.
 * **No test-per-variant parametrize explosion** — input permutations live inside the fixture, not as separate test functions.
+
+---
+
+## §18 — AC-Validation Phase: Review-Fidelity Phasing (ADR-0013)
+
+_GActionSheet pilot — accepted 2026-06-05. Extends ADR-0006; supersedes none of its commitments. Cross-reference: knowledge-base/adr/0013-review-fidelity-phasing.md._
+
+### 18.1 Purpose
+
+The twin-ticket cycle (Part 1 §2, ADR-0006) assumes the acceptance criteria are trusted before coding begins. A recurring failure challenges that assumption: a `[TST]`/`[IMP]` pair is taken to green, and only when the human reviews the working result does the design prove wrong. Both artifacts need rework, because the test hardened an unvalidated design. Cost is paid twice.
+
+The root cause is that design errors in schemas, interfaces, journeys, and UX are often only visible in a concrete instance — not in prose. This phase inserts an optional human review gate on a concrete artifact **before AC freeze**. The slice is cheap to redesign; full twin-ticket tests are not.
+
+### 18.2 The three fidelities
+
+AC validation has three fidelities. Work must select the **lowest fidelity that can actually surface design error**. Choosing Slice requires the author to state explicitly why Spec review is insufficient.
+
+| Fidelity | Review artifact | When to use |
+|----------|-----------------|-------------|
+| **Spec** | Written design field or contract prose (an issue description, the pre-code contract §2.1) | Default. Spec review is sufficient when the design is well-understood and the main risk is implementation error, not design error. |
+| **Slice** | A thin concrete instance — a sample schema, a stub interface, a happy-path scenario step, a rendered card — with smoke checks on durable invariants only | When design error is only visible in a built artifact, not in prose. Author must state why Spec is insufficient. |
+| **Hardened** | The full industrialised build plus complete test matrix | Reserved for the rare case where a full build is genuinely needed to validate the design — unusual given Slice sufficiency in almost all cases. |
+
+**Spec/test-first is the default.** Slice fidelity requires a justification; it is not a general bypass of test-first.
+
+### 18.3 Where the slice phase sits in the lifecycle
+
+The slice phase is **pre-AC-freeze**, upstream of the red→green twin-ticket cycle. The canonical journey (§16.10) and the full scenario machinery (§15–§16) run **downstream** of the gate, against the frozen contract.
+
+```
+[Spec/Slice/Hardened review] ──► GATE (freeze AC) ──► [IMP] + [TST] twin-ticket (ADR-0006)
+      ↑ optional pre-freeze phase                             ↑ Part 1 §2 / §15–§16 unchanged
+```
+
+- **Upstream of the gate:** exploration may relax isolation (same agent may build a slice and its smoke test); slice implementation is throwaway.
+- **At the gate:** human review. Outputs: verdict, §Funnel deltas, open-seams register (§18.5).
+- **Downstream of the gate:** AC is frozen. ADR-0006 twin-ticket runs unchanged. Test-first holds.
+
+### 18.4 Isolation at each phase
+
+Twin-track independence (ADR-0006 §2) is a guarantee that the **hardening tests** are authored against the frozen contract, not against the slice implementation.
+
+| Phase | Isolation rule |
+|-------|----------------|
+| **Pre-freeze (Slice)** | Same agent may author both the slice implementation and its smoke test. No isolation requirement — this phase is exploratory. Slice implementation is throwaway. |
+| **Post-freeze (Hardening)** | ADR-0006's no-shared-context rule applies in full. If the same agent produced the slice, the hardening `[TST]` is authored by a **fresh-context** agent reading only the frozen contract, never the slice's code. |
+
+The merge guard is unchanged: a sliced unit is not done until its hardening `[TST]` is green. The entry-point coverage invariant (CLAUDE.md) still holds. The slice phase produces a *created, blocking* hardening bead — not a promise to write tests later.
+
+### 18.5 Smoke checks during Slice: durable invariants only
+
+Even at Slice fidelity, smoke tests must assert **durable invariants** — state that survives design iteration — not the volatile surface. Volatile surface means: column set, field list, edge-case journey steps, UI copy, icon choices. Those are frozen only after the gate approves the design.
+
+**Durable-invariant examples (assert these during Slice):**
+- A row round-trips through sync with identity preserved.
+- An unreadable document's actions never appear in the sheet.
+- An interface returns its contract shape (keys present; types correct).
+- An `AI-N:` paragraph round-trips through a sync cycle.
+
+**Volatile-surface examples (defer until gate freezes them):**
+- The exact column order or column names of the ActionSheet.
+- Which status values appear in a status dropdown.
+- The specific UI copy on a card button.
+- Edge-case handling rules that are themselves the design question under review.
+
+### 18.6 Gate outputs (three, not one)
+
+The review gate produces three outputs, not just a go/no-go verdict:
+
+1. **Verdict** — `approve → harden` (freeze the AC; create the blocking hardening bead) or `redesign the slice` (iterate before freezing). Approval triggers creation of the hardening `[TST]` bead, which blocks the `[IMP]` bead per ADR-0006.
+
+2. **§Funnel deltas** — newly-seen opportunities captured as one-liners in `ROADMAP §Funnel`. Non-committal; evaluated at the next planning review. An open seam that is too large to express as a one-liner + test parameter goes here, not into the hardening bead.
+
+3. **Open-seams register** — an explicit "do not foreclose X" list, recorded in the hardening bead's design field. Each seam is expressible as a one-liner plus a test parameter: the hardening tests assert the invariant a known future direction will also satisfy, rather than locking in the current instance. **"Keep open" is not "build now"** — anything that cannot fit a one-liner is scope creep and belongs in §Funnel.
 
 ---
 
