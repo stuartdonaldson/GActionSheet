@@ -31,19 +31,48 @@ Initiatives with a lean business case under value/risk evaluation.
 ## Planning
 Planned epics prepared for decomposition into beads. No beads are created yet.
 
+### Model-recommendation legend
+
+Each draft bead below carries a recommended model tag. When the bead is created, apply it
+as the existing bd label (`model:opus` / `model:sonnet` / `model:haiku` — already in use on
+~12 issues; see `.beads/issues.jsonl`). The tag is a default, not a lock: escalate a level
+if the work proves harder than the contract implied; downgrade if it is more mechanical.
+
+| Tag | Use for |
+|-----|---------|
+| `model:opus` | Design/ADR authoring, security-sensitive logic, AI-N identity handling, DocWins precedence, cross-cutting test-journey design, debugging non-obvious regressions |
+| `model:sonnet` | Implementation and test authoring against a settled contract — sync paths, CRUD, fixture suites, UI shells, binding assertions to a defined journey |
+| `model:haiku` | Mechanical/scaffolding work with a clear template — flag clears, boilerplate helpers, simple parity smoke checks |
+
+### Epic structure (each epic below)
+
+- **Goal** — one sentence.
+- **Depends on** — upstream epic(s) that must land first (sequencing is enforced here, not just in §Sequencing).
+- **Supporting files** — staging contract + docs to update before the first bead starts.
+- **Beads to create** — twin-ticketed (`[IMP]`+`[TST]` per AC), each tagged with a recommended model.
+- **Acceptance test scenario** — the AC the twin-ticket pair must drive to green.
+
+Twin-ticket rule (CLAUDE.md §Testing): every `[IMP]` has a paired `[TST]` created at the
+same time; neither merges until both are green; the pre-code contract (entry-point signature,
+completion log tag, output schema) is the only shared artifact between them.
+
 ### EPIC-A — Adopt TeamData/DocData schema and keep regression green
 Goal: adopt the TeamData + DocData schema and verify existing tests, updated for the new schema, continue to pass.
 
+Depends on: GTaskSheet-knup (identity-terminology doc fix) must close before this epic is decomposed — see §Future design note. Otherwise first epic; no upstream epic dependency.
+
 Supporting files:
 - `knowledge-base/staging/epic-a-schema-adoption.md` (schema contract, rollout steps, verification checks)
+- `knowledge-base/adr/` (new ADR: team-scope schema — auto-assignment, DocData precedence, TeamData authority; do not conflate with ADR-0008)
 - `docs/DESIGN.md` (schema and write-path updates)
 - `docs/OPERATIONS.md` (schema rollout runbook and failure recovery)
 
 Supporting beads to create:
-- `[INF] Schema bootstrap and validation scaffolding`
-- `[IMP] Update read/write paths to TeamData and DocData`
-- `[TST] Regression suite run with tests updated for new schema (all green)`
-- `[FIX] Repair schema-adoption regressions discovered by test run`
+- `[INF] Author team-scope schema ADR + staging contract` — `model:opus` (decision record + precedence rules)
+- `[INF] Schema bootstrap and validation scaffolding` — `model:sonnet`
+- `[IMP] Update read/write paths to TeamData and DocData` — `model:sonnet`
+- `[TST] Regression suite run with tests updated for new schema (all green)` — `model:sonnet`
+- `[FIX] Repair schema-adoption regressions discovered by test run` — `model:sonnet` (escalate to `model:opus` if root cause is non-obvious)
 
 Acceptance test scenario:
 - Given TeamData/DocData schema is active and existing regression tests have been updated for that schema, when the full test suite is run, then all tests pass.
@@ -51,16 +80,19 @@ Acceptance test scenario:
 ### EPIC-B — Add Team Scope document property and bidirectional sync to sheet
 Goal: add Team Scope as a document custom property (Team ID) and synchronize it with sheet-backed TeamData/DocData.
 
+Depends on: EPIC-A (schema baseline must be green first).
+
 Supporting files:
 - `knowledge-base/staging/epic-b-team-property-sync.md` (property lifecycle, precedence, sync contract)
 - `docs/CONTEXT.md` (capability updates)
 - `docs/DESIGN.md` (property resolution, sync states, security checks)
 
 Supporting beads to create:
-- `[IMP] Add Team Scope document property read/write (Team ID)`
-- `[IMP] Sync Team Scope with DocData.Team using DocWins rules`
-- `[TST] Entry-point coverage for Team Scope sync and security guard`
-- `[FIX] Resolve Team Scope mismatches and edge-case defects`
+- `[IMP] Add Team Scope document property read/write (Team ID)` — `model:sonnet`
+- `[IMP] Sync Team Scope with DocData.Team using DocWins rules` — `model:opus` (precedence/reconciliation logic)
+- `[IMP] Folder-hierarchy auto-assignment against TeamData on first sync` — `model:opus` (ancestry walk + first-match security implications)
+- `[TST] Entry-point coverage for Team Scope sync and security guard` — `model:sonnet`
+- `[FIX] Resolve Team Scope mismatches and edge-case defects` — `model:sonnet` (escalate to `model:opus` if non-obvious)
 
 Acceptance test scenario:
 - Given a document with no `teamScope` and a matching ancestor folder in TeamData, when sync runs, then document `teamScope` is set to the matched Team ID (`Folder Id`), `DocData.Team` matches that Team ID, and team name display resolves via TeamData lookup.
@@ -68,22 +100,26 @@ Acceptance test scenario:
 ### EPIC-C — Reassign team from spreadsheet via DocData and sync
 Goal: allow team reassignment from spreadsheet by updating DocData and applying change on sync (`SyncStatus='UpdateDoc'`).
 
+Depends on: EPIC-B (property + DocData sync contract must exist).
+
 Supporting files:
 - `knowledge-base/staging/epic-c-docdata-reassignment.md` (reassignment workflow, auditability, operator UX)
 - `docs/DESIGN.md` (write-back precedence and validation)
 - `docs/OPERATIONS.md` (operator steps for reassignment and verification)
 
 Supporting beads to create:
-- `[IMP] Implement DocData-driven team reassignment write-back`
-- `[IMP] Clear SyncStatus after successful document update`
-- `[TST] Functional tests for reassignment, failure handling, and idempotency`
-- `[FIX] Address reassignment drift and stale TeamData lookup failures`
+- `[IMP] Implement DocData-driven team reassignment write-back` — `model:sonnet`
+- `[IMP] Clear SyncStatus after successful document update` — `model:haiku` (flag clear)
+- `[TST] Functional tests for reassignment, failure handling, and idempotency` — `model:sonnet`
+- `[FIX] Address reassignment drift and stale TeamData lookup failures` — `model:sonnet`
 
 Acceptance test scenario:
 - Given a document already synced to Team A and a DocData row updated to Team B with `SyncStatus='UpdateDoc'`, when sync runs, then document `teamScope` changes to Team B ID, `SyncStatus` is cleared, and a second sync performs no additional changes (idempotent).
 
 ### EPIC-D — Add Import tab and action forwarding workflow
 Goal: add sidebar Import capability to pull open team-scoped actions into the current document and forward source actions safely.
+
+Depends on: EPIC-B (teamScope must resolve) and the shared `J-ACCESS-FILTER` journey (see §Shared [TST] structure). Co-delivers the tabbed-sidebar refactor with EPIC-E.
 
 Access rule: Import must only list and import actions whose source documents are readable by the current user. Team scope alone is not sufficient; per-document access filtering is required.
 
@@ -94,20 +130,22 @@ Supporting files:
 - `docs/OPERATIONS.md` (operator verification, recovery for partial imports, auth-account test setup)
 
 Supporting beads to create:
-- `[IMP] Build tabbed sidebar shell with DocStatus and Import tabs`
-- `[IMP] Implement team-scoped Import list grouped by source document`
-- `[IMP] Filter Import results to source docs readable by current user`
-- `[IMP] Import selected actions at cursor paragraph with new AI-N numbering`
-- `[IMP] Forward source actions (Status=Forwarded, suffix, markDirty)`
-- `[TST] Functional coverage for Import flow, forwarded status, and post-import sync`
-- `[TST] Consume shared access-filter journey package (Import assertions)`
-- `[FIX] Repair import edge cases (duplicate forwarding, numbering drift, dirty flag miss)`
+- `[IMP] Build tabbed sidebar shell with DocStatus and Import tabs` — `model:sonnet` (UI shell; shared with EPIC-E)
+- `[IMP] Implement team-scoped Import list grouped by source document` — `model:sonnet`
+- `[IMP] Filter Import results to source docs readable by current user` — `model:opus` (per-document access gate — security-critical)
+- `[IMP] Import selected actions at cursor paragraph with new AI-N numbering` — `model:opus` (AI-N identity assignment per ADR-0008)
+- `[IMP] Forward source actions (Status=Forwarded, suffix, markDirty)` — `model:sonnet`
+- `[TST] Functional coverage for Import flow, forwarded status, and post-import sync` — `model:sonnet`
+- `[TST] Consume shared access-filter journey package (Import assertions)` — `model:sonnet`
+- `[FIX] Repair import edge cases (duplicate forwarding, numbering drift, dirty flag miss)` — `model:sonnet` (escalate to `model:opus` for numbering-drift root cause)
 
 Acceptance test scenario:
 - Given two open team-scoped actions selected in Import from documents readable by the current user, when Import is executed at the current paragraph, then both actions are inserted as new floating actions with new AI-N values, source rows are set to `Forwarded` with `[Forward:<DocName> AI-N]` suffixes, rows are marked dirty, and a post-import sync updates the document action table; actions from unreadable source documents are never listed.
 
 ### EPIC-E — Add Notify tab and assignee reminder email flow
 Goal: add sidebar Notify capability to send reminders to selected assignees with unresolved team-scoped actions.
+
+Depends on: EPIC-D (tabbed-sidebar shell + `J-ACCESS-FILTER` access filter are reused, not rebuilt). Align email-template approach with the Assignee reminder §Funnel entry before the first email bead.
 
 Access rule: Notify must only aggregate and present actions from source documents readable by the current user.
 
@@ -118,14 +156,14 @@ Supporting files:
 - `docs/OPERATIONS.md` (notification runbook, troubleshooting, auth-account test setup)
 
 Supporting beads to create:
-- `[IMP] Build Notify tab with assignee list and unresolved counts`
-- `[IMP] Send reminder emails using HtmlService template and GmailApp`
-- `[IMP] Reuse team-scope security gate on Notify reads`
-- `[IMP] Filter Notify aggregation to source docs readable by current user`
-- `[TST] Functional coverage for assignee aggregation and selective notifications`
-- `[TST] Consume shared access-filter journey package (Notify assertions)`
-- `[TST] Template rendering and escaping checks for notification emails`
-- `[FIX] Resolve notification count drift and send failures`
+- `[IMP] Build Notify tab with assignee list and unresolved counts` — `model:sonnet`
+- `[IMP] Send reminder emails using HtmlService template and GmailApp` — `model:opus` (template contract + XSS escaping — security-sensitive)
+- `[IMP] Reuse team-scope security gate on Notify reads` — `model:sonnet` (reuses EPIC-D filter)
+- `[IMP] Filter Notify aggregation to source docs readable by current user` — `model:sonnet` (binds to shared access filter)
+- `[TST] Functional coverage for assignee aggregation and selective notifications` — `model:sonnet`
+- `[TST] Consume shared access-filter journey package (Notify assertions)` — `model:sonnet`
+- `[TST] Template rendering and escaping checks for notification emails` — `model:sonnet`
+- `[FIX] Resolve notification count drift and send failures` — `model:sonnet`
 
 Acceptance test scenario:
 - Given team-scoped unresolved actions across multiple assignees from documents readable by the current user, when two assignees are selected in Notify and send is triggered, then only those assignees receive templated reminder emails with correct unresolved-action lists and counts, and actions from unreadable source documents are excluded from counts and emails.
@@ -157,10 +195,13 @@ Scenario parts within `J-ACCESS-FILTER`:
 4. `P4-FeatureParity`: same visibility set drives both Import list and Notify aggregation.
 
 How [TST] beads should be structured:
-- `[TST] Author shared J-ACCESS-FILTER journey fixtures and account matrix`.
-- `[TST] Bind Import assertions to J-ACCESS-FILTER parts (P1-P4)`.
-- `[TST] Bind Notify assertions to J-ACCESS-FILTER parts (P1-P4)`.
-- `[TST] Add cross-feature parity assertion (Import document set == Notify document set)`.
+- `[TST] Author shared J-ACCESS-FILTER journey fixtures and account matrix` — `model:opus` (cross-cutting journey design + two-account fixture matrix)
+- `[TST] Bind Import assertions to J-ACCESS-FILTER parts (P1-P4)` — `model:sonnet`
+- `[TST] Bind Notify assertions to J-ACCESS-FILTER parts (P1-P4)` — `model:sonnet`
+- `[TST] Add cross-feature parity assertion (Import document set == Notify document set)` — `model:haiku` (single equality assertion)
+
+This shared journey is a prerequisite of EPIC-D and EPIC-E and should be authored (its
+first bead) before either feature's access-filter beads start.
 
 Packaging guidance:
 - Integration package includes full journey (`P1`..`P4`) plus feature-specific assertions.

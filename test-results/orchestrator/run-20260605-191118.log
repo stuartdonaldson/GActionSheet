@@ -1,3 +1,54 @@
 
 
 ===== 2026-06-05T19:11:32.378943 GTaskSheet-80mo.13 model=opus =====
+GTaskSheet-80mo.13 (R5-design) complete.
+
+**Deliverable:** Populated `.14`'s `--design` field with the consistency-authority spec. A clean-context build can now proceed.
+
+**The spec defines three classes, no fourth notion:**
+- **SERVER** = `scn.verify_consistency(scope=DOC)` — the sole path to GAS `verify_action_rows`+`verify_chip_integrity` (live doc state the download misses).
+- **ARTIFACT** = `verify(on=DOC|SHEET|TRACKER)` over downloaded docx/xlsx via surface readers.
+- **NO-consistency** = JS smoke/probe call no consistency route.
+
+**Key discovery (the F3 drift):** two orphan competing notions exist for `.14` to delete — `doc_inspect.verify_doc_chip_integrity` (second Python path to the GAS chip route) and `addon_helpers.verifyConsistency` (JS third notion, exported but never imported by smoke/probe). Both confirmed callerless by grep.
+
+**Decision recorded:** keep `verify_consistency(scope=SHEET)` as an artifact-convenience under the same method (no rename/no caller migration); document the scope split. GAS `src/` untouched (contract surface); durable DESIGN.md/ADR write belongs to R5-docs `.15`.
+
+Cross-cutting facts appended to the epic Coordination Log; `.13` closed; bd state committed locally (`85030cc`). Not pushed — orchestrator owns the push.
+
+2026-06-06 — tokens this action: ~62k.
+
+
+===== 2026-06-05T19:15:28.585973 GTaskSheet-80mo.14 model=sonnet =====
+
+
+===== 2026-06-05T19:27:08.945155 GTaskSheet-80mo.15 model=haiku =====
+Perfect! I've completed bead GTaskSheet-80mo.15 successfully.
+
+## Summary
+
+**What was delivered:**
+
+1. **docs/atdd/atdd-lifecycle.md §16.7** — Documented the three-class consistency-authority split:
+   - **SERVER**: `scn.verify_consistency(scope=DOC)` — the *only* path to GAS `verify_action_rows` + `verify_chip_integrity` routes (single source of truth)
+   - **ARTIFACT**: `scn.verify(ai, on=DOC|SHEET|TRACKER)` per-surface probes — Python-side file parsing via python-docx and openpyxl
+   - **smoke/probe**: UI-only verification (live DOM), no consistency route
+
+2. **Decision binding** — Explicitly documented that early designs attempted a fourth notion (`verify_doc_chip_integrity` in Python), which violated single-source discipline and was deleted in R5-impl.14. There are now *only* three paths, not four.
+
+3. **UI exclusion clarification** — Formalized that INTEGRITY checkpoints observe only {DOC, SHEET, TRACKER}, excluding UI (which is live-only and drained separately).
+
+4. **Usage guidance** — Added "Targeting the right class in a journey" section with clear rules for when to use each verification class.
+
+5. **OPERATIONS.md** — Added new "Consistency Verification" section with paths, when to use each class, and single-source discipline enforcement.
+
+**Commit:** `06074c2` documents the consistency-authority split with comprehensive guidance for implementers and testers.
+
+The work is committed locally and ready for the orchestrator to push after R5 tests pass.
+
+----- test block R5 rc=0 -----
+........................................................................ [ 48%]
+........................................................................ [ 97%]
+...                                                                      [100%]
+147 passed in 11.02s
+
