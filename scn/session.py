@@ -322,10 +322,23 @@ class ScenarioSession:
         return {r.action_id: r.id_url for r in rows if getattr(r, "id_url", None)}
 
     def verify_consistency(self, scope: Surface = Surface.DOC) -> dict:
-        """Run the §16.7 consistency checklist (docId-scoped); also called by INTEGRITY drain.
+        """Single server authority for consistency verification (§16.7 + 6ov.8).
 
-        Also asserts chip document contract: every AI-N: paragraph must have a brand-NUTS
-        status icon and a valid globalId link (6ov.8).  Raises AssertionError on violations.
+        This is the ONLY code path permitted to call the GAS routes verify_action_rows
+        and verify_chip_integrity.  No other helper, test, or module may POST those
+        routes directly.
+
+        scope=DOC  — SERVER authority.  Posts verify_action_rows + verify_chip_integrity
+                     to the live GAS WebApp.  Sees real-time doc state that a downloaded
+                     artifact cannot capture (globalId linkage, rendered chip icons).
+                     Raises AssertionError on any violation.  Called standalone or
+                     internally by every INTEGRITY checkpoint via the read_consistency
+                     closure (session.py:511-519).
+
+        scope=SHEET — ARTIFACT-convenience authority.  Downloads the xlsx and asserts
+                      col7 doc_name present and col10 sync_status not an error state.
+                      Does NOT call any GAS route.  Equivalent to an artifact-side
+                      verify(on=SHEET) check; placed here for caller ergonomics only.
         """
         if scope == Surface.SHEET:
             from tests.helpers.download import download_xlsx
