@@ -584,9 +584,25 @@ Both accept the targeting/severity options:
 
 `scn.expect_absent(ai, on=...)` enqueues an absence/terminal expectation (e.g. no live doc action; sheet `Sync Status = Deleted`). Every expectation carries its `[uc AC#]` triage tag (§10) so a drain-time failure is self-explaining.
 
-### 16.7 The consistency checklist (what an `INTEGRITY` checkpoint verifies)
+### 16.7 Consistency verification — single-source authority model
 
-`verify_consistency(scope=doc)` — callable standalone at any point, and run internally by every `INTEGRITY` checkpoint — checks the three authoritative surfaces {DOC, SHEET, TRACKER}, scoped to the journey's `docId`. **UI is excluded** — it is live-only and drained separately by targeted `checkpoint(STEP, on=Surface.UI)` calls (§16.5).
+There are **three classes** of consistency verification, not four. Each class owns one verification path; multiple paths to the same check are explicitly prohibited to enforce a single source of truth.
+
+#### Authority split (decision binding)
+
+| Class | Authority | How it's called | When to use | Observable surfaces |
+|-------|-----------|---|---|---|
+| **SERVER** | GAS verify routes — the only path to `verify_action_rows` + `verify_chip_integrity` | `scn.verify_consistency(scope=DOC)` — called standalone or internally by `INTEGRITY` checkpoints | Test journeys that need end-to-end consistency; HTTP-phase boundaries; mutation verification | {DOC, SHEET, TRACKER} + GAS-computed consistency checks |
+| **ARTIFACT** | Downloaded files parsed by Python (docx via python-docx; xlsx via openpyxl) | `scn.verify(ai, on=DOC/SHEET/TRACKER, ...)` per-surface probes; useful for cross-surface divergence testing | Verifying document/sheet/tracker state without triggering expensive GAS round-trips; unit-level artifact checks | {DOC, SHEET, TRACKER} only; no GAS computed checks |
+| **smoke/probe** | Playwright (live DOM) minimal verification | No consistency route — smoke/probe tests assert only UI surface visuals | Fast gate smoke tests; surface-level regression checks before full journeys | UI only; never triggers artifact download or GAS verification |
+
+**Why three, not four:** Early designs experimented with a fourth notion — a separate Python-side GAS-consistency wrapper (`verify_doc_chip_integrity`, now deleted). That became load-bearing as a second Python path to the same server truth, violating single-source discipline. Deleted in R5-impl.14. The **only** path to GAS-side verification is `scn.verify_consistency()`, which calls the authoritative GAS routes directly.
+
+**UI is excluded from SERVER/ARTIFACT consistency:** UI is **live-only** — the sidebar card, preview card, and DOM state represent *current* user interaction but are not durable. Expectations on UI are enqueued and drained separately via targeted `checkpoint(STEP, on=Surface.UI)` calls (§16.5, §16.8), never via the `INTEGRITY` consistency checklist. An `INTEGRITY` checkpoint observes only {DOC, SHEET, TRACKER}.
+
+#### The consistency checklist (what `verify_consistency(scope=DOC)` verifies)
+
+`verify_consistency(scope=doc)` — callable standalone at any point, and run internally by every `INTEGRITY` checkpoint — checks the three authoritative surfaces {DOC, SHEET, TRACKER}, scoped to the journey's `docId`. This is the **SERVER** consistency class.
 
 1. **Queued expectations are met** — the specific AIs expected are present (on DOC/SHEET/TRACKER surfaces); the tracker table is present or absent as expected.
 2. **Every doc AI is internally consistent** — `action_id` present; `status` present; `assignee` email (if present) is a valid address; name is valid-for-email or empty. **Doc-specific:** the status icon is present and correct (today one icon; future: must match the status); the chip link is present and valid; all occurrences identical.
@@ -595,6 +611,12 @@ Both accept the targeting/severity options:
 5. **Every sheet AI (scoped to this doc) is present in the doc.**
 
 _(These are grouped deliberately so they can be reused as named expectation bundles; the exact field rules will be finalized against the contract source — see §16.9.)_
+
+#### Targeting the right class in a journey
+
+- **Use SERVER** (`scn.verify_consistency()`) at HTTP-phase boundaries and the journey end to validate the full integration through GAS.
+- **Use ARTIFACT** (`scn.verify(on=Surface.X)` probes) for focused single-surface assertions or when testing cross-surface divergence without triggering GAS round-trips.
+- **Use smoke/probe** (Playwright only, no consistency) for fast gate tests and surface-level UI regression checks; never assert artifact consistency in smoke tests.
 
 ### 16.8 Driving the UI (the layer below the scenario)
 

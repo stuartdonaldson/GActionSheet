@@ -120,3 +120,35 @@ npm run test:smoke   # Playwright smoke test (requires sheet URL configured)
 
 GAS test invocation: open the ActionSheet in Sheets, use the **Action Sync**
 custom menu. See the `gas-test-invocation` bd memory for selector details.
+
+## Consistency Verification
+
+Consistency verification ensures that actions are correctly synchronized across the Document, ActionSheet, and Tracker table. There are three classes of verification:
+
+### SERVER — GAS-side authoritative verification
+
+**Path:** `scn.verify_consistency(scope=DOC)` in Python test code; calls GAS `verify_action_rows` + `verify_chip_integrity` routes.
+
+**When to use:** Test journeys at HTTP-phase boundaries and the journey end to validate the full integration through GAS. This is the **only authoritative path** to GAS-computed consistency checks.
+
+**Observes:** Document (parsed via GAS API), ActionSheet rows (scoped to docId), Tracker table (if present), plus GAS-side field validation.
+
+### ARTIFACT — Python-side file parsing
+
+**Path:** `scn.verify(ai, on=DOC|SHEET|TRACKER, ...)` per-surface probes in Python test code; parses downloaded .docx and .xlsx files.
+
+**When to use:** Focused single-surface assertions or when testing cross-surface divergence without triggering expensive GAS round-trips. Useful for unit-level verification of document/sheet structure.
+
+**Observes:** Document (via python-docx), ActionSheet (via openpyxl), Tracker table (via docx parsing). **Does not** run GAS-side verification routes.
+
+### smoke/probe — UI surface only
+
+**Path:** Playwright tests in JavaScript (`tests/playwright/*.test.js`).
+
+**When to use:** Fast gate smoke tests and surface-level UI regression checks. Never assert artifact or consistency state in smoke tests — use server/artifact verification for that.
+
+**Observes:** Sidebar card, preview card, and DOM state only. UI is live-only and not durable.
+
+### Single-source discipline
+
+There is **only one** path to GAS-side consistency verification: `scn.verify_consistency()`. Competing paths (e.g., a separate Python wrapper around GAS routes) are explicitly prohibited. This enforces a single source of truth for end-to-end system state.
