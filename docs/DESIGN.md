@@ -389,14 +389,15 @@ Runs on sync when the document does not yet have a `teamScope` custom property:
 1. Retrieve the document's parent folder via `DriveApp.getFileById(docId).getParents()`.
 2. Walk ancestors from current parent up to root/drive.
 3. For each folder ID, look for an exact match in `TeamData.Folder Id`.
-4. First match → set document `teamScope` to that Folder Id (Team ID).
+4. First match → set document `teamScope` to the **`Team Id`** value from that TeamData row.
 5. No match after reaching root → leave `teamScope` blank; log a warning.
 
 ### Security gate
 
-Any read filtered by document ID or Team Id must first call
-`DriveApp.getFolderById(teamId)` as the active user. On failure (no access), return no rows
-and surface an error. This gate is load-bearing for Import and Notify (EPIC-D, EPIC-E).
+Any read filtered by document ID or Team Id must first resolve the `Folder Id` from TeamData
+for that Team Id, then call `DriveApp.getFolderById(folderId)` as the active user. On failure
+(no access), return no rows and surface an error. This gate is load-bearing for Import and
+Notify (EPIC-D, EPIC-E).
 
 ---
 

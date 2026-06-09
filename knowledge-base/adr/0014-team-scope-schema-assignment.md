@@ -28,14 +28,16 @@ This decision is distinct from ADR-0008 (AI-N in-text token action identity). Te
 Adopt a single-master-sheet team-scope schema with folder-walk auto-assignment and DocData-mediated
 override:
 
-1. **TeamData is the authority for team identity.** A master-sheet TeamData tab maps `Team Name`,
-   `Folder Id`, `Contact`. The **`Folder Id` value is the Team ID.** Team display names are resolved
-   by TeamData lookup on Team ID. A team may own multiple folders (multiple rows, same Team Name).
+1. **TeamData is the authority for team identity.** A master-sheet TeamData tab maps `Team Id`,
+   `Folder Id`, `Contact`. `Team Id` is the stable team identifier (e.g. `Board`, `Membership`) and
+   is the value stored in `teamScope`. `Folder Id` is the Drive folder ID used as the walk match key.
+   A team may own multiple folders (multiple rows, same `Team Id`). Team display names are resolved
+   by TeamData lookup on `Team Id`.
 
-2. **A document carries `teamScope` = Team ID** as a document custom property. Auto-assignment, on
+2. **A document carries `teamScope` = Team Id** as a document custom property. Auto-assignment, on
    sync when `teamScope` is unset: walk the document's Drive folder ancestry from current parent to
-   root; the first folder whose ID matches a `TeamData.Folder Id` sets `teamScope` to that ID; no
-   match leaves it blank.
+   root; the first folder whose ID matches a `TeamData.Folder Id` sets `teamScope` to that row's
+   `Team Id`; no match leaves it blank.
 
 3. **DocData mirrors per-document sync state** (`DocID`, `Doc Name`, `Doc Modified`, `Doc Updated`,
    `SyncStatus`, `Team`, `Action Count`, `Resolved Count`) and follows **DocWins**: when the document

@@ -18,7 +18,7 @@ is already in place from EPIC-A.
 
 | State | Trigger | Action |
 |-------|---------|--------|
-| Unset (first sync) | `PropertiesService` returns no `teamScope` | Run folder-walk; set to matched Folder Id if found |
+| Unset (first sync) | `PropertiesService` returns no `teamScope` | Run folder-walk; set to matched row's `Team Id` if found |
 | Set, no override | `DocData.SyncStatus != 'UpdateDoc'` | `DocData.Team Id` := `document.teamScope` (DocWins) |
 | Override pending | `DocData.SyncStatus == 'UpdateDoc'` | `document.teamScope` := `DocData.Team Id`; clear `SyncStatus` |
 | No folder match | Walk reaches root with no TeamData hit | Leave blank; log warning; re-evaluate next sync |
@@ -39,16 +39,17 @@ Runs only when `teamScope` is unset on the document.
 1. `DriveApp.getFileById(docId).getParents()` to get the current parent folder(s).
 2. Walk ancestors from current parent up to root/drive.
 3. For each folder ID, exact-match against `TeamData.Folder Id`.
-4. First match → set `document.teamScope` to that Folder Id (Team ID).
+4. First match → set `document.teamScope` to the **`Team Id`** value from that TeamData row.
 5. No match after root → `teamScope` remains blank.
 
 Multiple parents: walk uses the first folder returned by Drive API; log a warning.
 
 ## Security gate
 
-Before returning any rows filtered by document ID or Team Id, call
-`DriveApp.getFolderById(teamId)` as the active user. On failure (no access), return no rows
-and surface an error. Applied to any team-scoped read in this epic and all future epics.
+Before returning any rows filtered by document ID or Team Id, resolve the `Folder Id` from
+TeamData using the Team Id, then call `DriveApp.getFolderById(folderId)` as the active user.
+On failure (no access), return no rows and surface an error. Applied to any team-scoped read
+in this epic and all future epics.
 
 ## Entry-point signatures (pre-code contract for twin-tickets)
 

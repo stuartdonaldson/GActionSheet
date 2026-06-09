@@ -283,18 +283,18 @@ a demonstrated need.
 ```
 GActionSheet (master, container-bound)
 │  — single data store; Team Scope column on every action row
-│  — TeamData tab: Team Name, Folder Id, Contact
+│  — TeamData tab: Team Id, Folder Id, Contact
 │  — DocData tab: per-document sync metadata and counters
 │  — no per-team sheets created or managed
 │
-Documents carry:  teamScope = "<folder-id>" (Team ID)
+Documents carry:  teamScope = "<team-id>"
                   (assigned automatically on first sync via folder hierarchy)
                   (overridable from DocData via SyncStatus='UpdateDoc')
 ```
 
-`teamScope` stores **Team ID**, where Team ID is the `Folder Id` value that matched in
-TeamData during folder-walk resolution. Team display names are resolved by looking up
-TeamData using Team ID.
+`teamScope` stores **Team Id** — the stable team identifier from the matching TeamData row
+(e.g. `Board`, `Membership`). Auto-assignment finds the matching row via `Folder Id` and
+stores that row's `Team Id`. Team display names are resolved by TeamData lookup on `Team Id`.
 
 No folder-local tracker spreadsheets are created. The deployer identity model and Web App
 contract are unchanged in all phases below.
@@ -311,8 +311,8 @@ custom property on each tracked document.
 On every sync, if the document does not already have a `teamScope` document custom property,
 the add-on walks the document's Drive folder hierarchy (current parent first, then each
 ancestor up to root/drive) and compares each folder ID against `TeamData.Folder Id`.
-First match identifies the team and sets `teamScope` to the matched `TeamData.Folder Id`
-(Team ID). When team name is needed, resolve it via TeamData lookup by Team ID.
+First match identifies the team; `teamScope` is set to the **`Team Id`** value from that
+TeamData row. When team name is needed, resolve it via TeamData lookup by `Team Id`.
 If no match exists, `teamScope` remains blank.
 
 This phase requires no change to the Web App contract or the deployer identity model.
@@ -345,8 +345,8 @@ On sync, when `teamScope` is not yet set on the document:
 1. Retrieve the document's parent folder via `DriveApp`.
 2. Walk up the folder hierarchy from current parent to root/drive.
 3. For each folder ID in order, look for an exact match in `TeamData.Folder Id`.
-4. First match → set `teamScope` on the document to matched `TeamData.Folder Id`
-  (Team ID).
+4. First match → set `teamScope` on the document to the **`Team Id`** value from that
+  TeamData row.
 5. No match after reaching root/drive → leave `teamScope` blank.
 
 If `DocData.SyncStatus == 'UpdateDoc'`, the team assignment in `DocData.Team` is written
@@ -361,13 +361,13 @@ Managed by an administrator; not written by the add-on during normal sync.
 
 | Column | Purpose |
 |--------|---------|
-| Team Name | Human-readable team name (e.g. `Board`, `Membership`) |
-| Folder Id | Drive folder ID associated with this team (one row per folder) |
+| Team Id | Stable team identifier used as the routing key (e.g. `Board`, `Membership`); stored as `teamScope` on the document |
+| Folder Id | Drive folder ID associated with this team; the folder-walk match key |
 | Contact | Team contact for coordination/notifications |
 
-Multiple rows with the same Team Name are allowed — a team may own more than one folder.
-The auto-assignment algorithm matches on Folder Id; this Folder Id is also the Team ID
-stored in document `teamScope`.
+Multiple rows may share a Team Id — a team may own more than one folder.
+The auto-assignment algorithm matches on `Folder Id` and stores the matched row's `Team Id`
+as the document's `teamScope`.
 
 ---
 
@@ -470,10 +470,10 @@ These extend the existing failure modes in [docs/OPERATIONS.md](../docs/OPERATIO
 
 ### Framing
 
-- **Logical identity:** document carries `teamScope` as Team ID (matched `Folder Id`)
-- **Auto-assignment:** folder hierarchy walk against TeamData on first sync
+- **Logical identity:** document carries `teamScope` as `Team Id` (from matching TeamData row)
+- **Auto-assignment:** folder hierarchy walk against TeamData `Folder Id`; stores `Team Id` on match
 - **Reassignment path:** DocData `UpdateDoc` applies team changes back to documents
-- **Name resolution:** Team name is derived by TeamData lookup using Team ID
+- **Name resolution:** Team name is derived by TeamData lookup using `Team Id`
 - **Reporting surface:** `Team Scope` column on existing ActionSheet rows
 - **Storage:** single master GActionSheet throughout; physical partitioning is a future option
 
@@ -484,11 +484,10 @@ through `DocData.SyncStatus='UpdateDoc'` and then synchronized to the document p
 
 **Guiding rule (applies to all phases):** whenever actions are read from the GActionSheet
 filtered by document ID or team ID, the implementation must perform an access check
-before returning results: verify that the current user (active user in context ①) has
-read access to the team's `Folder Id` (the Team ID). Use `DriveApp.getFolderById(teamId)`
-and confirm the call succeeds for the current user. If the check fails, return no results
-and surface an appropriate error to the caller; do not surface rows belonging to a team
-the user cannot access.
+before returning results: resolve the `Folder Id` from TeamData using the `Team Id`, then
+verify that the current user (active user in context ①) has read access via
+`DriveApp.getFolderById(folderId)`. If the check fails, return no results and surface an
+appropriate error to the caller; do not surface rows belonging to a team the user cannot access.
 
 When Phase 1 is promoted to delivery, a new ADR is required covering the team-scope
 assignment model (auto-assignment algorithm, DocData write-back precedence, TeamData
