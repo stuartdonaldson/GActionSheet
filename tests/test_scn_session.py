@@ -337,7 +337,7 @@ def test_checkpoint_step_calls_engine_drain(monkeypatch):
 
     def fake_drain(kind, label=None, on=None, read=None, read_consistency=None):
         drain_calls.append({"kind": kind, "label": label, "on": on})
-        return []
+        return [], []
 
     scn = _make_session()
     scn.engine.drain = fake_drain
@@ -381,7 +381,7 @@ def test_checkpoint_read_closure_shares_docx_download(monkeypatch):
         for s in [Surface.DOC, Surface.TRACKER, Surface.SHEET]:
             read(s)
             called_surfaces.append(s)
-        return []
+        return [], []
 
     scn = _make_session()
     scn.engine.drain = fake_drain
@@ -438,7 +438,7 @@ def test_checkpoint_read_ui_delegates_to_ui_read_current():
 
     def fake_drain(kind, label=None, on=None, read=None, read_consistency=None):
         captured["result"] = read(Surface.UI)
-        return []
+        return [], []
 
     scn = _make_session()
     scn.ui = mock_ui
@@ -455,7 +455,7 @@ def test_checkpoint_read_ui_returns_empty_when_no_ui_driver():
 
     def fake_drain(kind, label=None, on=None, read=None, read_consistency=None):
         captured["result"] = read(Surface.UI)
-        return []
+        return [], []
 
     scn = _make_session()
     scn.ui = None

@@ -154,6 +154,7 @@ class ScenarioSession:
         doc_id: str,
         sheet_id: str,
         settings: dict,
+        request=None,
     ) -> None:
         self.doc_id = doc_id
         self.sheet_id = sheet_id
@@ -161,6 +162,7 @@ class ScenarioSession:
         self.tracker_present: bool = False
         self.engine = CheckpointEngine()
         self._seq: int = 0
+        self._request = request  # pytest FixtureRequest; used by checkpoint() for JUnit properties (T24)
         # Attach after creation: scn.ui = UiDriver(page, doc_id=scn.doc_id)
         self.ui: UiDriver | None = None
 
@@ -206,10 +208,11 @@ class ScenarioSession:
     # ------------------------------------------------------------------
 
     @classmethod
-    def new_doc(cls, settings: dict) -> "ScenarioSession":
+    def new_doc(cls, settings: dict, *, request=None) -> "ScenarioSession":
         """Create a guaranteed-clean empty journey doc (§16.11 #1).
 
         Calls begin_journey_session (AtddContracts.js); synchronous response carries docId.
+        Pass request=<pytest FixtureRequest> to enable JUnit property emission (T24).
         """
         url = settings.get("webappTestUrl") or ""
         token = settings.get("testToken") or ""
@@ -223,6 +226,7 @@ class ScenarioSession:
             doc_id=doc_id,
             sheet_id=settings["testSheetId"],
             settings=settings,
+            request=request,
         )
 
     def close(self) -> None:
@@ -524,13 +528,17 @@ class ScenarioSession:
         def read_consistency() -> dict:
             return self.verify_consistency()
 
-        return self.engine.drain(
+        warnings, drained_records = self.engine.drain(
             kind,
             label=label,
             on=on,
             read=read,
             read_consistency=read_consistency,
         )
+        if self._request is not None:
+            for tag, surface, severity in drained_records:
+                self._request.node.user_properties.append((f"ac.{tag}.{surface}", severity))
+        return warnings
 
 
 # ---------------------------------------------------------------------------

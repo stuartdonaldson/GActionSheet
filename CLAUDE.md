@@ -110,10 +110,11 @@ bd close <id>         # Complete work
 
 ## Testing Strategy & Issue Conventions
 
-This project follows the ATDD lifecycle. Authoritative sources:
-- **Universal testing principles** (entry-point coverage + call-site technique, durable-state assertion, negatives, idempotency, named-clone isolation, expectation-queue/checkpoints, permutation batching, twin-track independence) → DevStandard `knowledge-base/methodology/testing/atdd-bdd.md` § *Universal Scenario-Testing Engineering Principles*.
+This project follows the ATDD lifecycle. Authoritative sources (all legacy
+references are mapped in `docs/atdd/ID-map.md` — start there):
+- **Universal testing & lifecycle principles** (`T1`–`T24`, `I1`–`I11`: entry-point coverage + call-site, durable-state assertion, negatives, idempotency, run-isolated clones, expectation-queue/checkpoints, permutation batching, twin-track independence) → DevStandard `knowledge-base/bdd/sdlc-testing-principles.md` and `sdlc-implementation-principles.md`. Cite the ID, don't restate.
 - **GAS+Python acceptance-testing mechanics** → GAS-Practices `best-practices/gas-acceptance-testing/`.
-- **Project realization** (the `scn/` scenario model, canonical journey, contract) → `docs/atdd/atdd-lifecycle.md` §15–§16.
+- **Project realization** (the `scn/` scenario model, canonical journey, contract) → `docs/atdd/ID-map.md` (§`scn/` module map) and archived source `docs/atdd/archive/atdd-lifecycle.md` §15–§16.
 
 Methodology declaration — Testing: `atdd-bdd` (DevStandard). Key rules for every session:
 

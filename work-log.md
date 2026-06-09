@@ -1810,3 +1810,68 @@ Delivered GTaskSheet-80mo.10: reconciled README.md and DESIGN.md documentation w
 - The test-review document (2026-06-05-Test-Review.md §7) provided authoritative guidance on what contradictions existed; cross-referencing it ensured AC completeness
 - Terminology consistency across multiple documents (README, DESIGN, CONTEXT) requires careful coordination — a change in one file cascaded to clarifications in others
 - The AI-N: token model is the canonical identity mechanism; all prose referring to actions should emphasize the token, not the assignee chip
+
+## 2026-06-08 17:10:00
+
+### Summary:
+Fixed 4 schema-staleness bugs from 11-column migration; redesigned archive test as journey-based teardown; full regression suite clean (230 tests); committed and pushed.
+
+### Fixed:
+- `WebApp.js` `_handlePatchActionStatusAtdd` + `_handleDeleteActionRowAtdd`: hardcoded column numbers (6/9/10) replaced with `_ACOL` constants — columns shifted when File Id inserted at col 2, causing B7 ACT B status writes to land in `action_text`
+- `SyncManager.js` `_syncSheetRowToDoc`: removed `syncDocument()` call that caused race condition — installable trigger fires in separate GAS execution, opens doc with stale cached view, doc-wins path reverted sheet status to 'Open'
+- `test_scn_surfaces.py` `_make_xlsx_bytes`: added File Id column (col 2) to match 11-column schema; `SheetReader` was looking at col 8 for `document_formula` but test xlsx put it at col 7
+- `ContractSchema.json`: was stale 10-column schema; regenerated via `npm run export-contract`
+
+### Changed:
+- `test_archive.py`: replaced seed-and-trigger pattern with journey-based teardown — creates real doc, syncs (acquires globalId + fileId), closes row, ages modified_date via new `backdate_action_row` fixture, runs sweep, asserts Archive row has globalId and fileId intact
+- `TestFixtures.js`: added `backdate_action_row` fixture (accepts globalId + daysAgo, backdates modified_date in Actions sheet)
+
+### Key Learnings:
+- Hardcoded column numbers in GAS test routes are a recurring failure mode after schema migrations — any route using literal integers for column writes needs an audit pass after every schema change
+- The WriteGuard cross-execution property (disabled) was the documented assumption behind `_syncSheetRowToDoc` calling `syncDocument()` — when that assumption was invalidated, the comment stayed but the code became a race condition; comments that describe a removed safety net need to be updated immediately
+- Journey-based tests surface real integration bugs (missing globalId/fileId in archived rows) that seed-and-trigger tests cannot; the archive teardown pattern is the right model for any test that needs to verify data survives a full lifecycle
+
+## 2026-06-09 14:22:00
+
+### Summary:
+Evaluated DevStandard's `bdd/` testing-principles package against this project's ATDD structure and adopted it as a re-base (the project was the reference implementation it was extracted from). Project-side: archived the four legacy `docs/atdd/` docs to `docs/atdd/archive/`, created `docs/atdd/ID-map.md` as the new landing doc (full crosswalk of legacy Part 3 #1–14 / §15–§18 / CLAUDE.md rules / `scn/` modules → `T1`–`T24` + `I1`–`I11` IDs), and repointed CLAUDE.md §Testing Strategy through the ID-map. Also drove two improvements into the shared principles and a DevStandard-side relocation.
+
+### Details:
+- **bdd improvements (DevStandard `sdlc-testing-principles.md`):** marked `T24` (generated traceability) provisional — no reference implementation; resolved the `T1`↔`T24` contradiction by defining a drained `(AC × surface)` scenario expectation as a focused verification path (standalone test mandated only when no scenario drains the AC).
+- **DevStandard relocation (per user decisions):** moved `knowledge-base/bdd/` → `knowledge-base/methodology/testing/bdd/`; retired `atdd-bdd.md` to `…/testing/archive/` with a SUPERSEDED banner; the bdd-authored gate `SKILL.md` replaced the deployed `implementation-gate/SKILL.md` (single source); added `bdd/README.md` entry point; updated the methodology registry + 6 live framework references. Kept option name `atdd-bdd` (path-only change) to avoid touching immutable ADR-0005 and named references.
+
+### Key Learnings:
+- ADR-0005 (immutable) still cites the old `atdd-bdd.md` path — the path graduation single-file→package needs a *superseding* ADR, not an edit. Open follow-up.
+- Routing GActionSheet's CLAUDE.md through a project-local `ID-map.md` decouples the project from DevStandard's internal reorganisation — one indirection absorbs path churn on the reusable side.
+- Nothing committed in either repo; changes staged for review.
+
+## 2026-06-09 15:31:55
+
+### Summary
+Resolved GTaskSheet-8euh (T24 Step 1): added explicit `tag=` kwargs to all `verify` and `verify_all_expectations` call sites across the test suite. Tag format `[<scenario> <ac-label>]` chosen and documented in bead notes for Step 2 (GTaskSheet-fmtw) to consume.
+
+### Changes
+- `tests/test_journey.py` — 7 call sites tagged: `[journey sync-create]`, `[journey tracker-present]`, `[journey ui-create]`, `[journey status-change]`, `[journey idempotent]`
+- `tests/test_sidebar.py` — 5 call sites tagged: `[sidebar sync-SHEET]`, `[sidebar tracker-insert]`, `[sidebar mutation-baseline]`, `[sidebar mutation-changed]`
+- `tests/test_b7_write_routes.py` — 4 call sites tagged: `[b7 write-edit]`, `[b7 write-status]`
+- `scn/session.py` / `scn/engine.py` — no changes; `_current_test_tag()` fallback intact
+
+### Key Learnings
+- `test_sync_all.py` and `test_archive.py` use plain `assert` (not the scn expectation API) — AC2 of 8euh was vacuously satisfied; those files had no call sites to tag.
+- `verify_consistency`, `expect_visible`, `expect_alt` do not carry a `tag=` parameter — only `verify`, `verify_all_expectations`, and `expect_absent` do.
+
+## 2026-06-09 15:46:17
+
+### Summary:
+Implemented T24-Step2 (GTaskSheet-fmtw, closed): wired drained (AC tag x surface) expectations through to JUnit XML properties for traceability.
+- `scn/engine.py`: `CheckpointEngine.drain()` now returns `(warnings, drained_records)` where `drained_records` is a list of `(tag, surface.value, "PASS"|"WARN")` for each surface retired during the drain.
+- `scn/session.py`: `ScenarioSession.__init__()` and `new_doc()` accept optional `request=None` (pytest FixtureRequest); `checkpoint()` unpacks the new drain() tuple and emits `request.node.user_properties.append((f"ac.{tag}.{surface}", severity))` per drained record when `_request` is set. Non-journey callers (request=None) unaffected.
+- `tests/test_journey.py`: `scn` fixture changed from `scope="module"` to function scope (single test in module — behaviorally equivalent) and now requests `request`, passing it to `new_doc()`. Module-scoped `request.node` is a `Module` (no `user_properties`) — confirmed this fails, hence the scope change.
+- `tests/test_scn_engine.py`: updated 5 call sites that captured `drain()`'s return to unpack the new tuple; added `TestDrainedRecords` (4 tests) covering PASS/WARN/multi-surface/no-match cases.
+- `tests/test_scn_session.py`: updated 4 `fake_drain` mocks to return `([], [])`.
+
+### Verification:
+209/209 unit tests pass (test_scn_engine 57, test_scn_session/test_scn_ai/test_scn_surfaces/test_ai_n_token/test_contract = 138, test_scn_ui = 71); full 234-test collection succeeds. JUnit property-emission mechanism verified via an isolated pytest harness mirroring the fixture/checkpoint pattern, producing `<property name="ac.journey-sync-create.DOC" value="PASS" />`. A live journey run against GAS (to produce an actual `pytest.xml` sample) was not exercised in this session — flagged as a caveat for Step 3 (GTaskSheet-1wuu).
+
+### Key Learnings:
+A module-scoped pytest fixture's `request.node` is the `Module` collector, which has no `user_properties` — `record_property`-style JUnit emission requires the `request.node` to be the test `Item`, i.e. a function-scoped (or test-scoped) `request`.

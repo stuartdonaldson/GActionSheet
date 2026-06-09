@@ -146,7 +146,7 @@ class TestAutoTargeting:
         engine = CheckpointEngine()
         e = _exp({Surface.DOC}, action="Do the thing", action_id="AI-1", status="Open")
         engine.enqueue(e)
-        warnings = engine.drain(
+        warnings, _ = engine.drain(
             CheckpointKind.STEP,
             on=frozenset({Surface.DOC}),
             read=_reader_present(action_id="AI-1"),
@@ -396,7 +396,7 @@ class TestSeverityWarn:
             status="Open",
         )
         engine.enqueue(e)
-        warnings = engine.drain(
+        warnings, _ = engine.drain(
             CheckpointKind.STEP,
             on=frozenset({Surface.SHEET}),
             read=_reader_absent(),  # returns nothing → present check fails
@@ -422,6 +422,77 @@ class TestSeverityWarn:
                 on=frozenset({Surface.SHEET}),
                 read=_reader_absent(),
             )
+
+
+# ---------------------------------------------------------------------------
+# TestDrainedRecords — T24: drain() returns (tag, surface, severity) tuples
+# ---------------------------------------------------------------------------
+
+class TestDrainedRecords:
+    def test_pass_surface_emits_pass_record(self):
+        engine = CheckpointEngine()
+        e = _exp({Surface.DOC}, action="Do the thing", action_id="AI-1", status="Open")
+        e.tag = "[journey sync-create]"
+        engine.enqueue(e)
+        warnings, records = engine.drain(
+            CheckpointKind.STEP,
+            on=frozenset({Surface.DOC}),
+            read=_reader_present(action_id="AI-1"),
+        )
+        assert warnings == []
+        assert len(records) == 1
+        assert records[0] == ("[journey sync-create]", "DOC", "PASS")
+
+    def test_warn_surface_emits_warn_record(self):
+        engine = CheckpointEngine()
+        e = _exp(
+            {Surface.SHEET},
+            severity=Severity.WARN,
+            action="Do the thing",
+            action_id="AI-99",
+            status="Open",
+        )
+        e.tag = "[journey warn-ac]"
+        engine.enqueue(e)
+        warnings, records = engine.drain(
+            CheckpointKind.STEP,
+            on=frozenset({Surface.SHEET}),
+            read=_reader_absent(),
+        )
+        assert len(warnings) == 1
+        assert len(records) == 1
+        assert records[0] == ("[journey warn-ac]", "SHEET", "WARN")
+
+    def test_multiple_surfaces_emit_one_record_each(self):
+        engine = CheckpointEngine()
+        e = _exp(
+            {Surface.DOC, Surface.SHEET},
+            action="Do the thing",
+            action_id="AI-1",
+            status="Open",
+        )
+        e.tag = "[journey multi]"
+        engine.enqueue(e)
+        _, records = engine.drain(
+            CheckpointKind.STEP,
+            on=frozenset({Surface.DOC, Surface.SHEET}),
+            read=_reader_present(action_id="AI-1"),
+        )
+        assert len(records) == 2
+        surfaces = {r[1] for r in records}
+        assert surfaces == {"DOC", "SHEET"}
+        assert all(r[2] == "PASS" for r in records)
+
+    def test_no_match_emits_no_record(self):
+        engine = CheckpointEngine()
+        e = _exp({Surface.DOC}, action="Do the thing", action_id="AI-1", status="Open")
+        engine.enqueue(e)
+        _, records = engine.drain(
+            CheckpointKind.STEP,
+            on=frozenset({Surface.SHEET}),  # DOC not in obs — not evaluated
+            read=_reader_present(action_id="AI-1"),
+        )
+        assert records == []
 
 
 # ---------------------------------------------------------------------------
@@ -718,7 +789,7 @@ class TestUIDrainableAndWithin:
         """verify(on=UI) drains at STEP when obs includes UI and read returns matching ai."""
         engine = CheckpointEngine()
         engine.enqueue(_ui_exp(action_id="AI-1", status="Open"))
-        warns = engine.drain(
+        warns, _ = engine.drain(
             CheckpointKind.STEP,
             on=frozenset({Surface.UI}),
             read=lambda s: [_ui_ai(action_id="AI-1", status="Open")],
@@ -767,7 +838,7 @@ class TestUIDrainableAndWithin:
         with patch("scn.engine.time") as m:
             m.monotonic.side_effect = [0.0, 0.1]  # deadline=1.0s; 2nd monotonic check at 0.1s < 1.0
             m.sleep = MagicMock()
-            warns = engine.drain(
+            warns, _ = engine.drain(
                 CheckpointKind.STEP,
                 on=frozenset({Surface.UI}),
                 read=read,
@@ -804,7 +875,7 @@ class TestUIDrainableAndWithin:
         with patch("scn.engine.time") as m:
             m.monotonic.side_effect = [0.0, 1.0]
             m.sleep = MagicMock()
-            warns = engine.drain(
+            warns, _ = engine.drain(
                 CheckpointKind.STEP,
                 on=frozenset({Surface.UI}),
                 read=lambda s: [_ui_ai(action_id="AI-1", status="Open")],

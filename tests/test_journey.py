@@ -60,10 +60,15 @@ def browser_page():
         browser.close()
 
 
-@pytest.fixture(scope="module")
-def scn(settings, browser_page):
-    """Create the isolated journey doc; attach UiDriver; teardown trashes the doc."""
-    s = ScenarioSession.new_doc(settings)
+@pytest.fixture
+def scn(settings, browser_page, request):
+    """Create the isolated journey doc; attach UiDriver; teardown trashes the doc.
+
+    Function-scoped (not module) so request.node is the test item — required for
+    record_property/JUnit <property> emission (T24). Single test_journey in this
+    module, so this is behaviorally equivalent to the prior module scope.
+    """
+    s = ScenarioSession.new_doc(settings, request=request)
     s.ui = UiDriver(browser_page, doc_id=s.doc_id)
     yield s
     s.close()                              # trash; assert expectation queue empty

@@ -150,8 +150,11 @@ class CheckpointEngine:
         on: frozenset | None = None,
         read: Callable[[Surface], list] | None = None,
         read_consistency: Callable[[], dict] | None = None,
-    ) -> list[str]:
-        """Evaluate queued expectations at checkpoint (kind, label) and return warnings.
+    ) -> tuple[list[str], list[tuple[str, str, str]]]:
+        """Evaluate queued expectations at checkpoint (kind, label).
+
+        Returns (warnings, drained_records) where drained_records is a list of
+        (tag, surface_value, 'PASS'|'WARN') for each surface retired this drain (T24).
 
         Raises AssertionError on a FAIL-severity miss.
         Implements §4.5 steps 1–5 verbatim.
@@ -170,6 +173,7 @@ class CheckpointEngine:
             read = lambda s: []
 
         warnings: list[str] = []
+        drained_records: list[tuple[str, str, str]] = []
         targetable = [e for e in self._queue if _is_targetable(e, kind, label)]
 
         # §4.4 OBS computation
@@ -213,10 +217,12 @@ class CheckpointEngine:
 
                 if error is None:
                     e.remaining.discard(surface)
+                    drained_records.append((e.tag, surface.value, "PASS"))
                 elif e.severity == Severity.WARN:
                     # WARN: record warning AND drop surface to prevent dangling (§4.5 step 2)
                     warnings.append(f"WARN [{e.tag}] surface={surface.value}: {error}")
                     e.remaining.discard(surface)
+                    drained_records.append((e.tag, surface.value, "WARN"))
                 else:
                     raise AssertionError(error)
 
@@ -250,7 +256,7 @@ class CheckpointEngine:
         for e in to_retire:
             self._queue.remove(e)
 
-        return warnings
+        return warnings, drained_records
 
     def close(self) -> None:
         """Assert the queue is empty; raise DrainInvariantError if not (§4.6).
