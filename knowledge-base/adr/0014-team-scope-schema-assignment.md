@@ -1,11 +1,12 @@
 # ADR-0014: Team-Scope Schema and Folder-Walk Assignment Model
 
-Status: Proposed
+Status: Accepted
 Date: 2026-06-05
+Accepted: 2026-06-08
 
-> Proposed during the EPIC-A slice phase (ADR-0013). Accepted at the EPIC-A freeze gate
-> (`GTaskSheet-5r4l.3`) once the schema slice validates the model. Working contract:
-> `knowledge-base/staging/epic-a-schema-adoption.md`.
+> Accepted at the EPIC-A freeze gate (`GTaskSheet-5r4l.3`). Schema slice validated the
+> column set, round-trip invariant, and single resolved-count authority. Working contract
+> `knowledge-base/staging/epic-a-schema-adoption.md` retired on acceptance.
 
 ## Context
 

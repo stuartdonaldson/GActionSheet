@@ -320,6 +320,8 @@ erDiagram
     Action ||--|| ActionSheetRow : "stored as"
     Action ||--|| DocChecklistItem : "anchored in"
     Action ||--o| TrackerTableRow : "summarised by"
+    TeamData ||--o{ DocData : "Team Id →"
+    DocData ||--o{ ActionSheetRow : "FileId →"
 ```
 
 The cross-doc key is `globalId = {docId}/AI-{N}`, stored in ActionSheet column 1. The doc-scoped `id` (column 2) is the human-facing `AI-N` derived from that key; `N` is assigned once per document by the Token Manager and then persists in the paragraph text — it is stable, not recomputed from document order.
@@ -329,6 +331,72 @@ The cross-doc key is `globalId = {docId}/AI-{N}`, stored in ActionSheet column 1
 **Field notes:**
 - `assigneeChip` — compound value extracted from the PERSON chip, canonical form `name <email>`. The ActionSheet stores this in two separate columns (`Assignee Name`, `Assignee Email`); `DocChecklistItem` and `TrackerTableRow` hold it as a single parsed unit.
 - `documentTitle` / `documentUrl` — the ActionSheet renders these as a single hyperlink cell (display text = `documentTitle`, URL = `documentUrl`). Modelled separately here to mirror `Action` and make the hyperlink structure explicit.
+
+---
+
+## Team Scope Schema (ADR-0014)
+
+Documents are tagged with a logical **Team ID** so actions can be filtered and reported by
+team from the master sheet. Team ID is a `Folder Id` value — the folder that matched during
+folder-walk auto-assignment. This section describes the three schema additions and their
+interaction; the synchronisation behaviour is implemented in EPIC-B.
+
+### TeamData tab (admin-managed)
+
+| Column | Purpose |
+|--------|---------|
+| Team Id | Stable team identifier; equals the Team's Folder Id (e.g. `Board`, `Membership`). Display name and identity are currently the same field; a separate `Team Name` display field is a future addition. |
+| Folder Id | Drive folder ID owned by this team; the folder-walk match key |
+| Contact | Team contact for coordination/notifications |
+
+Multiple rows may share a Team Id (a team may own several folders).
+
+### DocData tab (per-document sync state)
+
+| Column | Purpose |
+|--------|---------|
+| FileId | Google Drive file ID (stable; FK → ActionSheet `File Id`) |
+| Doc Name | Current document name |
+| Doc Modified | Document modified timestamp (DocWins source-of-truth check) |
+| Doc Updated | Last time the DocData row was written by sync |
+| SyncStatus | `UpdateDoc` → push `DocData.Team Id` to document property on next sync |
+| Team Id | Team ID assigned to this document (matches a `TeamData.Folder Id`) |
+| Action Count | Total actions for the document |
+| Resolved Count | Total actions resolved per the shared `isResolved()` authority |
+
+**DocWins:** when the document was modified since last sync, DocData is updated from
+document state. The one exception: if `SyncStatus == 'UpdateDoc'`, DocData wins — the team
+assignment in `DocData.Team Id` is written to the document and `SyncStatus` is cleared.
+
+### ActionSheet — `File Id` column
+
+One column added to the existing ActionSheet:
+
+| Column | Purpose |
+|--------|---------|
+| File Id | Google Drive file ID of the source document; decomposed from the `globalId` prefix; FK → `DocData.FileId` |
+
+Team Id is **not** stored in the ActionSheet action rows (update anomaly: team reassignment
+would require rewriting N rows). Import/Notify workflows join Actions → DocData via `File Id`
+to resolve Team Id.
+
+Rows written before this column existed carry blank; not backfilled automatically.
+
+### Auto-assignment algorithm
+
+Runs on sync when the document does not yet have a `teamScope` custom property:
+
+1. Retrieve the document's parent folder via `DriveApp.getFileById(docId).getParents()`.
+2. Walk ancestors from current parent up to root/drive.
+3. For each folder ID, look for an exact match in `TeamData.Folder Id`.
+4. First match → set document `teamScope` to that Folder Id (Team ID).
+5. No match after reaching root → leave `teamScope` blank; log a warning.
+
+### Security gate
+
+Any read filtered by document ID or Team Id must first call
+`DriveApp.getFolderById(teamId)` as the active user. On failure (no access), return no rows
+and surface an error. This gate is load-bearing for Import and Notify (EPIC-D, EPIC-E).
 
 ---
 

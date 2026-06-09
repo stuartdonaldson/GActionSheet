@@ -152,6 +152,12 @@ Apps Script editor → Run → initializeTriggers
 | Doc inaccessible during sweep | Sweep skips that doc with a logged error | Grant the deploying user edit access to the document |
 | Permission denied writing the ActionSheet | `doPost` returns an error; Sync now notification | Verify the deploying user has edit access to the ActionSheet |
 | Duplicate `Last Modified` on both sides | Tie — ActionSheet row wins | Expected behavior; no recovery needed |
+| No parent folder found for document (orphan doc) | `teamScope` not assigned; `Team Id` column blank | Expected; no recovery needed unless team tracking is required |
+| Document folder has no ancestor in TeamData | `teamScope` not assigned; re-evaluated on next sync | Add the folder or an ancestor to TeamData |
+| TeamData tab missing or malformed | Auto-assignment skipped; sync completes without team scope | Restore or recreate the TeamData tab |
+| Team ID in document/DocData has no matching TeamData row | Team name cannot be resolved for UI/reporting | Add or restore TeamData row for that Team ID |
+| DocData row missing for known document | Sync cannot reconcile DocWins fields | Row is recreated on next sync keyed by `FileId` |
+| `SyncStatus='UpdateDoc'` with blank/invalid Team Id | Team write-back skipped; status retained | Correct `DocData.Team Id`, then sync again |
 
 ---
 
