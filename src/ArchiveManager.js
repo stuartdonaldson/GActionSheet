@@ -17,11 +17,8 @@ var ArchiveManager = (function () {
 
   var ARCHIVE_THRESHOLD_DAYS = 30;
 
-  // 1-based column indices (matching SHEET_HEADERS with globalId as col 1).
-  var COL_STATUS        = 7;
-  var COL_DATE_MODIFIED = 10;
-  var COL_SYNC_STATUS   = 11;
-  var TOTAL_COLS        = 11;
+  // Column refs resolved lazily inside archive() — ArchiveManager.js loads before
+  // ContractSchema.js alphabetically, so CONTRACT_SCHEMA is not yet defined at IIFE time.
 
   /**
    * Converts a value to a Date, or returns null.
@@ -43,12 +40,12 @@ var ArchiveManager = (function () {
    * @param {Date}   now        Sync execution time.
    * @returns {boolean}
    */
-  function _isEligible(rowValues, now) {
-    var status     = rowValues[COL_STATUS - 1];
-    var syncStatus = rowValues[COL_SYNC_STATUS - 1];
+  function _isEligible(rowValues, now, colStatus, colSyncStatus, colModified) {
+    var status     = rowValues[colStatus    - 1];
+    var syncStatus = rowValues[colSyncStatus - 1];
     if (status !== 'Closed' && syncStatus !== 'Doc Not Found') return false;
 
-    var dateModified = _toDate(rowValues[COL_DATE_MODIFIED - 1]);
+    var dateModified = _toDate(rowValues[colModified - 1]);
     if (!dateModified) return false;
 
     var ageDays = (now.getTime() - dateModified.getTime()) / (1000 * 60 * 60 * 24);
@@ -67,6 +64,13 @@ var ArchiveManager = (function () {
      * @returns {number}  Count of rows archived.
      */
     archive: function (ss) {
+      // Resolve column positions here (CONTRACT_SCHEMA available by the time this runs).
+      var _AC        = CONTRACT_SCHEMA.sheetAction.columnsByField;
+      var COL_STATUS        = _AC.status;
+      var COL_DATE_MODIFIED = _AC.modified_date;
+      var COL_SYNC_STATUS   = _AC.sync_status;
+      var TOTAL_COLS        = SHEET_HEADERS.length;
+
       var actionsSheet = ss.getSheetByName('Actions');
       if (!actionsSheet) {
         throw new Error('Actions sheet tab not found.');
@@ -96,7 +100,7 @@ var ArchiveManager = (function () {
         var rowValues   = allValues[r];
         var rowFormulas = allFormulas[r];
 
-        if (!_isEligible(rowValues, now)) continue;
+        if (!_isEligible(rowValues, now, COL_STATUS, COL_SYNC_STATUS, COL_DATE_MODIFIED)) continue;
 
         var sheetRow = r + 2;  // 1-based; row 1 is the header
 

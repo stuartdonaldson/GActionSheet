@@ -32,6 +32,9 @@
  */
 var ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUTS/action';
 
+// 1-based column numbers from the authoritative schema.
+var _SCOL = CONTRACT_SCHEMA.sheetAction.columnsByField;
+
 // ---------------------------------------------------------------------------
 // Public entry points
 // ---------------------------------------------------------------------------
@@ -251,10 +254,10 @@ function syncAll() {
       return;
     }
 
-    // Extract unique docIds from the HYPERLINK formula in column 8.
+    // Extract unique docIds from the document-formula column.
     // Formula shape: =HYPERLINK("https://docs.google.com/document/d/DOCID/edit", "Title")
     var numRows      = lastRow - 1;
-    var formulasCol7 = actionsSheet.getRange(2, 8, numRows, 1).getFormulas();
+    var formulasCol7 = actionsSheet.getRange(2, _SCOL.document_formula, numRows, 1).getFormulas();
     var docIdSet     = {};
     for (var i = 0; i < formulasCol7.length; i++) {
       var formula = formulasCol7[i][0] || '';
@@ -268,19 +271,19 @@ function syncAll() {
     var syncStateSheet = _getOrCreateSyncStateSheet(ss);
     var syncState      = _loadSyncState(syncStateSheet);
 
-    // Read cols 1 + 11 once for dirty-row detection across all docs.
-    var actionData = actionsSheet.getRange(2, 1, numRows, 11).getValues();
+    // Read globalId + sync_status once for dirty-row detection across all docs.
+    var actionData = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
 
     // Pre-build dirty-doc set in one pass — avoids O(docs × rows) scan per doc.
     var dirtyDocIds = {};
     var alreadyDocNotFound = {};
     for (var d = 0; d < actionData.length; d++) {
-      var gidD  = String(actionData[d][0] || '');
+      var gidD  = String(actionData[d][_SCOL.global_id   - 1] || '');
       var slashD = gidD.indexOf('/');
-      if (actionData[d][10] === 'Dirty' && slashD > 0) {
+      if (actionData[d][_SCOL.sync_status - 1] === 'Dirty' && slashD > 0) {
         dirtyDocIds[gidD.substring(0, slashD)] = true;
       }
-      if (actionData[d][10] === 'Doc Not Found' && slashD > 0) {
+      if (actionData[d][_SCOL.sync_status - 1] === 'Doc Not Found' && slashD > 0) {
         alreadyDocNotFound[gidD.substring(0, slashD)] = true;
       }
     }
@@ -351,7 +354,7 @@ function onActionSheetEdit(e) {
   var row   = range.getRow();
   if (row < 2) return;
   var col = range.getColumn();
-  if ([4, 5, 6, 7].indexOf(col) === -1) return; // Assignee Email, Name, Action, Status
+  if ([_SCOL.assignee_email, _SCOL.assignee_name, _SCOL.action_text, _SCOL.status].indexOf(col) === -1) return;
   var sheet = range.getSheet();
   if (sheet.getName() !== 'Actions') return;
 
@@ -364,8 +367,8 @@ function onActionSheetEdit(e) {
   var dateModified = new Date();
   WriteGuard.wrap(function () {
     if (numRows === 1) {
-      sheet.getRange(row, 10).setValue(dateModified);
-      sheet.getRange(row, 11).setValue('Dirty');
+      sheet.getRange(row, _SCOL.modified_date).setValue(dateModified);
+      sheet.getRange(row, _SCOL.sync_status).setValue('Dirty');
     } else {
       var dates    = [];
       var dirtyCol = [];
@@ -373,8 +376,8 @@ function onActionSheetEdit(e) {
         dates.push([dateModified]);
         dirtyCol.push(['Dirty']);
       }
-      sheet.getRange(row, 10, numRows, 1).setValues(dates);
-      sheet.getRange(row, 11, numRows, 1).setValues(dirtyCol);
+      sheet.getRange(row, _SCOL.modified_date, numRows, 1).setValues(dates);
+      sheet.getRange(row, _SCOL.sync_status,   numRows, 1).setValues(dirtyCol);
     }
   });
 
@@ -385,7 +388,7 @@ function onActionSheetEdit(e) {
  * Propagates a single ActionSheet row edit to the corresponding floating action
  * in the source document via REST batchUpdate.
  *
- * Reads: globalId (col 1), Action (col 6), Status (col 7), Document URL (col 8)
+ * Reads: globalId, action_text, status, document_formula (from SHEET_HEADERS positions).
  * Extracts docId from the Document hyperlink formula.
  * Extracts N from the globalId (format: {docId}/AI-{N}).
  *
@@ -395,12 +398,12 @@ function onActionSheetEdit(e) {
 function _syncSheetRowToDoc(sheet, row) {
   try {
     var rowData       = sheet.getRange(row, 1, 1, SHEET_HEADERS.length).getValues()[0];
-    var globalId      = rowData[0];  // Col 1: globalId (format: {docId}/AI-{N})
-    var assigneeEmail = rowData[3];  // Col 4: Assignee Email
-    var assigneeName  = rowData[4];  // Col 5: Assignee Name
-    var action        = rowData[5];  // Col 6: Action
-    var status        = rowData[6];  // Col 7: Status
-    var docFormula    = sheet.getRange(row, 8).getFormula();
+    var globalId      = rowData[_SCOL.global_id      - 1];
+    var assigneeEmail = rowData[_SCOL.assignee_email - 1];
+    var assigneeName  = rowData[_SCOL.assignee_name  - 1];
+    var action        = rowData[_SCOL.action_text    - 1];
+    var status        = rowData[_SCOL.status         - 1];
+    var docFormula    = sheet.getRange(row, _SCOL.document_formula).getFormula();
 
     if (!globalId) return;
     if (!docFormula) return;
@@ -417,18 +420,13 @@ function _syncSheetRowToDoc(sheet, row) {
     var ok = _flushActionParagraph(docId, token, N, globalId, action, status, assigneeEmail, assigneeName || '');
     if (ok) {
       // Flush confirmed — clear Dirty immediately rather than waiting for WebApp round-trip.
-      WriteGuard.wrap(function () { sheet.getRange(row, 11).setValue(''); });
+      WriteGuard.wrap(function () { sheet.getRange(row, _SCOL.sync_status).setValue(''); });
       GasLogger.log('sync.sheet-to-doc.done', { globalId: globalId });
-
-      // Full doc scan: writes chip-resolved assigneeName back to sheet (docWins branch),
-      // clears any residual Dirty, and keeps the sheet consistent with the doc's canonical
-      // floating action state. WriteGuard cross-execution property suppresses the
-      // onActionSheetEdit trigger that would otherwise re-set Dirty on these writes.
-      try {
-        syncDocument(docId);
-      } catch (syncErr) {
-        GasLogger.log('sync.sheet-to-doc.sync-failed', { globalId: globalId, msg: syncErr.message });
-      }
+      // Note: syncDocument() was removed here. It caused a race condition: the trigger
+      // fires in a separate GAS execution, opens the doc via DocumentApp.openById with a
+      // stale cached view (status=pre-edit), and the doc-wins path overwrites the sheet
+      // back to the old value. Chip-resolved assigneeName propagation is deferred to the
+      // next scheduled syncAll sweep.
     } else {
       GasLogger.log('sync.sheet-to-doc.flush-failed', { globalId: globalId });
     }
@@ -722,7 +720,7 @@ function _remarkRowDirty(globalId) {
     var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
     for (var i = 0; i < ids.length; i++) {
       if (ids[i][0] === globalId) {
-        sheet.getRange(i + 2, 11).setValue('Dirty');
+        sheet.getRange(i + 2, _SCOL.sync_status).setValue('Dirty');
         GasLogger.log('flush.remarked-dirty', { globalId: globalId });
         return;
       }

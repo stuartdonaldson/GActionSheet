@@ -238,13 +238,13 @@ def _make_xlsx_bytes(rows: list[dict]) -> bytes:
     """
     Build xlsx with SHEET_HEADERS header row and given data rows.
 
-    Row dict keys: global_id, action_id, assignee_email, assignee_name,
+    Row dict keys: global_id, file_id, action_id, assignee_email, assignee_name,
                    action_text, status, document_url, doc_name,
                    created_date, modified_date, sync_status
-    document_url → stored as =HYPERLINK("url","name") formula in col 7.
+    document_url → stored as =HYPERLINK("url","name") formula in col 8 (11-column schema).
     """
     HEADERS = [
-        "globalId", "ID", "Assignee Email", "Assignee Name",
+        "globalId", "File Id", "ID", "Assignee Email", "Assignee Name",
         "Action", "Status", "Document",
         "Date Created", "Date Modified", "Sync Status"
     ]
@@ -257,6 +257,7 @@ def _make_xlsx_bytes(rows: list[dict]) -> bytes:
         formula = f'=HYPERLINK("{doc_url}","{doc_name}")' if doc_url else ""
         ws.append([
             row.get("global_id", ""),
+            row.get("file_id", ""),
             row.get("action_id", ""),
             row.get("assignee_email", ""),
             row.get("assignee_name", ""),

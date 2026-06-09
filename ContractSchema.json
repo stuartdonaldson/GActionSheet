@@ -7,9 +7,44 @@
       "status"
     ]
   },
+  "sheetTeamData": {
+    "headers": [
+      "Team Id",
+      "Folder Id",
+      "Contact"
+    ],
+    "columnsByField": {
+      "team_id": 1,
+      "folder_id": 2,
+      "contact": 3
+    }
+  },
+  "sheetDocData": {
+    "headers": [
+      "FileId",
+      "Doc Name",
+      "Doc Modified",
+      "Doc Updated",
+      "SyncStatus",
+      "Team Id",
+      "Action Count",
+      "Resolved Count"
+    ],
+    "columnsByField": {
+      "file_id": 1,
+      "doc_name": 2,
+      "doc_modified": 3,
+      "doc_updated": 4,
+      "sync_status": 5,
+      "team_id": 6,
+      "action_count": 7,
+      "resolved_count": 8
+    }
+  },
   "sheetAction": {
     "fields": [
       "global_id",
+      "file_id",
       "action_id",
       "assignee_email",
       "assignee_name",
@@ -24,6 +59,7 @@
     ],
     "headers": [
       "globalId",
+      "File Id",
       "ID",
       "Assignee Email",
       "Assignee Name",
@@ -36,15 +72,16 @@
     ],
     "columnsByField": {
       "global_id": 1,
-      "action_id": 2,
-      "assignee_email": 3,
-      "assignee_name": 4,
-      "action_text": 5,
-      "status": 6,
-      "document_formula": 7,
-      "created_date": 8,
-      "modified_date": 9,
-      "sync_status": 10
+      "file_id": 2,
+      "action_id": 3,
+      "assignee_email": 4,
+      "assignee_name": 5,
+      "action_text": 6,
+      "status": 7,
+      "document_formula": 8,
+      "created_date": 9,
+      "modified_date": 10,
+      "sync_status": 11
     }
   },
   "webApp": {
@@ -60,7 +97,8 @@
     ],
     "testRouteNames": [
       "edit_action_row",
-      "find_sheet_actions"
+      "find_sheet_actions",
+      "verify_chip_integrity"
     ],
     "messages": {
       "sync_action_rows": {

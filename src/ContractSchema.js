@@ -17,6 +17,29 @@ var CONTRACT_SCHEMA = Object.freeze({
     ])
   }),
 
+  sheetTeamData: Object.freeze({
+    headers: Object.freeze(['Team Id', 'Folder Id', 'Contact']),
+    columnsByField: Object.freeze({
+      team_id: 1,
+      folder_id: 2,
+      contact: 3
+    })
+  }),
+
+  sheetDocData: Object.freeze({
+    headers: Object.freeze(['FileId', 'Doc Name', 'Doc Modified', 'Doc Updated', 'SyncStatus', 'Team Id', 'Action Count', 'Resolved Count']),
+    columnsByField: Object.freeze({
+      file_id: 1,
+      doc_name: 2,
+      doc_modified: 3,
+      doc_updated: 4,
+      sync_status: 5,
+      team_id: 6,
+      action_count: 7,
+      resolved_count: 8
+    })
+  }),
+
   sheetAction: Object.freeze({
     fields: Object.freeze([
       'global_id',

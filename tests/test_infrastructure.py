@@ -40,6 +40,19 @@ ARCHIVE_HEADERS = [
     "Date Modified",
 ]
 
+TEAMDATA_HEADERS = ["Team Id", "Folder Id", "Contact"]
+
+DOCDATA_HEADERS = [
+    "FileId",
+    "Doc Name",
+    "Doc Modified",
+    "Doc Updated",
+    "SyncStatus",
+    "Team Id",
+    "Action Count",
+    "Resolved Count",
+]
+
 
 # ---------------------------------------------------------------------------
 # TriggerManager
@@ -131,6 +144,36 @@ class TestSheetHeaders:
         assert col_positions == sorted(col_positions), (
             f"Archive headers are not in the expected order. "
             f"Got positions: {list(zip(ARCHIVE_HEADERS, col_positions))}"
+        )
+
+    def test_teamdata_sheet_headers(self, test_sheet_id):
+        """'TeamData' tab must exist with the required headers in exact left-to-right order."""
+        xlsx = download_xlsx(test_sheet_id)
+        ws = load_sheet(xlsx, sheet_name="TeamData")
+        actual = headers(ws)
+
+        missing = [h for h in TEAMDATA_HEADERS if h not in actual]
+        assert not missing, f"TeamData tab missing headers: {missing}"
+
+        col_positions = [actual[h] for h in TEAMDATA_HEADERS]
+        assert col_positions == sorted(col_positions), (
+            f"TeamData headers are not in the expected order. "
+            f"Got positions: {list(zip(TEAMDATA_HEADERS, col_positions))}"
+        )
+
+    def test_docdata_sheet_headers(self, test_sheet_id):
+        """'DocData' tab must exist with the required headers in exact left-to-right order."""
+        xlsx = download_xlsx(test_sheet_id)
+        ws = load_sheet(xlsx, sheet_name="DocData")
+        actual = headers(ws)
+
+        missing = [h for h in DOCDATA_HEADERS if h not in actual]
+        assert not missing, f"DocData tab missing headers: {missing}"
+
+        col_positions = [actual[h] for h in DOCDATA_HEADERS]
+        assert col_positions == sorted(col_positions), (
+            f"DocData headers are not in the expected order. "
+            f"Got positions: {list(zip(DOCDATA_HEADERS, col_positions))}"
         )
 
 

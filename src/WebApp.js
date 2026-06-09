@@ -18,6 +18,10 @@
  *
  * @returns {{ eu: string, au: string }}
  */
+// 1-based column numbers from the authoritative schema — use these everywhere
+// instead of magic integers so a future column change only touches ContractSchema.js.
+var _ACOL = CONTRACT_SCHEMA.sheetAction.columnsByField;
+
 function _getIdentity() {
   var eu = ''; var au = '';
   try { eu = Session.getEffectiveUser().getEmail(); } catch (_) {}
@@ -276,12 +280,12 @@ function _handleUpsertActionRows(payload) {
                       newText  !== existing.action        ||
                       newStatus !== existing.status;
         if (changed) {
-          actionsSheet.getRange(r, 3).setValue(newId);
-          actionsSheet.getRange(r, 4).setValue(newEmail);
-          actionsSheet.getRange(r, 5).setValue(newName);
-          actionsSheet.getRange(r, 6).setValue(newText);
-          actionsSheet.getRange(r, 7).setValue(newStatus);
-          actionsSheet.getRange(r, 10).setValue(now);
+          actionsSheet.getRange(r, _ACOL.action_id).setValue(newId);
+          actionsSheet.getRange(r, _ACOL.assignee_email).setValue(newEmail);
+          actionsSheet.getRange(r, _ACOL.assignee_name).setValue(newName);
+          actionsSheet.getRange(r, _ACOL.action_text).setValue(newText);
+          actionsSheet.getRange(r, _ACOL.status).setValue(newStatus);
+          actionsSheet.getRange(r, _ACOL.modified_date).setValue(now);
           updated++;
         }
       } else {
@@ -328,14 +332,14 @@ function _loadExistingRowsByGlobalId(actionsSheet) {
     if (!globalId) continue;
     result[globalId] = {
       rowIndex:      i + 2,
-      fileId:        data[i][1],
-      id:            data[i][2],
-      assigneeEmail: data[i][3],
-      assigneeName:  data[i][4] || '',
-      action:        data[i][5],
-      status:        data[i][6],
-      dateModified:  data[i][9] instanceof Date ? data[i][9] : null,
-      syncStatus:    data[i][10] || ''
+      fileId:        data[i][_ACOL.file_id        - 1],
+      id:            data[i][_ACOL.action_id      - 1],
+      assigneeEmail: data[i][_ACOL.assignee_email - 1],
+      assigneeName:  data[i][_ACOL.assignee_name  - 1] || '',
+      action:        data[i][_ACOL.action_text    - 1],
+      status:        data[i][_ACOL.status         - 1],
+      dateModified:  data[i][_ACOL.modified_date  - 1] instanceof Date ? data[i][_ACOL.modified_date - 1] : null,
+      syncStatus:    data[i][_ACOL.sync_status    - 1] || ''
     };
   }
 
@@ -438,10 +442,10 @@ function _handleSyncActionRows(payload) {
     docStateIdentitySet[_rowIdentityKey(docRow.assigneeEmail, docRow.actionText, docRow.status)] = true;
   }
 
-  // Load col 8 formulas for orphan detection (need docId to match rows to this doc).
+  // Load document-formula column for orphan detection (need docId to match rows to this doc).
   var lastRow      = actionsSheet.getLastRow();
   var formulasCol7 = lastRow >= 2
-    ? actionsSheet.getRange(2, 8, lastRow - 1, 1).getFormulas()
+    ? actionsSheet.getRange(2, _ACOL.document_formula, lastRow - 1, 1).getFormulas()
     : [];
   var duplicateRowIndexes = [];
 
@@ -478,33 +482,33 @@ function _handleSyncActionRows(payload) {
           status:        existing.status
         });
         // Row synced successfully — clear any prior Sync Status.
-        actionsSheet.getRange(existing.rowIndex, 11).setValue('');
+        actionsSheet.getRange(existing.rowIndex, _ACOL.sync_status).setValue('');
       } else {
         // Doc is authoritative — update sheet row only when content values differ.
         var rowIdx     = existing.rowIndex;
         var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
         var correctId = _extractActionId(row.globalId);
         if (existing.id !== correctId) {
-          actionsSheet.getRange(rowIdx, 3).setValue(correctId);
+          actionsSheet.getRange(rowIdx, _ACOL.action_id).setValue(correctId);
         }
         if (existing.assigneeEmail !== row.assigneeEmail ||
             existing.assigneeName !== row.assigneeName ||
             existing.action !== row.actionText ||
             existing.status !== row.status) {
-          actionsSheet.getRange(rowIdx, 4).setValue(row.assigneeEmail || '');
-          actionsSheet.getRange(rowIdx, 5).setValue(row.assigneeName  || '');
-          actionsSheet.getRange(rowIdx, 6).setValue(row.actionText || '');
-          actionsSheet.getRange(rowIdx, 7).setValue(row.status     || 'Open');
-          actionsSheet.getRange(rowIdx, 10).setValue(now);
+          actionsSheet.getRange(rowIdx, _ACOL.assignee_email).setValue(row.assigneeEmail || '');
+          actionsSheet.getRange(rowIdx, _ACOL.assignee_name).setValue(row.assigneeName  || '');
+          actionsSheet.getRange(rowIdx, _ACOL.action_text).setValue(row.actionText || '');
+          actionsSheet.getRange(rowIdx, _ACOL.status).setValue(row.status || 'Open');
+          actionsSheet.getRange(rowIdx, _ACOL.modified_date).setValue(now);
           updated++;
         }
         var fIdx = rowIdx - 2;
         var existingFormula = (fIdx >= 0 && fIdx < formulasCol7.length) ? formulasCol7[fIdx][0] : '';
         if (existingFormula !== docFormula) {
-          actionsSheet.getRange(rowIdx, 8).setFormula(docFormula);
+          actionsSheet.getRange(rowIdx, _ACOL.document_formula).setFormula(docFormula);
         }
         if (existing.syncStatus !== '') {
-          actionsSheet.getRange(rowIdx, 11).setValue('');
+          actionsSheet.getRange(rowIdx, _ACOL.sync_status).setValue('');
         }
       }
     }
@@ -528,7 +532,7 @@ function _handleSyncActionRows(payload) {
 
         if (activeGlobalIdSet[gId]) continue; // still in the doc
 
-        actionsSheet.getRange(entry.rowIndex, 11).setValue('Deleted');
+        actionsSheet.getRange(entry.rowIndex, _ACOL.sync_status).setValue('Deleted');
         GasLogger.log('sync.info', { msg: 'Sync Status — Deleted', row: entry.rowIndex, globalId: gId });
       }
 
@@ -672,7 +676,7 @@ function _loadRowsForDocUrl(actionsSheet, docUrl) {
   var targetDocId = _extractDocIdFromString(docUrl);
   var numRows = lastRow - 1;
   var data = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
-  var formulas = actionsSheet.getRange(2, 8, numRows, 1).getFormulas();
+  var formulas = actionsSheet.getRange(2, _ACOL.document_formula, numRows, 1).getFormulas();
   var rows = [];
 
   for (var i = 0; i < data.length; i++) {
@@ -682,13 +686,13 @@ function _loadRowsForDocUrl(actionsSheet, docUrl) {
     }
 
     rows.push({
-      globalId: data[i][0] || '',
-      fileId: data[i][1] || '',
-      id: data[i][2] || '',
-      assigneeEmail: data[i][3] || '',
-      assigneeName: data[i][4] || '',
-      action: data[i][5] || '',
-      status: data[i][6] || 'Open'
+      globalId:     data[i][_ACOL.global_id      - 1] || '',
+      fileId:       data[i][_ACOL.file_id         - 1] || '',
+      id:           data[i][_ACOL.action_id       - 1] || '',
+      assigneeEmail:data[i][_ACOL.assignee_email  - 1] || '',
+      assigneeName: data[i][_ACOL.assignee_name   - 1] || '',
+      action:       data[i][_ACOL.action_text     - 1] || '',
+      status:       data[i][_ACOL.status          - 1] || 'Open'
     });
   }
 
@@ -715,14 +719,14 @@ function _handleMarkDocNotFound(payload) {
   }
 
   var numRows      = lastRow - 1;
-  var formulasCol7 = actionsSheet.getRange(2, 8, numRows, 1).getFormulas();
+  var formulasCol7 = actionsSheet.getRange(2, _ACOL.document_formula, numRows, 1).getFormulas();
   var marked       = 0;
 
   WriteGuard.wrapPersistent(function () {
     for (var i = 0; i < formulasCol7.length; i++) {
       var formula = formulasCol7[i][0] || '';
       if (formula.indexOf(docId) === -1) continue;
-      actionsSheet.getRange(i + 2, 11).setValue('Doc Not Found');
+      actionsSheet.getRange(i + 2, _ACOL.sync_status).setValue('Doc Not Found');
       marked++;
     }
   });
@@ -803,9 +807,9 @@ function _handlePatchActionStatus(payload) {
 
   var now = new Date();
   WriteGuard.wrapPersistent(function () {
-    actionsSheet.getRange(entry.rowIndex, 7).setValue(newStatus);  // Status
-    actionsSheet.getRange(entry.rowIndex, 10).setValue(now);       // Date Modified
-    actionsSheet.getRange(entry.rowIndex, 11).setValue('');        // clear Sync Status
+    actionsSheet.getRange(entry.rowIndex, _ACOL.status).setValue(newStatus);
+    actionsSheet.getRange(entry.rowIndex, _ACOL.modified_date).setValue(now);
+    actionsSheet.getRange(entry.rowIndex, _ACOL.sync_status).setValue('');
   });
 
   GasLogger.log('sidebar.status.patched', { globalId: globalId, newStatus: newStatus, row: entry.rowIndex });
@@ -858,20 +862,20 @@ function _handleEditActionRow(payload) {
 
   WriteGuard.wrapPersistent(function () {
     if (fields.assignee_email !== undefined) {
-      actionsSheet.getRange(rowIdx, 4).setValue(fields.assignee_email);
+      actionsSheet.getRange(rowIdx, _ACOL.assignee_email).setValue(fields.assignee_email);
     }
     if (fields.assignee_name !== undefined) {
-      actionsSheet.getRange(rowIdx, 5).setValue(fields.assignee_name);
+      actionsSheet.getRange(rowIdx, _ACOL.assignee_name).setValue(fields.assignee_name);
     }
     if (fields.action_text !== undefined) {
-      actionsSheet.getRange(rowIdx, 6).setValue(fields.action_text);
+      actionsSheet.getRange(rowIdx, _ACOL.action_text).setValue(fields.action_text);
     }
     if (fields.status !== undefined) {
-      actionsSheet.getRange(rowIdx, 7).setValue(fields.status);
+      actionsSheet.getRange(rowIdx, _ACOL.status).setValue(fields.status);
     }
     // Replicate onActionSheetEdit: stamp Date Modified + Sync Status = 'Dirty'.
-    actionsSheet.getRange(rowIdx, 10).setValue(now);
-    actionsSheet.getRange(rowIdx, 11).setValue('Dirty');
+    actionsSheet.getRange(rowIdx, _ACOL.modified_date).setValue(now);
+    actionsSheet.getRange(rowIdx, _ACOL.sync_status).setValue('Dirty');
   });
 
   // Re-read the row to return authoritative post-write state.
@@ -928,7 +932,7 @@ function _handleFindSheetActions(payload) {
 
   var numRows  = lastRow - 1;
   var data     = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
-  var formulas = actionsSheet.getRange(2, 8, numRows, 1).getFormulas();
+  var formulas = actionsSheet.getRange(2, _ACOL.document_formula, numRows, 1).getFormulas();
   var rows     = [];
 
   for (var i = 0; i < data.length; i++) {
@@ -937,24 +941,24 @@ function _handleFindSheetActions(payload) {
     var formulaDocId = _extractDocIdFromString(formula);
     if (docId && formulaDocId !== docId) continue;
 
-    var docName = _extractDocNameFromFormula(formula);
-    var createdRaw  = data[i][8];
-    var modifiedRaw = data[i][9];
+    var docName     = _extractDocNameFromFormula(formula);
+    var createdRaw  = data[i][_ACOL.created_date  - 1];
+    var modifiedRaw = data[i][_ACOL.modified_date  - 1];
 
     rows.push({
-      global_id:        data[i][0] || '',
-      file_id:          data[i][1] || '',
-      action_id:        data[i][2] || '',
-      assignee_email:   data[i][3] || '',
-      assignee_name:    data[i][4] || '',
-      action_text:      data[i][5] || '',
-      status:           data[i][6] || '',
+      global_id:        data[i][_ACOL.global_id      - 1] || '',
+      file_id:          data[i][_ACOL.file_id         - 1] || '',
+      action_id:        data[i][_ACOL.action_id       - 1] || '',
+      assignee_email:   data[i][_ACOL.assignee_email  - 1] || '',
+      assignee_name:    data[i][_ACOL.assignee_name   - 1] || '',
+      action_text:      data[i][_ACOL.action_text     - 1] || '',
+      status:           data[i][_ACOL.status          - 1] || '',
       document_formula: formula,
       doc_id:           formulaDocId,
       doc_name:         docName,
       created_date:     createdRaw  instanceof Date ? createdRaw.toISOString()  : (createdRaw  || ''),
       modified_date:    modifiedRaw instanceof Date ? modifiedRaw.toISOString() : (modifiedRaw || ''),
-      sync_status:      data[i][10] || ''
+      sync_status:      data[i][_ACOL.sync_status    - 1] || ''
     });
   }
 
@@ -1000,12 +1004,9 @@ function _handlePatchActionStatusAtdd(payload) {
 
   var now = new Date();
   WriteGuard.wrapPersistent(function () {
-    actionsSheet.getRange(entry.rowIndex, 6).setValue(newStatus);
-    // Stamp Dirty + Date Modified so the status change survives the next sync
-    // via sheet-wins, matching the observable behaviour of a real sidebar tap
-    // (onActionSheetEdit fires on col 6 edits and does the same stamp).
-    actionsSheet.getRange(entry.rowIndex, 9).setValue(now);
-    actionsSheet.getRange(entry.rowIndex, 10).setValue('Dirty');
+    actionsSheet.getRange(entry.rowIndex, _ACOL.status).setValue(newStatus);
+    actionsSheet.getRange(entry.rowIndex, _ACOL.modified_date).setValue(now);
+    actionsSheet.getRange(entry.rowIndex, _ACOL.sync_status).setValue('Dirty');
   });
 
   GasLogger.log('test.patch_action_status', { global_id: globalId, status: newStatus });
@@ -1049,7 +1050,7 @@ function _handleDeleteActionRowAtdd(payload) {
   }
 
   WriteGuard.wrapPersistent(function () {
-    actionsSheet.getRange(entry.rowIndex, 10).setValue('Deleted');
+    actionsSheet.getRange(entry.rowIndex, _ACOL.sync_status).setValue('Deleted');
   });
 
   GasLogger.log('test.delete_action_row', { global_id: globalId });

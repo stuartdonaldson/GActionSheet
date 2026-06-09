@@ -1775,3 +1775,38 @@ Realized fkl7.3: annotated ROADMAP.md with ADR-0013 review-fidelity pilot assign
 
 ### Key Learnings
 Fidelity-level annotation at planning time makes ADR-0013 pilot commitments visible to future agents and prevents drifting into unvalidated Spec assumptions when a concrete artifact (Slice) is required to surface design error.
+
+## 2026-06-06 11:22:29
+
+### Summary
+Completed EPIC-A slice-BUILD (GTaskSheet-5r4l.2): deployed columnsByField refactor + fixture column fixes + TeamData/DocData sheet structure. Ready for regression run.
+
+### Changes
+- **ContractSchema.js**: Added `sheetTeamData` and `sheetDocData` schemas (headers + columnsByField) as authoritative definitions alongside `sheetAction`
+- **SheetSetup.js**: Parameterized `_ensureHeaders(sheet, headers)`; extended `ensureSheetStructure()` to create and verify TeamData and DocData tabs; updated log output to include new row counts
+- **TestFixtures.js**: Added `_SF = CONTRACT_SCHEMA.sheetAction.columnsByField` alias in `setupTestFixtures`; added `_VF` alias in `verifyConsistencyForTest`; fixed 8 formula-column reads (hardcoded `7` → `_SF.document_formula`); fixed 4 five-column data reads extended to `_SF.action_text` (6) with matching `[4]` → `[_SF.action_text - 1]` index fixes; fixed uc_b and uc_b_conflict assignee/action array index reads in 4 locations; fixed all verifyConsistencyForTest sheetRow index assignments
+- **test_infrastructure.py**: Added `TEAMDATA_HEADERS` and `DOCDATA_HEADERS` constants; added `test_teamdata_sheet_headers` and `test_docdata_sheet_headers` test methods to `TestSheetHeaders`
+- **Deployed**: v0.2.1 Rev. Jun 6 2026 11:13 TEST
+
+### Key Learnings
+- The columnsByField refactor from the previous session was incomplete — TestFixtures.js had the same hardcoded column-number pattern in fixture read paths (formula column 7, data index [2]/[4]) that was already fixed in production GAS files. Consistency requires applying the same discipline to test infrastructure.
+- `verifyConsistencyForTest` array indices were all off by one after `File Id` insertion at column 2 (assigneeEmail was reading the action_id column, etc.) — silent failure with wrong data.
+- Terminology rule established: "smoke test" = standard `test:smoke` suite; EPIC-A invariant checks = "Epic-A slice smoke" (qualified by bead ID).
+
+## 2026-06-06 00:00:00
+
+### Summary
+Delivered GTaskSheet-80mo.10: reconciled README.md and DESIGN.md documentation with the as-built AI-N: token model. Updated action identification references from chip-led/named-range design (superseded by ADR-0008) to the current in-text `AI-N:` token identity mechanism. Restructured DESIGN.md §Test Model to reference the scn canonical journey + focused-test split, removing outdated setupTestFixtures()/one-test-per-UC framing.
+
+### Work Done
+- **README.md §How It Works** — rewritten to describe `AI-N:` token model; removed chip-led/named-range prose; clarified steps 1–6 with current token syntax and conflict-resolution behavior
+- **DESIGN.md §Test Model** — restructured Fixture Scope Architecture (Journey/Atomic distinction), documented Canonical Journey (§16.10 with Acts 1–5), reorganized Atomic Tests by concern, updated Anti-Patterns for HTTP-fixture approach
+- **DESIGN.md** — removed duplicate "Atomic Tests" section (old version remained after initial edit)
+- **CONTEXT.md** — updated UC-B precondition from "chip-led checklist paragraph" to "floating action paragraph (identified by AI-N: token)"; rewrote error handling from named-range re-anchoring to orphaned-row reconciliation via missing tokens; clarified quality goal 3 to reference `AI:` token syntax
+- **Verification** — ran grep searches to confirm no remaining "chip-led", "setupTestFixtures", "one-test-per-UC" references in key docs; verified AC1–AC3 satisfied
+- **Commit & Push** — dd835ba (docs reconciliation); pushed to remote; closed GTaskSheet-80mo.10
+
+### Key Learnings
+- The test-review document (2026-06-05-Test-Review.md §7) provided authoritative guidance on what contradictions existed; cross-referencing it ensured AC completeness
+- Terminology consistency across multiple documents (README, DESIGN, CONTEXT) requires careful coordination — a change in one file cascaded to clarifications in others
+- The AI-N: token model is the canonical identity mechanism; all prose referring to actions should emphasize the token, not the assignee chip

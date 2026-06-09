@@ -1,9 +1,9 @@
 /**
  * SheetSetup.js
  *
- * Creates or validates the "Actions" and "Archive" sheet tabs with the
- * required 10-column header row, bold/frozen row 1, and a basic filter.
- * Also resolves and persists the DOC_FOLDER_ID script property.
+ * Creates or validates the "Actions", "Archive", "TeamData", and "DocData"
+ * sheet tabs with the required header row, bold/frozen row 1, and a basic
+ * filter.  Also resolves and persists the DOC_FOLDER_ID script property.
  */
 
 // Column positions (1-based) are defined in ContractSchema.js.
@@ -29,22 +29,23 @@ function _getOrCreateSheet(ss, name) {
  * If row 1 already contains the correct headers this function is a no-op for
  * that sheet.
  *
- * @param {Sheet} sheet
+ * @param {Sheet}    sheet
+ * @param {string[]} headers  Expected header values in column order.
  */
-function _ensureHeaders(sheet) {
-  var headerRange = sheet.getRange(1, 1, 1, SHEET_HEADERS.length);
+function _ensureHeaders(sheet, headers) {
+  var headerRange = sheet.getRange(1, 1, 1, headers.length);
   var existing = headerRange.getValues()[0];
 
   var headersMatch = true;
-  for (var i = 0; i < SHEET_HEADERS.length; i++) {
-    if (existing[i] !== SHEET_HEADERS[i]) {
+  for (var i = 0; i < headers.length; i++) {
+    if (existing[i] !== headers[i]) {
       headersMatch = false;
       break;
     }
   }
 
   if (!headersMatch) {
-    headerRange.setValues([SHEET_HEADERS]);
+    headerRange.setValues([headers]);
     headerRange.setFontWeight('bold');
     sheet.setFrozenRows(1);
   }
@@ -52,7 +53,7 @@ function _ensureHeaders(sheet) {
   // Enable basic filter if not already present.
   if (!sheet.getFilter()) {
     var lastRow = Math.max(sheet.getLastRow(), 1);
-    var lastCol = SHEET_HEADERS.length;
+    var lastCol = headers.length;
     sheet.getRange(1, 1, lastRow, lastCol).createFilter();
   }
 }
@@ -80,28 +81,40 @@ function _resolveDocFolderId(ss) {
 }
 
 /**
- * Creates or validates the "Actions" and "Archive" tabs with headers and
- * filtering. Idempotent — safe to run multiple times.
+ * Creates or validates the "Actions", "Archive", "TeamData", and "DocData"
+ * tabs with headers and filtering. Idempotent — safe to run multiple times.
  */
 function ensureSheetStructure() {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    var actionsSheet = _getOrCreateSheet(ss, 'Actions');
-    var archiveSheet = _getOrCreateSheet(ss, 'Archive');
+    var actionsSheet  = _getOrCreateSheet(ss, 'Actions');
+    var archiveSheet  = _getOrCreateSheet(ss, 'Archive');
+    var teamDataSheet = _getOrCreateSheet(ss, 'TeamData');
+    var docDataSheet  = _getOrCreateSheet(ss, 'DocData');
     _getOrCreateSheet(ss, 'TestControl');
 
-    _ensureHeaders(actionsSheet);
-    _ensureHeaders(archiveSheet);
+    var actionHeaders   = CONTRACT_SCHEMA.sheetAction.headers.slice();
+    var teamDataHeaders = CONTRACT_SCHEMA.sheetTeamData.headers.slice();
+    var docDataHeaders  = CONTRACT_SCHEMA.sheetDocData.headers.slice();
+
+    _ensureHeaders(actionsSheet,  actionHeaders);
+    _ensureHeaders(archiveSheet,  actionHeaders);
+    _ensureHeaders(teamDataSheet, teamDataHeaders);
+    _ensureHeaders(docDataSheet,  docDataHeaders);
 
     _resolveDocFolderId(ss);
 
-    var actionsRows = Math.max(actionsSheet.getLastRow() - 1, 0); // exclude header
-    var archiveRows = Math.max(archiveSheet.getLastRow() - 1, 0);
+    var actionsRows  = Math.max(actionsSheet.getLastRow()  - 1, 0);
+    var archiveRows  = Math.max(archiveSheet.getLastRow()  - 1, 0);
+    var teamDataRows = Math.max(teamDataSheet.getLastRow() - 1, 0);
+    var docDataRows  = Math.max(docDataSheet.getLastRow()  - 1, 0);
 
     GasLogger.log('sheet.structure.ensured', {
-      actionsRows: actionsRows,
-      archiveRows: archiveRows
+      actionsRows:  actionsRows,
+      archiveRows:  archiveRows,
+      teamDataRows: teamDataRows,
+      docDataRows:  docDataRows
     });
   } finally {
     GasLogger.flush();

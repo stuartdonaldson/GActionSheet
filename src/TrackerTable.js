@@ -115,17 +115,18 @@ function _readTrackerSheetRows(ss, docId) {
 
   var numRows  = sheet.getLastRow() - 1;
   var data     = sheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
-  var formulas = sheet.getRange(2, 8, numRows, 1).getFormulas();
+  var _TC      = CONTRACT_SCHEMA.sheetAction.columnsByField;
+  var formulas = sheet.getRange(2, _TC.document_formula, numRows, 1).getFormulas();
   var result   = {};
 
   for (var i = 0; i < data.length; i++) {
     var formula = formulas[i][0] || '';
     if (formula.indexOf(docId) === -1) continue;
-    var globalId = data[i][0];
+    var globalId = data[i][_TC.global_id - 1];
     if (!globalId) continue;
     result[globalId] = {
-      id:     data[i][2],
-      status: data[i][6] || 'Open'
+      id:     data[i][_TC.action_id - 1],
+      status: data[i][_TC.status    - 1] || 'Open'
     };
   }
 

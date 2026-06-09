@@ -508,6 +508,7 @@ function setupTestFixtures(scenario, data) {
   var resolvedScenario = scenario || 'default';
   data = data || {};
   _TF_RESULT = null; // reset for this invocation
+  var _SF = CONTRACT_SCHEMA.sheetAction.columnsByField;
   try {
     // -- Read test IDs from script properties --------------------------------
     var props = PropertiesService.getScriptProperties();
@@ -1065,11 +1066,11 @@ function setupTestFixtures(scenario, data) {
             var ucbData    = ucbSheet.getRange(2, 1, ucbLastR - 1, SHEET_HEADERS.length).getValues();
             // Filter by testDocId (Document column formula) to avoid matching rows from prior
             // test sessions that accumulated in the sheet (accumulate-without-reset design).
-            var ucbDocFmls = ucbSheet.getRange(2, 7, ucbLastR - 1, 1).getFormulas();
+            var ucbDocFmls = ucbSheet.getRange(2, _SF.document_formula, ucbLastR - 1, 1).getFormulas();
             for (var ucbRi = 0; ucbRi < ucbData.length; ucbRi++) {
               if (ucbDocFmls[ucbRi][0].indexOf(testDocId) === -1) continue;
-              var ucbAssignee = ucbData[ucbRi][2]; // col C: Assignee Email
-              var ucbAction   = ucbData[ucbRi][4]; // col E: Action
+              var ucbAssignee = ucbData[ucbRi][_SF.assignee_email - 1];
+              var ucbAction   = ucbData[ucbRi][_SF.action_text - 1];
               if (ucbAssignee === 'jane.smith@example.com') {
                 if (ucbAction.indexOf(ucbPrefix + 'Schedule the follow-up') !== -1) {
                   // Var 4: Status Done → Closed; set Dirty so sheet wins conflict resolution.
@@ -1109,11 +1110,11 @@ function setupTestFixtures(scenario, data) {
           var ucbALastR = ucbASheet ? ucbASheet.getLastRow() : 1;
           if (ucbASheet && ucbALastR > 1) {
             var ucbAData    = ucbASheet.getRange(2, 1, ucbALastR - 1, SHEET_HEADERS.length).getValues();
-            var ucbADocFmls = ucbASheet.getRange(2, 7, ucbALastR - 1, 1).getFormulas();
+            var ucbADocFmls = ucbASheet.getRange(2, _SF.document_formula, ucbALastR - 1, 1).getFormulas();
             for (var ucbARi = 0; ucbARi < ucbAData.length; ucbARi++) {
               if (ucbADocFmls[ucbARi][0].indexOf(testDocId) === -1) continue;
-              var ucbAAssignee = ucbAData[ucbARi][2];
-              var ucbAAction   = ucbAData[ucbARi][4];
+              var ucbAAssignee = ucbAData[ucbARi][_SF.assignee_email - 1];
+              var ucbAAction   = ucbAData[ucbARi][_SF.action_text - 1];
               if (ucbAAssignee === 'bob_jones@example.com' &&
                   ucbAAction.indexOf(ucbPrefix + 'Review the Q2 report') !== -1) {
                 var ucbARow = ucbARi + 2;
@@ -1137,11 +1138,11 @@ function setupTestFixtures(scenario, data) {
           if (ucbCSheet && ucbCLastR > 1) {
             var ucbCData    = ucbCSheet.getRange(2, 1, ucbCLastR - 1, SHEET_HEADERS.length).getValues();
             // Filter by testDocId to avoid matching rows from prior sessions in the shared sheet.
-            var ucbCDocFmls = ucbCSheet.getRange(2, 7, ucbCLastR - 1, 1).getFormulas();
+            var ucbCDocFmls = ucbCSheet.getRange(2, _SF.document_formula, ucbCLastR - 1, 1).getFormulas();
             for (var ucbCRi = 0; ucbCRi < ucbCData.length; ucbCRi++) {
               if (ucbCDocFmls[ucbCRi][0].indexOf(testDocId) === -1) continue;
-              var ucbCAssignee = ucbCData[ucbCRi][2];
-              var ucbCAction   = ucbCData[ucbCRi][4];
+              var ucbCAssignee = ucbCData[ucbCRi][_SF.assignee_email - 1];
+              var ucbCAction   = ucbCData[ucbCRi][_SF.action_text - 1];
               if (ucbCAssignee === ucbEmail &&
                   ucbCAction.indexOf(ucbPrefix + 'Review the budget report') !== -1) {
                 // Stale sheet Date Modified far in the past so the doc edit wins.
@@ -1180,8 +1181,8 @@ function setupTestFixtures(scenario, data) {
             var ucbCData2 = ucbCSheet.getRange(2, 1, ucbCLastR - 1, SHEET_HEADERS.length).getValues();
             for (var ucbCRi2 = 0; ucbCRi2 < ucbCData2.length; ucbCRi2++) {
               if (ucbCDocFmls[ucbCRi2][0].indexOf(testDocId) === -1) continue;
-              if (ucbCData2[ucbCRi2][2] === 'jane.smith@example.com' &&
-                  ucbCData2[ucbCRi2][4].indexOf(ucbPrefix + 'Schedule the follow-up') !== -1) {
+              if (ucbCData2[ucbCRi2][_SF.assignee_email - 1] === 'jane.smith@example.com' &&
+                  ucbCData2[ucbCRi2][_SF.action_text - 1].indexOf(ucbPrefix + 'Schedule the follow-up') !== -1) {
                 var ucbCRowB = ucbCRi2 + 2;
                 WriteGuard.wrap(function () {
                   ucbCSheet.getRange(ucbCRowB, 7).setValue('Closed');
@@ -1254,11 +1255,11 @@ function setupTestFixtures(scenario, data) {
         var ucCRefActSheet = ss.getSheetByName('Actions');
         var ucCRefLastR    = ucCRefActSheet ? ucCRefActSheet.getLastRow() : 1;
         if (ucCRefActSheet && ucCRefLastR > 1) {
-          var ucCRefData = ucCRefActSheet.getRange(2, 1, ucCRefLastR - 1, 5).getValues();
-          var ucCRefFmls = ucCRefActSheet.getRange(2, 7, ucCRefLastR - 1, 1).getFormulas();
+          var ucCRefData = ucCRefActSheet.getRange(2, 1, ucCRefLastR - 1, _SF.action_text).getValues();
+          var ucCRefFmls = ucCRefActSheet.getRange(2, _SF.document_formula, ucCRefLastR - 1, 1).getFormulas();
           for (var ucCRefI = 0; ucCRefI < ucCRefData.length; ucCRefI++) {
             if (ucCRefFmls[ucCRefI][0].indexOf(testDocId) !== -1 &&
-                (ucCRefData[ucCRefI][4] || '').indexOf('UCC-REFRESH: Approve') !== -1) {
+                (ucCRefData[ucCRefI][_SF.action_text - 1] || '').indexOf('UCC-REFRESH: Approve') !== -1) {
               var ucCRefRowNum = ucCRefI + 2;
               WriteGuard.wrap(function () {
                 ucCRefActSheet.getRange(ucCRefRowNum, 7).setValue('Closed');
@@ -1385,11 +1386,11 @@ function setupTestFixtures(scenario, data) {
         var ssDelLastRow = ssDelSheet ? ssDelSheet.getLastRow() : 1;
         var ssDelNRId    = null;
         if (ssDelSheet && ssDelLastRow > 1) {
-          var ssDelSheetData = ssDelSheet.getRange(2, 1, ssDelLastRow - 1, 5).getValues();
-          var ssDelSheetFmls = ssDelSheet.getRange(2, 7, ssDelLastRow - 1, 1).getFormulas();
+          var ssDelSheetData = ssDelSheet.getRange(2, 1, ssDelLastRow - 1, _SF.action_text).getValues();
+          var ssDelSheetFmls = ssDelSheet.getRange(2, _SF.document_formula, ssDelLastRow - 1, 1).getFormulas();
           for (var sdi = 0; sdi < ssDelSheetData.length; sdi++) {
             if (ssDelSheetFmls[sdi][0].indexOf(testDocId) !== -1 &&
-                (ssDelSheetData[sdi][4] || '').indexOf('SS-DEL:') !== -1) {
+                (ssDelSheetData[sdi][_SF.action_text - 1] || '').indexOf('SS-DEL:') !== -1) {
               ssDelNRId = ssDelSheetData[sdi][0]; // col 1 = globalId
               break;
             }
@@ -1485,11 +1486,11 @@ function setupTestFixtures(scenario, data) {
         var ssRecSheet = ss.getSheetByName('Actions');
         var ssRecLastR = ssRecSheet ? ssRecSheet.getLastRow() : 1;
         if (ssRecSheet && ssRecLastR > 1) {
-          var ssRecData = ssRecSheet.getRange(2, 1, ssRecLastR - 1, 5).getValues();
-          var ssRecFmls = ssRecSheet.getRange(2, 7, ssRecLastR - 1, 1).getFormulas();
+          var ssRecData = ssRecSheet.getRange(2, 1, ssRecLastR - 1, _SF.action_text).getValues();
+          var ssRecFmls = ssRecSheet.getRange(2, _SF.document_formula, ssRecLastR - 1, 1).getFormulas();
           for (var ssRecI = 0; ssRecI < ssRecData.length; ssRecI++) {
             if (ssRecFmls[ssRecI][0].indexOf(testDocId) !== -1 &&
-                (ssRecData[ssRecI][4] || '').indexOf('SS-REC:') !== -1) {
+                (ssRecData[ssRecI][_SF.action_text - 1] || '').indexOf('SS-REC:') !== -1) {
               var ssRecRowNum = ssRecI + 2;
               WriteGuard.wrap(function () {
                 ssRecSheet.getRange(ssRecRowNum, 11).setValue('Deleted');
@@ -1573,11 +1574,11 @@ function setupTestFixtures(scenario, data) {
         var ssArchLastR   = ssArchSheet ? ssArchSheet.getLastRow() : 1;
         var ssArchOldDate = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000);
         if (ssArchSheet && ssArchLastR > 1) {
-          var ssArchData = ssArchSheet.getRange(2, 1, ssArchLastR - 1, 5).getValues();
-          var ssArchFmls = ssArchSheet.getRange(2, 7, ssArchLastR - 1, 1).getFormulas();
+          var ssArchData = ssArchSheet.getRange(2, 1, ssArchLastR - 1, _SF.action_text).getValues();
+          var ssArchFmls = ssArchSheet.getRange(2, _SF.document_formula, ssArchLastR - 1, 1).getFormulas();
           for (var ssArchI = 0; ssArchI < ssArchData.length; ssArchI++) {
             if (ssArchFmls[ssArchI][0].indexOf(testDocId) !== -1 &&
-                (ssArchData[ssArchI][4] || '').indexOf('SS-ARCH:') !== -1) {
+                (ssArchData[ssArchI][_SF.action_text - 1] || '').indexOf('SS-ARCH:') !== -1) {
               var ssArchRowNum = ssArchI + 2;
               WriteGuard.wrap(function () {
                 ssArchSheet.getRange(ssArchRowNum, 7).setValue('Closed');
@@ -1832,6 +1833,23 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'backdate_action_row': {
+        var backdateGlobalId = data.globalId || '';
+        var daysAgo = data.daysAgo != null ? Number(data.daysAgo) : 35;
+        if (!backdateGlobalId) throw new Error('backdate_action_row: globalId required');
+        var actionsSheet = ss.getSheetByName('Actions');
+        if (!actionsSheet) throw new Error('backdate_action_row: Actions sheet not found');
+        var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+        var backdateEntry = existingMap[backdateGlobalId];
+        if (!backdateEntry) throw new Error('backdate_action_row: row not found for globalId=' + backdateGlobalId);
+        var backdateDate = new Date();
+        backdateDate.setDate(backdateDate.getDate() - daysAgo);
+        actionsSheet.getRange(backdateEntry.rowIndex, _ACOL.modified_date).setValue(backdateDate);
+        _TF_RESULT = { tag: 'fixture.backdate_action_row', data: { globalId: backdateGlobalId, daysAgo: daysAgo } };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'seed_row': {
         _tfAppendSheetRow(ss, _tfSheetRow({
           id:            data.actionId        || 1,
@@ -2072,21 +2090,22 @@ function verifyConsistencyForTest(docId) {
     if (actionsSheet && actionsSheet.getLastRow() > 1) {
       var numRows = actionsSheet.getLastRow() - 1;
       var data     = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
-      var formulas = actionsSheet.getRange(2, 7, numRows, 1).getFormulas();
+      var _VF = CONTRACT_SCHEMA.sheetAction.columnsByField;
+      var formulas = actionsSheet.getRange(2, _VF.document_formula, numRows, 1).getFormulas();
       for (var i = 0; i < data.length; i++) {
         var formula = formulas[i][0] || '';
         // Extract display name from =HYPERLINK("url","title")
         var titleMatch = formula.match(/HYPERLINK\s*\(\s*"[^"]*"\s*,\s*"([^"]*)"\s*\)/i);
         sheetRows.push({
-          globalId: data[i][0] ? String(data[i][0]) : '',
-          id:           data[i][1] || '',
-          assigneeEmail: data[i][2] || '',
-          assigneeName:  data[i][3] || '',
-          action:        data[i][4] || '',
-          status:        data[i][5] || 'Open',
+          globalId:      data[i][_VF.global_id       - 1] ? String(data[i][_VF.global_id - 1]) : '',
+          id:            data[i][_VF.action_id       - 1] || '',
+          assigneeEmail: data[i][_VF.assignee_email  - 1] || '',
+          assigneeName:  data[i][_VF.assignee_name   - 1] || '',
+          action:        data[i][_VF.action_text     - 1] || '',
+          status:        data[i][_VF.status          - 1] || 'Open',
           docTitle:      titleMatch ? titleMatch[1] : '',
-          dateCreated:   data[i][7],
-          dateModified:  data[i][8]
+          dateCreated:   data[i][_VF.created_date    - 1],
+          dateModified:  data[i][_VF.modified_date   - 1]
         });
       }
     }
