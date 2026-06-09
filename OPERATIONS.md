@@ -121,6 +121,20 @@ npm run test:smoke   # Playwright smoke test (requires sheet URL configured)
 GAS test invocation: open the ActionSheet in Sheets, use the **Action Sync**
 custom menu. See the `gas-test-invocation` bd memory for selector details.
 
+### AC Coverage Check (T24 Step 3)
+
+After running tests, check AC coverage against the authoritative registry:
+
+```bash
+python scripts/check_coverage.py               # Brief report; exit 1 if gaps exist
+python scripts/check_coverage.py --verbose     # Show covered, warn-only, and uncovered ACs
+```
+
+This diff's JUnit properties (`ac.*` tags emitted by `ScenarioSession.checkpoint()`)
+against the AC registry in `scn/contract.AC_REGISTRY`. Uncovered ACs indicate missing
+test scenarios and block the build if used in CI. The registry lives in `scn/contract.py`
+and is co-located with the contract for drift detection.
+
 ## Consistency Verification
 
 Consistency verification ensures that actions are correctly synchronized across the Document, ActionSheet, and Tracker table. There are three classes of verification:

@@ -44,6 +44,32 @@ MESSAGES: dict = dict(_web_app.get("messages", {}))
 MODEL_NAMES: list[str] = list(_doc_read.get("modelNames", []))
 
 
+# Acceptance Criteria Registry (T24 traceability — see GTaskSheet-1wuu)
+# Maps AC identifier to description. Used by scripts/check_coverage.py to validate test coverage.
+AC_REGISTRY: dict[str, str] = {
+    "b7 write-edit": "B7 action edit via web form",
+    "b7 write-status": "B7 action status change via web form",
+    "journey idempotent": "Journey idempotency across operations",
+    "journey status-change": "Journey status change propagation",
+    "journey sync-create": "Journey create action → doc+sheet sync",
+    "journey tracker-present": "Journey tracker field presence",
+    "journey ui-create": "Journey UI create form",
+    "sidebar mutation-baseline": "Sidebar baseline state after mutations",
+    "sidebar mutation-changed": "Sidebar state change tracking",
+    "sidebar sync-SHEET": "Sidebar SHEET surface sync",
+    "sidebar tracker-insert": "Sidebar tracker insert operation",
+    "t": "Generic test marker",
+    "uc AC-1": "Use case AC-1",
+    "uc AC-2": "Use case AC-2",
+    "uc TEST": "Use case test marker",
+    "uc1 AC1": "Use case 1 AC1",
+    "uc1 AC2": "Use case 1 AC2",
+    "uc1 AC3": "Use case 1 AC3",
+    "uc1 AC4": "Use case 1 AC4",
+    "t1": "Test scenario 1",
+    "t2": "Test scenario 2",
+}
+
 __all__ = [
     "ACTION_ITEM_FIELDS",
     "SHEET_ACTION_FIELDS",
@@ -54,4 +80,5 @@ __all__ = [
     "TEST_ROUTE_NAMES",
     "MESSAGES",
     "MODEL_NAMES",
+    "AC_REGISTRY",
 ]
