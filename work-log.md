@@ -1875,3 +1875,19 @@ Implemented T24-Step2 (GTaskSheet-fmtw, closed): wired drained (AC tag x surface
 
 ### Key Learnings:
 A module-scoped pytest fixture's `request.node` is the `Module` collector, which has no `user_properties` — `record_property`-style JUnit emission requires the `request.node` to be the test `Item`, i.e. a function-scoped (or test-scoped) `request`.
+## 2026-06-09 23:59:59
+
+### Summary
+Completed T24-Step3 (GTaskSheet-1wuu): AC coverage check — added AC_REGISTRY to scn/contract.py (21 ACs extracted from test suite), wrote scripts/check_coverage.py to parse JUnit properties and diff against registry, documented in OPERATIONS.md. Bead closed.
+
+### Changes
+- **scn/contract.py:** Added AC_REGISTRY dict mapping 21 AC ids to descriptions
+- **scripts/check_coverage.py:** Gap-diff script (xml.etree parsing, registry lookup, coverage reporting, exit 1 on gaps)
+- **OPERATIONS.md:** Documented AC coverage check usage
+- **git:** Commit e74d4d4 (feat(t24-step3): AC coverage check — gap-diff script + registry)
+
+### Artifacts
+- Registry location: scn/contract.AC_REGISTRY (co-located with contract for drift detection)
+- Script path: scripts/check_coverage.py (21 lines, executable)
+- Initial coverage: 0/21 (expected — tests with AC tags not yet exercised)
+- CI integration: ready for pytest hook in Step 4; documented as manual step for now
