@@ -1891,3 +1891,32 @@ Completed T24-Step3 (GTaskSheet-1wuu): AC coverage check — added AC_REGISTRY t
 - Script path: scripts/check_coverage.py (21 lines, executable)
 - Initial coverage: 0/21 (expected — tests with AC tags not yet exercised)
 - CI integration: ready for pytest hook in Step 4; documented as manual step for now
+
+## 2026-06-09 16:42:48
+
+### Summary:
+T24-Step4 (GTaskSheet-5a6x) — analysis + documentation close-out for the T24
+generated-traceability implementation (Steps 1-3). Synthesized the three Step
+bead notes against T24's design intent and revised the principle's status from
+"provisional — no reference implementation" to "reference implementation exists
+— GActionSheet 2026-06-09; not yet fully ratified" in both
+DevStandard sdlc-testing-principles.md and bdd/README.md. Updated
+docs/atdd/ID-map.md §Open follow-ups to describe the built artifacts (drain()
+records, ScenarioSession.checkpoint() ac.<tag>.<surface> JUnit properties,
+scn/contract.AC_REGISTRY=21, scripts/check_coverage.py, tag format
+[<scenario> <ac-label>]) plus the two remaining gaps. Closed GTaskSheet-ym61
+(superseded by the 2026-06-09 archive). Scanned GTaskSheet-80mo and
+GTaskSheet-w6vg — no overlap with Steps 1-3; left open.
+
+### Key Learnings:
+- The T24 design needed NO correction — emission keyed on the drained
+  expectation worked exactly as the principle specified. The provisional marker
+  did its job: it surfaced two *completeness* gaps that refine T24's "done"
+  criteria, not the principle itself.
+- Not marked fully ratified: (1) the loop has never been run end-to-end against
+  a live test (mechanism verified only via an isolated pytest harness, so 0/21
+  ACs currently show covered); (2) the gap-diff covers the AC registry only —
+  the entry-point half (T17) is unbuilt. Registry is 21 entries (>=5, not thin),
+  but real coverage is 0.
+- CLAUDE.md §Testing Strategy needed no edit: it cites T1-T24 + ID-map as the
+  authoritative source, and none of the Steps 1-3 paths are referenced there.
