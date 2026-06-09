@@ -125,7 +125,7 @@ def test_journey(scn):
     assert backlogged.action_id is not None, "backlogged action not found in sheet after sync"
 
     for a in (unassigned, with_email, explicit_5, domain_usr, started_ip, backlogged):
-        scn.verify_all_expectations(a)     # doc+sheet (+tracker when present); all fields
+        scn.verify_all_expectations(a, tag="[journey sync-create]")     # doc+sheet (+tracker when present); all fields
     scn.verify_consistency(scope=DOC)      # §16.7 checklist + chip integrity (6ov.8)
     scn.checkpoint(INTEGRITY)             # capture docx+xlsx; drain the above
 
@@ -143,7 +143,7 @@ def test_journey(scn):
         scn.insert_tracker()
     scn.sync()
     for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
-        scn.verify(a, on=TRACKER)          # column form; assignee as chip
+        scn.verify(a, on=TRACKER, tag="[journey tracker-present]")          # column form; assignee as chip
     scn.checkpoint(STEP)
 
     # rwz AC4: tracker ID cells are hyperlinked to chip URLs
@@ -189,8 +189,8 @@ def test_journey(scn):
 
     if _act4_done:
         # action_id left UNSET — next id is ambiguous after AI-1,2,5,9; resolved at D3 below
-        scn.verify(created, on=DOC, status="Open")               # cheap doc probe, now
-        scn.verify(created, on=SHEET, status="Open", at=INTEGRITY)  # async sheet write → defer
+        scn.verify(created, on=DOC, status="Open", tag="[journey ui-create]")               # cheap doc probe, now
+        scn.verify(created, on=SHEET, status="Open", at=INTEGRITY, tag="[journey ui-create]")  # async sheet write → defer
 
         # D1: drain the Open SHEET expectation before set_status changes it (Coordination Log)
         scn.checkpoint(INTEGRITY)
@@ -227,9 +227,9 @@ def test_journey(scn):
         scn.ui.set_status(card, "In Progress")  # click; driver waits out gray/busy (≤10s)
         created.status = "In Progress"
 
-        scn.verify(created, on=Surface.UI, within="10s")            # enqueue; bounded live poll
+        scn.verify(created, on=Surface.UI, within="10s", tag="[journey status-change]")            # enqueue; bounded live poll
         scn.checkpoint(STEP, on=frozenset({Surface.UI}))            # drain UI live, in-browser
-        scn.verify(created, on=SHEET, at=INTEGRITY)                 # durable, async (13–60s) → defer
+        scn.verify(created, on=SHEET, at=INTEGRITY, tag="[journey status-change]")                 # durable, async (13–60s) → defer
 
         # ── Final reconcile (HTTP phase) — settle every deferred expectation ──
         scn.checkpoint(INTEGRITY)         # docx+xlsx+tracker+consistency; queue empty at close
@@ -240,7 +240,7 @@ def test_journey(scn):
     if _act4_done:
         _idempotency_set = _idempotency_set + (created,)
     for a in _idempotency_set:
-        scn.verify_all_expectations(a)
+        scn.verify_all_expectations(a, tag="[journey idempotent]")
     scn.checkpoint(INTEGRITY)
 
     # ── ckj: M2 sheet consistency after idempotency pass ─────────────────────

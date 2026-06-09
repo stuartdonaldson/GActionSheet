@@ -87,7 +87,7 @@ def test_sidebar_bootstrap_sync(settings, browser_page):
         # Bootstrap uniqueness is the (0)->(N) refresh; individual row correctness
         # is verified via SHEET (no tracker in this fixture path; G1 binding).
         for a in anchored:
-            s.verify(a, on=SHEET)
+            s.verify(a, on=SHEET, tag="[sidebar sync-SHEET]")
         s.verify_consistency(scope=DOC)   # server authority: ok, 0 issues
         s.checkpoint(INTEGRITY)
     finally:
@@ -124,7 +124,7 @@ def test_tracker_insert_button(settings, browser_page):
         # GAS verify_consistency call below — avoids the docx export cache lag that
         # affects direct verify(on=TRACKER) reads right after _insertTrackerIdLinks.
         for a in anchored:
-            s.verify(a, on=SHEET)
+            s.verify(a, on=SHEET, tag="[sidebar tracker-insert]")
         s.verify_consistency(scope=DOC)   # live GAS: tracker==floating==matched, 0 issues
         s.checkpoint(INTEGRITY)
     finally:
@@ -163,7 +163,7 @@ def test_status_mutation_only_mutated_row(settings, browser_page):
 
         # Baseline: verify all 3 tracker rows then check consistency
         for a in (a1, a2, a3):
-            s.verify(a, on=TRACKER)
+            s.verify(a, on=TRACKER, tag="[sidebar mutation-baseline]")
         s.verify_consistency(scope=DOC)
         s.checkpoint(INTEGRITY)
 
@@ -186,8 +186,8 @@ def test_status_mutation_only_mutated_row(settings, browser_page):
 
         # Only-mutated-row: unchanged ais at baseline status; changed at new_status
         for a in (a2, a3):
-            s.verify(a, on=TRACKER)                          # must hold baseline
-        s.verify(changed, on=TRACKER, status=new_status)     # must hold new
+            s.verify(a, on=TRACKER, tag="[sidebar mutation-baseline]")                          # must hold baseline
+        s.verify(changed, on=TRACKER, status=new_status, tag="[sidebar mutation-changed]")     # must hold new
         s.verify_consistency(scope=DOC)
         s.checkpoint(INTEGRITY)   # drains all three; unchanged rows must not drift
     finally:

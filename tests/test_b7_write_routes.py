@@ -112,8 +112,8 @@ def test_b7_write_routes(scn):
 
     # Defer full surface verification to INTEGRITY (sheet-wins only after sync)
     target_edit.status = "In Progress"
-    scn.verify(target_edit, on=DOC, at=INTEGRITY)   # doc paragraph must reflect new status
-    scn.verify(target_edit, on=SHEET, at=INTEGRITY) # sheet row: status="In Progress", Dirty cleared
+    scn.verify(target_edit, on=DOC, at=INTEGRITY, tag="[b7 write-edit]")   # doc paragraph must reflect new status
+    scn.verify(target_edit, on=SHEET, at=INTEGRITY, tag="[b7 write-edit]") # sheet row: status="In Progress", Dirty cleared
 
     scn.sync()                              # Dirty → sheetWins flush; doc paragraph updated
     scn.checkpoint(INTEGRITY)              # drain: DOC + SHEET expectations for target_edit
@@ -139,8 +139,8 @@ def test_b7_write_routes(scn):
 
     # Durable outcomes deferred to INTEGRITY (async; not resolved until sync drains queue)
     target_status.status = "In Progress"
-    scn.verify(target_status, on=SHEET, at=INTEGRITY)  # sheet receives the status
-    scn.verify(target_status, on=DOC, at=INTEGRITY)    # doc paragraph updated
+    scn.verify(target_status, on=SHEET, at=INTEGRITY, tag="[b7 write-status]")  # sheet receives the status
+    scn.verify(target_status, on=DOC, at=INTEGRITY, tag="[b7 write-status]")    # doc paragraph updated
 
     scn.sync()                              # forces convergence (§16.11 #4: queue drains)
     scn.checkpoint(INTEGRITY)              # drain: SHEET + DOC expectations for target_status
