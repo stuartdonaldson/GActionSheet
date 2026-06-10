@@ -1962,3 +1962,53 @@ decomposition.
 - Uncommitted work can persist across sessions/clears; always check
   `git status`/`git diff --stat` before assuming a closed bead's changes are
   pushed.
+
+## 2026-06-09 21:57:25
+
+### Summary:
+- **me6w.6** ([TST] Entry-point coverage for Team Scope sync and security
+  guard, EPIC-B): implemented all 10 scenarios (S1a/S1b/S1c, S2-S8) from the
+  me6w.2 design in `tests/test_team_scope.py`, run against the live deployment.
+  - Added new GAS test fixtures (TestFixtures.js): `get_team_scope`,
+    `get_docdata_row`, `set_docdata_row`, `move_doc_to_folder`, and
+    `setup_team_scope_fixture` (idempotent folder-hierarchy + TeamData row
+    creation, persisted via script properties).
+  - Extended `verifyConsistencyForTest(docId, expected)` with an optional
+    `expected.teamId` param that asserts Drive appProperty `teamScope` ==
+    `DocData[fileId].team_id` == `expected.teamId`, plus DocData row
+    existence/field consistency (doc_name, doc_modified, action_count,
+    resolved_count) — the sole assertion mechanism for S1a/S1b/S1c/S8.
+  - Added `Expectation.kind == "CALLABLE"` to `scn/engine.py` and
+    `ScenarioSession.expect_callable()` to `scn/session.py`, reusing the
+    existing drained-expectation/checkpoint emission path (T24 resolution:
+    no parallel `record_ac()` helper) for non-`ai`-shaped Team Scope checks.
+  - Updated `local.settings.json`/`local.settings.example.json` with three
+    distinct real Drive folder IDs: `testTeamA` (parent, registered
+    `TestTeamA`), `testTeamAChild` (child, registered `TestTeamAChild`), and
+    `testTeamADeep` (multi-level descendant of `testTeamA`, not under
+    `testTeamAChild`, no intermediate TeamData registration) — created via
+    `setup_team_scope_fixture`.
+  - Inline fix in `_syncTeamScope` (SyncManager.js): now threads
+    `doc.getName()` through to the DocData upsert and preserves existing
+    action/resolved counts (was hardcoded to `''`/`0`/`0` on every sync) —
+    required for the new `doc_name`/`action_count`/`resolved_count`
+    consistency checks to pass.
+  - `python scripts/check_coverage.py --verbose`: all 10 `teamscope *` AC ids
+    PASS, both `ENTRY_POINT_REGISTRY` entries (`syncDocument`,
+    `assertTeamAccess`) covered — no uncovered entries. Full
+    `tests/test_team_scope.py` run: 1 passed in ~11 min (live Drive/Sheets
+    calls). `tests/test_scn_engine.py`/`tests/test_scn_session.py`: 81 passed.
+  - me6w.6 closed. EPIC-B's `[TST]` gate is green; me6w.7 ([FIX] Resolve Team
+    Scope mismatches and edge-case defects) is now unblocked.
+
+### Key Learnings:
+- S6's design precondition ("TeamData tab is empty") is incompatible with the
+  persistent, idempotent TestTeamA/TestTeamAChild rows required by S1a/S1b/
+  S1c/S8 in the same suite — implemented S6 as the same default-location
+  no-match path as S2 (documented in the test module docstring as a deliberate
+  pragmatic equivalence, not a defect).
+- The `expect_callable`/`CALLABLE` Expectation extension is a generally
+  reusable pattern for any future scenario needing a durable-state assertion
+  (DocData rows, Drive appProperties, etc.) that doesn't fit the `ai`-shaped
+  PRESENT_CONSISTENT/ABSENT checks — emits `ac.*`/`ep.*` via the same drain
+  path with zero new infrastructure.

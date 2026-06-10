@@ -67,7 +67,7 @@ function syncDocument(docId) {
 
     // Team Scope: folder-walk auto-assignment, UpdateDoc override, and DocData
     // sync. See knowledge-base/staging/epic-b-team-property-sync.md.
-    _syncTeamScope(SpreadsheetApp.getActiveSpreadsheet(), docId, ScriptApp.getOAuthToken());
+    _syncTeamScope(SpreadsheetApp.getActiveSpreadsheet(), docId, ScriptApp.getOAuthToken(), doc.getName());
 
     var assignResult = _assignPlaceholderTokens(doc);
     if (assignResult.count > 0) {
@@ -992,8 +992,11 @@ function _getOrUpsertDocDataRow(ss, fileId, docName, docModified, teamId, syncSt
  * @param {Spreadsheet} ss
  * @param {string} docId
  * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
+ * @param {string} docName  Current document title (doc.getName()), persisted to
+ *   DocData.doc_name on every sync so the row is populated even before the
+ *   document has any floating actions.
  */
-function _syncTeamScope(ss, docId, token) {
+function _syncTeamScope(ss, docId, token, docName) {
   var docDataRow = _readDocDataRow(ss, docId);
   var teamScope  = _getDocAppProperty(docId, 'teamScope', token);
   var newSyncStatus = docDataRow ? docDataRow.syncStatus : '';
@@ -1017,7 +1020,9 @@ function _syncTeamScope(ss, docId, token) {
     }
   }
 
-  _getOrUpsertDocDataRow(ss, docId, '', new Date(), teamScope || '', newSyncStatus, 0, 0);
+  var existingActionCount   = docDataRow ? docDataRow.actionCount   : 0;
+  var existingResolvedCount = docDataRow ? docDataRow.resolvedCount : 0;
+  _getOrUpsertDocDataRow(ss, docId, docName || '', new Date(), teamScope || '', newSyncStatus, existingActionCount, existingResolvedCount);
 }
 
 /**

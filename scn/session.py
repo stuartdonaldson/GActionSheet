@@ -469,6 +469,39 @@ class ScenarioSession:
         )
         self._enqueue(exp)
 
+    def expect_callable(
+        self,
+        check: "Callable[[], str | None]",
+        *,
+        on: Surface,
+        at=AUTO,
+        severity: Severity = Severity.FAIL,
+        tag: str = "",
+        entry_point: str = "",
+    ) -> None:
+        """Enqueue a generic drained expectation backed by a zero-arg check callable.
+
+        `check()` is called at drain time; return None for pass, or an error string
+        for failure. Reuses the standard checkpoint/drain mechanism (and its
+        ac.<tag>.<surface> / ep.<entry_point>.<surface> emission) for expectations
+        that aren't ai-shaped — e.g. Team Scope / DocData state (GTaskSheet-me6w.6,
+        T24 resolution: no parallel emission path).
+        """
+        exp = Expectation(
+            seq=self._seq,
+            expected={"check": check},
+            surfaces=frozenset({on}),
+            remaining={on},
+            target=at,
+            kind="CALLABLE",
+            within=None,
+            severity=severity,
+            needs_consistency=False,
+            tag=tag or _current_test_tag(),
+            entry_point=entry_point,
+        )
+        self._enqueue(exp)
+
     # ------------------------------------------------------------------
     # UI expectations — convenience wrappers that delegate to scn.ui (§16.8)
     # ------------------------------------------------------------------

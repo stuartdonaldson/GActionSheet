@@ -1819,7 +1819,138 @@ function setupTestFixtures(scenario, data) {
       case 'verify_consistency': {
         _TF_RESULT = {
           tag: 'fixture.verify_consistency',
-          data: verifyConsistencyForTest(testDocId)
+          data: verifyConsistencyForTest(testDocId, data.expected || null)
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'get_team_scope': {
+        // Returns the document's Drive appProperty 'teamScope' (GTaskSheet-me6w.6).
+        var gtsDocId = data.docId || testDocId;
+        var gtsToken = ScriptApp.getOAuthToken();
+        _TF_RESULT = {
+          tag: 'fixture.get_team_scope',
+          data: { teamScope: _getDocAppProperty(gtsDocId, 'teamScope', gtsToken) || '' }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'get_docdata_row': {
+        // Returns the DocData row for fileId (default testDocId), or null (GTaskSheet-me6w.6).
+        var gddFileId = data.fileId || testDocId;
+        _TF_RESULT = {
+          tag: 'fixture.get_docdata_row',
+          data: { row: _readDocDataRow(ss, gddFileId) }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'set_docdata_row': {
+        // Upserts a DocData row, overriding only the fields supplied (GTaskSheet-me6w.6).
+        // Used to set up the UpdateDoc-override scenarios (S3/S7) on a row already
+        // created by a prior sync.
+        var sdrFileId = data.fileId || testDocId;
+        var sdrExisting = _readDocDataRow(ss, sdrFileId) || {
+          docName: '', docModified: new Date(), syncStatus: '', teamId: '',
+          actionCount: 0, resolvedCount: 0
+        };
+        var sdrTeamId     = data.hasOwnProperty('teamId')     ? data.teamId     : sdrExisting.teamId;
+        var sdrSyncStatus = data.hasOwnProperty('syncStatus') ? data.syncStatus : sdrExisting.syncStatus;
+        var sdrUpdated = _getOrUpsertDocDataRow(
+          ss, sdrFileId,
+          sdrExisting.docName, sdrExisting.docModified,
+          sdrTeamId, sdrSyncStatus,
+          sdrExisting.actionCount, sdrExisting.resolvedCount
+        );
+        _TF_RESULT = { tag: 'fixture.set_docdata_row', data: { row: sdrUpdated } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'move_doc_to_folder': {
+        // Moves a doc into the given folder (GTaskSheet-me6w.6) — used by the
+        // sticky-after-move scenario (S8) and the folder-hierarchy fixture.
+        var mdtfDocId    = data.docId || testDocId;
+        var mdtfFolderId = data.folderId;
+        if (!mdtfFolderId) throw new Error('move_doc_to_folder: folderId required');
+        DriveApp.getFileById(mdtfDocId).moveTo(DriveApp.getFolderById(mdtfFolderId));
+        _TF_RESULT = {
+          tag: 'fixture.move_doc_to_folder',
+          data: { docId: mdtfDocId, folderId: mdtfFolderId }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'setup_team_scope_fixture': {
+        // Idempotent (check-exists-or-create, no cleanup) folder hierarchy +
+        // TeamData rows for the S1a/S1b/S1c/S8 folder-walk scenarios
+        // (GTaskSheet-me6w.6). Folder IDs are persisted in script properties so
+        // repeat runs reuse the same Drive folders.
+        //
+        //   testTeamA (parent, registered TestTeamA)
+        //   |- testTeamAChild (child, registered TestTeamAChild)
+        //   `- testTeamAMid (unregistered)
+        //      `- testTeamADeep (unregistered, no TeamData row)
+        var stsfProps = PropertiesService.getScriptProperties();
+
+        var stsfRootIter = DriveApp.getFileById(testSheetId).getParents();
+        var stsfRoot = stsfRootIter.hasNext() ? stsfRootIter.next() : DriveApp.getRootFolder();
+
+        var stsfParentId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A');
+        var stsfParent = stsfParentId ? DriveApp.getFolderById(stsfParentId)
+                                       : stsfRoot.createFolder('GActionSheet Test - TeamScope A');
+        stsfParentId = stsfParent.getId();
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_A', stsfParentId);
+
+        var stsfChildId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A_CHILD');
+        var stsfChild = stsfChildId ? DriveApp.getFolderById(stsfChildId)
+                                     : stsfParent.createFolder('GActionSheet Test - TeamScope A Child');
+        stsfChildId = stsfChild.getId();
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_A_CHILD', stsfChildId);
+
+        var stsfMidId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A_MID');
+        var stsfMid = stsfMidId ? DriveApp.getFolderById(stsfMidId)
+                                 : stsfParent.createFolder('GActionSheet Test - TeamScope A Mid');
+        stsfMidId = stsfMid.getId();
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_A_MID', stsfMidId);
+
+        var stsfDeepId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A_DEEP');
+        var stsfDeep = stsfDeepId ? DriveApp.getFolderById(stsfDeepId)
+                                   : stsfMid.createFolder('GActionSheet Test - TeamScope A Deep');
+        stsfDeepId = stsfDeep.getId();
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_A_DEEP', stsfDeepId);
+
+        // Idempotent TeamData rows: TestTeamA -> A, TestTeamAChild -> Child
+        var stsfTeamSheet = _getOrCreateSheet(ss, 'TeamData');
+        if (stsfTeamSheet.getLastRow() < 1) {
+          stsfTeamSheet.getRange(1, 1, 1, 3).setValues([['Team Id', 'Folder Id', 'Contact']]).setFontWeight('bold');
+        }
+        var stsfRows = _readTeamDataRows(ss);
+        var stsfHasA = false, stsfHasChild = false;
+        for (var stsfI = 0; stsfI < stsfRows.length; stsfI++) {
+          if (stsfRows[stsfI].teamId === 'TestTeamA') stsfHasA = true;
+          if (stsfRows[stsfI].teamId === 'TestTeamAChild') stsfHasChild = true;
+        }
+        var stsfNewRows = [];
+        if (!stsfHasA) stsfNewRows.push(['TestTeamA', stsfParentId, '']);
+        if (!stsfHasChild) stsfNewRows.push(['TestTeamAChild', stsfChildId, '']);
+        if (stsfNewRows.length > 0) {
+          var stsfLastRow = stsfTeamSheet.getLastRow();
+          stsfTeamSheet.getRange(stsfLastRow + 1, 1, stsfNewRows.length, 3).setValues(stsfNewRows);
+        }
+
+        _TF_RESULT = {
+          tag: 'fixture.setup_team_scope_fixture',
+          data: {
+            testTeamA:      stsfParentId,
+            testTeamAChild: stsfChildId,
+            testTeamAMid:   stsfMidId,
+            testTeamADeep:  stsfDeepId
+          }
         };
         docAlreadyClosed = true;
         break;
@@ -2057,8 +2188,14 @@ function setupAndSync(scenario) {
  * can poll gasLogDir and assert result.ok === true.
  *
  * @param {string} [docId]  Defaults to TEST_DOC_ID script property.
+ * @param {?{teamId: string}} [expected]  Optional Team Scope expectation
+ *   (GTaskSheet-me6w.6). When expected.teamId is set, additionally asserts:
+ *     - the document's Drive appProperty 'teamScope' === expected.teamId
+ *     - DocData[fileId].team_id === expected.teamId
+ *     - DocData[fileId] exists with doc_name, doc_modified, action_count,
+ *       resolved_count populated and consistent with the current scan
  */
-function verifyConsistencyForTest(docId) {
+function verifyConsistencyForTest(docId, expected) {
   var props = PropertiesService.getScriptProperties();
   var resolvedDocId = docId || props.getProperty('TEST_DOC_ID');
   var testSheetId   = props.getProperty('TEST_SHEET_ID');
@@ -2147,6 +2284,48 @@ function verifyConsistencyForTest(docId) {
     }
 
     _runConsistencyChecks(result, floatingActions, tracker, sheetRows, result.docTitle, archivedIds);
+
+    // Team Scope consistency (GTaskSheet-me6w.6) — only when requested.
+    if (expected && expected.teamId !== undefined && expected.teamId !== null) {
+      var vcfToken = ScriptApp.getOAuthToken();
+      var vcfTeamScope = _getDocAppProperty(resolvedDocId, 'teamScope', vcfToken) || '';
+      if (vcfTeamScope !== expected.teamId) {
+        result.issues.push(
+          'teamScope appProperty mismatch: expected=' + expected.teamId + ' actual=' + vcfTeamScope
+        );
+      }
+      var vcfDocDataRow = _readDocDataRow(ss, resolvedDocId);
+      if (!vcfDocDataRow) {
+        result.issues.push('DocData row missing for fileId=' + resolvedDocId);
+      } else {
+        if (vcfDocDataRow.teamId !== expected.teamId) {
+          result.issues.push(
+            'DocData.team_id mismatch: expected=' + expected.teamId + ' actual=' + vcfDocDataRow.teamId
+          );
+        }
+        if (!vcfDocDataRow.docName) {
+          result.issues.push('DocData.doc_name is empty for fileId=' + resolvedDocId);
+        }
+        if (!vcfDocDataRow.docModified) {
+          result.issues.push('DocData.doc_modified is empty for fileId=' + resolvedDocId);
+        }
+        if (vcfDocDataRow.actionCount !== sheetRows.length) {
+          result.issues.push(
+            'DocData.action_count mismatch: expected=' + sheetRows.length + ' actual=' + vcfDocDataRow.actionCount
+          );
+        }
+        var vcfResolvedCount = 0;
+        for (var vcfI = 0; vcfI < sheetRows.length; vcfI++) {
+          if (isResolved(sheetRows[vcfI].status)) vcfResolvedCount++;
+        }
+        if (vcfDocDataRow.resolvedCount !== vcfResolvedCount) {
+          result.issues.push(
+            'DocData.resolved_count mismatch: expected=' + vcfResolvedCount + ' actual=' + vcfDocDataRow.resolvedCount
+          );
+        }
+      }
+    }
+
     result.ok = result.issues.length === 0;
 
     GasLogger.log('verify.consistency.complete', result);

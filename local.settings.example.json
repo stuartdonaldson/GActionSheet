@@ -7,6 +7,11 @@
   "discoveryStaleDocId": "DOC_ID_MODIFIED_8_OR_MORE_DAYS_AGO",
   "discoverySubfolderDocId": "DOC_ID_IN_SUBFOLDER_MODIFIED_WITHIN_7_DAYS",
 
+  "_note_teamScopeFolders": "Folder hierarchy for Team Scope sync tests (GTaskSheet-me6w.6). Create via the setup_team_scope_fixture GAS fixture, which also registers TestTeamA/TestTeamAChild in TeamData.",
+  "testTeamA": "FOLDER_ID_REGISTERED_AS_TestTeamA_IN_TEAMDATA",
+  "testTeamAChild": "FOLDER_ID_CHILD_OF_testTeamA_REGISTERED_AS_TestTeamAChild",
+  "testTeamADeep": "FOLDER_ID_MULTI_LEVEL_DESCENDANT_OF_testTeamA_NOT_UNDER_testTeamAChild_UNREGISTERED",
+
   "webappSecret": "YOUR_WEBAPP_SECRET_SCRIPT_PROPERTY_VALUE",
 
   "_note_testToken": "Auto-populated by npm run deploy:test — do not edit manually.",

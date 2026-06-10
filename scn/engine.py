@@ -51,7 +51,7 @@ class Expectation:
     surfaces: frozenset               # claim set — immutable; set at enqueue
     remaining: set                    # surfaces not yet drained; mutable
     target: object                    # AUTO | INTEGRITY_TARGET | "<label>"
-    kind: str                         # "PRESENT_CONSISTENT" | "ABSENT"
+    kind: str                         # "PRESENT_CONSISTENT" | "ABSENT" | "CALLABLE"
     within: str | None
     severity: Severity
     needs_consistency: bool           # True for verify_all_expectations
@@ -205,17 +205,24 @@ class CheckpointEngine:
             observable_here = e.remaining & obs
 
             for surface in list(observable_here):
-                check_fn = (
-                    check_present_consistent
-                    if e.kind == "PRESENT_CONSISTENT"
-                    else check_absent
-                )
-                # within= bounded poll: UI surface only; bypasses _cache for live DOM re-read
-                if e.within is not None and surface == Surface.UI:
-                    error = _poll_until_pass(read, surface, check_fn, e.expected, e.tag, e.within)
+                if e.kind == "CALLABLE":
+                    # Generic check: a zero-arg callable returning None (pass) or an
+                    # error string (fail). Reuses the standard drain/ac-emission path
+                    # for expectations that aren't ai-shaped (e.g. Team Scope state) —
+                    # see GTaskSheet-me6w.6 / sdlc-testing-principles.md T24.
+                    error = e.expected["check"]()
                 else:
-                    actuals = get_actuals(surface)
-                    error = check_fn(e.expected, actuals, surface, e.tag)
+                    check_fn = (
+                        check_present_consistent
+                        if e.kind == "PRESENT_CONSISTENT"
+                        else check_absent
+                    )
+                    # within= bounded poll: UI surface only; bypasses _cache for live DOM re-read
+                    if e.within is not None and surface == Surface.UI:
+                        error = _poll_until_pass(read, surface, check_fn, e.expected, e.tag, e.within)
+                    else:
+                        actuals = get_actuals(surface)
+                        error = check_fn(e.expected, actuals, surface, e.tag)
 
                 if error is None:
                     e.remaining.discard(surface)
