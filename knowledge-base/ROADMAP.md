@@ -100,7 +100,10 @@ Supporting beads to create:
 - `[FIX] Resolve Team Scope mismatches and edge-case defects` — `model:sonnet` (escalate to `model:opus` if non-obvious)
 
 Acceptance test scenario:
-- Given a document with no `teamScope` and a matching ancestor folder in TeamData, when sync runs, then document `teamScope` is set to the matched Team ID (`Folder Id`), `DocData.Team` matches that Team ID, and team name display resolves via TeamData lookup.
+- Given a document with no `teamScope` and a matching ancestor folder in TeamData, when sync runs, then document `teamScope` is set to the matched Team ID (`Folder Id`), `DocData.TeamId` matches that Team ID, and team name display resolves via TeamData lookup.
+- **Folder-hierarchy resolution** (see `knowledge-base/staging/epic-b-team-property-sync.md` §Acceptance fixture): given TeamData rows `TestTeamA` (Folder Id = `local.settings.testTeamA`) and `TestTeamAChild` (Folder Id = `local.settings.testTeamAChild`, a child folder of `testTeamA`), and three fresh documents with no `teamScope` placed directly in `testTeamA`, `testTeamAChild`, and `testTeamADeep` (a multi-level, unregistered descendant of `testTeamA`) respectively — after sync, each document's `teamScope` and `DocData.Team Id` resolve to `TestTeamA`, `TestTeamAChild`, and `TestTeamA` respectively, and `DocData` for each document has all fields up to date.
+- **Sticky assignment**: given a document already assigned `teamScope = TestTeamA`, when it is moved into `testTeamAChild`'s folder and sync runs again, then `teamScope` and `DocData.Team Id` remain `TestTeamA` (no reassignment).
+- **Verification**: each scenario above is verified solely via `verifyConsistencyForTest(docId, {teamId})`, extended to assert `document.teamScope == DocData[fileId].Team Id == expected.teamId` plus existing docId/sheet/tracker consistency — so each scenario only needs to create the document under its initial condition, sync, and run this one check.
 
 ### EPIC-C — Reassign team from spreadsheet via DocData and sync
 Goal: allow team reassignment from spreadsheet by updating DocData and applying change on sync (`SyncStatus='UpdateDoc'`).
@@ -326,7 +329,7 @@ This phase requires no change to the Web App contract or the deployer identity m
   the codebase (do not redefine resolved status values in this plan).
 
 On sync, if `DocData.SyncStatus == 'UpdateDoc'`, update document team information from
-`DocData.Team`, then clear `SyncStatus`. This supports reassigning a document to a new team
+`DocData.TeamId`, then clear `SyncStatus`. This supports reassigning a document to a new team
 from the master GActionSheet.
 
 **Phase 3 (future, if needed) — Physical partitioning into team-owned sheets**
@@ -349,7 +352,7 @@ On sync, when `teamScope` is not yet set on the document:
   TeamData row.
 5. No match after reaching root/drive → leave `teamScope` blank.
 
-If `DocData.SyncStatus == 'UpdateDoc'`, the team assignment in `DocData.Team` is written
+If `DocData.SyncStatus == 'UpdateDoc'`, the team assignment in `DocData.TeamId` is written
 to the document as `teamScope` and `SyncStatus` is cleared.
 
 ---
@@ -419,8 +422,8 @@ Actors: Document author, Administrator
 Preconditions: Add-on is installed; user has the doc open.
 
 Core capabilities the Settings surface must expose:
-- The current `teamScope` for the active document and its mapped `DocData.Team`
-- A way to request reassignment by setting `DocData.Team` and `DocData.SyncStatus='UpdateDoc'`
+- The current `teamScope` for the active document and its mapped `DocData.TeamId`
+- A way to request reassignment by setting `DocData.TeamId` and `DocData.SyncStatus='UpdateDoc'`
 - Confirmation step before requesting reassignment
 
 **Design (proposed)**
@@ -443,8 +446,8 @@ Key design constraints:
 
 ### Acceptance checks (test cycle)
 
-- After sync, `Doc.teamScope == DocData[docid].Team`.
-- Team name rendering uses TeamData lookup by Team ID (`Doc.teamScope` / `DocData.Team`).
+- After sync, `Doc.teamScope == DocData[docid].TeamId`.
+- Team name rendering uses TeamData lookup by Team ID (`Doc.teamScope` / `DocData.TeamId`).
 - After sync, `Doc.Modified == DocData[docid].Doc Modified`.
 - If team lookup fails across the full folder ancestry, `Doc.teamScope` remains blank.
 - If `DocData.SyncStatus == 'UpdateDoc'`, sync updates document team from DocData and clears
@@ -464,7 +467,7 @@ These extend the existing failure modes in [docs/OPERATIONS.md](../docs/OPERATIO
 | TeamData tab missing or malformed | Auto-assignment skipped; sync completes without team scope | Restore or recreate the TeamData tab |
 | Team ID exists in document/DocData but no TeamData row matches | Team name cannot be resolved for UI/reporting | Add or restore TeamData row for that Team ID |
 | DocData row missing for known document | Sync cannot reconcile DocWins fields | Recreate row keyed by `DocID` on next sync |
-| `SyncStatus='UpdateDoc'` with blank/invalid Team | Team write-back skipped and status retained | Correct `DocData.Team`, then sync again |
+| `SyncStatus='UpdateDoc'` with blank/invalid Team | Team write-back skipped and status retained | Correct `DocData.TeamId`, then sync again |
 
 ---
 

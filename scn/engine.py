@@ -57,6 +57,7 @@ class Expectation:
     needs_consistency: bool           # True for verify_all_expectations
     tag: str                          # [uc AC#] triage tag
     consistency_discharged: bool = field(default=False)
+    entry_point: str = ""             # state-modifying entry point exercised (T1/T17; emits ep.*)
 
 
 class DrainInvariantError(Exception):
@@ -150,11 +151,12 @@ class CheckpointEngine:
         on: frozenset | None = None,
         read: Callable[[Surface], list] | None = None,
         read_consistency: Callable[[], dict] | None = None,
-    ) -> tuple[list[str], list[tuple[str, str, str]]]:
+    ) -> tuple[list[str], list[tuple[str, str, str, str]]]:
         """Evaluate queued expectations at checkpoint (kind, label).
 
         Returns (warnings, drained_records) where drained_records is a list of
-        (tag, surface_value, 'PASS'|'WARN') for each surface retired this drain (T24).
+        (tag, surface_value, 'PASS'|'WARN', entry_point) for each surface retired this
+        drain (T24). entry_point is '' unless the expectation tagged one (T1/T17).
 
         Raises AssertionError on a FAIL-severity miss.
         Implements §4.5 steps 1–5 verbatim.
@@ -173,7 +175,7 @@ class CheckpointEngine:
             read = lambda s: []
 
         warnings: list[str] = []
-        drained_records: list[tuple[str, str, str]] = []
+        drained_records: list[tuple[str, str, str, str]] = []
         targetable = [e for e in self._queue if _is_targetable(e, kind, label)]
 
         # §4.4 OBS computation
@@ -217,12 +219,12 @@ class CheckpointEngine:
 
                 if error is None:
                     e.remaining.discard(surface)
-                    drained_records.append((e.tag, surface.value, "PASS"))
+                    drained_records.append((e.tag, surface.value, "PASS", e.entry_point))
                 elif e.severity == Severity.WARN:
                     # WARN: record warning AND drop surface to prevent dangling (§4.5 step 2)
                     warnings.append(f"WARN [{e.tag}] surface={surface.value}: {error}")
                     e.remaining.discard(surface)
-                    drained_records.append((e.tag, surface.value, "WARN"))
+                    drained_records.append((e.tag, surface.value, "WARN", e.entry_point))
                 else:
                     raise AssertionError(error)
 

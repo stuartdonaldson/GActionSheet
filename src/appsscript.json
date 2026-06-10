@@ -21,7 +21,8 @@
     "https://script.google.com/a/northlakeuu.org/macros/s/",
     "https://script.google.com/macros/s/",
     "https://docs.googleapis.com/",
-    "https://people.googleapis.com/"
+    "https://people.googleapis.com/",
+    "https://www.googleapis.com/drive/"
   ],
   "webapp": {
     "access": "ANYONE_ANONYMOUS",

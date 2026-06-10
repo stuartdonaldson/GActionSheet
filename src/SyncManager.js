@@ -64,6 +64,11 @@ function syncDocument(docId) {
     } catch (driveErr) {
       // Drive API unavailable or permission denied — proceed with sync.
     }
+
+    // Team Scope: folder-walk auto-assignment, UpdateDoc override, and DocData
+    // sync. See knowledge-base/staging/epic-b-team-property-sync.md.
+    _syncTeamScope(SpreadsheetApp.getActiveSpreadsheet(), docId, ScriptApp.getOAuthToken());
+
     var assignResult = _assignPlaceholderTokens(doc);
     if (assignResult.count > 0) {
       GasLogger.log('sync.assigned', { docId: docId, count: assignResult.count });
@@ -701,6 +706,279 @@ function _markDocNotFound(docId) {
     })
   });
   GasLogger.flush();
+}
+
+// ---------------------------------------------------------------------------
+// Team Scope: Drive appProperty read/write and folder-walk auto-assignment
+// (GTaskSheet-me6w.3 — see knowledge-base/staging/epic-b-team-property-sync.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads a Drive file appProperty via the Drive REST API. Works in any
+ * execution context (unlike PropertiesService.getDocumentProperties(), which
+ * is only valid when the script is bound to the active document).
+ *
+ * @param {string} docId
+ * @param {string} key
+ * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
+ * @return {?string} the property value, or null if absent or on API error.
+ */
+function _getDocAppProperty(docId, key, token) {
+  var url = 'https://www.googleapis.com/drive/v3/files/' + docId + '?fields=appProperties';
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      method:             'get',
+      headers:            { 'Authorization': 'Bearer ' + token },
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) {
+      GasLogger.log('sync.teamScope.property.read.error', { docId: docId, key: key, status: resp.getResponseCode() });
+      return null;
+    }
+    var props = JSON.parse(resp.getContentText()).appProperties || {};
+    return Object.prototype.hasOwnProperty.call(props, key) ? props[key] : null;
+  } catch (e) {
+    GasLogger.log('sync.teamScope.property.read.error', { docId: docId, key: key, msg: e.message });
+    return null;
+  }
+}
+
+/**
+ * Writes a Drive file appProperty via the Drive REST API. Logs a warning and
+ * returns without throwing on failure — callers treat this as best-effort.
+ *
+ * @param {string} docId
+ * @param {string} key
+ * @param {string} value
+ * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
+ */
+function _setDocAppProperty(docId, key, value, token) {
+  var url     = 'https://www.googleapis.com/drive/v3/files/' + docId + '?fields=appProperties';
+  var payload = { appProperties: {} };
+  payload.appProperties[key] = value;
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      method:             'patch',
+      contentType:        'application/json',
+      headers:            { 'Authorization': 'Bearer ' + token },
+      payload:            JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) {
+      GasLogger.log('sync.teamScope.property.write.error', { docId: docId, key: key, status: resp.getResponseCode() });
+    }
+  } catch (e) {
+    GasLogger.log('sync.teamScope.property.write.error', { docId: docId, key: key, msg: e.message });
+  }
+}
+
+/**
+ * Reads all TeamData rows from the 'TeamData' tab.
+ *
+ * @param {Spreadsheet} ss
+ * @return {Array<{teamId: string, folderId: string, contact: string}>}
+ *   Empty array if the tab is missing or has no data rows. Blank rows
+ *   (both Team Id and Folder Id empty) are skipped.
+ */
+function _readTeamDataRows(ss) {
+  var sheet = ss.getSheetByName('TeamData');
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var cols    = CONTRACT_SCHEMA.sheetTeamData.columnsByField;
+  var numCols = CONTRACT_SCHEMA.sheetTeamData.headers.length;
+  var values  = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+  var rows    = [];
+  for (var i = 0; i < values.length; i++) {
+    var teamId   = values[i][cols.team_id - 1];
+    var folderId = values[i][cols.folder_id - 1];
+    if (!teamId && !folderId) continue;
+    rows.push({ teamId: teamId, folderId: folderId, contact: values[i][cols.contact - 1] });
+  }
+  return rows;
+}
+
+/**
+ * Walks the Drive folder ancestry of docId, looking for the nearest ancestor
+ * folder (starting at the doc's immediate parent) whose ID matches a
+ * TeamData row's Folder Id.
+ *
+ * @param {string} docId
+ * @param {Array<{teamId: string, folderId: string}>} teamDataRows
+ * @return {?{teamId: string}} the matched team, or null if no ancestor matches
+ *   (or on Drive error).
+ */
+function _walkFolderForTeam(docId, teamDataRows) {
+  try {
+    var parents = DriveApp.getFileById(docId).getParents();
+    if (!parents.hasNext()) {
+      GasLogger.log('sync.teamScope.walk.no-match', { docId: docId });
+      return null;
+    }
+    var folder = parents.next();
+    if (parents.hasNext()) {
+      GasLogger.log('sync.teamScope.walk.multi-parent', { docId: docId });
+    }
+
+    while (folder) {
+      var folderId = folder.getId();
+      for (var i = 0; i < teamDataRows.length; i++) {
+        if (teamDataRows[i].folderId === folderId) {
+          return { teamId: teamDataRows[i].teamId };
+        }
+      }
+      var folderParents = folder.getParents();
+      if (!folderParents.hasNext()) break;
+      folder = folderParents.next();
+      if (folderParents.hasNext()) {
+        GasLogger.log('sync.teamScope.walk.multi-parent', { docId: docId });
+      }
+    }
+
+    GasLogger.log('sync.teamScope.walk.no-match', { docId: docId });
+    return null;
+  } catch (e) {
+    GasLogger.log('sync.teamScope.walk.error', { docId: docId, msg: e.message });
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Team Scope: DocData sync (DocWins + UpdateDoc write-back)
+// (GTaskSheet-me6w.4 — see knowledge-base/staging/epic-b-team-property-sync.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads the single DocData row whose FileId matches docId. Read-only.
+ *
+ * @param {Spreadsheet} ss
+ * @param {string} docId
+ * @return {?{fileId: string, docName: string, docModified: Date, docUpdated: Date,
+ *   syncStatus: string, teamId: string, actionCount: number, resolvedCount: number}}
+ *   the matching row, or null if the DocData tab is missing or has no match.
+ */
+function _readDocDataRow(ss, docId) {
+  var sheet = ss.getSheetByName('DocData');
+  if (!sheet) return null;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+  var cols   = CONTRACT_SCHEMA.sheetDocData.columnsByField;
+  var values = sheet.getRange(2, 1, lastRow - 1, CONTRACT_SCHEMA.sheetDocData.headers.length).getValues();
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (row[cols.file_id - 1] === docId) {
+      return {
+        fileId:        row[cols.file_id - 1],
+        docName:       row[cols.doc_name - 1],
+        docModified:   row[cols.doc_modified - 1],
+        docUpdated:    row[cols.doc_updated - 1],
+        syncStatus:    row[cols.sync_status - 1],
+        teamId:        row[cols.team_id - 1],
+        actionCount:   row[cols.action_count - 1],
+        resolvedCount: row[cols.resolved_count - 1]
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Finds the DocData row matching fileId and overwrites it with the given
+ * values, or appends a new row if none exists. doc_updated is always set to
+ * the current time.
+ *
+ * @param {Spreadsheet} ss
+ * @param {string} fileId
+ * @param {string} docName
+ * @param {Date} docModified
+ * @param {string} teamId
+ * @param {string} syncStatus
+ * @param {number} actionCount
+ * @param {number} resolvedCount
+ * @return {?Object} the row data as written, or null if the DocData tab is missing.
+ */
+function _getOrUpsertDocDataRow(ss, fileId, docName, docModified, teamId, syncStatus, actionCount, resolvedCount) {
+  var sheet = ss.getSheetByName('DocData');
+  if (!sheet) return null;
+  var cols       = CONTRACT_SCHEMA.sheetDocData.columnsByField;
+  var numCols    = CONTRACT_SCHEMA.sheetDocData.headers.length;
+  var docUpdated = new Date();
+
+  var rowValues = [];
+  rowValues[cols.file_id - 1]        = fileId;
+  rowValues[cols.doc_name - 1]       = docName;
+  rowValues[cols.doc_modified - 1]   = docModified;
+  rowValues[cols.doc_updated - 1]    = docUpdated;
+  rowValues[cols.sync_status - 1]    = syncStatus;
+  rowValues[cols.team_id - 1]        = teamId;
+  rowValues[cols.action_count - 1]   = actionCount;
+  rowValues[cols.resolved_count - 1] = resolvedCount;
+
+  var lastRow   = sheet.getLastRow();
+  var targetRow = -1;
+  if (lastRow >= 2) {
+    var ids = sheet.getRange(2, cols.file_id, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (ids[i][0] === fileId) {
+        targetRow = i + 2;
+        break;
+      }
+    }
+  }
+  if (targetRow === -1) targetRow = lastRow + 1;
+
+  sheet.getRange(targetRow, 1, 1, numCols).setValues([rowValues]);
+
+  return {
+    fileId: fileId, docName: docName, docModified: docModified, docUpdated: docUpdated,
+    syncStatus: syncStatus, teamId: teamId, actionCount: actionCount, resolvedCount: resolvedCount
+  };
+}
+
+/**
+ * Orchestrates Team Scope resolution for a single document and mirrors the
+ * result to DocData:
+ *
+ * - If DocData.SyncStatus == 'UpdateDoc': DocData.Team Id wins. The doc's
+ *   teamScope appProperty is overwritten and SyncStatus is cleared.
+ * - Else if the doc has no teamScope yet: folder-walk auto-assignment
+ *   (sticky — only runs once per document).
+ * - Else: teamScope is left unchanged (sticky).
+ *
+ * In all cases, DocData is upserted with the resulting Team Id. Action/
+ * resolved counts and Doc Name are left for the WebApp's sync_action_rows
+ * handler to populate — this is a first-pass write so DocData always has a
+ * row for the document, even if the doc has no floating actions.
+ *
+ * @param {Spreadsheet} ss
+ * @param {string} docId
+ * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
+ */
+function _syncTeamScope(ss, docId, token) {
+  var docDataRow = _readDocDataRow(ss, docId);
+  var teamScope  = _getDocAppProperty(docId, 'teamScope', token);
+  var newSyncStatus = docDataRow ? docDataRow.syncStatus : '';
+
+  if (docDataRow && docDataRow.syncStatus === 'UpdateDoc') {
+    teamScope = docDataRow.teamId || '';
+    _setDocAppProperty(docId, 'teamScope', teamScope, token);
+    if (teamScope) {
+      GasLogger.log('sync.teamScope.overridden', { docId: docId, teamId: teamScope });
+    } else {
+      GasLogger.log('sync.teamScope.override-blank', { docId: docId });
+    }
+    newSyncStatus = '';
+  } else if (!teamScope) {
+    var teamDataRows = _readTeamDataRows(ss);
+    var walkResult   = _walkFolderForTeam(docId, teamDataRows);
+    if (walkResult) {
+      teamScope = walkResult.teamId;
+      _setDocAppProperty(docId, 'teamScope', teamScope, token);
+      GasLogger.log('sync.teamScope.resolved', { docId: docId, teamId: teamScope });
+    }
+  }
+
+  _getOrUpsertDocDataRow(ss, docId, '', new Date(), teamScope || '', newSyncStatus, 0, 0);
 }
 
 /**

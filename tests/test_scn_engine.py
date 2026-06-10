@@ -51,6 +51,7 @@ def _exp(
     action_id=None,
     assignee=None,
     status=None,
+    entry_point="",
 ):
     s = frozenset(surfaces)
     expected = {"action": action}
@@ -71,6 +72,7 @@ def _exp(
         severity=severity,
         needs_consistency=needs_consistency,
         tag=tag,
+        entry_point=entry_point,
     )
 
 
@@ -441,7 +443,7 @@ class TestDrainedRecords:
         )
         assert warnings == []
         assert len(records) == 1
-        assert records[0] == ("[journey sync-create]", "DOC", "PASS")
+        assert records[0] == ("[journey sync-create]", "DOC", "PASS", "")
 
     def test_warn_surface_emits_warn_record(self):
         engine = CheckpointEngine()
@@ -461,7 +463,7 @@ class TestDrainedRecords:
         )
         assert len(warnings) == 1
         assert len(records) == 1
-        assert records[0] == ("[journey warn-ac]", "SHEET", "WARN")
+        assert records[0] == ("[journey warn-ac]", "SHEET", "WARN", "")
 
     def test_multiple_surfaces_emit_one_record_each(self):
         engine = CheckpointEngine()
@@ -493,6 +495,26 @@ class TestDrainedRecords:
             read=_reader_present(action_id="AI-1"),
         )
         assert records == []
+
+    def test_entry_point_propagates_into_record(self):
+        # T1/T17: an expectation tagging an entry point carries it into the drained
+        # record so the session can emit ep.<entry_point>.<surface> (GTaskSheet-me6w.2).
+        engine = CheckpointEngine()
+        e = _exp(
+            {Surface.SHEET},
+            action="Do the thing",
+            action_id="AI-1",
+            status="Open",
+            entry_point="syncDocument",
+        )
+        e.tag = "[teamscope direct-match]"
+        engine.enqueue(e)
+        _, records = engine.drain(
+            CheckpointKind.STEP,
+            on=frozenset({Surface.SHEET}),
+            read=_reader_present(action_id="AI-1"),
+        )
+        assert records == [("[teamscope direct-match]", "SHEET", "PASS", "syncDocument")]
 
 
 # ---------------------------------------------------------------------------

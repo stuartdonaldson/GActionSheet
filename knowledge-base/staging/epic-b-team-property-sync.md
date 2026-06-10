@@ -44,6 +44,43 @@ Runs only when `teamScope` is unset on the document.
 
 Multiple parents: walk uses the first folder returned by Drive API; log a warning.
 
+Once `teamScope` is set, it is sticky: moving the document to a different folder does **not**
+trigger a re-walk or reassignment, even if the new folder would itself match a different
+TeamData row on a fresh walk. Reassignment only happens via the explicit
+`SyncStatus == 'UpdateDoc'` override (see Sync contract above).
+
+### Acceptance fixture: folder-hierarchy team resolution
+
+The auto-assignment algorithm is validated against a 3-folder hierarchy configured via
+`local.settings.json` (three distinct Drive folder IDs):
+
+```
+local.settings.testTeamA            — parent folder, registered as TeamData [TestTeamA]
+└── local.settings.testTeamAChild   — child folder, registered as TeamData [TestTeamAChild]
+└── ... (several levels) ...
+    └── local.settings.testTeamADeep — multi-level descendant of testTeamA, NOT under
+                                         testTeamAChild, no intermediate folder registered
+```
+
+| Scenario | Doc placed in | Walk result | Demonstrates |
+|----------|---------------|-------------|--------------|
+| S1a | `testTeamA` | `teamScope = TestTeamA` | direct match on the doc's own folder |
+| S1b | `testTeamAChild` | `teamScope = TestTeamAChild` | a more specific sub-team folder wins over its registered parent (first-folder-found) |
+| S1c | `testTeamADeep` | `teamScope = TestTeamA` | walk climbs multiple unregistered ancestor levels to find the nearest registered ancestor |
+| S8 | doc from S1a moved into `testTeamAChild` | `teamScope` stays `TestTeamA` | sticky assignment — a move into another team's folder does not trigger reassignment |
+
+> **local.settings.json gap**: today `testTeamA` and `testTeamAChild` point to the *same* folder
+> ID and `testTeamADeep` does not exist. These three keys must be set to distinct real Drive
+> folder IDs forming the hierarchy above before this fixture can run. This is a setup task for
+> the `[TST]` bead (`GTaskSheet-me6w.6`).
+
+TeamData rows for this fixture (idempotent setup — check-exists-or-create, **no cleanup**):
+
+| Team Id | Folder Id |
+|---------|-----------|
+| `TestTeamA` | `local.settings.testTeamA` |
+| `TestTeamAChild` | `local.settings.testTeamAChild` |
+
 ## Security gate
 
 Before returning any rows filtered by document ID or Team Id, resolve the `Folder Id` from
@@ -65,6 +102,21 @@ in this epic and all future epics.
 - After sync (UpdateDoc path): `document.teamScope == new Team Id` AND `DocData.SyncStatus` is blank.
 - Security-deny path: call returns no rows; error is surfaced to caller; no data leaks.
 - Idempotency: a second sync with no changes produces no further writes.
+
+### Consistency-check assertion
+
+`verifyConsistencyForTest(docId, expected)` (`src/TestFixtures.js`) is extended with an optional
+`expected.teamId`. When present, it additionally asserts:
+
+- the document's Drive `appProperty` `teamScope == expected.teamId`
+- `DocData[fileId].Team Id == expected.teamId`
+- `DocData[fileId]` exists with `Doc Name`, `Doc Modified`, `Action Count`, `Resolved Count`
+  populated and consistent with the current scan
+
+This makes `verifyConsistencyForTest(docId, {teamId})` the single assertion call for the
+folder-hierarchy fixture: each scenario only creates a document under its stated initial
+condition, syncs, and calls this one check — no bespoke per-scenario assertions beyond log-tag
+checks.
 
 ## Open seams (ADR-0013 register)
 

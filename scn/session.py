@@ -383,11 +383,14 @@ class ScenarioSession:
         at=AUTO,
         severity: Severity = Severity.FAIL,
         tag: str = "",
+        entry_point: str = "",
     ) -> None:
         """Enqueue a present-and-consistent expectation across DOC + SHEET (+ TRACKER if present).
 
         Snapshot the ai NOW (§4.2) — pin action_id/status before calling this.
         needs_consistency=True: the CONSISTENCY obligation runs at the next INTEGRITY.
+        entry_point (T1/T17): the state-modifying entry point this expectation exercises;
+        when set, emits an ep.<entry_point>.<surface> property for entry-point coverage.
         """
         surfaces = frozenset(
             {Surface.DOC, Surface.SHEET}
@@ -404,6 +407,7 @@ class ScenarioSession:
             severity=severity,
             needs_consistency=True,
             tag=tag or _current_test_tag(),
+            entry_point=entry_point,
         )
         self._enqueue(exp)
 
@@ -416,11 +420,14 @@ class ScenarioSession:
         within: str | None = None,
         severity: Severity = Severity.FAIL,
         tag: str = "",
+        entry_point: str = "",
         **field_overrides,
     ) -> None:
         """Enqueue a single-surface present-and-consistent expectation.
 
         field_overrides (e.g. status="Open") override the snapshot for this surface only (§16.10 Act 4).
+        entry_point (T1/T17): the state-modifying entry point this expectation exercises;
+        when set, emits an ep.<entry_point>.<surface> property for entry-point coverage.
         """
         snap = _snapshot(target)
         snap.update(field_overrides)
@@ -435,6 +442,7 @@ class ScenarioSession:
             severity=severity,
             needs_consistency=False,
             tag=tag or _current_test_tag(),
+            entry_point=entry_point,
         )
         self._enqueue(exp)
 
@@ -536,8 +544,15 @@ class ScenarioSession:
             read_consistency=read_consistency,
         )
         if self._request is not None:
-            for tag, surface, severity in drained_records:
+            for tag, surface, severity, entry_point in drained_records:
                 self._request.node.user_properties.append((f"ac.{tag}.{surface}", severity))
+                # T1/T17 entry-point coverage: emit ep.* only when the expectation tagged
+                # an entry point, so scripts/check_coverage.py can diff against
+                # ENTRY_POINT_REGISTRY (GTaskSheet-me6w.2).
+                if entry_point:
+                    self._request.node.user_properties.append(
+                        (f"ep.{entry_point}.{surface}", severity)
+                    )
         return warnings
 
 

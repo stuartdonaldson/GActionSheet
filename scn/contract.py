@@ -59,6 +59,16 @@ AC_REGISTRY: dict[str, str] = {
     "sidebar sync-SHEET": "Sidebar SHEET surface sync",
     "sidebar tracker-insert": "Sidebar tracker insert operation",
     "t": "Generic test marker",
+    "teamscope direct-match": "S1a - auto-assign when doc is directly in a registered team's folder",
+    "teamscope subteam-match": "S1b - auto-assign matches a more specific sub-team folder over its registered parent",
+    "teamscope deep-walk": "S1c - auto-assign walks multiple unregistered ancestor levels to the nearest registered folder",
+    "teamscope no-match": "S2 - no TeamData match leaves teamScope blank",
+    "teamscope updatedoc-override": "S3 - DocData SyncStatus=UpdateDoc overrides document teamScope (DocData wins)",
+    "teamscope idempotent": "S4 - second sync with no changes makes no further teamScope writes",
+    "teamscope security-gate": "S5 - assertTeamAccess allows valid team-folder access",
+    "teamscope teamdata-missing": "S6 - sync completes without assignment when TeamData is empty",
+    "teamscope updatedoc-blank": "S7 - UpdateDoc with blank Team Id clears SyncStatus without crash",
+    "teamscope sticky-after-move": "S8 - moving an already-assigned doc to another team's folder does not reassign",
     "uc AC-1": "Use case AC-1",
     "uc AC-2": "Use case AC-2",
     "uc TEST": "Use case test marker",
@@ -68,6 +78,18 @@ AC_REGISTRY: dict[str, str] = {
     "uc1 AC4": "Use case 1 AC4",
     "t1": "Test scenario 1",
     "t2": "Test scenario 2",
+}
+
+# Entry-Point Registry (T1/T17 entry-point coverage; T24 gap-diff — see GTaskSheet-me6w.2)
+# Maps a state-modifying GAS entry point to its description. Each scenario tags the entry
+# point it exercises; ScenarioSession emits ep.<entry_point>.<surface> JUnit properties
+# alongside ac.<tag>.<surface>. scripts/check_coverage.py diffs these keys against the
+# emitted ep.* properties — the entry-point half of the gap-diff, binding on new harness
+# work per the ratified T24 status note. Seeded with EPIC-B's two entry points; this is the
+# minimal slice that proves the entry-point diff shape for GTaskSheet-me6w.6.
+ENTRY_POINT_REGISTRY: dict[str, str] = {
+    "syncDocument": "syncDocument(docId) — auto-assign / UpdateDoc-override / idempotent re-sync",
+    "assertTeamAccess": "assertTeamAccess(teamId, ss) — team-scoped security gate on filtered reads",
 }
 
 __all__ = [
@@ -81,4 +103,5 @@ __all__ = [
     "MESSAGES",
     "MODEL_NAMES",
     "AC_REGISTRY",
+    "ENTRY_POINT_REGISTRY",
 ]
