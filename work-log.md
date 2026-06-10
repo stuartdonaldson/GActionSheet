@@ -1920,3 +1920,45 @@ GTaskSheet-w6vg — no overlap with Steps 1-3; left open.
   but real coverage is 0.
 - CLAUDE.md §Testing Strategy needed no edit: it cites T1-T24 + ID-map as the
   authoritative source, and none of the Steps 1-3 paths are referenced there.
+
+## 2026-06-10 03:45:00
+
+### Summary:
+Resolved EPIC-B beads me6w.4 and me6w.5, completing all `[IMP]`/`[INF]` work for
+the Team Scope sync epic.
+
+- **me6w.4** (DocData.Team Id sync, DocWins + UpdateDoc write-back): closed —
+  implementation (`_readDocDataRow`, `_getOrUpsertDocDataRow`, UpdateDoc-override
+  branch of `_syncTeamScope`) was already written but uncommitted from a prior
+  session. Verified via `node --check`, JSON validation, and 207 offline
+  scn/contract tests (incl. 54 in test_scn_engine.py). Also committed the
+  uncommitted me6w.2/me6w.3 work (entry-point gap-diff registry, Drive
+  appProperty helpers + folder-walk, appsscript.json whitelist, ROADMAP/staging
+  doc updates) and a separately-staged implementation-gate SKILL.md ATDD v2.0
+  rewrite, in two commits (`ca23a94`, `3a0067d`).
+- **me6w.5** (team-scoped security gate): implemented `assertTeamAccess(teamId, ss)`
+  in src/SyncManager.js per the frozen me6w.1 design contract — throws
+  `TeamNotFound: <teamId>` if no TeamData row matches, or
+  `TeamAccessDenied: <teamId>` if `DriveApp.getFolderById` fails for the
+  matched folder. Standalone (not called from `syncDocument()`) — gate for
+  future team-scoped reads (Import/Notify, EPIC-D/E). Added an
+  `assert_team_access` run_fixture route to TestFixtures.js for me6w.6 harness
+  coverage (S5). Verified via `node --check`; 207 offline tests pass unaffected.
+  Committed as `55f6859`.
+- Fixed a trailing-comma JSON syntax error in local.settings.json (gitignored,
+  local-only) that was blocking the full pytest run.
+
+All EPIC-B `[IMP]`/`[INF]` beads (me6w.1-5) are now closed. me6w.6
+([TST] Entry-point coverage for Team Scope sync and security guard) is fully
+unblocked — its dependencies (me6w.2/.3/.4/.5) are all green. AC verification
+for the teamscope scenario matrix (S1a-S8) is deferred there per the epic
+decomposition.
+
+### Key Learnings:
+- AC verification for me6w.3-5 was consistently deferred to the dependent
+  `[TST]` bead (me6w.6) per the epic-B decomposition — `[IMP]` beads in this
+  epic are verified via `node --check` + offline scn/contract tests only,
+  since the live folder-hierarchy fixture doesn't exist yet.
+- Uncommitted work can persist across sessions/clears; always check
+  `git status`/`git diff --stat` before assuming a closed bead's changes are
+  pushed.
