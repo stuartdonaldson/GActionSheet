@@ -1695,6 +1695,21 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'assert_team_access': {
+        // Calls the assertTeamAccess(teamId, ss) security gate (GTaskSheet-me6w.5)
+        // and reports the outcome instead of letting the thrown error propagate,
+        // so the test harness can assert on TeamNotFound / TeamAccessDenied.
+        var atfTeamId = data.teamId || '';
+        try {
+          assertTeamAccess(atfTeamId, ss);
+          _TF_RESULT = { tag: 'fixture.assert_team_access', data: { ok: true, teamId: atfTeamId } };
+        } catch (atfErr) {
+          _TF_RESULT = { tag: 'fixture.assert_team_access', data: { ok: false, error: atfErr.message } };
+        }
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'sidebar_set_status': {
         // Mutation: change an action from "Open" to "Done" using sidebarSetStatus.
         // Resolves globalId by scanning floating actions for the target text.

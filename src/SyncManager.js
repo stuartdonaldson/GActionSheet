@@ -844,6 +844,45 @@ function _walkFolderForTeam(docId, teamDataRows) {
 }
 
 // ---------------------------------------------------------------------------
+// Team Scope: security gate
+// (GTaskSheet-me6w.5 — see knowledge-base/staging/epic-b-team-property-sync.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Verifies that the active user can access the given team's folder. Standalone
+ * gate — not called from syncDocument(); intended for future team-scoped
+ * filtered reads (Import/Notify, EPIC-D/E).
+ *
+ * Throws rather than returning a boolean: callers catch the error message
+ * prefix ('TeamNotFound: ' or 'TeamAccessDenied: ') and respond with no rows
+ * plus a surfaced error — never partial/leaked data.
+ *
+ * @param {string} teamId
+ * @param {Spreadsheet} ss
+ * @throws {Error} 'TeamNotFound: <teamId>' if no TeamData row matches teamId.
+ * @throws {Error} 'TeamAccessDenied: <teamId>' if the active user cannot
+ *   access the team's folder (DriveApp.getFolderById throws).
+ */
+function assertTeamAccess(teamId, ss) {
+  var teamDataRows = _readTeamDataRows(ss);
+  var match = null;
+  for (var i = 0; i < teamDataRows.length; i++) {
+    if (teamDataRows[i].teamId === teamId) {
+      match = teamDataRows[i];
+      break;
+    }
+  }
+  if (!match) {
+    throw new Error('TeamNotFound: ' + teamId);
+  }
+  try {
+    DriveApp.getFolderById(match.folderId);
+  } catch (e) {
+    throw new Error('TeamAccessDenied: ' + teamId);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Team Scope: DocData sync (DocWins + UpdateDoc write-back)
 // (GTaskSheet-me6w.4 — see knowledge-base/staging/epic-b-team-property-sync.md)
 // ---------------------------------------------------------------------------
