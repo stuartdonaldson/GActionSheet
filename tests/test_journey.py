@@ -33,6 +33,7 @@ from scn.ai import ai
 from scn.engine import CheckpointKind, Severity, Surface
 from scn.session import ScenarioSession
 from scn.ui import UiDriver
+from tests.helpers.gas_log import assert_log, clear_logs
 
 DOC = Surface.DOC
 SHEET = Surface.SHEET
@@ -82,7 +83,7 @@ def scn(settings, browser_page, request):
 # Journey
 # ---------------------------------------------------------------------------
 
-def test_journey(scn, expected_version):
+def test_journey(scn, expected_version, gas_log_dir):
     # ── Act 0 — pre-flight: confirm the add-on test deployment is installed
     # and serving the build just deployed ────────────────────────────────────
     try:
@@ -215,7 +216,17 @@ def test_journey(scn, expected_version):
         assignee="sdonaldson@northlakeuu.org",
     )
     scn.mark("act4.pre-create-action")
+    _fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
     scn.ui.create_action(created)      # fills @-menu form; autocomplete (in TEST_CONTACTS)
+    # GTaskSheet-5vr6: cursor lands on an empty paragraph (Ctrl+End+Enter before
+    # @create) — the chip-insertion path that used to throw on an empty
+    # paragraph/list-item. CREATE_ACTION_TRIGGER.done confirms _submitCreateAction
+    # ran to completion without the uncaught _insertActionChip exception.
+    assert_log(
+        gas_log_dir, _fence,
+        lambda e: e.get("tag") == "CREATE_ACTION_TRIGGER.done",
+        "[5vr6] create_action done",
+    )
 
     # action_id left UNSET — next id is ambiguous after AI-1,2,5,9; resolved at D3 below
     scn.verify(created, on=DOC, status="Open", tag="[journey ui-create]")               # cheap doc probe, now

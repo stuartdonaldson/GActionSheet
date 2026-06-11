@@ -89,73 +89,87 @@ function onLinkPreview(e) { // eslint-disable-line no-unused-vars
  * @returns {GoogleAppsScript.Card_Service.ActionResponse}
  */
 function _submitCreateAction(e) {
-  var formInput      = (e && e.formInput) || {};
-  var actionText     = (formInput.actionText  || '').trim();
-  var assigneeRaw    = (formInput.assignee    || '').trim();
-  var status         = formInput.status || 'Open';
+  try {
+    var formInput      = (e && e.formInput) || {};
+    var actionText     = (formInput.actionText  || '').trim();
+    var assigneeRaw    = (formInput.assignee    || '').trim();
+    var status         = formInput.status || 'Open';
 
-  // Parse "Display Name <email>" format produced by the suggestions lookup.
-  // Falls back to treating the whole value as an email address.
-  var assigneeEmail  = assigneeRaw;
-  var assigneeName   = '';
-  var nameEmailMatch = assigneeRaw.match(/^(.*?)\s*<([^>]+)>\s*$/);
-  if (nameEmailMatch) {
-    assigneeName  = nameEmailMatch[1].trim();
-    assigneeEmail = nameEmailMatch[2].trim();
-  }
+    // Parse "Display Name <email>" format produced by the suggestions lookup.
+    // Falls back to treating the whole value as an email address.
+    var assigneeEmail  = assigneeRaw;
+    var assigneeName   = '';
+    var nameEmailMatch = assigneeRaw.match(/^(.*?)\s*<([^>]+)>\s*$/);
+    if (nameEmailMatch) {
+      assigneeName  = nameEmailMatch[1].trim();
+      assigneeEmail = nameEmailMatch[2].trim();
+    }
 
-  if (!actionText) {
-    GasLogger.log('CREATE_ACTION_TRIGGER.validation', { msg: 'actionText required' });
+    if (!actionText) {
+      GasLogger.log('CREATE_ACTION_TRIGGER.validation', { msg: 'actionText required' });
+      GasLogger.flush();
+      return CardService.newActionResponseBuilder()
+        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Required', 'Action text cannot be empty.')))
+        .build();
+    }
+
+    var doc      = DocumentApp.getActiveDocument();
+    var N        = _getNextActionN(doc);
+    var globalId = doc.getId() + '/AI-' + N;
+    var docUrl   = doc.getUrl();
+    var docTitle = doc.getName();
+
+    // Insert chip at cursor first — doc is source of truth; sheet is downstream.
+    // NOTE: CardService.newSmartChipConfig / newRenderAction do NOT exist in the
+    // current GAS runtime (confirmed 2026-05-27 — TypeError). The REST approach
+    // is the correct insertion method.
+    var insertError = _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName || assigneeEmail);
+
+    if (insertError) {
+      GasLogger.log('CREATE_ACTION_TRIGGER.error', { msg: 'chip insert failed', err: insertError });
+      GasLogger.flush();
+      return CardService.newActionResponseBuilder()
+        .setNavigation(CardService.newNavigation().updateCard(
+          _buildMessageCard('Insert failed', 'Action could not be inserted at the cursor.\n\n' + insertError)
+        ))
+        .build();
+    }
+
+    // Write row to ActionSheet only after doc insertion succeeds.
+    var result = _callWebApp('upsert_action_rows', {
+      docUrl:   docUrl,
+      docTitle: docTitle,
+      rows: [{
+        globalId:      globalId,
+        actionText:    actionText,
+        assigneeEmail: assigneeEmail,
+        assigneeName:  assigneeName || assigneeEmail,
+        status:        status
+      }]
+    });
+
+    if (!result || result.error) {
+      GasLogger.log('CREATE_ACTION_TRIGGER.error', { err: result && result.error });
+      GasLogger.flush();
+      return CardService.newActionResponseBuilder()
+        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Failed to create action: ' + ((result && result.error) || 'unknown error'))))
+        .build();
+    }
+
+    GasLogger.log('CREATE_ACTION_TRIGGER.done', { globalId: globalId });
+    GasLogger.flush();
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Required', 'Action text cannot be empty.')))
+      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText)))
       .build();
-  }
-
-  var doc      = DocumentApp.getActiveDocument();
-  var N        = _getNextActionN(doc);
-  var globalId = doc.getId() + '/AI-' + N;
-  var docUrl   = doc.getUrl();
-  var docTitle = doc.getName();
-
-  // Insert chip at cursor first — doc is source of truth; sheet is downstream.
-  // NOTE: CardService.newSmartChipConfig / newRenderAction do NOT exist in the
-  // current GAS runtime (confirmed 2026-05-27 — TypeError). The REST approach
-  // is the correct insertion method.
-  var insertError = _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName || assigneeEmail);
-
-  if (insertError) {
-    GasLogger.log('CREATE_ACTION_TRIGGER.error', { msg: 'chip insert failed', err: insertError });
+  } catch (err) {
+    GasLogger.log('CREATE_ACTION_TRIGGER.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
+    GasLogger.flush();
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().updateCard(
-        _buildMessageCard('Insert failed', 'Action could not be inserted at the cursor.\n\n' + insertError)
+        _buildMessageCard('Error', 'Could not create action. Please report this to your administrator.\n\n' + String(err))
       ))
       .build();
   }
-
-  // Write row to ActionSheet only after doc insertion succeeds.
-  var result = _callWebApp('upsert_action_rows', {
-    docUrl:   docUrl,
-    docTitle: docTitle,
-    rows: [{
-      globalId:      globalId,
-      actionText:    actionText,
-      assigneeEmail: assigneeEmail,
-      assigneeName:  assigneeName || assigneeEmail,
-      status:        status
-    }]
-  });
-
-  if (!result || result.error) {
-    GasLogger.log('CREATE_ACTION_TRIGGER.error', { err: result && result.error });
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Failed to create action: ' + ((result && result.error) || 'unknown error'))))
-      .build();
-  }
-
-  GasLogger.log('CREATE_ACTION_TRIGGER.done', { globalId: globalId });
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText)))
-    .build();
 }
 
 // ---------------------------------------------------------------------------

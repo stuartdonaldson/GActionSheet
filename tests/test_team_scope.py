@@ -26,7 +26,9 @@ which produces the same observable outcome (blank teamScope, no-match log).
 """
 from scn.engine import CheckpointKind, Surface
 from scn.session import ScenarioSession
-from tests.helpers.gas_log import clear_logs, wait_for_log
+from tests.helpers.gas_log import assert_log as _assert_log
+from tests.helpers.gas_log import assert_no_log as _assert_no_log
+from tests.helpers.gas_log import clear_logs
 
 SHEET = Surface.SHEET
 STEP = CheckpointKind.STEP
@@ -97,22 +99,6 @@ def _team_access_check(scn, team_id):
             return f"assert_team_access(teamId={team_id!r}) failed: {data.get('error')}"
         return None
     return check
-
-
-def _assert_log(gas_log_dir, fence, match_fn, what):
-    if gas_log_dir is None:
-        return
-    wait_for_log(gas_log_dir, match_fn, timeout_s=60, after=fence)
-
-
-def _assert_no_log(gas_log_dir, fence, match_fn, what):
-    if gas_log_dir is None:
-        return
-    try:
-        entry = wait_for_log(gas_log_dir, match_fn, timeout_s=8, after=fence)
-    except TimeoutError:
-        return
-    raise AssertionError(f"unexpected log entry ({what}): {entry}")
 
 
 # ---------------------------------------------------------------------------

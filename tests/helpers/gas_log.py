@@ -99,3 +99,21 @@ def wait_for_log(
             input()
         except (KeyboardInterrupt, EOFError):
             raise TimeoutError(f"Aborted by user after {timeout_s}s")
+
+
+def assert_log(log_dir: str | None, fence: float, match_fn, what: str) -> None:
+    """Assert a matching log entry appears within 60s of `fence`. No-op if log_dir is unset."""
+    if log_dir is None:
+        return
+    wait_for_log(log_dir, match_fn, timeout_s=60, after=fence)
+
+
+def assert_no_log(log_dir: str | None, fence: float, match_fn, what: str) -> None:
+    """Assert no matching log entry appears within 8s of `fence`. No-op if log_dir is unset."""
+    if log_dir is None:
+        return
+    try:
+        entry = wait_for_log(log_dir, match_fn, timeout_s=8, after=fence)
+    except TimeoutError:
+        return
+    raise AssertionError(f"unexpected log entry ({what}): {entry}")

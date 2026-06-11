@@ -2106,3 +2106,102 @@ value this work was meant to deliver. Note: ~92s exceeds the <1 min target — t
 time is real GAS round-trips (sync 17.6s, insert_tracker 14.5s, @-menu cold start
 16.6s); a future pass could trim these. Beads 80mo.16/.17/.18 closed. Three commits;
 not pushed.
+
+## 2026-06-11 09:50:00
+
+### Summary:
+Resolved GTaskSheet-zc21 (TeamData test safety + Sync/DocData consistency).
+Root-caused the long-standing DocData.action_count/resolved_count=0 bug to a
+cross-execution staleness issue: _syncTeamScope writes the initial DocData row
+during syncDocument(), but _handleSyncActionRows (a separate doPost execution
+invoked via UrlFetchApp moments later) couldn't see that write — _readDocDataRow
+returned null, so _getOrUpsertDocDataRow appended a duplicate row instead of
+updating the existing one, and _readDocDataRow's "first match" semantics kept
+returning the stale original (action_count=0). Fix: SpreadsheetApp.flush()
+immediately after _syncTeamScope in syncDocument (src/SyncManager.js).
+
+Also: _handleMarkDocNotFound now mirrors 'Doc Not Found' to DocData.sync_status
+(preserving other fields); verifyConsistencyForTest gained an unconditional
+DocData.team_id/action_count/resolved_count check (vs both doc and sheet);
+new get_team_data_rows fixture; test_team_scope.py S0 proves fixture setup only
+touches test-marked TeamData rows; test_sync_all.py checks DocData for
+trashed/invalid docs; test_journey.py wires the new verify_consistency check in
+(filtered to DocData.* issues — _runConsistencyChecks' assigneeName finding for
+AI-9 is a separate pre-existing issue, GTaskSheet-mpe1).
+
+While verifying test_journey end-to-end, found and fixed a real create_action
+bug: once Act 3b opens the homepage sidebar, a second addons.gsuite.google.com
+iframe matches _ADDON_FORM_IFRAME, making frame_locator(...) ambiguous
+(strict-mode violation). Fixed by polling page.frames for the frame whose
+assignee input is actually visible (scn/ui.py). This unblocked the journey
+through Act 4; Act 5 now fails on a separate, newly-exposed chip-hover timing
+issue (GTaskSheet-o5py, not yet investigated).
+
+Verified: test_sync_all.py PASSED; test_team_scope.py S0/S1a/S1b/S1c PASSED
+(S2/S6 still fail on pre-existing GTaskSheet-u2np, out of scope); test_journey's
+[zc21] DocData consistency assertion PASSED.
+
+Closed GTaskSheet-zc21. Filed GTaskSheet-mpe1 (assigneeName mismatch for
+domain-resolved chips) and GTaskSheet-o5py (Act5 hover timing) as follow-ups.
+Removed docs/BD-TSTFIXNOW-Fix-these-issuese.md (folded into zc21's bd
+description). Deployed (npm run deploy:test), committed, pushed to
+inf/scn-observability-failfast.
+
+### Key Learnings:
+Cross-execution staleness in Apps Script: writes made via
+SpreadsheetApp.openById()/_openActionSheetSpreadsheet() in one execution are
+NOT guaranteed visible to a second execution invoked moments later via
+UrlFetchApp unless SpreadsheetApp.flush() is called first — _readDocDataRow's
+getLastRow()-bounded scan and _getOrUpsertDocDataRow's row-search are both
+silently wrong (append-duplicate) without it. Debugging this required adding
+temporary GasLogger instrumentation that captured the upsert's return value,
+sheet.getLastRow(), AND an immediate same-execution reread — the same-execution
+reread succeeded while cross-execution reads kept returning the stale row,
+which is what isolated the fix to a flush() rather than a row-lookup bug.
+
+## 2026-06-11 08:37:16
+
+### Summary:
+Resolved GTaskSheet-5vr6 ([FIX] _insertActionChip empty-paragraph cursor crash)
+and its twin GTaskSheet-4ghw ([TST] coverage + entry-point audit).
+
+The root-cause fix (skip the getChildIndex/sibling-offset walk when
+cursor.getElement() returns the paragraph itself — the empty-paragraph case)
+was already in HEAD (cddf488). What remained was AC4: an automated check that
+the path completes without the bead's "generic uncaught _submitCreateAction
+exception", with CREATE_ACTION_TRIGGER.done logged.
+
+While tracing this, found _submitCreateAction never called GasLogger.flush()
+on any return path — every other entry point in EditorAddonCard.js does, and
+without it CREATE_ACTION_TRIGGER.* entries never reach the Drive log files
+the test harness polls. Fixed by:
+- Wrapping _submitCreateAction's body in try/catch (mirrors onLinkPreview):
+  uncaught exceptions now log CREATE_ACTION_TRIGGER.error + flush, returning
+  a graceful error card instead of crashing — picked up automatically by the
+  existing _check_gas_errors fail-fast.
+- Adding GasLogger.flush() after every CREATE_ACTION_TRIGGER.* log call.
+- tests/test_journey.py Act 4: added a gas_log_dir fence + assert_log for
+  CREATE_ACTION_TRIGGER.done around scn.ui.create_action() (which already
+  drives the empty-paragraph path via Ctrl+End+Enter -> @create).
+- Extracted assert_log/assert_no_log (previously duplicated in
+  test_team_scope.py) into tests/helpers/gas_log.py for reuse.
+
+Audit (4ghw): _insertActionChip has exactly one call site
+(createActionTrigger -> _submitCreateAction). The non-empty-paragraph /
+mid-text cursor branch (sibling-offset walk, AC3) has zero coverage —
+pre-existing gap, recorded via `bd remember` rather than a new bead.
+
+Verified live: npm run deploy:test, then pytest tests/test_journey.py.
+clasp logs confirmed CREATE_ACTION_TRIGGER -> INSERT_CHIP.done (AI-14,
+cursorIndex:1) -> CREATE_ACTION_TRIGGER.done, all logged with no error. Act 4
+and the new assertion pass; the run fails afterward at Act 5 on the
+unrelated, already-tracked GTaskSheet-o5py (chip-hover timing).
+
+Closed GTaskSheet-5vr6 and GTaskSheet-4ghw.
+
+### Key Learnings:
+GasLogger.log() only buffers in memory — entries are invisible to the
+Drive-polling test harness (and to `clasp logs`'s structured JSON lines)
+until GasLogger.flush() is called. Any entry-point function whose log tags
+need to be assertable by tests must flush on every return path, including
+catch blocks.
