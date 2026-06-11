@@ -8,6 +8,7 @@ Covers every AC from the bead plus supporting invariants from §4:
   3. Multi-surface expectation drains per-surface (partial drain §4.7)
   4. close() with non-empty queue fails
 """
+import contextlib
 import copy
 import re
 import pytest
@@ -425,6 +426,27 @@ class TestSeverityWarn:
                 read=_reader_absent(),
             )
 
+    def test_on_ui_fail_not_called_for_non_ui_surface(self):
+        """R6 (GTaskSheet-16kh): on_ui_fail only fires for Surface.UI FAIL misses."""
+        engine = CheckpointEngine()
+        e = _exp(
+            {Surface.SHEET},
+            severity=Severity.FAIL,
+            action="Do the thing",
+            action_id="AI-99",
+            status="Open",
+        )
+        engine.enqueue(e)
+        calls = []
+        with pytest.raises(AssertionError):
+            engine.drain(
+                CheckpointKind.STEP,
+                on=frozenset({Surface.SHEET}),
+                read=_reader_absent(),
+                on_ui_fail=lambda *a: calls.append(a),
+            )
+        assert calls == []
+
 
 # ---------------------------------------------------------------------------
 # TestDrainedRecords — T24: drain() returns (tag, surface, severity) tuples
@@ -495,6 +517,37 @@ class TestDrainedRecords:
             read=_reader_present(action_id="AI-1"),
         )
         assert records == []
+
+    def test_step_cm_invoked_once_per_expectation_surface(self):
+        """R6 (GTaskSheet-16kh): step_cm(name) wraps each per-surface check."""
+        engine = CheckpointEngine()
+        e = _exp(
+            {Surface.DOC, Surface.SHEET},
+            action="Do the thing",
+            action_id="AI-1",
+            status="Open",
+        )
+        e.tag = "[journey sync-create AC1]"
+        engine.enqueue(e)
+
+        calls = []
+
+        @contextlib.contextmanager
+        def step_cm(name):
+            calls.append(name)
+            yield
+
+        _, records = engine.drain(
+            CheckpointKind.STEP,
+            on=frozenset({Surface.DOC, Surface.SHEET}),
+            read=_reader_present(action_id="AI-1"),
+            step_cm=step_cm,
+        )
+        assert len(records) == 2
+        assert sorted(calls) == [
+            "[journey sync-create AC1] DOC",
+            "[journey sync-create AC1] SHEET",
+        ]
 
     def test_entry_point_propagates_into_record(self):
         # T1/T17: an expectation tagging an entry point carries it into the drained
@@ -886,6 +939,44 @@ class TestUIDrainableAndWithin:
                     on=frozenset({Surface.UI}),
                     read=lambda s: [_ui_ai(action_id="AI-1", status="Open")],
                 )
+
+    def test_on_ui_fail_called_before_raise_for_ui_fail(self):
+        """R6 (GTaskSheet-16kh): on_ui_fail(surface, tag, error) fires, then raises."""
+        engine = CheckpointEngine()
+        e = _ui_exp(action_id="AI-1", status="Done", tag="[journey ui-fail AC1]")
+        engine.enqueue(e)
+        calls = []
+
+        with pytest.raises(AssertionError):
+            engine.drain(
+                CheckpointKind.STEP,
+                on=frozenset({Surface.UI}),
+                read=lambda s: [_ui_ai(action_id="AI-1", status="Open")],
+                on_ui_fail=lambda surface, tag, error: calls.append((surface, tag, error)),
+            )
+
+        assert len(calls) == 1
+        surface, tag, error = calls[0]
+        assert surface == Surface.UI
+        assert tag == "[journey ui-fail AC1]"
+        assert isinstance(error, str) and error
+
+    def test_on_ui_fail_not_called_for_warn(self):
+        """R6 (GTaskSheet-16kh): WARN-severity UI miss does not trigger a screenshot."""
+        engine = CheckpointEngine()
+        e = _ui_exp(action_id="AI-1", status="Done", severity=Severity.WARN, tag="[journey ui-warn AC1]")
+        engine.enqueue(e)
+        calls = []
+
+        warns, _ = engine.drain(
+            CheckpointKind.STEP,
+            on=frozenset({Surface.UI}),
+            read=lambda s: [_ui_ai(action_id="AI-1", status="Open")],
+            on_ui_fail=lambda *a: calls.append(a),
+        )
+
+        assert len(warns) == 1
+        assert calls == []
 
     def test_within_warn_drops_surface_and_records_warning(self):
         """within poll: WARN severity records warning + drops surface at timeout."""

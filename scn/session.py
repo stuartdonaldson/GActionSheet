@@ -302,6 +302,16 @@ class ScenarioSession:
             raise AssertionError(f"GAS backend error: {tag} {data}")
         return entry
 
+    def _attach_ui_failure_screenshot(self, surface: Surface, tag: str, error: str) -> None:
+        """on_ui_fail hook for engine.drain() (R6, GTaskSheet-16kh).
+
+        Attaches a screenshot of the live page to the Allure report when a
+        Surface.UI FAIL-severity check misses, named "<tag> <surface> FAIL".
+        No-op if scn.ui is not attached.
+        """
+        if self.ui is not None:
+            self._reporter.attach_screenshot(self.ui._page, name=f"{tag} {surface.value} FAIL")
+
     @contextlib.contextmanager
     def _act(self, name: str, detail: str = ""):
         """Run an Act body as a traced step, then the post-act fail-fast check."""
@@ -735,6 +745,8 @@ class ScenarioSession:
                 on=on,
                 read=read,
                 read_consistency=read_consistency,
+                step_cm=self._reporter.allure_step,
+                on_ui_fail=self._attach_ui_failure_screenshot,
             )
         except AssertionError as exc:
             # FAIL-severity miss: record what was being checked before re-raising,

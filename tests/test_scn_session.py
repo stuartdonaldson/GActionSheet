@@ -335,8 +335,12 @@ def test_checkpoint_step_calls_engine_drain(monkeypatch):
     """checkpoint(STEP) calls engine.drain with the correct kind."""
     drain_calls = []
 
-    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None):
-        drain_calls.append({"kind": kind, "label": label, "on": on})
+    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None,
+                    step_cm=None, on_ui_fail=None):
+        drain_calls.append({
+            "kind": kind, "label": label, "on": on,
+            "step_cm": step_cm, "on_ui_fail": on_ui_fail,
+        })
         return [], []
 
     scn = _make_session()
@@ -346,6 +350,24 @@ def test_checkpoint_step_calls_engine_drain(monkeypatch):
     assert len(drain_calls) == 1
     assert drain_calls[0]["kind"] == CheckpointKind.STEP
     assert drain_calls[0]["label"] == "after-act-1"
+
+
+def test_checkpoint_wires_allure_step_and_ui_fail_hooks(monkeypatch):
+    """R6 (GTaskSheet-16kh): checkpoint() passes the reporter's allure_step and
+    the session's UI-failure-screenshot hook into engine.drain()."""
+    drain_calls = []
+
+    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None,
+                    step_cm=None, on_ui_fail=None):
+        drain_calls.append({"step_cm": step_cm, "on_ui_fail": on_ui_fail})
+        return [], []
+
+    scn = _make_session()
+    scn.engine.drain = fake_drain
+    scn.checkpoint(CheckpointKind.STEP)
+
+    assert drain_calls[0]["step_cm"] == scn._reporter.allure_step
+    assert drain_calls[0]["on_ui_fail"] == scn._attach_ui_failure_screenshot
 
 
 def test_checkpoint_read_closure_shares_docx_download(monkeypatch):
@@ -377,7 +399,7 @@ def test_checkpoint_read_closure_shares_docx_download(monkeypatch):
 
     called_surfaces = []
 
-    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None):
+    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None, **kwargs):
         for s in [Surface.DOC, Surface.TRACKER, Surface.SHEET]:
             read(s)
             called_surfaces.append(s)
@@ -436,7 +458,7 @@ def test_checkpoint_read_ui_delegates_to_ui_read_current():
 
     captured = {}
 
-    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None):
+    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None, **kwargs):
         captured["result"] = read(Surface.UI)
         return [], []
 
@@ -453,7 +475,7 @@ def test_checkpoint_read_ui_returns_empty_when_no_ui_driver():
     """read(Surface.UI) returns [] when self.ui is None."""
     captured = {}
 
-    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None):
+    def fake_drain(kind, label=None, on=None, read=None, read_consistency=None, **kwargs):
         captured["result"] = read(Surface.UI)
         return [], []
 
@@ -514,3 +536,30 @@ def test_assert_no_addon_error_always_raises(tmp_path, monkeypatch):
     with pytest.raises(AssertionError, match="x.error"):
         with scn.assert_no_addon_error(timeout_s=0.1):
             _write_log(tmp_path, "x.error")
+
+
+# ---------------------------------------------------------------------------
+# _attach_ui_failure_screenshot — UI FAIL screenshot hook (R6, GTaskSheet-16kh)
+# ---------------------------------------------------------------------------
+
+def test_attach_ui_failure_screenshot_calls_reporter():
+    scn = _make_session()
+    mock_ui = MagicMock()
+    scn.ui = mock_ui
+    scn._reporter.attach_screenshot = MagicMock()
+
+    scn._attach_ui_failure_screenshot(Surface.UI, "[journey ui-fail AC1]", "boom")
+
+    scn._reporter.attach_screenshot.assert_called_once_with(
+        mock_ui._page, name="[journey ui-fail AC1] UI FAIL"
+    )
+
+
+def test_attach_ui_failure_screenshot_noop_without_ui():
+    scn = _make_session()
+    scn.ui = None
+    scn._reporter.attach_screenshot = MagicMock()
+
+    scn._attach_ui_failure_screenshot(Surface.UI, "[journey ui-fail AC1]", "boom")
+
+    scn._reporter.attach_screenshot.assert_not_called()

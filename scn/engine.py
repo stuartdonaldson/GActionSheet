@@ -10,6 +10,7 @@ Public API consumed by scn/session.py (.7) thin enqueuers:
   - CheckpointEngine  (enqueue, drain, close, queue)
   - DrainInvariantError
 """
+import contextlib
 import re
 import time
 from dataclasses import dataclass, field
@@ -151,6 +152,8 @@ class CheckpointEngine:
         on: frozenset | None = None,
         read: Callable[[Surface], list] | None = None,
         read_consistency: Callable[[], dict] | None = None,
+        step_cm: Callable[[str], "contextlib.AbstractContextManager"] | None = None,
+        on_ui_fail: Callable[[Surface, str, str], None] | None = None,
     ) -> tuple[list[str], list[tuple[str, str, str, str]]]:
         """Evaluate queued expectations at checkpoint (kind, label).
 
@@ -167,6 +170,11 @@ class CheckpointEngine:
             on: explicit observable surface set for STEP; if None, computed from pending remainders.
             read: callable Surface → list[ai]; called at most once per surface per drain.
             read_consistency: called at INTEGRITY for needs_consistency expectations; None = skip.
+            step_cm (R6, GTaskSheet-16kh): if given, called as step_cm(f"{tag} {surface}")
+                to wrap each per-surface check in an Allure step. None = no wrapping.
+            on_ui_fail (R6, GTaskSheet-16kh): if given, called as
+                on_ui_fail(surface, tag, error) immediately before raising on a
+                Surface.UI FAIL-severity miss (e.g. to attach a screenshot).
         """
         # Delayed import avoids circular dependency (assertions.py imports Surface from here)
         from scn.assertions import check_present_consistent, check_absent
@@ -205,35 +213,39 @@ class CheckpointEngine:
             observable_here = e.remaining & obs
 
             for surface in list(observable_here):
-                if e.kind == "CALLABLE":
-                    # Generic check: a zero-arg callable returning None (pass) or an
-                    # error string (fail). Reuses the standard drain/ac-emission path
-                    # for expectations that aren't ai-shaped (e.g. Team Scope state) —
-                    # see GTaskSheet-me6w.6 / sdlc-testing-principles.md T24.
-                    error = e.expected["check"]()
-                else:
-                    check_fn = (
-                        check_present_consistent
-                        if e.kind == "PRESENT_CONSISTENT"
-                        else check_absent
-                    )
-                    # within= bounded poll: UI surface only; bypasses _cache for live DOM re-read
-                    if e.within is not None and surface == Surface.UI:
-                        error = _poll_until_pass(read, surface, check_fn, e.expected, e.tag, e.within)
+                cm = step_cm(f"{e.tag} {surface.value}") if step_cm else contextlib.nullcontext()
+                with cm:
+                    if e.kind == "CALLABLE":
+                        # Generic check: a zero-arg callable returning None (pass) or an
+                        # error string (fail). Reuses the standard drain/ac-emission path
+                        # for expectations that aren't ai-shaped (e.g. Team Scope state) —
+                        # see GTaskSheet-me6w.6 / sdlc-testing-principles.md T24.
+                        error = e.expected["check"]()
                     else:
-                        actuals = get_actuals(surface)
-                        error = check_fn(e.expected, actuals, surface, e.tag)
+                        check_fn = (
+                            check_present_consistent
+                            if e.kind == "PRESENT_CONSISTENT"
+                            else check_absent
+                        )
+                        # within= bounded poll: UI surface only; bypasses _cache for live DOM re-read
+                        if e.within is not None and surface == Surface.UI:
+                            error = _poll_until_pass(read, surface, check_fn, e.expected, e.tag, e.within)
+                        else:
+                            actuals = get_actuals(surface)
+                            error = check_fn(e.expected, actuals, surface, e.tag)
 
-                if error is None:
-                    e.remaining.discard(surface)
-                    drained_records.append((e.tag, surface.value, "PASS", e.entry_point))
-                elif e.severity == Severity.WARN:
-                    # WARN: record warning AND drop surface to prevent dangling (§4.5 step 2)
-                    warnings.append(f"WARN [{e.tag}] surface={surface.value}: {error}")
-                    e.remaining.discard(surface)
-                    drained_records.append((e.tag, surface.value, "WARN", e.entry_point))
-                else:
-                    raise AssertionError(error)
+                    if error is None:
+                        e.remaining.discard(surface)
+                        drained_records.append((e.tag, surface.value, "PASS", e.entry_point))
+                    elif e.severity == Severity.WARN:
+                        # WARN: record warning AND drop surface to prevent dangling (§4.5 step 2)
+                        warnings.append(f"WARN [{e.tag}] surface={surface.value}: {error}")
+                        e.remaining.discard(surface)
+                        drained_records.append((e.tag, surface.value, "WARN", e.entry_point))
+                    else:
+                        if surface == Surface.UI and on_ui_fail is not None:
+                            on_ui_fail(surface, e.tag, error)
+                        raise AssertionError(error)
 
             # §4.5 step 3 — INTEGRITY consistency obligation (CONSISTENCY pseudo-surface)
             if (

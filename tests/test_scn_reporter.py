@@ -6,12 +6,15 @@ written to .trace.jsonl + .trace.log (always), streamed to a console sink when
 enabled, and JUnit user_properties (elapsed.*/ac.*/ep.*) appended when a pytest
 request is present. These tests verify Python logic only — no GAS/network.
 """
+import contextlib
 import io
 import json
+from unittest.mock import MagicMock
 
+import allure
 import pytest
 
-from scn.reporter import Reporter
+from scn.reporter import NullReporter, Reporter
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +135,115 @@ def test_step_marks_fail_and_reraises(tmp_path):
     fail = [r for r in rows if r["result"] == "FAIL"]
     assert fail, "expected a FAIL event recorded before re-raise"
     assert fail[-1]["name"] == "create_action"
+
+
+# ---------------------------------------------------------------------------
+# step() — Allure step wrapping (R6, GTaskSheet-16kh)
+# ---------------------------------------------------------------------------
+
+def test_step_wraps_block_in_allure_step(tmp_path, monkeypatch):
+    calls = []
+
+    @contextlib.contextmanager
+    def fake_allure_step(title):
+        calls.append(title)
+        yield
+
+    monkeypatch.setattr("scn.reporter.allure.step", fake_allure_step)
+    rep = _make(tmp_path, clock=[0.0, 0.1])
+    with rep.step("ACT", "sync"):
+        pass
+    rep.close()
+    assert calls == ["ACT sync"]
+
+
+def test_step_wraps_block_in_allure_step_with_detail(tmp_path, monkeypatch):
+    calls = []
+
+    @contextlib.contextmanager
+    def fake_allure_step(title):
+        calls.append(title)
+        yield
+
+    monkeypatch.setattr("scn.reporter.allure.step", fake_allure_step)
+    rep = _make(tmp_path, clock=[0.0, 0.1])
+    with rep.step("ACT", "edit_sheet", "AI-1 status=Open"):
+        pass
+    rep.close()
+    assert calls == ["ACT edit_sheet AI-1 status=Open"]
+
+
+# ---------------------------------------------------------------------------
+# allure_step() / attach_screenshot() (R6, GTaskSheet-16kh)
+# ---------------------------------------------------------------------------
+
+def test_allure_step_delegates_to_allure(tmp_path, monkeypatch):
+    sentinel = object()
+    calls = []
+
+    def fake_allure_step(title):
+        calls.append(title)
+        return sentinel
+
+    monkeypatch.setattr("scn.reporter.allure.step", fake_allure_step)
+    rep = _make(tmp_path, clock=[0.0])
+    result = rep.allure_step("[journey sync-create AC1] DOC")
+    rep.close()
+    assert calls == ["[journey sync-create AC1] DOC"]
+    assert result is sentinel
+
+
+def test_attach_screenshot_calls_allure_attach(tmp_path, monkeypatch):
+    attached = []
+
+    def fake_attach(body, name=None, attachment_type=None):
+        attached.append((body, name, attachment_type))
+
+    monkeypatch.setattr("scn.reporter.allure.attach", fake_attach)
+    rep = _make(tmp_path, clock=[0.0])
+    page = MagicMock()
+    page.screenshot.return_value = b"PNG-BYTES"
+    rep.attach_screenshot(page, name="[journey sync-create AC1] UI FAIL")
+    rep.close()
+    assert attached == [
+        (b"PNG-BYTES", "[journey sync-create AC1] UI FAIL", allure.attachment_type.PNG)
+    ]
+
+
+def test_attach_screenshot_swallows_exception(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("screenshot failed")
+
+    page = MagicMock()
+    page.screenshot.side_effect = boom
+    rep = _make(tmp_path, clock=[0.0])
+    rep.attach_screenshot(page, name="x")  # must not raise
+    rep.close()
+
+
+def test_attach_screenshot_noop_when_page_none(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("scn.reporter.allure.attach", lambda *a, **k: calls.append((a, k)))
+    rep = _make(tmp_path, clock=[0.0])
+    rep.attach_screenshot(None, name="x")
+    rep.close()
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# NullReporter — allure_step/attach_screenshot no-ops (R6, GTaskSheet-16kh)
+# ---------------------------------------------------------------------------
+
+def test_null_reporter_allure_step_is_usable_context_manager():
+    rep = NullReporter()
+    with rep.allure_step("anything"):
+        pass
+
+
+def test_null_reporter_attach_screenshot_is_noop():
+    rep = NullReporter()
+    rep.attach_screenshot(None, name="x")
+    rep.attach_screenshot(MagicMock(), name="x")
 
 
 # ---------------------------------------------------------------------------

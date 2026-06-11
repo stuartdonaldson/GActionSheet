@@ -29,6 +29,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import allure
+
 _UNSET = object()
 
 # Phases (documented for callers; not enforced — kept open for new surfaces).
@@ -156,25 +158,54 @@ class Reporter:
 
         On exception, emit a result=FAIL event (detail = exception message) BEFORE
         re-raising, so the trace ends on the real step, not a bare traceback.
+
+        The block also runs inside an Allure step named "<phase> <name>[ <detail>]"
+        (R6, GTaskSheet-16kh) — every ACT/QUERY/UIACT/CHECK/CHECKPOINT call routed
+        through step() gets a uniform Allure step for free. allure.step() is a
+        no-op outside an active allure-pytest run.
         """
+        title = f"{phase} {name}" + (f" {detail}" if detail else "")
         start = self._now_elapsed()
+        with allure.step(title):
+            try:
+                yield
+            except BaseException as exc:  # noqa: BLE001 — emit then re-raise unchanged
+                end = self._now_elapsed()
+                self.event(
+                    phase, name,
+                    detail=(detail or str(exc))[:200],
+                    surface=surface, result="FAIL",
+                    dur_s=end - start, _t_elapsed=end,
+                )
+                raise
+            else:
+                end = self._now_elapsed()
+                self.event(
+                    phase, name, detail=detail, surface=surface,
+                    result="OK", dur_s=end - start, _t_elapsed=end,
+                )
+
+    def allure_step(self, name: str):
+        """Return an Allure step context manager named `name` (R6, GTaskSheet-16kh).
+
+        Used by engine.drain() for per-surface CHECK granularity below the
+        coarser step() wrapping in session.checkpoint(). No-op outside an active
+        allure-pytest run.
+        """
+        return allure.step(name)
+
+    def attach_screenshot(self, page, name: str) -> None:
+        """Attach a PNG screenshot of `page` to the Allure report (R6, GTaskSheet-16kh).
+
+        No-op if `page` is None. Screenshot failures are swallowed so they never
+        mask the original AssertionError they're attached alongside.
+        """
+        if page is None:
+            return
         try:
-            yield
-        except BaseException as exc:  # noqa: BLE001 — emit then re-raise unchanged
-            end = self._now_elapsed()
-            self.event(
-                phase, name,
-                detail=(detail or str(exc))[:200],
-                surface=surface, result="FAIL",
-                dur_s=end - start, _t_elapsed=end,
-            )
-            raise
-        else:
-            end = self._now_elapsed()
-            self.event(
-                phase, name, detail=detail, surface=surface,
-                result="OK", dur_s=end - start, _t_elapsed=end,
-            )
+            allure.attach(page.screenshot(), name=name, attachment_type=allure.attachment_type.PNG)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # JUnit user_properties — single emission path (R1)
@@ -228,6 +259,13 @@ class NullReporter:
 
     def elapsed(self, *a, **k) -> float:
         return 0.0
+
+    @contextlib.contextmanager
+    def allure_step(self, name: str):
+        yield
+
+    def attach_screenshot(self, page, name: str) -> None:
+        pass
 
     def close(self) -> None:
         pass
