@@ -165,6 +165,34 @@ Apps Script editor → Run → initializeTriggers
 
 The `scn/` package provides the scenario harness (`ai`, `engine`, `session`, `surfaces`, `ui`, `contract` modules). Architecture: `docs/atdd/scenario-harness-design.md`. Strategy: `docs/atdd/atdd-lifecycle.md`.
 
+### Test Accounts
+
+Most tests run as a single primary account. The access-filter journey (`J-ACCESS-FILTER`,
+used by the Import and Notify features) additionally requires a **second, restricted**
+account so the read-denied path is genuinely exercised rather than simulated.
+
+| Account | Auth artifact | Role | Minimum Drive permissions |
+|---------|---------------|------|---------------------------|
+| Primary | `.auth/user.json` | Full-access baseline | Reader (or owner) on **all** team folders registered in `TeamData` |
+| Restricted | `.auth/user2.json` | Least-privilege subset | Reader on a **strict subset** of team folders only — must have **no** access to at least one team folder the primary can read |
+
+The restricted account is the same second Google account used by the Probe tests
+(`npm run probe:user2`). Setup:
+
+1. Capture its storage state: `node tests/playwright/auth.setup.js --output .auth/user2.json`
+   (sign in as the restricted account when prompted).
+2. In Drive, share `testTeamAChild`'s folder with the restricted account as **Reader**.
+   Do **not** share `testTeamA` — that asymmetry is what produces the deny path.
+3. Seed one source document with ≥1 team-scoped action in each of `testTeamA` and
+   `testTeamAChild` (the access-filter fixture; idempotent check-exists-or-create).
+
+The harness selects the account per run via `PROBE_AUTH_STATE` (defaults to
+`.auth/user.json`). Tests that assert the restricted view set `PROBE_AUTH_STATE=.auth/user2.json`.
+
+> This is a **shared test asset** for EPIC-D (Import) and EPIC-E (Notify). The two-account
+> fixture matrix and the journey it backs are specified in
+> `knowledge-base/staging/j-access-filter-journey.md`.
+
 ### Test Patterns
 
 **Python-drives-Playwright pattern.** Scenarios exercise two kinds of entry points:

@@ -175,7 +175,9 @@ Access-control validation for Import/Notify requires at least two authenticated 
 ### J-ACCESS-FILTER shared journey (P1-P4)
 
 Single source of truth for visibility/authorization across Import and Notify, authored by
-`GTaskSheet-z1fr` and bound by `GTaskSheet-1dxz` (Import) / `GTaskSheet-ay5w` (Notify):
+`GTaskSheet-z1fr` and bound by `GTaskSheet-1dxz` (Import) / `GTaskSheet-ay5w` (Notify).
+Full spec (scenario list, two-account fixture matrix, entry-point call-site table, shared
+`tests/helpers/access_filter.py` assertion contract): `knowledge-base/staging/j-access-filter-journey.md`.
 
 1. `P1-PrimaryFullAccess`: primary account sees all eligible source documents.
 2. `P2-SecondaryRestrictedAccess`: restricted account sees only permitted documents.
