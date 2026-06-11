@@ -13,6 +13,7 @@
     "release:major": "npm version major && npm run deploy:prod && node commit-deploy-stamp.js && git push --follow-tags",
     "test:prep": "/mnt/c/dev/venvs/uv1/bin/python3 write-environment.py",
     "test:smoke": "npm run test:prep && npx playwright test tests/playwright/smoke.test.js --config tests/playwright/playwright.config.js",
+    "test:ui-smoke": "npm run test:prep && SCN_TRACE=1 /mnt/c/dev/venvs/uv1/bin/python3 -m pytest tests/test_ui_smoke.py -s -m smoke",
     "test:full": "npm run test:prep && /mnt/c/dev/venvs/uv1/bin/python3 -m pytest --alluredir=test-results/allure-results --junitxml=test-results/junit/pytest.xml && npx playwright test --config tests/playwright/playwright.config.js",
     "test:report": "npx allure generate test-results/allure-results -o allure-report --clean",
     "test:serve": "npm run test:report && npx allure open allure-report -h 0.0.0.0 -p 5050",

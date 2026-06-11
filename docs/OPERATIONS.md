@@ -230,6 +230,15 @@ All UC tests use **HTTP fixture invocation** — no browser required for setup. 
 
 Playwright is used only for **UI-level tests** (homepage card rendering, menu presence assertions). It is not used for GAS fixture setup.
 
+### Test observability
+
+Every scenario run writes a per-step trace to `test-results/runs/<node>_<utc>.trace.{log,jsonl}` — a human-readable `.log` and a structured `.jsonl`, written unconditionally. Open the `.log` after a run to see what each step did and how long it took.
+
+- **`SCN_TRACE=1`** — additionally streams the per-step trace live to the console as the run progresses. Use it to watch a long run and see which step it is currently stuck on. Each line shows the phase (`ACT` / `QUERY` / `UIACT` / `CHECK` / `CHECKPOINT` / `MONITOR` / `HTTP`), elapsed timestamp, and duration.
+- **`SCN_FAILFAST`** — fail-fast GAS-error monitoring is ON by default: a `*.error` GAS log entry (or an unexpected/non-JSON HTTP response) following any act aborts the run immediately at the source, instead of surfacing 10 minutes later at the consistency checkpoint. Set `SCN_FAILFAST=0` to disable raising (trace-only).
+- **`npm run test:ui-smoke`** — the fast (<1 min) high-risk UI smoke test (new doc → floating action → `@`-action → sidebar sync → insert table); streams the live trace.
+- **`python scripts/trace_report.py [trace.jsonl]`** — renders a timeline, per-phase totals, slowest steps, and CHECK coverage rollup from a trace. Defaults to the latest run under `test-results/runs/`.
+
 ### UC-A Tests
 **Prerequisites:** `npm run deploy:test` (pushes `src/`, stamps the revision, repoints the TEST deployment).
 

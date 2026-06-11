@@ -463,3 +463,54 @@ def test_checkpoint_read_ui_returns_empty_when_no_ui_driver():
     scn.checkpoint(CheckpointKind.STEP)
 
     assert captured["result"] == []
+
+
+# ---------------------------------------------------------------------------
+# Fail-fast monitor — _check_gas_errors (GTaskSheet-80mo.16)
+# ---------------------------------------------------------------------------
+
+def _write_log(log_dir, tag, *, data="boom"):
+    """Write a single NDJSON GAS-log entry stamped 'now' into log_dir."""
+    import json as _json
+    from datetime import datetime, timezone
+    entry = {"ts": datetime.now(timezone.utc).isoformat(), "tag": tag, "data": data}
+    (log_dir / "run.log").write_text(_json.dumps(entry) + "\n")
+
+
+def test_check_gas_errors_raises_on_error_entry(tmp_path):
+    """A *.error entry logged after session start aborts by default (fail-fast on)."""
+    scn = _make_session(settings={**SETTINGS, "gasLogDir": str(tmp_path)})
+    _write_log(tmp_path, "addon.sync.error")
+    with pytest.raises(AssertionError, match="addon.sync.error"):
+        scn._check_gas_errors()
+
+
+def test_check_gas_errors_suppressed_by_env(tmp_path, monkeypatch):
+    """SCN_FAILFAST=0 downgrades the post-Act guard to trace-only (returns, no raise)."""
+    monkeypatch.setenv("SCN_FAILFAST", "0")
+    scn = _make_session(settings={**SETTINGS, "gasLogDir": str(tmp_path)})
+    _write_log(tmp_path, "sync.error")
+    entry = scn._check_gas_errors()
+    assert entry is not None and entry["tag"] == "sync.error"
+
+
+def test_check_gas_errors_ignores_non_error_tags(tmp_path):
+    """Non-.error tags do not trip the monitor."""
+    scn = _make_session(settings={**SETTINGS, "gasLogDir": str(tmp_path)})
+    _write_log(tmp_path, "addon.sync.ok")
+    assert scn._check_gas_errors() is None
+
+
+def test_check_gas_errors_noop_without_log_dir():
+    """No gasLogDir configured → monitor is inert."""
+    scn = _make_session()
+    assert scn._check_gas_errors() is None
+
+
+def test_assert_no_addon_error_always_raises(tmp_path, monkeypatch):
+    """Explicit assert_no_addon_error raises even when SCN_FAILFAST=0."""
+    monkeypatch.setenv("SCN_FAILFAST", "0")
+    scn = _make_session(settings={**SETTINGS, "gasLogDir": str(tmp_path)})
+    with pytest.raises(AssertionError, match="x.error"):
+        with scn.assert_no_addon_error(timeout_s=0.1):
+            _write_log(tmp_path, "x.error")

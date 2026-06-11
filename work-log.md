@@ -2012,3 +2012,80 @@ decomposition.
   (DocData rows, Drive appProperties, etc.) that doesn't fit the `ai`-shaped
   PRESENT_CONSISTENT/ABSENT checks — emits `ac.*`/`ep.*` via the same drain
   path with zero new infrastructure.
+
+## 2026-06-10 19:35:28
+
+> This tree held TWO distinct bodies of work, committed separately on branch
+> `inf/scn-observability-failfast`:
+>   - **Commit 1 — prior in-flight work (NOT done this session):** add-on
+>     version/build-stamp preflight (see "Other work in this tree" below).
+>   - **Commit 2 — work done this session (Claude):** `scn/` harness observability
+>     + fail-fast + UI smoke (the "Summary" / "Key Learnings" below).
+> The work-log entry below describes the session's own work; the "Other work"
+> block records only enough to attribute the first commit, not to claim it.
+
+### Summary (this session — observability + fail-fast + UI smoke):
+Built an observability + fail-fast layer for the `scn/` test harness and a fast
+UI smoke scenario, to fix the "10-minute silent run before an error I can find in
+the web UI in under a minute" problem. Branch: `inf/scn-observability-failfast`.
+bd: GTaskSheet-80mo.16 (INF, claimed) + 80mo.17 (TST), under epic 80mo.
+
+- **`scn/reporter.py` (new, only new module)** — single owner of observability:
+  per-step trace (what was done / what was checked / elapsed / duration / result)
+  at every mutation, inspection, and checkpoint. Always writes
+  `test-results/runs/<node>_<utc>.trace.{log,jsonl}`; streams live to console under
+  `SCN_TRACE=1`. R1 consolidation: existing `mark()`/`checkpoint()` `elapsed.*`
+  and `ac.*`/`ep.*` JUnit emission now route THROUGH the reporter (collapsed the two
+  duplicated elapsed/seq blocks); JUnit format preserved for `check_coverage.py`.
+- **Fail-fast monitoring (default on)** in `scn/session.py` — refactored the
+  existing `assert_no_addon_error` into one reusable `_check_gas_errors()` (no
+  parallel module); runs after every Act and routes `_http_post` bad responses
+  through the reporter. A `*.error` GAS log entry / unexpected response aborts at
+  the act, not 10 min later at the consistency checkpoint. `SCN_FAILFAST=0` disables.
+- **`tests/test_ui_smoke.py` (new)** — <1 min scenario over existing primitives:
+  new doc → floating action → @action → sidebar sync → insert table. Removed two
+  pure-dead-time forced sleeps in `create_action` (the following `wait_for` already
+  polls). `smoke` marker registered; `npm run test:ui-smoke` added.
+- **`scripts/trace_report.py` (new)** — timeline / per-phase totals / slowest steps /
+  CHECK coverage rollup from a `.trace.jsonl` (delegated to a Sonnet agent, reviewed).
+- **docs/OPERATIONS.md** — "Test observability" subsection (trace files, `SCN_TRACE`,
+  `SCN_FAILFAST`, `test:ui-smoke`, `trace_report.py`). `.gitignore` ignores
+  `test-results/runs/`.
+
+Verified: 208 deterministic tests green (193 harness unit + 10 reporter + 5 new
+fail-fast); reporter + trace_report validated end-to-end against real trace output;
+smoke collects cleanly.
+
+Files in THIS session's commit (commit 2): `scn/reporter.py`,
+`scripts/trace_report.py`, `tests/test_scn_reporter.py`, `tests/test_ui_smoke.py`,
+`tests/test_scn_session.py` (fail-fast tests), `scn/session.py`, the observability
+hunks of `scn/ui.py`, the "Test observability" section of `docs/OPERATIONS.md`,
+`pyproject.toml` (smoke marker), `package.json` (`test:ui-smoke`), `.gitignore`.
+
+### Other work in this tree (NOT done this session — commit 1):
+Prior in-flight feature: **add-on version/build-stamp preflight** — the journey's
+Act 0 reads the live add-on sidebar's `BUILD_INFO.version` footer and compares it
+to the just-deployed stamp, failing fast if the installed test deployment is stale.
+Files: `tests/test_journey.py` (Act 0), `tests/conftest.py` (`expected_version`
+fixture), `tests/helpers/version.py` (new), `scn/ui.py` (`read_version` +
+`_VERSION_FOOTER_RE` — the version hunks only), `src/Version.js` (regenerated
+stamp), `src/EditorAddonCard.js` (version footer), `src/SyncManager.js`,
+`docs/CONTEXT.md`. This work predates the session; recorded here only to keep the
+two commits attributable. (Tree noise NOT committed: `.beads/interactions.jsonl`,
+`deployment-ledger/test.jsonl`, `CLAUDE.md`, `test-results/*` allure-history +
+probe PNGs.)
+
+### Pending:
+- Live runs (`test_ui_smoke`, `test_journey`) need a GAS deployment + browser auth —
+  run `npm run test:ui-smoke` (should finish <1 min; fails fast if the @-menu add-on
+  isn't installed, bead 7gyt).
+
+### Key Learnings:
+- The harness already captured rich timing/coverage (`mark()`, `checkpoint()` elapsed,
+  per-check PASS/WARN/FAIL drain records) — but only as post-run JUnit `<property>` XML,
+  never streamed. The fix was surfacing existing data live, not generating new data.
+- The deferred expectation-queue/drain model is why a web-UI-visible defect takes 10 min
+  to surface: a mutation is only asserted at the next `checkpoint()`. Deterministic
+  immediate signals (GAS `*.error` logs, non-JSON/error HTTP responses) are what can
+  fail fast safely — eager-asserting durable surfaces (DOC/SHEET) would false-positive
+  since they're async and not yet converged.

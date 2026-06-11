@@ -18,3 +18,6 @@ ui = ["playwright>=1.49"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--alluredir=test-results/allure-results --junitxml=test-results/junit/pytest.xml"
+markers = [
+    "smoke: fast (<1 min) high-risk UI-surface scenario (GTaskSheet-80mo.17)",
+]

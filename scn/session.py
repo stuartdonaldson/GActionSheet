@@ -15,10 +15,12 @@ It does NOT own assertion logic — evaluation lives in engine.py + assertions.p
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import os
 import pathlib
+import time
 import urllib.error
 import urllib.request
 
@@ -31,6 +33,7 @@ from scn.engine import (
     Severity,
     Surface,
 )
+from scn.reporter import NullReporter, Reporter
 from scn.surfaces import DocReader, SheetReader, TrackerReader
 
 
@@ -162,18 +165,59 @@ class ScenarioSession:
         self.tracker_present: bool = False
         self.engine = CheckpointEngine()
         self._seq: int = 0
-        self._request = request  # pytest FixtureRequest; used by checkpoint() for JUnit properties (T24)
+        self._request = request  # pytest FixtureRequest; enables JUnit + trace files (T24)
+        self._start_time = time.monotonic()  # reporter reports elapsed relative to this
+        # Reporter = single owner of trace files + JUnit user_properties (R1, 80mo.16).
+        # NullReporter when there is no run context (harness unit tests) — writes no files.
+        self._reporter = (
+            Reporter(start_time=self._start_time, request=request)
+            if request is not None
+            else NullReporter()
+        )
+        # Fail-fast fence: a GAS *.error logged after this aborts the next post-Act
+        # check (default on; SCN_FAILFAST=0 disables raising). No-op without gasLogDir.
+        from tests.helpers.gas_log import clear_logs
+        self._gas_fence: float = clear_logs(settings.get("gasLogDir"))
         # Attach after creation: scn.ui = UiDriver(page, doc_id=scn.doc_id)
-        self.ui: UiDriver | None = None
+        self._ui = None
+
+    # ``ui`` is a property so assigning the driver auto-wires the reporter + a
+    # back-reference for the post-act fail-fast check — no fixture edits needed.
+    @property
+    def ui(self):
+        return self._ui
+
+    @ui.setter
+    def ui(self, driver) -> None:
+        self._ui = driver
+        if driver is not None:
+            driver.reporter = self._reporter
+            driver._session = self
 
     # ------------------------------------------------------------------
     # Private HTTP helpers
     # ------------------------------------------------------------------
 
     def _post(self, payload: dict, *, timeout: int = 360) -> dict:
-        """POST JSON payload to webappTestUrl; delegates to module-level _http_post."""
+        """POST JSON payload to webappTestUrl; time it and emit an HTTP trace event.
+
+        Unexpected responses (HTTP error / non-JSON / token / GAS error field) are
+        raised by _http_post; we record a FAIL HTTP event first so the trace shows
+        the bad response at the source (G2 fail-fast signal), then re-raise.
+        """
         url = self.settings.get("webappTestUrl") or ""
-        return _http_post(url, payload, timeout)
+        action = payload.get("action") or payload.get("fixture") or "post"
+        t0 = time.monotonic()
+        try:
+            result = _http_post(url, payload, timeout)
+        except Exception as exc:
+            self._reporter.event(
+                "HTTP", action, detail=str(exc)[:200], result="FAIL",
+                dur_s=time.monotonic() - t0,
+            )
+            raise
+        self._reporter.event("HTTP", action, dur_s=time.monotonic() - t0)
+        return result
 
     def _post_route(self, action: str, extra: dict | None = None) -> dict:
         """POST a named webapp route with the test token."""
@@ -202,6 +246,68 @@ class ScenarioSession:
                 "Pin action_id on the ai after a sync/read before calling write acts."
             )
         return f"{self.doc_id}/{target.action_id}"
+
+    # ------------------------------------------------------------------
+    # Fail-fast monitor (G2) — single GAS-error scan path
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _failfast_enabled() -> bool:
+        """Fail-fast aborts by default; SCN_FAILFAST=0 downgrades to trace-only."""
+        return os.environ.get("SCN_FAILFAST") != "0"
+
+    def _check_gas_errors(self, fence: float | None = None, *, raise_on_error: bool | None = None):
+        """Scan the GAS log dir for any `*.error` entry since the fence.
+
+        The single GAS-error scan routine: both the always-on post-Act guard and
+        assert_no_addon_error() call this (no duplicated scan logic). On a hit it
+        records a MONITOR FAIL trace event and advances the running fence past the
+        entry. Whether it raises:
+          * raise_on_error=None  → default-on fail-fast, suppressed by SCN_FAILFAST=0
+            (post-Act guard);
+          * raise_on_error=True  → always raise (explicit assert_no_addon_error).
+        No-op when gasLogDir is unset. Returns the matched entry (or None).
+        """
+        from datetime import datetime
+        from tests.helpers.gas_log import _scan_logs
+
+        log_dir = self.settings.get("gasLogDir")
+        if not log_dir:
+            return None
+        if fence is None:
+            fence = self._gas_fence
+        entry = _scan_logs(
+            log_dir,
+            lambda e: str(e.get("tag", "")).endswith(".error"),
+            after=fence,
+        )
+        if not entry:
+            return None
+
+        tag = entry.get("tag", "?")
+        data = entry.get("data")
+        self._reporter.event(
+            "MONITOR", str(tag), detail=str(data)[:200], result="FAIL",
+        )
+        # Advance the running fence past this entry so we don't re-detect it.
+        try:
+            ts = datetime.fromisoformat(
+                str(entry.get("ts", "")).replace("Z", "+00:00")
+            ).timestamp()
+            self._gas_fence = max(self._gas_fence, ts + 0.001)
+        except (ValueError, OSError):
+            pass
+        should_raise = self._failfast_enabled() if raise_on_error is None else raise_on_error
+        if should_raise:
+            raise AssertionError(f"GAS backend error: {tag} {data}")
+        return entry
+
+    @contextlib.contextmanager
+    def _act(self, name: str, detail: str = ""):
+        """Run an Act body as a traced step, then the post-act fail-fast check."""
+        with self._reporter.step("ACT", name, detail):
+            yield
+        self._check_gas_errors()
 
     # ------------------------------------------------------------------
     # Lifecycle (§16.9 / §3.3)
@@ -236,7 +342,10 @@ class ScenarioSession:
         the drain invariant — a non-empty queue is a DrainInvariantError (test failure).
         """
         self._post_route("end_journey_session", {"docId": self.doc_id})
-        self.engine.close()
+        try:
+            self.engine.close()
+        finally:
+            self._reporter.close()
 
     # ------------------------------------------------------------------
     # Acts — HTTP mutations (§16.9 / §3.4)
@@ -248,7 +357,8 @@ class ScenarioSession:
         Routes through the append_doc_paragraph testToken-gated route (WebApp.js).
         Text is appended as a plain paragraph; the AI-N: token causes sync to detect it.
         """
-        self._post_route("append_doc_paragraph", {"testDocId": self.doc_id, "text": text})
+        with self._act("append_paragraph", text[:60]):
+            self._post_route("append_doc_paragraph", {"testDocId": self.doc_id, "text": text})
 
     def insert_tracker(self) -> None:
         """Insert/refresh the tracker table; widens surface set of subsequent verify_all_expectations.
@@ -256,7 +366,8 @@ class ScenarioSession:
         # TODO(.8 CONTRACT GAP): fixture name 'insert_tracker_table' is a placeholder.
         # Confirm with bead .8 before .11/.13 run. See epic Coordination Log.
         """
-        self._post_fixture("insert_tracker_table")
+        with self._act("insert_tracker"):
+            self._post_fixture("insert_tracker_table")
         self.tracker_present = True
 
     def sync(self) -> None:
@@ -267,27 +378,31 @@ class ScenarioSession:
         WEBAPP_SECRET and drains ACTION_SHEET_QUEUE before responding (§16.11 #4).
         A following sync() is how the scenario forces an async act to convergence.
         """
-        resp = self._post_fixture("sync_document")
-        data = resp.get("data") or {}
-        if not data.get("synced"):
-            raise RuntimeError(
-                f"sync_document fixture returned unexpected response: {resp}"
-            )
+        with self._act("sync"):
+            resp = self._post_fixture("sync_document")
+            data = resp.get("data") or {}
+            if not data.get("synced"):
+                raise RuntimeError(
+                    f"sync_document fixture returned unexpected response: {resp}"
+                )
 
     def edit_sheet(self, target: ai, **fields) -> None:
         """Edit one or more sheet fields for target (addressed by globalId, §16.11 #3).
 
         Replicates onActionSheetEdit's Dirty + Date-Modified stamp on the API path (§16.11 #2).
         """
-        self._post_route("edit_action_row", {"global_id": self._gid(target), "fields": fields})
+        with self._act("edit_sheet", f"{target.action_id} {fields}"[:60]):
+            self._post_route("edit_action_row", {"global_id": self._gid(target), "fields": fields})
 
     def set_status(self, target: ai, status: str) -> None:
         """Set status via the sidebar path (async; converges on next sync(), §16.11 #4)."""
-        self._post_route("patch_action_status", {"global_id": self._gid(target), "status": status})
+        with self._act("set_status", f"{target.action_id} -> {status}"):
+            self._post_route("patch_action_status", {"global_id": self._gid(target), "status": status})
 
     def delete(self, target: ai) -> None:
         """Delete the target row (addressed by globalId, §16.11 #3); Sync Status → 'Deleted'."""
-        self._post_route("delete_action_row", {"global_id": self._gid(target)})
+        with self._act("delete", str(target.action_id)):
+            self._post_route("delete_action_row", {"global_id": self._gid(target)})
 
     # ------------------------------------------------------------------
     # Queries — read-only, no mutation (§16.9 / §3.5)
@@ -296,14 +411,16 @@ class ScenarioSession:
     def doc_items(self) -> list[ai]:
         """Parse floating actions from the live journey doc (.docx download, DOC surface)."""
         from tests.helpers.download import download_docx
-        docx = download_docx(self.doc_id)
-        return DocReader().read(docx, self.doc_id)
+        with self._reporter.step("QUERY", "doc_items"):
+            docx = download_docx(self.doc_id)
+            return DocReader().read(docx, self.doc_id)
 
     def sheet_rows(self) -> list[ai]:
         """Download the ActionSheet (.xlsx), parse rows scoped to this doc (SHEET surface)."""
         from tests.helpers.download import download_xlsx
-        xlsx = download_xlsx(self.sheet_id)
-        return SheetReader().read(xlsx, self.doc_id)
+        with self._reporter.step("QUERY", "sheet_rows"):
+            xlsx = download_xlsx(self.sheet_id)
+            return SheetReader().read(xlsx, self.doc_id)
 
     def archive_rows(self, doc_id: str) -> list[ai]:
         """Download the ActionSheet (.xlsx), parse Archive-tab rows scoped to doc_id."""
@@ -321,9 +438,10 @@ class ScenarioSession:
         """Return {action_id: id_url} for tracker rows that have an ID-column hyperlink."""
         from tests.helpers.download import download_docx
         from scn.surfaces import TrackerReader
-        docx = download_docx(self.doc_id)
-        rows = TrackerReader().read(docx, self.doc_id)
-        return {r.action_id: r.id_url for r in rows if getattr(r, "id_url", None)}
+        with self._reporter.step("QUERY", "tracker_id_urls"):
+            docx = download_docx(self.doc_id)
+            rows = TrackerReader().read(docx, self.doc_id)
+            return {r.action_id: r.id_url for r in rows if getattr(r, "id_url", None)}
 
     def verify_consistency(self, scope: Surface = Surface.DOC) -> dict:
         """Single server authority for consistency verification (§16.7 + 6ov.8).
@@ -534,6 +652,45 @@ class ScenarioSession:
             )
         self.ui.expect_alt(locator, text, severity=severity)
 
+    @contextlib.contextmanager
+    def assert_no_addon_error(self, *, timeout_s: float = 10.0):
+        """Wrap a sidebar/add-on UI act; fail if it logs a `*.error` entry.
+
+        UI acts (sidebar_sync, insert_tracker_button, sidebar_set_status,
+        sidebar_delete) only wait out the busy-spinner — a GAS-side exception
+        in the underlying entry point (e.g. addon.sync.error) does not always
+        surface as a Playwright failure, since the sidebar may already show
+        state from an earlier sync. This polls the GasLogger NDJSON output for
+        timeout_s after the wrapped block returns and raises if an error was
+        logged. Delegates to the single GAS-error scan (_check_gas_errors); as an
+        explicit assertion it always raises, regardless of SCN_FAILFAST.
+
+        No-op if `gasLogDir` is not configured.
+        """
+        from tests.helpers.gas_log import clear_logs
+
+        log_dir = self.settings.get("gasLogDir")
+        fence = clear_logs(log_dir) if log_dir else 0.0
+        yield
+        if not log_dir:
+            return
+
+        import time as _time
+        deadline = _time.monotonic() + timeout_s
+        while _time.monotonic() < deadline:
+            self._check_gas_errors(fence, raise_on_error=True)
+            _time.sleep(0.5)
+
+    def mark(self, label: str) -> None:
+        """Record an elapsed.{seq}.{label} milestone + a MARK trace event.
+
+        Lightweight sibling of checkpoint()'s elapsed.* property, for timing
+        sub-Act boundaries (T24) without the cost or side-effects of a drain.
+        Emission routed through the reporter (single owner — R1).
+        """
+        self._reporter.elapsed(label, junit=True)
+        self._reporter.event("MARK", label)
+
     def checkpoint(
         self,
         kind: CheckpointKind,
@@ -569,23 +726,44 @@ class ScenarioSession:
         def read_consistency() -> dict:
             return self.verify_consistency()
 
-        warnings, drained_records = self.engine.drain(
-            kind,
-            label=label,
-            on=on,
-            read=read,
-            read_consistency=read_consistency,
+        checkpoint_name = f"{kind.value}.{label}" if label else kind.value
+        t0 = time.monotonic()
+        try:
+            warnings, drained_records = self.engine.drain(
+                kind,
+                label=label,
+                on=on,
+                read=read,
+                read_consistency=read_consistency,
+            )
+        except AssertionError as exc:
+            # FAIL-severity miss: record what was being checked before re-raising,
+            # so the trace ends on the real check rather than a bare traceback.
+            self._reporter.event(
+                "CHECK", checkpoint_name, detail=str(exc)[:200],
+                result="FAIL", dur_s=time.monotonic() - t0,
+            )
+            raise
+
+        # Per-surface CHECK events — "what was being checked" (PASS/WARN) — and the
+        # JUnit ac.*/ep.* coverage properties, all via the reporter (single path, R1).
+        # Format preserved for scripts/check_coverage.py.
+        for tag, surface, severity, entry_point in drained_records:
+            self._reporter.event(
+                "CHECK", checkpoint_name, checking=f"{tag} {surface}",
+                surface=surface, result=severity,
+            )
+            self._reporter.junit(f"ac.{tag}.{surface}", severity)
+            # T1/T17 entry-point coverage: emit ep.* only when the expectation tagged
+            # an entry point (GTaskSheet-me6w.2).
+            if entry_point:
+                self._reporter.junit(f"ep.{entry_point}.{surface}", severity)
+        self._reporter.elapsed(checkpoint_name, junit=True)
+        self._reporter.event(
+            "CHECKPOINT", checkpoint_name,
+            detail=f"drained={len(drained_records)} warnings={len(warnings)}",
+            dur_s=time.monotonic() - t0,
         )
-        if self._request is not None:
-            for tag, surface, severity, entry_point in drained_records:
-                self._request.node.user_properties.append((f"ac.{tag}.{surface}", severity))
-                # T1/T17 entry-point coverage: emit ep.* only when the expectation tagged
-                # an entry point, so scripts/check_coverage.py can diff against
-                # ENTRY_POINT_REGISTRY (GTaskSheet-me6w.2).
-                if entry_point:
-                    self._request.node.user_properties.append(
-                        (f"ep.{entry_point}.{surface}", severity)
-                    )
         return warnings
 
 

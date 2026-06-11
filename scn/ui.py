@@ -174,6 +174,16 @@ class UiDriver:
         self._page = page
         self._doc_id = doc_id
         self._current_card: Card | None = None  # context for next=True locate()
+        # Wired by ScenarioSession.ui setter: trace sink + back-ref for the
+        # post-act fail-fast GAS-error check. Defaults keep UiDriver usable alone.
+        from scn.reporter import NullReporter
+        self.reporter = NullReporter()
+        self._session = None
+
+    def _post_act_check(self) -> None:
+        """Run the session's fail-fast GAS-error scan after a UI entry-point act."""
+        if self._session is not None:
+            self._session._check_gas_errors()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -355,18 +365,20 @@ class UiDriver:
         after the click the card may briefly show a spinner while GAS processes
         the update.  The driver absorbs that wait; scenarios do not.
         """
-        status_btn = card.frame.locator(
-            f'[aria-label="{status}"], button:has-text("{status}")'
-        )
-        status_btn.wait_for(state="visible", timeout=10000)
-        status_btn.click()
+        with self.reporter.step("UIACT", "set_status", f"card -> {status}"):
+            status_btn = card.frame.locator(
+                f'[aria-label="{status}"], button:has-text("{status}")'
+            )
+            status_btn.wait_for(state="visible", timeout=10000)
+            status_btn.click()
 
-        busy = card.frame.locator(_BUSY)
-        try:
-            busy.wait_for(state="visible", timeout=2000)
-            busy.wait_for(state="hidden", timeout=10000)
-        except Exception:
-            pass  # no spinner appeared; action completed synchronously
+            busy = card.frame.locator(_BUSY)
+            try:
+                busy.wait_for(state="visible", timeout=2000)
+                busy.wait_for(state="hidden", timeout=10000)
+            except Exception:
+                pass
+        self._post_act_check()  # no spinner appeared; action completed synchronously
 
     # ------------------------------------------------------------------
     # create_action — @-menu form (§16.4 autocomplete path)
@@ -380,55 +392,58 @@ class UiDriver:
         the plain email is tabbed through and a severity=WARN is expected at
         verify time (§16.4 / §16.8).
         """
-        self._ensure_doc()
+        detail = str(target.action_id or target.assignee or target.action or "")[:60]
+        with self.reporter.step("UIACT", "create_action", detail):
+            self._ensure_doc()
 
-        self._page.locator(_DOC_CONTENT).click()
-        self._page.keyboard.type("@")
+            self._page.locator(_DOC_CONTENT).click()
+            self._page.keyboard.type("@")
 
-        # Wait for @-menu dropdown.
-        self._page.wait_for_selector(
-            "[role='listbox'], [data-at-menu], .docs-at-picker-container",
-            timeout=5000,
-        )
-        self._page.keyboard.type("Create")
-        # GAS add-on items are fetched server-side; cold start can take 5-15s.
-        self._page.wait_for_timeout(8000)
+            # Wait for @-menu dropdown.
+            self._page.wait_for_selector(
+                "[role='listbox'], [data-at-menu], .docs-at-picker-container",
+                timeout=5000,
+            )
+            self._page.keyboard.type("Create")
 
-        item = self._page.locator(_AT_MENU_CREATE).first
-        try:
-            item.wait_for(state="visible", timeout=20000)
-        except Exception as exc:
-            raise RuntimeError(
-                "createActionTriggers 'Create action' not found in the @-menu after 20s. "
-                "The editor add-on must be installed as a test deployment: "
-                "Apps Script editor → Deploy → Test deployments → Install as Add-on."
-            ) from exc
-        item.click()
-
-        # Wait for the action creation form to appear.
-        self._page.wait_for_selector(_FORM_ASSIGNEE, timeout=25000)
-
-        if target.assignee:
-            inp = self._page.locator(_FORM_ASSIGNEE).first
-            inp.fill(target.assignee)
-            self._page.wait_for_timeout(800)
-            suggestion = self._page.locator('[role="option"]').first
+            # GAS add-on items are fetched server-side (cold start 5-15s). The
+            # wait_for below already polls until visible — no fixed pre-sleep.
+            item = self._page.locator(_AT_MENU_CREATE).first
             try:
-                suggestion.wait_for(state="visible", timeout=2000)
-                suggestion.click()
-            except Exception:
-                # No autocomplete suggestion — plain email, tab to confirm.
-                inp.press("Tab")
+                item.wait_for(state="visible", timeout=20000)
+            except Exception as exc:
+                raise RuntimeError(
+                    "createActionTriggers 'Create action' not found in the @-menu after 20s. "
+                    "The editor add-on must be installed as a test deployment: "
+                    "Apps Script editor → Deploy → Test deployments → Install as Add-on."
+                ) from exc
+            item.click()
 
-        if target.action:
-            self._page.locator(_FORM_TEXT).first.fill(target.action)
+            # Wait for the action creation form to appear.
+            self._page.wait_for_selector(_FORM_ASSIGNEE, timeout=25000)
 
-        submit = self._page.locator(_FORM_SUBMIT).first
-        submit.wait_for(state="visible", timeout=5000)
-        submit.click()
+            if target.assignee:
+                inp = self._page.locator(_FORM_ASSIGNEE).first
+                inp.fill(target.assignee)
+                # Poll for the autocomplete option directly (no fixed pre-sleep).
+                suggestion = self._page.locator('[role="option"]').first
+                try:
+                    suggestion.wait_for(state="visible", timeout=2000)
+                    suggestion.click()
+                except Exception:
+                    # No autocomplete suggestion — plain email, tab to confirm.
+                    inp.press("Tab")
 
-        # Wait for the form to close (chip inserted into doc).
-        self._page.wait_for_selector("[role='dialog']", state="hidden", timeout=10000)
+            if target.action:
+                self._page.locator(_FORM_TEXT).first.fill(target.action)
+
+            submit = self._page.locator(_FORM_SUBMIT).first
+            submit.wait_for(state="visible", timeout=5000)
+            submit.click()
+
+            # Wait for the form to close (chip inserted into doc).
+            self._page.wait_for_selector("[role='dialog']", state="hidden", timeout=10000)
+        self._post_act_check()
 
     # ------------------------------------------------------------------
     # UI expectations (live mid-session; §16.8, §16.11 #8)
@@ -503,19 +518,21 @@ class UiDriver:
         slow — 60s default. Does NOT poll the sheet; durable convergence is
         the journey's responsibility (§16.11 #4).
         """
-        ms = _parse_timeout(timeout)
-        self._sidebar_card()
-        assert self._current_card is not None
-        sync_btn = self._current_card.frame.locator(_SIDEBAR_SYNC)
-        sync_btn.wait_for(state="visible", timeout=ms)
-        sync_btn.click()
+        with self.reporter.step("UIACT", "sidebar_sync", f"waiting busy<={timeout}"):
+            ms = _parse_timeout(timeout)
+            self._sidebar_card()
+            assert self._current_card is not None
+            sync_btn = self._current_card.frame.locator(_SIDEBAR_SYNC)
+            sync_btn.wait_for(state="visible", timeout=ms)
+            sync_btn.click()
 
-        busy = self._current_card.frame.locator(_BUSY)
-        try:
-            busy.wait_for(state="visible", timeout=2000)
-            busy.wait_for(state="hidden", timeout=ms)
-        except Exception:
-            pass
+            busy = self._current_card.frame.locator(_BUSY)
+            try:
+                busy.wait_for(state="visible", timeout=2000)
+                busy.wait_for(state="hidden", timeout=ms)
+            except Exception:
+                pass
+        self._post_act_check()
 
     def insert_tracker_button(self, *, timeout: str = "30s") -> None:
         """Click the homepage sidebar Insert tracker button; wait out busy.
@@ -523,19 +540,21 @@ class UiDriver:
         Real call-site for scn.insert_tracker(). Mutates the doc (tracker
         table inserted/refreshed).
         """
-        ms = _parse_timeout(timeout)
-        self._sidebar_card()
-        assert self._current_card is not None
-        insert_btn = self._current_card.frame.locator(_SIDEBAR_INSERT_TRACKER)
-        insert_btn.wait_for(state="visible", timeout=ms)
-        insert_btn.click()
+        with self.reporter.step("UIACT", "insert_tracker_button", f"waiting busy<={timeout}"):
+            ms = _parse_timeout(timeout)
+            self._sidebar_card()
+            assert self._current_card is not None
+            insert_btn = self._current_card.frame.locator(_SIDEBAR_INSERT_TRACKER)
+            insert_btn.wait_for(state="visible", timeout=ms)
+            insert_btn.click()
 
-        busy = self._current_card.frame.locator(_BUSY)
-        try:
-            busy.wait_for(state="visible", timeout=2000)
-            busy.wait_for(state="hidden", timeout=ms)
-        except Exception:
-            pass
+            busy = self._current_card.frame.locator(_BUSY)
+            try:
+                busy.wait_for(state="visible", timeout=2000)
+                busy.wait_for(state="hidden", timeout=ms)
+            except Exception:
+                pass
+        self._post_act_check()
 
     def sidebar_delete(self, target: ai, *, timeout: str = "15s") -> None:
         """Click the per-row Delete action button for target.action_id; wait out busy.
@@ -543,20 +562,22 @@ class UiDriver:
         Real call-site for scn.delete(ai) (per-row sidebar Delete button).
         Identity addressing is by action_id (§16.11 #3).
         """
-        ms = _parse_timeout(timeout)
-        self._sidebar_card()
-        assert self._current_card is not None
-        row = self._sidebar_row(target.action_id or "")
-        delete_btn = row.locator(_SIDEBAR_DELETE)
-        delete_btn.wait_for(state="visible", timeout=ms)
-        delete_btn.click()
+        with self.reporter.step("UIACT", "sidebar_delete", str(target.action_id or "")):
+            ms = _parse_timeout(timeout)
+            self._sidebar_card()
+            assert self._current_card is not None
+            row = self._sidebar_row(target.action_id or "")
+            delete_btn = row.locator(_SIDEBAR_DELETE)
+            delete_btn.wait_for(state="visible", timeout=ms)
+            delete_btn.click()
 
-        busy = self._current_card.frame.locator(_BUSY)
-        try:
-            busy.wait_for(state="visible", timeout=2000)
-            busy.wait_for(state="hidden", timeout=ms)
-        except Exception:
-            pass
+            busy = self._current_card.frame.locator(_BUSY)
+            try:
+                busy.wait_for(state="visible", timeout=2000)
+                busy.wait_for(state="hidden", timeout=ms)
+            except Exception:
+                pass
+        self._post_act_check()
 
     def sidebar_set_status(
         self, target: ai, status: str, *, timeout: str = "15s"
@@ -567,22 +588,24 @@ class UiDriver:
         sidebar status control). DISTINCT from set_status(card, status), which
         operates on a hovered preview Card.
         """
-        ms = _parse_timeout(timeout)
-        self._sidebar_card()
-        assert self._current_card is not None
-        row = self._sidebar_row(target.action_id or "")
-        status_btn = row.locator(
-            f'[aria-label="{status}"], button:has-text("{status}")'
-        )
-        status_btn.wait_for(state="visible", timeout=ms)
-        status_btn.click()
+        with self.reporter.step("UIACT", "sidebar_set_status", f"{target.action_id} -> {status}"):
+            ms = _parse_timeout(timeout)
+            self._sidebar_card()
+            assert self._current_card is not None
+            row = self._sidebar_row(target.action_id or "")
+            status_btn = row.locator(
+                f'[aria-label="{status}"], button:has-text("{status}")'
+            )
+            status_btn.wait_for(state="visible", timeout=ms)
+            status_btn.click()
 
-        busy = self._current_card.frame.locator(_BUSY)
-        try:
-            busy.wait_for(state="visible", timeout=2000)
-            busy.wait_for(state="hidden", timeout=ms)
-        except Exception:
-            pass
+            busy = self._current_card.frame.locator(_BUSY)
+            try:
+                busy.wait_for(state="visible", timeout=2000)
+                busy.wait_for(state="hidden", timeout=ms)
+            except Exception:
+                pass
+        self._post_act_check()
 
     def read_current(self) -> list[ai]:
         """Read the currently-rendered card as list[ai] for queue-drain (R1-impl §1).

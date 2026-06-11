@@ -18,6 +18,8 @@ test-results/junit/
 test-results/playwright/
 # GAS log archives (copied from Drive-mounted gasLogDir before each test run)
 test-results/gas-logs/
+# per-run scenario trace artifacts (scn/reporter.py: .trace.log + .trace.jsonl)
+test-results/runs/
 # allure and playwright HTML reports
 allure-report/
 playwright-report/
