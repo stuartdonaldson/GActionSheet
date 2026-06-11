@@ -23,6 +23,14 @@ test-results/runs/
 # allure and playwright HTML reports
 allure-report/
 playwright-report/
+# TestExec-NNN/ per-invocation artifacts (np7s, scripts/run_test_exec.py) — keep
+# README.md (per run) and the top-level INDEX.md, ignore the bulky generated dirs.
+test-results/TestExec-*/allure-results/
+test-results/TestExec-*/junit/
+test-results/TestExec-*/runs/
+test-results/TestExec-*/gas-logs/
+test-results/TestExec-*/pytest-stdout.log
+test-results/TestExec-*/allure-generate.log
 node_modules/
 .venv/
 __pycache__/

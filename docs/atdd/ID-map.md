@@ -118,7 +118,35 @@ homes. File these as `[TST]` beads tagged with the principle they discharge:
 
 ## Open follow-ups (not done by this re-base)
 
-- **CLAUDE.md pointers still cite archived paths** (`docs/atdd/atdd-lifecycle.md §15–§16`, `atdd-bdd.md §Universal…`). Update them to cite `T`/`I` IDs + this map when CLAUDE.md is next touched.
-- **`T24` (generated traceability) — reference implementation built here (2026-06-09).** Emission: `scn/engine.py drain()` returns drained `(tag, surface, PASS|WARN)` records; `ScenarioSession.checkpoint()` appends each as a JUnit `ac.<tag>.<surface>` property via `request.node.user_properties`. AC registry: `scn/contract.AC_REGISTRY` (21 entries). Gap-diff: `scripts/check_coverage.py` diffs the registry against emitted `ac.*` properties, exit 1 on gaps (see OPERATIONS.md §AC Coverage Check). Call-site tag format: `[<scenario> <ac-label>]`, e.g. `[journey sync-create]`. **Remaining gaps (not fully ratified):** (a) not yet exercised end-to-end against a live journey run — the mechanism is verified via an isolated pytest harness, so 0/21 ACs currently show covered until a live run emits `pytest.xml`; (b) the entry-point half of the gap-diff (`T17`) is not built — only the AC-requirements diff exists.
-- **Two `implementation-gate` skills exist** (this project's active one + bdd `SKILL.md` v2.0). Reconcile to one.
-- **Fill the two templates** into live project docs (`project-testing-guide.md`, `harness-design.md`) — §15/§16 content is the source material, mostly extraction.
+Tracked under GTaskSheet-k22t. Status as of 2026-06-11:
+
+- ~~CLAUDE.md pointers still cite archived paths~~ — **resolved**: this
+  project's CLAUDE.md §Testing Strategy now cites `T1`–`T24`/`I1`–`I11` and
+  this map as the starting point; the archived `atdd-lifecycle.md §15–§16` is
+  cited only as the source material for the `scn/` realization, not as an
+  authoritative reference.
+- **`T24` (generated traceability) — reference implementation built 2026-06-09.**
+  Emission: `scn/engine.py drain()` returns drained `(tag, surface, PASS|WARN)`
+  records; `ScenarioSession.checkpoint()` appends each as a JUnit
+  `ac.<tag>.<surface>` property via `request.node.user_properties`. AC
+  registry: `scn/contract.AC_REGISTRY` (32 entries). Gap-diff:
+  `scripts/check_coverage.py` diffs the registry against emitted `ac.*`/`ep.*`
+  properties, exit 1 on gaps (see OPERATIONS.md §AC Coverage Check). Call-site
+  tag format: `[<scenario> <ac-label>]`, e.g. `[journey sync-create]`.
+  - ~~(a) not yet exercised end-to-end against a live journey run~~ —
+    **resolved**: `scripts/check_coverage.py -v` run against the live
+    `test_journey` run's `test-results/junit/pytest.xml` (2026-06-11) produces
+    a correct AC/EP diff (3/32 ACs covered, 0/3 entry points covered),
+    confirming the mechanism works end-to-end against real journey output.
+  - (b) the entry-point half of the gap-diff (`T17`) is built but only
+    seeded (3 of the project's state-modifying entry points registered) —
+    tracked as GTaskSheet-z6f8 (project-wide buildout); GTaskSheet-yuvq
+    covers the narrower onSyncNow/onVerifySync/onInsertTrackerTable
+    doc-context slice first.
+- ~~Two `implementation-gate` skills exist~~ — **resolved**: this project's
+  `.claude/skills/implementation-gate/SKILL.md` is identical (byte-for-byte)
+  to DevStandard's `dot-claude/skills/implementation-gate/SKILL.md` (both
+  `v2.0`, `last_updated: 2026-06-08`) — already reconciled to one.
+- **Fill the two templates** into live project docs (`project-testing-guide.md`,
+  `harness-design.md`) — §15/§16 content is the source material, mostly
+  extraction. Tracked as GTaskSheet-ruoa.

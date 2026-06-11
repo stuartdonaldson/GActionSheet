@@ -239,6 +239,39 @@ Every scenario run writes a per-step trace to `test-results/runs/<node>_<utc>.tr
 - **`npm run test:ui-smoke`** — the fast (<1 min) high-risk UI smoke test (new doc → floating action → `@`-action → sidebar sync → insert table); streams the live trace.
 - **`python scripts/trace_report.py [trace.jsonl]`** — renders a timeline, per-phase totals, slowest steps, and CHECK coverage rollup from a trace. Defaults to the latest run under `test-results/runs/`.
 
+#### `scripts/run_test_exec.py` — self-contained TestExec-NNN/ folders
+
+For investigations (a specific bug, a regression hunt, a one-off run worth
+keeping a record of), wrap the pytest invocation in `run_test_exec.py` instead
+of calling pytest directly:
+
+```bash
+/mnt/c/dev/venvs/uv1/bin/python3 scripts/run_test_exec.py \
+  -q "Investigating GTaskSheet-XXXX: <question>" \
+  tests/test_journey.py -x -v < /dev/null
+```
+
+This creates `test-results/TestExec-NNN/` (zero-padded, auto-incrementing)
+containing everything from that single run:
+- `runs/` — per-step scn traces (redirected via `SCN_RUN_DIR`)
+- `gas-logs/` — archived GAS logs (redirected via `SCN_GAS_LOG_DIR`)
+- `allure-results/` + `allure-report/` — raw and generated Allure HTML report
+- `junit/pytest.xml` — JUnit results
+- `pytest-stdout.log` — full captured console output
+- `README.md` — deployed GAS version, test package, investigation question,
+  and PASS/FAIL summary
+
+`test-results/INDEX.md` is regenerated after every run, newest-first, linking
+to each `TestExec-NNN/README.md` and its Allure report. Only `README.md` and
+`INDEX.md` are committed — the bulky generated subdirs (`runs/`, `gas-logs/`,
+`allure-results/`, `junit/`, `allure-report/`, `pytest-stdout.log`) are
+gitignored.
+
+Without `run_test_exec.py`, traces/GAS-logs/JUnit/Allure output still go to
+their default unconditional locations (`test-results/runs/`,
+`test-results/gas-logs/`, etc.) as described above — the wrapper only adds
+per-invocation grouping and the README/INDEX audit trail.
+
 ### UC-A Tests
 **Prerequisites:** `npm run deploy:test` (pushes `src/`, stamps the revision, repoints the TEST deployment).
 

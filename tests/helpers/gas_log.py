@@ -26,7 +26,11 @@ def clear_logs(log_dir: str) -> float:
         return fence
     ts = time.strftime("%Y-%m-%dT%H-%M-%S")
     repo_root = pathlib.Path(__file__).parent.parent.parent
-    archive_dir = repo_root / "test-results" / "gas-logs" / ts
+    # SCN_GAS_LOG_DIR (set by scripts/run_test_exec.py) redirects archived GAS logs
+    # into a TestExec-NNN/ folder for that invocation; default unchanged otherwise (np7s).
+    gas_log_base = os.environ.get("SCN_GAS_LOG_DIR")
+    base_dir = pathlib.Path(gas_log_base) if gas_log_base else (repo_root / "test-results" / "gas-logs")
+    archive_dir = base_dir / ts
     archive_dir.mkdir(parents=True, exist_ok=True)
     for f in logs:
         shutil.copy2(f, archive_dir / f.name)

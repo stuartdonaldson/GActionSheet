@@ -54,7 +54,7 @@ class Reporter:
         *,
         start_time: float,
         request=None,
-        run_dir: str = "test-results/runs",
+        run_dir: str | None = None,
         node_name: str | None = None,
         console=_UNSET,
         clock=time.monotonic,
@@ -70,7 +70,9 @@ class Reporter:
             getattr(getattr(request, "node", None), "name", None) or "scn"
         )
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        base = Path(run_dir)
+        # SCN_RUN_DIR (set by scripts/run_test_exec.py) redirects trace files into a
+        # TestExec-NNN/ folder for that invocation; default unchanged otherwise (np7s).
+        base = Path(run_dir or os.environ.get("SCN_RUN_DIR", "test-results/runs"))
         base.mkdir(parents=True, exist_ok=True)
         stem = f"{_slug(name)}_{ts}.trace"
         self.jsonl_path = base / f"{stem}.jsonl"
