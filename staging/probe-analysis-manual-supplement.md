@@ -30,7 +30,7 @@
   "activeUser":    "sdonaldson@northlakeuu.org",
   "version":       "v0.2.0 (Rev. Jun 1, 2026 22:28) (TEST)",
   "serviceUrl":    "https://…/AKfycbz1lH…/exec",
-  "matchedUrl":    "https://northlakeuu.org/NUTS/action?c=view&globalId=1LG5SofI…%2FAI-10",
+  "matchedUrl":    "https://northlakeuu.org/NUUTS?c=view&globalId=1LG5SofI…%2FAI-10",
   "globalId":      "1LG5SofIJOH_qs6BbXuDy99pJHpejDYJPj0oqkzhUprI/AI-10"
 }
 ```
@@ -42,7 +42,7 @@
   "effectiveUser": "sdonaldson@northlakeuu.org",
   "activeUser":    "sdonaldson@northlakeuu.org",
   "serviceUrl":    "https://…/AKfycbz1lH…/exec",
-  "matchedUrl":    "https://northlakeuu.org/NUTS/action?c=view&globalId=1LG5SofI…%2FAI-5",
+  "matchedUrl":    "https://northlakeuu.org/NUUTS?c=view&globalId=1LG5SofI…%2FAI-5",
   "globalId":      "1LG5SofIJOH_qs6BbXuDy99pJHpejDYJPj0oqkzhUprI/AI-5"
 }
 ```

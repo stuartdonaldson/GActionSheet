@@ -23,7 +23,7 @@ from scn.session import ScenarioSession
 from scn.surfaces import SheetReader
 from tests.helpers.download import download_xlsx
 
-ACTION_CHIP_URL_BASE = "https://northlakeuu.org/NUTS/action"
+ACTION_CHIP_URL_BASE = "https://northlakeuu.org/NUUTS"
 
 
 def _chip_url(global_id: str) -> str:

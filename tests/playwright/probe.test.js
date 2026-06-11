@@ -258,7 +258,7 @@ test.describe('PROBE session', () => {
       await page.waitForSelector('.docs-title-outer', { timeout: 30000 });
     }
 
-    const chipLink = page.locator('a[href*="northlakeuu.org/NUTS/action"]').first();
+    const chipLink = page.locator('a[href*="northlakeuu.org/NUUTS"]').first();
     const visible  = await chipLink.isVisible().catch(() => false);
 
     if (visible) {
