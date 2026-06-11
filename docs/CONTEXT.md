@@ -102,6 +102,7 @@ The tracker table is located by a sentinel heading paragraph so refresh can repl
 - Insert or refresh the in-doc tracker table on demand, prefixed with concise instructional text summarizing the sync rules
 - Periodic timed sweep (owned by the ActionSheet automation script) reconciles all docs referenced by ActionSheet rows, catching docs no one opened recently
 - Archive ActionSheet rows with `Status = Closed` and `Last Modified > 30 days` to the archive sheet
+- Team Scope: on first sync, auto-assign a document to a team by walking its Drive folder ancestry for a `TeamData` match; the assignment is sticky (stored as the `teamScope` Drive file property) and survives the document being moved to another team's folder, unless explicitly overridden via `DocData.SyncStatus = UpdateDoc`
 
 ---
 
@@ -241,6 +242,9 @@ Errors are surfaced in the sidebar (for add-on operations) or logged to the auto
 | Status | The recognized values are `Open`, `In Progress`, `In Review`, `Done`, and `Closed` (eligible for archive). The sidebar status dropdown exposes all five values; any other parenthesized token found in the doc is preserved as a free-form custom status. |
 | Sweep | The time-based reconcile run on the ActionSheet that iterates rows grouped by document and pulls updates from docs no one opened recently. |
 | Sync | One on-demand round in the sidebar that scans the active doc and reconciles ActionSheet rows for that doc in one shot. |
+| Team Scope (`teamScope`) | The Drive file `appProperty` holding a document's assigned `Team Id`. Set once via folder-walk auto-assignment (sticky thereafter) or overridden via `DocData.SyncStatus = UpdateDoc`. |
+| TeamData | Admin-managed sheet tab mapping `Team Id` -> `Folder Id` (+ `Contact`), used for folder-walk auto-assignment and the `assertTeamAccess` security gate. |
+| DocData | Per-document sync-state sheet tab (`FileId`, `Doc Name`, `Doc Modified`, `Doc Updated`, `SyncStatus`, `Team Id`, `Action Count`, `Resolved Count`) used for DocWins reconciliation and Team Scope sync. |
 | Tracker table | The in-doc summary table written by **Insert / refresh tracker**, preceded by an instructional paragraph summarizing the sync rules. |
 | Proxy-write | The pattern where the add-on calls the Web App to perform writes under the deployer identity, bridging the add-on's active-user identity to the deployer's sheet-write authority. |
 | BUILD_INFO | Version/timestamp object stamped into `src/Version.js` by `update-revision.js` before each deployment. |

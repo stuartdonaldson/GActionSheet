@@ -14,16 +14,20 @@ Deviations from §16.10 (mechanical, not design):
   D3 — created.action_id is ambiguous until post-sync (§16.10 note: "next id is
        ambiguous after AI-1,2,5,9"). Resolved from scn.doc_items() after Act 4
        INTEGRITY before the Act 5 hover.
-  D4 — Acts 3b, 4, and 5 require add-on triggers (homepage, createActionTriggers)
-       that may not be installed in all test deployments.  These acts warn and
-       continue rather than skipping the whole test so the idempotency pass and
-       ckj assertion run regardless of UI availability.
+  D4 — Acts 3, 3b, 4, and 5 require add-on triggers (homepage card,
+       createActionTriggers) installed as a test deployment in the test
+       Google account (one-time setup, see docs/OPERATIONS.md). Act 0
+       (below) is a pre-flight that opens the sidebar and reads its
+       BUILD_INFO.version footer (live, via the UI -- not a settings flag):
+       if the sidebar doesn't load, or shows a version other than the one
+       just stamped by npm run deploy:test, the journey fails immediately
+       with a message naming the install/redeploy step -- instead of Acts
+       3/3b/4/5 silently warning and continuing against a missing or stale
+       add-on.
 """
 import pathlib
-import warnings
 
 import pytest
-from playwright.sync_api import TimeoutError as _PlaywrightTimeout
 
 from scn.ai import ai
 from scn.engine import CheckpointKind, Severity, Surface
@@ -78,7 +82,28 @@ def scn(settings, browser_page, request):
 # Journey
 # ---------------------------------------------------------------------------
 
-def test_journey(scn):
+def test_journey(scn, expected_version):
+    # ── Act 0 — pre-flight: confirm the add-on test deployment is installed
+    # and serving the build just deployed ────────────────────────────────────
+    try:
+        sidebar = scn.ui.open_sidebar()
+    except TimeoutError as e:
+        pytest.fail(
+            "Add-on test deployment not installed (or not loading) in this "
+            f"Google account: sidebar did not load ({e}). One-time setup: "
+            "Apps Script editor -> Deploy -> Test deployments -> Install as "
+            "Add-on. See docs/OPERATIONS.md, Running Tests section."
+        )
+
+    version_text = scn.ui.read_version(sidebar)
+    assert version_text == expected_version, (
+        f"Add-on sidebar reports version {version_text!r}, expected "
+        f"{expected_version!r} (src/Version.js BUILD_INFO.version, just "
+        "stamped by npm run deploy:test). The installed add-on test "
+        "deployment is stale -- reinstall it: Apps Script editor -> Deploy "
+        "-> Test deployments -> Install as Add-on."
+    )
+
     # ── Act 1 — author types five AI lines into a blank doc ───────────────────
     #   status left UNSET on plain items (non-default status requires explicit token)
     unassigned = ai(action="This tag and text confirms creation of an unassigned action item")
@@ -135,24 +160,20 @@ def test_journey(scn):
     scn.checkpoint(INTEGRITY)             # capture docx+xlsx; drain the above
 
     # ── Act 3 — insert the tracker table and re-sync ──────────────────────────
-    # Real call-site: the sidebar Insert tracker button (R2-impl). D4 guard: if
-    # the add-on is not installed as a test deployment the UI act raises; fall
-    # back to the HTTP shortcut so the rest of the journey continues.
-    try:
+    # Real call-site: the sidebar Insert tracker button (R2-impl).
+    scn.mark("act3.pre-insert-tracker")
+    with scn.assert_no_addon_error():
         scn.ui.insert_tracker_button(timeout="30s")
-    except Exception as _e3:
-        warnings.warn(
-            f"Act 3 sidebar insert_tracker_button skipped (add-on not installed?): {_e3}",
-            stacklevel=2,
-        )
-        scn.insert_tracker()
+    scn.mark("act3.post-insert-tracker")
     scn.sync()
+    scn.mark("act3.post-sync")
     for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
         scn.verify(a, on=TRACKER, tag="[journey tracker-present]")          # column form; assignee as chip
     scn.checkpoint(STEP)
 
     # rwz AC4: tracker ID cells are hyperlinked to chip URLs
     id_urls = scn.tracker_id_urls()
+    scn.mark("act3.post-tracker-id-urls")
     for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
         url = id_urls.get(a.action_id, "")
         assert url and "globalId=" in url, (
@@ -162,88 +183,79 @@ def test_journey(scn):
     # ── Act 3b — open the homepage sidebar, sync, verify action list ────────
     # R3-impl: sidebar_sync() added here so the Sync Now entry point appears as a
     # scn call-site in the canonical journey matrix (entry-point coverage invariant).
-    try:
-        sidebar = scn.ui.open_sidebar()
-        scn.expect_visible(sidebar, timeout="15s")
+    sidebar = scn.ui.open_sidebar()
+    scn.expect_visible(sidebar, timeout="15s")
+    scn.mark("act3b.pre-sidebar-sync")
+    with scn.assert_no_addon_error():
         scn.ui.sidebar_sync(timeout="60s")  # entry-point call-site: Sync Now button
-        # rwz AC3a: action row shows AI-N • topLabel pattern (explicit_5 is always anchored)
-        sidebar.frame.get_by_text(explicit_5.action_id + " •", exact=False).wait_for(
-            state="visible", timeout=5000
-        )
-        # rwz AC3b: delete button present for anchored actions
-        sidebar.frame.locator('[aria-label="Delete action"]').first.wait_for(
-            state="visible", timeout=5000
-        )
-    except Exception as _e:
-        warnings.warn(
-            f"Act 3b skipped (homepage trigger not installed as test deployment?): {_e}",
-            stacklevel=2,
-        )
+    scn.mark("act3b.post-sidebar-sync")
+    # rwz AC3a: action row shows AI-N • topLabel pattern (explicit_5 is always anchored)
+    sidebar.frame.get_by_text(explicit_5.action_id + " •", exact=False).wait_for(
+        state="visible", timeout=5000
+    )
+    # rwz AC3b: delete button present for anchored actions
+    sidebar.frame.locator('[aria-label="Delete action"]').first.wait_for(
+        state="visible", timeout=5000
+    )
+    scn.mark("act3b.done")
 
     # ── Act 4 — @create through the editor UI (Playwright phase begins) ───────
     created = ai(
         action="Creating an action via the @-menu trigger",
         assignee="sdonaldson@northlakeuu.org",
     )
-    _act4_done = False
-    try:
-        scn.ui.create_action(created)      # fills @-menu form; autocomplete (in TEST_CONTACTS)
-        _act4_done = True
-    except (RuntimeError, _PlaywrightTimeout) as _e:
-        warnings.warn(f"Act 4 skipped (UI trigger not available): {_e}", stacklevel=2)
+    scn.mark("act4.pre-create-action")
+    scn.ui.create_action(created)      # fills @-menu form; autocomplete (in TEST_CONTACTS)
 
-    if _act4_done:
-        # action_id left UNSET — next id is ambiguous after AI-1,2,5,9; resolved at D3 below
-        scn.verify(created, on=DOC, status="Open", tag="[journey ui-create]")               # cheap doc probe, now
-        scn.verify(created, on=SHEET, status="Open", at=INTEGRITY, tag="[journey ui-create]")  # async sheet write → defer
+    # action_id left UNSET — next id is ambiguous after AI-1,2,5,9; resolved at D3 below
+    scn.verify(created, on=DOC, status="Open", tag="[journey ui-create]")               # cheap doc probe, now
+    scn.verify(created, on=SHEET, status="Open", at=INTEGRITY, tag="[journey ui-create]")  # async sheet write → defer
 
-        # D1: drain the Open SHEET expectation before set_status changes it (Coordination Log)
-        scn.checkpoint(INTEGRITY)
+    # D1: drain the Open SHEET expectation before set_status changes it (Coordination Log)
+    scn.checkpoint(INTEGRITY)
 
-        # D3: resolve created.action_id from live doc (ambiguous until post-sync)
-        for item in scn.doc_items():
-            if item.action == created.action:
-                created.action_id = item.action_id
-                break
-        assert created.action_id is not None, (
-            f"created action not found in doc after Act 4 INTEGRITY; "
-            f"expected action text: {created.action!r}"
-        )
+    # D3: resolve created.action_id from live doc (ambiguous until post-sync)
+    for item in scn.doc_items():
+        if item.action == created.action:
+            created.action_id = item.action_id
+            break
+    assert created.action_id is not None, (
+        f"created action not found in doc after Act 4 INTEGRITY; "
+        f"expected action text: {created.action!r}"
+    )
 
-        # ── Act 5 — hover the chip, read the preview card, change status ──────
-        card = scn.ui.hover(
-            scn.ui.locate(text=created.action_id, occurrence=1),
-            timeout="5s",
-        )
-        scn.expect_visible(card, timeout="5s")
-        # rwz AC1: card header contains "AI-N: …" pattern
-        card.frame.get_by_text(created.action_id + ":", exact=False).wait_for(
-            state="visible", timeout=5000
-        )
-        # rwz AC2: card header link points to chip URL (href contains globalId parameter)
-        card.frame.locator('a[href*="globalId"]').first.wait_for(state="visible", timeout=5000)
-        # autocomplete warn-only per §16.4 — chip may lack name if contact resolution failed
-        scn.expect_alt(
-            scn.ui.locate(alt="In Progress", next=True),
-            "In Progress",
-            severity=WARN,
-        )
+    # ── Act 5 — hover the chip, read the preview card, change status ──────
+    card = scn.ui.hover(
+        scn.ui.locate(text=created.action_id, occurrence=1),
+        timeout="5s",
+    )
+    scn.expect_visible(card, timeout="5s")
+    # rwz AC1: card header contains "AI-N: …" pattern
+    card.frame.get_by_text(created.action_id + ":", exact=False).wait_for(
+        state="visible", timeout=5000
+    )
+    # rwz AC2: card header link points to chip URL (href contains globalId parameter)
+    card.frame.locator('a[href*="globalId"]').first.wait_for(state="visible", timeout=5000)
+    # autocomplete warn-only per §16.4 — chip may lack name if contact resolution failed
+    scn.expect_alt(
+        scn.ui.locate(alt="In Progress", next=True),
+        "In Progress",
+        severity=WARN,
+    )
 
-        scn.ui.set_status(card, "In Progress")  # click; driver waits out gray/busy (≤10s)
-        created.status = "In Progress"
+    scn.ui.set_status(card, "In Progress")  # click; driver waits out gray/busy (≤10s)
+    created.status = "In Progress"
 
-        scn.verify(created, on=Surface.UI, within="10s", tag="[journey status-change]")            # enqueue; bounded live poll
-        scn.checkpoint(STEP, on=frozenset({Surface.UI}))            # drain UI live, in-browser
-        scn.verify(created, on=SHEET, at=INTEGRITY, tag="[journey status-change]")                 # durable, async (13–60s) → defer
+    scn.verify(created, on=Surface.UI, within="10s", tag="[journey status-change]")            # enqueue; bounded live poll
+    scn.checkpoint(STEP, on=frozenset({Surface.UI}))            # drain UI live, in-browser
+    scn.verify(created, on=SHEET, at=INTEGRITY, tag="[journey status-change]")                 # durable, async (13–60s) → defer
 
-        # ── Final reconcile (HTTP phase) — settle every deferred expectation ──
-        scn.checkpoint(INTEGRITY)         # docx+xlsx+tracker+consistency; queue empty at close
+    # ── Final reconcile (HTTP phase) — settle every deferred expectation ──
+    scn.checkpoint(INTEGRITY)         # docx+xlsx+tracker+consistency; queue empty at close
 
     # ── Idempotency pass (bjx7): second sync must leave all surfaces unchanged ─
     scn.sync()
-    _idempotency_set = (unassigned, with_email, explicit_5, domain_usr, started_ip, backlogged)
-    if _act4_done:
-        _idempotency_set = _idempotency_set + (created,)
+    _idempotency_set = (unassigned, with_email, explicit_5, domain_usr, started_ip, backlogged, created)
     for a in _idempotency_set:
         scn.verify_all_expectations(a, tag="[journey idempotent]")
     scn.checkpoint(INTEGRITY)

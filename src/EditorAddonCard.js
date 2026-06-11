@@ -660,13 +660,18 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
   // Offset within the paragraph accounting for preceding sibling text elements.
   // Use element index to avoid false matches when two siblings have identical text.
   var paraOffset = cursorOffset;
-  var targetChildIdx = cursorPara.getChildIndex(cursorElement);
-  for (var s = 0; s < targetChildIdx; s++) {
-    var sibling = cursorPara.getChild(s);
-    if (sibling.getType() === DocumentApp.ElementType.TEXT) {
-      paraOffset += sibling.asText().getText().length;
-    } else {
-      paraOffset += 1; // inline image or other non-text element
+  // Empty paragraph (no Text child yet): getElement() returns the paragraph
+  // itself, which is not its own child — getChildIndex would throw. No
+  // preceding siblings exist, so paraOffset is already correct.
+  if (cursorElement !== cursorPara) {
+    var targetChildIdx = cursorPara.getChildIndex(cursorElement);
+    for (var s = 0; s < targetChildIdx; s++) {
+      var sibling = cursorPara.getChild(s);
+      if (sibling.getType() === DocumentApp.ElementType.TEXT) {
+        paraOffset += sibling.asText().getText().length;
+      } else {
+        paraOffset += 1; // inline image or other non-text element
+      }
     }
   }
   var paraText = cursorPara.getText();

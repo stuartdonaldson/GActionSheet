@@ -67,7 +67,10 @@ function syncDocument(docId) {
 
     // Team Scope: folder-walk auto-assignment, UpdateDoc override, and DocData
     // sync. See knowledge-base/staging/epic-b-team-property-sync.md.
-    _syncTeamScope(SpreadsheetApp.getActiveSpreadsheet(), docId, ScriptApp.getOAuthToken(), doc.getName());
+    // syncDocument() runs from doc-context entry points (e.g. onSyncNow) where
+    // getActiveSpreadsheet() is null — use _openActionSheetSpreadsheet() (TrackerTable.js)
+    // for the ACTION_SHEET_ID/TEST_SHEET_ID fallback.
+    _syncTeamScope(_openActionSheetSpreadsheet(), docId, ScriptApp.getOAuthToken(), doc.getName());
 
     var assignResult = _assignPlaceholderTokens(doc);
     if (assignResult.count > 0) {

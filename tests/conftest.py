@@ -46,6 +46,18 @@ def test_doc_id(settings):
 
 
 @pytest.fixture(scope="session")
+def expected_version():
+    """BUILD_INFO.version stamped into src/Version.js by npm run deploy:test.
+
+    Used as a smoke-test pre-flight (test_journey.py Act 0): the live add-on
+    sidebar's version footer is compared against this to confirm the test
+    deployment installed in the test Google account is serving this build.
+    """
+    from tests.helpers.version import read_expected_version
+    return read_expected_version()
+
+
+@pytest.fixture(scope="session")
 def script_id(settings):
     return settings["scriptId"]
 

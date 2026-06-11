@@ -157,7 +157,7 @@ Apps Script editor → Run → initializeTriggers
 | TeamData tab missing or malformed | Auto-assignment skipped; sync completes without team scope | Restore or recreate the TeamData tab |
 | Team ID in document/DocData has no matching TeamData row | Team name cannot be resolved for UI/reporting | Add or restore TeamData row for that Team ID |
 | DocData row missing for known document | Sync cannot reconcile DocWins fields | Row is recreated on next sync keyed by `FileId` |
-| `SyncStatus='UpdateDoc'` with blank/invalid Team Id | Team write-back skipped; status retained | Correct `DocData.Team Id`, then sync again |
+| `SyncStatus='UpdateDoc'` with blank Team Id | `teamScope` cleared to blank and `SyncStatus` cleared (logs `sync.teamScope.override-blank`) — DocData still wins | Set `DocData.Team Id` to the desired team and `SyncStatus='UpdateDoc'` again to assign a team |
 
 ---
 
@@ -190,11 +190,29 @@ The `scn/` package provides the scenario harness (`ai`, `engine`, `session`, `su
 # §16.10 canonical ATDD journey — Acts 1–3 (requires live GAS — npm run deploy:test first):
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey_acts_1_3.py -x -v
 
-# §16.10 canonical ATDD journey — full Acts 1–5:
-# Acts 4–5 additionally require the add-on test deployment installed in the test account:
+# §16.10 canonical ATDD journey — full Acts 1–5 (also the primary browser smoke test):
+# Acts 3/3b/4/5 additionally require the add-on test deployment installed in the test account:
 #   Apps Script editor → Deploy → Test deployments → Install as Add-on
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey.py -x -v
 ```
+
+**Add-on install/version pre-flight (Act 0).** `test_journey.py` exercises the
+Workspace Add-on homepage card (Sync now, Insert tracker) and the `@`-menu
+editor trigger — these only work once the add-on test deployment is installed
+in the test Google account (one-time setup, see above) *and* is serving the
+revision just pushed by `npm run deploy:test`. Before Act 1, the journey opens
+the sidebar and reads its `BUILD_INFO.version` footer (`scn.ui.read_version`),
+comparing it against `src/Version.js` (`expected_version` fixture,
+`tests/helpers/version.py`):
+- Sidebar doesn't load within 15s — the test fails immediately, naming the
+  one-time install step above.
+- Sidebar loads but shows a different version string — the test fails
+  immediately, identifying a stale add-on install (reinstall the test
+  deployment).
+
+Either way Acts 3/3b/4/5 never run silently degraded against a missing or
+stale add-on — the failure surfaces at Act 0, before any journey state is
+created.
 
 Each UC scenario test has significant setup/teardown cost (GAS invocation, up to 300 s). A root-cause failure in an early scenario cascades to all later ones — running to completion wastes time and obscures the real defect. Fix the first failure before proceeding.
 

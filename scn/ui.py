@@ -107,6 +107,8 @@ _SIDEBAR_INSERT_TRACKER = (
 )
 # Sidebar homepage card — per-row Delete action button
 _SIDEBAR_DELETE = '[aria-label="Delete action"]'
+# Sidebar homepage card — BUILD_INFO.version footer (e.g. "v0.2.1 (Rev. Jun 9, 2026 22:06) (TEST)")
+_VERSION_FOOTER_RE = re.compile(r"v\d+\.\d+\.\d+\s*\(Rev\.[^)]*\)(?:\s*\([A-Za-z]+\))?")
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +257,10 @@ class UiDriver:
     def open_sidebar(self, addon_name: str = _ADDON_NAME, *, timeout: str = "15s") -> Card:
         """Click the add-on icon to open the homepage card; return a Card handle.
 
+        Idempotent: if the sidebar is already open (e.g. from an earlier call
+        in the same journey), returns the existing card without re-clicking
+        the icon — clicking it again toggles the panel closed.
+
         Polls all page frames for one that contains the 'Sync now' button —
         the same detection strategy as JS findAddonFrame in _helpers.js.
         Handles the cold-start 'Refresh' button that can appear before the card
@@ -262,6 +268,16 @@ class UiDriver:
         """
         self._ensure_doc()
         ms = _parse_timeout(timeout)
+
+        for frame in self._page.frames:
+            try:
+                if frame.get_by_role("button", name=re.compile(r"sync now", re.I)).count():
+                    card = Card(frame)
+                    self._current_card = card
+                    return card
+            except Exception:
+                pass
+
         btn = self._page.locator(_SIDEBAR_ICON_TMPL.format(name=addon_name)).first
         btn.wait_for(state="visible", timeout=ms)
         btn.click()
@@ -303,6 +319,18 @@ class UiDriver:
                     pass
 
             time.sleep(0.5)
+
+    def read_version(self, card: Card, *, timeout: str = "5s") -> str:
+        """Read the BUILD_INFO.version footer text from a homepage card.
+
+        Pre-flight smoke check: confirms the add-on test deployment installed
+        in this Google account is serving the expected revision
+        (tests/helpers/version.read_expected_version, src/Version.js).
+        """
+        ms = _parse_timeout(timeout)
+        locator = card.frame.get_by_text(_VERSION_FOOTER_RE)
+        locator.first.wait_for(state="visible", timeout=ms)
+        return locator.first.inner_text()
 
     def click(self, locator: _PwLocator, *, timeout: str = "5s") -> None:
         """Click a locator after waiting up to timeout for it to be visible."""
