@@ -210,6 +210,22 @@ def test_journey(scn, expected_version, gas_log_dir):
     )
     scn.mark("act3b.done")
 
+    # GTaskSheet-yuvq: durable-state assertion that the sidebar "Sync now" click
+    # (onSyncNow, doc-context) ran _syncTeamScope to completion and upserted the
+    # DocData row for this doc — the exact call-site that crashed before
+    # SyncManager.js:70's _openActionSheetSpreadsheet() fix (getActiveSpreadsheet()
+    # is null in doc-context).
+    def _docdata_row_written() -> str | None:
+        row = (scn._post_fixture("get_docdata_row").get("data") or {}).get("row")
+        if row is None:
+            return f"DocData row missing for {scn.doc_id} after onSyncNow sidebar sync"
+        return None
+
+    scn.expect_callable(
+        _docdata_row_written, on=SHEET, tag="[journey onSyncNow]",
+        entry_point="syncDocument.onSyncNow",
+    )
+
     # ── Act 4 — @create through the editor UI (Playwright phase begins) ───────
     created = ai(
         action="Creating an action via the @-menu trigger",

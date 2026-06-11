@@ -90,6 +90,9 @@ AC_REGISTRY: dict[str, str] = {
 # minimal slice that proves the entry-point diff shape for GTaskSheet-me6w.6.
 ENTRY_POINT_REGISTRY: dict[str, str] = {
     "syncDocument": "syncDocument(docId) — auto-assign / UpdateDoc-override / idempotent re-sync",
+    "syncDocument.onSyncNow": "syncDocument(docId) via onSyncNow (WorkspaceAddonCard.js 'Sync now' "
+        "button, doc-context) — distinct call-site from the run_fixture/Web-App path; "
+        "getActiveSpreadsheet() is null here (GTaskSheet-yuvq)",
     "assertTeamAccess": "assertTeamAccess(teamId, ss) — team-scoped security gate on filtered reads",
     "setup_team_scope_fixture": "setup_team_scope_fixture — idempotent TeamData/folder fixture setup for team-scope scenarios",
 }
