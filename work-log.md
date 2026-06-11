@@ -2205,3 +2205,151 @@ Drive-polling test harness (and to `clasp logs`'s structured JSON lines)
 until GasLogger.flush() is called. Any entry-point function whose log tags
 need to be assertable by tests must flush on every return path, including
 catch blocks.
+
+## 2026-06-11 12:16:00
+
+### Summary:
+Resolved GTaskSheet-o5py, mpe1, u2np, 7gyt as a coordinated group (shared
+test_journey.py / test_team_scope.py fixtures).
+
+- o5py: Added `UiDriver.reload()` (scn/ui.py) before Act 5's hover so the
+  AI-N chip inserted via Act 4's REST batchUpdate is visible to the live
+  editor locator.
+- 7gyt: Confirmed already resolved by prior commit cc844a0 — Act 4's
+  @-menu create-action flow passes end-to-end (CREATE_ACTION_TRIGGER.done
+  logged, chip inserted).
+- mpe1: Widened `_runConsistencyChecks`'s assigneeName skip condition
+  (src/TestFixtures.js) to cover directory-resolved chip names, reusing
+  the existing `_isEmailDerivedName` helper.
+- u2np: Added a "no-team" folder to `setup_team_scope_fixture`
+  (src/TestFixtures.js), created at My Drive root after a debug
+  `debug_drive_ancestors` fixture showed the project's stsfRoot folder is
+  itself the live TestGActionSheet-registered TeamData folder (so a
+  no-team folder must NOT be a sibling of it). test_team_scope.py now
+  passes S0-S8.
+
+Hit and worked through an Apps Script 200-version limit blocking
+`npm run deploy:test` (versions are immutable via clasp/API; user
+bulk-deleted old versions via the Apps Script editor's Project History UI
+to unblock).
+
+Found and fixed a real test-harness bug: `wait_for_log()` in
+tests/helpers/gas_log.py checks `sys.stdin.isatty()` on timeout and blocks
+forever on `input()` when pytest runs in a backgrounded/non-TTY shell —
+recorded via `bd remember`; always run pytest with `< /dev/null` in this
+environment.
+
+Act 5's hover now succeeds with `force=True` (works around a Google Docs
+`<span jsslot="">` overlay intercepting pointer events), but the GAS
+link-preview card iframe still doesn't render afterward even at a 15s
+timeout — filed as new follow-up GTaskSheet-s9so.
+
+Filed GTaskSheet-np7s for a TestExec-NNN/ per-run artifact folder + Allure
+index idea (discussed during the long test waits) to make redeploy/test
+correlation auditable.
+
+Closed GTaskSheet-o5py, mpe1, u2np, 7gyt. Committed (d734b30) and pushed to
+inf/scn-observability-failfast; bd synced to Dolt remote.
+
+### Key Learnings:
+- Apps Script script-version limit (200) is hard and immutable via
+  clasp/API — only the editor's Project History "bulk delete" UI can free
+  versions, and only for versions not pinned to an active deployment.
+- pytest invocations in this project must redirect stdin from /dev/null
+  (`< /dev/null`) to avoid `wait_for_log()`'s isatty-triggered hang on
+  assert_no_log timeouts in backgrounded runs.
+- The project's stsfRoot test folder is itself a live TeamData-registered
+  folder — fixtures needing a "no team match" Drive location must use a
+  folder outside that subtree (My Drive root), not a sibling of stsfRoot.
+
+## 2026-06-11 15:17:11
+
+### Summary:
+Resolved GTaskSheet-k22t and GTaskSheet-np7s (k22t+np7s scoped this session
+per user decision; GTaskSheet-yuvq explicitly deferred).
+
+- **k22t** (closed): Re-based docs/atdd/ID-map.md follow-ups. Verified T24
+  (generated traceability) end-to-end via `scripts/check_coverage.py -v`
+  against a live `test_journey` JUnit run (3/32 ACs, 0/3 entry points
+  covered — confirms the AC/EP gap-diff mechanism works against real
+  output). Confirmed the two `implementation-gate` skills are already
+  identical. Filed `GTaskSheet-z6f8` (T17 project-wide
+  ENTRY_POINT_REGISTRY buildout) and `GTaskSheet-ruoa` (fill DevStandard
+  ATDD templates into project docs) for remaining work.
+- **np7s** (closed): Added `scripts/run_test_exec.py` — wraps a pytest
+  invocation in a self-contained `test-results/TestExec-NNN/` folder
+  (per-step traces via new `SCN_RUN_DIR`, archived GAS logs via new
+  `SCN_GAS_LOG_DIR`, Allure results+HTML report, JUnit XML, README with
+  deployed GAS version + pass/fail summary + investigation question).
+  Regenerates `test-results/INDEX.md` (newest-first). Edited
+  `scn/reporter.py` and `tests/helpers/gas_log.py` to honor the new env
+  vars while preserving default (unwrapped) output paths. Verified
+  end-to-end: 64/64 pass case and a 0-tests/exit-4 collection-error case
+  (fixed `_junit_summary` to report FAIL, not a misleading PASS, for
+  usage/collection errors). Documented the wrapper in
+  docs/OPERATIONS.md §Test observability. `.gitignore` updated to keep
+  README.md/INDEX.md but ignore the bulky generated subdirs.
+- **80mo.12 design phase** (kicked off per user, after surfacing overlap
+  with np7s): created `GTaskSheet-16kh` (R6-impl: Allure step tags +
+  UI-failure screenshots via new optional `engine.drain()` hooks,
+  `Reporter.allure_step()`/`attach_screenshot()`) with full design spec,
+  and `GTaskSheet-80mo.12.1` (R6-docs, depends on 16kh). Implementation
+  not started — design only.
+
+Committed as `d57ebcb` (k22t+np7s code/docs) and `b962ab8` (bd state),
+pushed to `inf/scn-observability-failfast`. `bd dolt push` synced.
+Pre-existing unrelated WIP (src/*.js, work-log.md prior entries,
+deployment-ledger/test.jsonl, staging/probe-analysis-manual-supplement.md,
+tests/playwright/probe.test.js, tests/test_poc_features.py, stray
+test-results/*.log) left untouched — out of scope for this session.
+
+### Key Learnings:
+`run_test_exec.py`'s `_junit_summary()` must take pytest's exit code, not
+just the JUnit XML, to distinguish "0 tests, exit 0" (e.g. filtered to
+nothing) from "0 tests, exit 4" (collection/usage error) — the XML alone
+reports both as a vacuous PASS.
+
+## 2026-06-11 15:54:35
+
+### Summary:
+Resolved GTaskSheet-16kh (R6-impl: Allure step tags + UI-failure screenshots,
+engine.drain hooks). Implemented per the bead's frozen activation design:
+- `scn/reporter.py`: `Reporter.step()` now wraps each traced block in
+  `allure.step("<phase> <name>[ <detail>]")`; added `allure_step(name)` and
+  `attach_screenshot(page, name)` (exception-swallowing); `NullReporter` got
+  matching no-ops.
+- `scn/engine.py`: `CheckpointEngine.drain()` gained optional `step_cm`/
+  `on_ui_fail` params (default `None`, backward compatible); per-surface checks
+  wrapped in `step_cm(f"{tag} {surface}")`, and `on_ui_fail(surface, tag, error)`
+  fires before raising on a `Surface.UI` FAIL-severity miss.
+- `scn/session.py`: new `_attach_ui_failure_screenshot` wired into
+  `checkpoint()`'s `engine.drain()` call.
+- Tests extended (not duplicated) in `test_scn_reporter.py`, `test_scn_engine.py`,
+  `test_scn_session.py` — 233 scn unit tests pass (182 + 51).
+Closing 16kh unblocked the docs follow-up GTaskSheet-80mo.12.1. Committed
+(e2dfa5f, f778b12) and pushed to inf/scn-observability-failfast.
+
+### Key Learnings:
+- Live-run AC (real `test_journey` + `npx allure generate` showing
+  `[<scenario> <ac-label>] <SURFACE>` step names + UI-fail screenshot
+  attachment) requires a deployed GAS WebApp — deferred as a follow-up manual/CI
+  verification, not blocking bead closure.
+- A broad `pytest tests/ -k "not journey and not sync_all..."` run hangs on
+  `test_b7_write_routes.py` (live network dependency) even with `< /dev/null`;
+  scope verification runs to the `test_scn_*.py` unit modules for fast,
+  network-free feedback.
+
+## 2026-06-11 23:35:00
+
+### Summary:
+Completed GTaskSheet-yuvq: registered `syncDocument.onSyncNow` (sidebar "Sync now", doc-context) as a distinct entry point in `scn/contract.py`'s ENTRY_POINT_REGISTRY, and added a durable-state check in `tests/test_journey.py` Act 3b that asserts the DocData row for the journey doc was upserted with a `teamId` after the onSyncNow sidebar sync — drained at the Act 4 INTEGRITY checkpoint. D4 (warn->fail tightening for Acts 3/3b/4/5 preflight) was confirmed already done via commit cddf488.
+
+Resolved a pre-existing uncommitted WIP that renamed the chip-URL namespace from NUTS to NUUTS (`ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUUTS'`, appsscript.json linkPreview pathPrefix `NUUTS`). Per user direction: fixed garbled/broken doc-comments in `src/SyncManager.js`, and simplified `_globalIdFromChipUrl` in `src/EditorAddonCard.js` by dropping unused legacy path-suffix support and standardizing on returning `null` (not `''`) when the URL has no `globalId` query parameter. All 3 call sites confirmed falsy-safe with `null`.
+
+Ran `npm run deploy:test` (new version v0.2.1, Rev. Jun 11 16:20) and a full live `test_journey.py` run via `run_test_exec.py` (TestExec-001). Acts 1-4 passed cleanly, including `[journey onSyncNow] SHEET PASS` (teamId=TestGActionSheet) and `[journey ui-create] DOC/SHEET PASS`. Act 5 failed on `scn.ui.hover()` timing out waiting for the chip-hover preview iframe -- attributed to the pre-existing, separately-tracked OPEN bug GTaskSheet-s9so (force=True hover doesn't trigger Google's onLinkPreview), not a regression from this session's changes. Verified `check_coverage.py --xml` shows `syncDocument.onSyncNow` covered. Confirmed 16kh's deferred live-Allure-report acceptance criterion via the same TestExec-001 run (Allure steps rendered for `[journey onSyncNow]`, `[journey sync-create]`, etc).
+
+Closed GTaskSheet-yuvq; updated GTaskSheet-16kh notes; created GTaskSheet-oqn4 (follow-up: update stale ADR-0011 NUTS->NUUTS namespace doc). Full scn unit suite: 233/233 passed. Two commits on `inf/scn-observability-failfast`: 3d43a17 (NUUTS rename + _globalIdFromChipUrl simplification) and 52cac64 (onSyncNow entry-point coverage).
+
+### Key Learnings:
+- `_globalIdFromChipUrl` convention: return `null` (not `''`) when a chip URL has no `globalId` param -- all call sites already handle falsy/null safely.
+- Act5 hover-preview failures via Playwright `force=True` are a known, distinct, pre-existing issue (GTaskSheet-s9so) -- do not conflate with new regressions when triaging future journey runs.
