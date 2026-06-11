@@ -1848,6 +1848,17 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'get_team_data_rows': {
+        // Returns all TeamData rows ({teamId, folderId, contact}) (GTaskSheet-zc21).
+        // Used to verify TeamData fixture setup never mutates pre-existing rows.
+        _TF_RESULT = {
+          tag: 'fixture.get_team_data_rows',
+          data: { rows: _readTeamDataRows(ss) }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'set_docdata_row': {
         // Upserts a DocData row, overriding only the fields supplied (GTaskSheet-me6w.6).
         // Used to set up the UpdateDoc-override scenarios (S3/S7) on a row already
@@ -2285,16 +2296,57 @@ function verifyConsistencyForTest(docId, expected) {
 
     _runConsistencyChecks(result, floatingActions, tracker, sheetRows, result.docTitle, archivedIds);
 
+    // DocData consistency (GTaskSheet-zc21) — runs whenever a DocData row exists
+    // for this doc, independent of `expected`. Verifies DocData.team_id matches
+    // the document's actual teamScope appProperty, and that DocData.action_count
+    // / resolved_count match BOTH the document's floating actions AND the
+    // ActionSheet rows.
+    var vcfDocDataRow = _readDocDataRow(ss, resolvedDocId);
+    var vcfToken      = ScriptApp.getOAuthToken();
+    var vcfTeamScope  = _getDocAppProperty(resolvedDocId, 'teamScope', vcfToken) || '';
+    if (vcfDocDataRow) {
+      if (vcfDocDataRow.teamId !== vcfTeamScope) {
+        result.issues.push(
+          'DocData.team_id mismatch vs teamScope appProperty: docData=' + vcfDocDataRow.teamId + ' appProperty=' + vcfTeamScope
+        );
+      }
+      if (vcfDocDataRow.actionCount !== floatingActions.length) {
+        result.issues.push(
+          'DocData.action_count mismatch vs document: docData=' + vcfDocDataRow.actionCount + ' document=' + floatingActions.length
+        );
+      }
+      if (vcfDocDataRow.actionCount !== sheetRows.length) {
+        result.issues.push(
+          'DocData.action_count mismatch vs sheet: docData=' + vcfDocDataRow.actionCount + ' sheet=' + sheetRows.length
+        );
+      }
+      var vcfFloatingResolvedCount = 0;
+      for (var vcfFI = 0; vcfFI < floatingActions.length; vcfFI++) {
+        if (isResolved(floatingActions[vcfFI].status)) vcfFloatingResolvedCount++;
+      }
+      var vcfSheetResolvedCount = 0;
+      for (var vcfSI = 0; vcfSI < sheetRows.length; vcfSI++) {
+        if (isResolved(sheetRows[vcfSI].status)) vcfSheetResolvedCount++;
+      }
+      if (vcfDocDataRow.resolvedCount !== vcfFloatingResolvedCount) {
+        result.issues.push(
+          'DocData.resolved_count mismatch vs document: docData=' + vcfDocDataRow.resolvedCount + ' document=' + vcfFloatingResolvedCount
+        );
+      }
+      if (vcfDocDataRow.resolvedCount !== vcfSheetResolvedCount) {
+        result.issues.push(
+          'DocData.resolved_count mismatch vs sheet: docData=' + vcfDocDataRow.resolvedCount + ' sheet=' + vcfSheetResolvedCount
+        );
+      }
+    }
+
     // Team Scope consistency (GTaskSheet-me6w.6) — only when requested.
     if (expected && expected.teamId !== undefined && expected.teamId !== null) {
-      var vcfToken = ScriptApp.getOAuthToken();
-      var vcfTeamScope = _getDocAppProperty(resolvedDocId, 'teamScope', vcfToken) || '';
       if (vcfTeamScope !== expected.teamId) {
         result.issues.push(
           'teamScope appProperty mismatch: expected=' + expected.teamId + ' actual=' + vcfTeamScope
         );
       }
-      var vcfDocDataRow = _readDocDataRow(ss, resolvedDocId);
       if (!vcfDocDataRow) {
         result.issues.push('DocData row missing for fileId=' + resolvedDocId);
       } else {
@@ -2308,20 +2360,6 @@ function verifyConsistencyForTest(docId, expected) {
         }
         if (!vcfDocDataRow.docModified) {
           result.issues.push('DocData.doc_modified is empty for fileId=' + resolvedDocId);
-        }
-        if (vcfDocDataRow.actionCount !== sheetRows.length) {
-          result.issues.push(
-            'DocData.action_count mismatch: expected=' + sheetRows.length + ' actual=' + vcfDocDataRow.actionCount
-          );
-        }
-        var vcfResolvedCount = 0;
-        for (var vcfI = 0; vcfI < sheetRows.length; vcfI++) {
-          if (isResolved(sheetRows[vcfI].status)) vcfResolvedCount++;
-        }
-        if (vcfDocDataRow.resolvedCount !== vcfResolvedCount) {
-          result.issues.push(
-            'DocData.resolved_count mismatch: expected=' + vcfResolvedCount + ' actual=' + vcfDocDataRow.resolvedCount
-          );
         }
       }
     }

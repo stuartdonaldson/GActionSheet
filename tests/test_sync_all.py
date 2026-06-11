@@ -151,6 +151,39 @@ def test_sync_all(sync_ctx):
             f"[grxl] trashed-doc row: expected 'Doc Not Found', got {row.sync_status!r}"
         )
 
+    # [zc21] DocData mirrors 'Doc Not Found' and keeps Team Id consistent with
+    # the document's actual teamScope appProperty.
+    trashed_docdata = (scn_mod._post_fixture("get_docdata_row", {"fileId": trashed_id})
+                        .get("data") or {}).get("row")
+    assert trashed_docdata is not None, (
+        "[zc21] trashed-doc DocData row missing after Sweep 1"
+    )
+    assert trashed_docdata.get("syncStatus") == "Doc Not Found", (
+        f"[zc21] trashed-doc DocData.sync_status: expected 'Doc Not Found', "
+        f"got {trashed_docdata.get('syncStatus')!r}"
+    )
+    trashed_team_scope = (scn_mod._post_fixture("get_team_scope", {"docId": trashed_id})
+                           .get("data") or {}).get("teamScope", "")
+    assert trashed_docdata.get("teamId", "") == trashed_team_scope, (
+        f"[zc21] trashed-doc DocData.team_id ({trashed_docdata.get('teamId')!r}) "
+        f"!= teamScope appProperty ({trashed_team_scope!r})"
+    )
+
+    # [zc21] invalid doc never had a DocData row before sync_all — one is
+    # created on first 'Doc Not Found' mark, with an empty Team Id.
+    invalid_docdata = (scn_mod._post_fixture("get_docdata_row", {"fileId": invalid_id})
+                        .get("data") or {}).get("row")
+    assert invalid_docdata is not None, (
+        "[zc21] invalid-doc DocData row not created after Sweep 1"
+    )
+    assert invalid_docdata.get("syncStatus") == "Doc Not Found", (
+        f"[zc21] invalid-doc DocData.sync_status: expected 'Doc Not Found', "
+        f"got {invalid_docdata.get('syncStatus')!r}"
+    )
+    assert invalid_docdata.get("teamId", "") == "", (
+        f"[zc21] invalid-doc DocData.team_id: expected '', got {invalid_docdata.get('teamId')!r}"
+    )
+
     # [5u2v] unmodified valid doc → row count unchanged; NOT marked Doc Not Found
     post_unmod_s1 = _sheet_rows_for(settings, unmodified_id)
     for row in post_unmod_s1:

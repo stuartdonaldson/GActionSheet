@@ -157,6 +157,16 @@ def test_journey(scn, expected_version):
     for a in (unassigned, with_email, explicit_5, domain_usr, started_ip, backlogged):
         scn.verify_all_expectations(a, tag="[journey sync-create]")     # doc+sheet (+tracker when present); all fields
     scn.verify_consistency(scope=DOC)      # §16.7 checklist + chip integrity (6ov.8)
+
+    # [zc21] DocData consistency: action_count/resolved_count match both the
+    # document's floating actions and the ActionSheet, and Team Id matches the
+    # document's teamScope appProperty. Filtered to DocData.* issues — other
+    # _runConsistencyChecks findings (e.g. assigneeName) are out of scope for
+    # zc21 and tracked separately (GTaskSheet-mpe1).
+    _vc = (scn._post_fixture("verify_consistency").get("data") or {})
+    _vc_docdata_issues = [i for i in _vc.get("issues", []) if i.startswith("DocData.")]
+    assert not _vc_docdata_issues, f"[zc21] verify_consistency failed: {_vc_docdata_issues}"
+
     scn.checkpoint(INTEGRITY)             # capture docx+xlsx; drain the above
 
     # ── Act 3 — insert the tracker table and re-sync ──────────────────────────

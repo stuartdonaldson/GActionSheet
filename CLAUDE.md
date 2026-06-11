@@ -116,6 +116,8 @@ references are mapped in `docs/atdd/ID-map.md` — start there):
 - **GAS+Python acceptance-testing mechanics** → GAS-Practices `best-practices/gas-acceptance-testing/`.
 - **Project realization** (the `scn/` scenario model, canonical journey, contract) → `docs/atdd/ID-map.md` (§`scn/` module map) and archived source `docs/atdd/archive/atdd-lifecycle.md` §15–§16.
 
+For long running tests, always route test output to a fail rather than pipe to tail so we have the file for later analysis and to use to monitor progress of the test.
+
 Methodology declaration — Testing: `atdd-bdd` (DevStandard). Key rules for every session:
 
 **Issue title prefixes (required on all new issues):**

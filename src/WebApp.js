@@ -541,6 +541,37 @@ function _handleSyncActionRows(payload) {
         actionsSheet.deleteRow(duplicateRowIndexes[dri]);
       }
     }
+
+    // Refresh DocData.action_count / resolved_count from the just-reconciled
+    // Actions sheet (GTaskSheet-zc21) — counts exclude rows orphaned from this
+    // doc (Deleted/Doc Not Found) so they track the document's live floating
+    // actions, preserving doc_name/doc_modified/team_id/sync_status.
+    if (docId) {
+      var dcLastRow = actionsSheet.getLastRow();
+      var dcActionCount   = 0;
+      var dcResolvedCount = 0;
+      if (dcLastRow >= 2) {
+        var dcData = actionsSheet.getRange(2, 1, dcLastRow - 1, SHEET_HEADERS.length).getValues();
+        var _DCF   = CONTRACT_SCHEMA.sheetAction.columnsByField;
+        for (var dci = 0; dci < dcData.length; dci++) {
+          var dcGlobalId = String(dcData[dci][_DCF.global_id - 1] || '');
+          if (dcGlobalId.indexOf(docId + '/') !== 0) continue;
+          var dcSyncStatus = dcData[dci][_DCF.sync_status - 1];
+          if (dcSyncStatus === 'Deleted' || dcSyncStatus === 'Doc Not Found') continue;
+          dcActionCount++;
+          if (isResolved(dcData[dci][_DCF.status - 1])) dcResolvedCount++;
+        }
+      }
+      var dcExisting = _readDocDataRow(ss, docId);
+      _getOrUpsertDocDataRow(
+        ss, docId,
+        dcExisting ? dcExisting.docName : (docTitle || ''),
+        dcExisting ? dcExisting.docModified : now,
+        dcExisting ? dcExisting.teamId : '',
+        dcExisting ? dcExisting.syncStatus : '',
+        dcActionCount, dcResolvedCount
+      );
+    }
   });
 
   return _jsonResponse({ ok: true, upserted: upserted, updated: updated, sheetWins: sheetWins, queueDrained: queueDrained });
@@ -728,6 +759,22 @@ function _handleMarkDocNotFound(payload) {
       if (formula.indexOf(docId) === -1) continue;
       actionsSheet.getRange(i + 2, _ACOL.sync_status).setValue('Doc Not Found');
       marked++;
+    }
+
+    if (marked > 0) {
+      // Mirror the Doc Not Found status to DocData (GTaskSheet-zc21), preserving
+      // any existing Team Id / counts so the row stays a consistent record of
+      // the document even after it becomes unreachable.
+      var existingDocDataRow = _readDocDataRow(ss, docId);
+      _getOrUpsertDocDataRow(
+        ss, docId,
+        existingDocDataRow ? existingDocDataRow.docName : '',
+        existingDocDataRow ? existingDocDataRow.docModified : new Date(),
+        existingDocDataRow ? existingDocDataRow.teamId : '',
+        'Doc Not Found',
+        existingDocDataRow ? existingDocDataRow.actionCount : 0,
+        existingDocDataRow ? existingDocDataRow.resolvedCount : 0
+      );
     }
   });
 

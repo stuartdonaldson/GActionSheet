@@ -59,6 +59,7 @@ AC_REGISTRY: dict[str, str] = {
     "sidebar sync-SHEET": "Sidebar SHEET surface sync",
     "sidebar tracker-insert": "Sidebar tracker insert operation",
     "t": "Generic test marker",
+    "teamscope teamdata-safety": "S0 - TeamData fixture setup leaves pre-existing rows unchanged; new rows are test-marked only",
     "teamscope direct-match": "S1a - auto-assign when doc is directly in a registered team's folder",
     "teamscope subteam-match": "S1b - auto-assign matches a more specific sub-team folder over its registered parent",
     "teamscope deep-walk": "S1c - auto-assign walks multiple unregistered ancestor levels to the nearest registered folder",
@@ -90,6 +91,7 @@ AC_REGISTRY: dict[str, str] = {
 ENTRY_POINT_REGISTRY: dict[str, str] = {
     "syncDocument": "syncDocument(docId) — auto-assign / UpdateDoc-override / idempotent re-sync",
     "assertTeamAccess": "assertTeamAccess(teamId, ss) — team-scoped security gate on filtered reads",
+    "setup_team_scope_fixture": "setup_team_scope_fixture — idempotent TeamData/folder fixture setup for team-scope scenarios",
 }
 
 __all__ = [

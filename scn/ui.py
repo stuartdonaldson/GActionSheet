@@ -434,9 +434,34 @@ class UiDriver:
             # that frame. Diagnosed 2026-06-10: the 'Action' / 'Assignee (optional)'
             # inputs live in that frame ~6s after the click; a top-level
             # wait_for_selector never finds them (25s timeout).
-            form = self._page.frame_locator(_ADDON_FORM_IFRAME)
+            # Multiple frames can match _ADDON_FORM_IFRAME once the homepage
+            # sidebar (Act 3b) is open (sidebar iframe + Docs' own kix-appview
+            # iframe), in addition to the Create-action form's iframe — so a
+            # single frame_locator(...) is ambiguous (strict-mode violation).
+            # Poll page.frames directly for the one frame whose assignee input
+            # becomes visible.
+            deadline = time.monotonic() + 30.0
+            form = None
+            while time.monotonic() < deadline:
+                for frame in self._page.frames:
+                    if "addons.gsuite.google.com" not in frame.url:
+                        continue
+                    try:
+                        candidate = frame.locator(_FORM_ASSIGNEE).first
+                        if candidate.is_visible():
+                            form = frame
+                            break
+                    except Exception:
+                        continue
+                if form is not None:
+                    break
+                time.sleep(0.5)
+            if form is None:
+                raise TimeoutError(
+                    "create_action: no add-on iframe with a visible assignee "
+                    "input found within 30s"
+                )
             assignee = form.locator(_FORM_ASSIGNEE).first
-            assignee.wait_for(state="visible", timeout=30000)
 
             if target.assignee:
                 assignee.fill(target.assignee)

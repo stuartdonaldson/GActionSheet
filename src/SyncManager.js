@@ -71,6 +71,10 @@ function syncDocument(docId) {
     // getActiveSpreadsheet() is null — use _openActionSheetSpreadsheet() (TrackerTable.js)
     // for the ACTION_SHEET_ID/TEST_SHEET_ID fallback.
     _syncTeamScope(_openActionSheetSpreadsheet(), docId, ScriptApp.getOAuthToken(), doc.getName());
+    // Flush the DocData row written above so it's visible to the separate
+    // doPost execution (_handleSyncActionRows, invoked via UrlFetchApp below)
+    // — cross-execution reads of the spreadsheet do not see unflushed writes.
+    SpreadsheetApp.flush();
 
     var assignResult = _assignPlaceholderTokens(doc);
     if (assignResult.count > 0) {

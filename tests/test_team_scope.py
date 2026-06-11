@@ -36,6 +36,15 @@ STEP = CheckpointKind.STEP
 # Helpers
 # ---------------------------------------------------------------------------
 
+_TEAMDATA_TEST_MARKED_IDS = {"TestTeamA", "TestTeamAChild"}
+
+
+def _team_data_rows(scn):
+    """All TeamData rows ({teamId, folderId, contact}) (GTaskSheet-zc21)."""
+    resp = scn._post_fixture("get_team_data_rows")
+    return (resp.get("data") or {}).get("rows") or []
+
+
 def _team_scope(scn):
     resp = scn._post_fixture("get_team_scope")
     return (resp.get("data") or {}).get("teamScope", "")
@@ -119,6 +128,46 @@ def test_team_scope(settings, gas_log_dir, request):
         return s
 
     try:
+        # ── S0 — TeamData safety: fixture setup leaves pre-existing rows
+        # unchanged; any newly-created rows are test-marked only (GTaskSheet-zc21) ─
+        scn_0 = new_doc()
+        rows_before = _team_data_rows(scn_0)
+        scn_0._post_fixture("setup_team_scope_fixture")
+        rows_after = _team_data_rows(scn_0)
+
+        before_by_id = {r.get("teamId"): r for r in rows_before}
+        after_by_id = {r.get("teamId"): r for r in rows_after}
+
+        for team_id, before in before_by_id.items():
+            after = after_by_id.get(team_id)
+            assert after is not None, (
+                f"S0: pre-existing TeamData row {team_id!r} disappeared "
+                f"after setup_team_scope_fixture"
+            )
+            assert after == before, (
+                f"S0: pre-existing TeamData row {team_id!r} changed: "
+                f"before={before} after={after}"
+            )
+
+        new_team_ids = set(after_by_id) - set(before_by_id)
+
+        def check_0(new_team_ids=new_team_ids):
+            extra = new_team_ids - _TEAMDATA_TEST_MARKED_IDS
+            if extra:
+                return (
+                    f"setup_team_scope_fixture added non-test-marked TeamData "
+                    f"rows: {sorted(extra)}"
+                )
+            return None
+
+        err = check_0()
+        assert err is None, err
+        scn_0.expect_callable(
+            check_0, on=SHEET, tag="teamscope teamdata-safety",
+            entry_point="setup_team_scope_fixture",
+        )
+        scn_0.checkpoint(STEP)
+
         # ── S1a — direct-match: doc placed directly in testTeamA ────────────
         scn_a = new_doc()
         _move_to_folder(scn_a, settings["testTeamA"])
