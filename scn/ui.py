@@ -205,6 +205,16 @@ class UiDriver:
             self._page.goto(self._doc_url())
             self._page.wait_for_selector(".docs-title-outer", timeout=30000)
 
+    def reload(self) -> None:
+        """Reload the current page and wait for the Docs editor to be ready.
+
+        REST-API-applied changes (e.g. a chip inserted via batchUpdate during
+        an INTEGRITY checkpoint) are not reflected in an already-open editor
+        tab without a reload.
+        """
+        self._page.reload()
+        self._page.wait_for_selector(".docs-title-outer", timeout=30000)
+
     # ------------------------------------------------------------------
     # locate — builds a Playwright locator (lazy, no DOM touch)
     # ------------------------------------------------------------------
@@ -253,10 +263,16 @@ class UiDriver:
         Waits up to timeout for the element to be visible and for the GAS
         link-preview card iframe to render its body.
         Sets the current card context for subsequent next=True locate() calls.
+
+        GTaskSheet-o5py: force=True bypasses Playwright's "receives pointer
+        events" actionability check. The Docs editor renders its own hover
+        chrome (a <span jsslot> overlay) on top of smart-chip links, which
+        intercepts the synthetic hover event even though the element itself
+        is visible and present.
         """
         ms = _parse_timeout(timeout)
         locator.wait_for(state="visible", timeout=ms)
-        locator.hover()
+        locator.hover(force=True)
 
         card_frame = self._page.frame_locator(_CARD_IFRAME).first
         card_frame.locator(_CARD_BODY).first.wait_for(state="visible", timeout=ms)

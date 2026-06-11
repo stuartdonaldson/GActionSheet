@@ -246,9 +246,15 @@ def test_journey(scn, expected_version, gas_log_dir):
     )
 
     # ── Act 5 — hover the chip, read the preview card, change status ──────
+    # GTaskSheet-o5py: the chip inserted via the Act 4 INTEGRITY sync's REST
+    # batchUpdate is not reflected in the already-open editor tab without a
+    # reload. The first hover after a fresh reload is also slower (Docs
+    # re-initializes its chip-hover JS and the onLinkPreview GAS trigger is a
+    # cold-start round trip), so give the preview card extra time to render.
+    scn.ui.reload()
     card = scn.ui.hover(
         scn.ui.locate(text=created.action_id, occurrence=1),
-        timeout="5s",
+        timeout="15s",
     )
     scn.expect_visible(card, timeout="5s")
     # rwz AC1: card header contains "AI-N: …" pattern

@@ -1859,6 +1859,26 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'debug_drive_ancestors': {
+        // Diagnostic: returns the chain of ancestor folders ({id, name}) from
+        // fileId's immediate parent up to My Drive root (GTaskSheet-u2np).
+        // Useful for explaining unexpected teamScope folder-walk matches.
+        var ddaFileId = data.fileId || testSheetId;
+        var ddaChain  = [];
+        var ddaIter   = DriveApp.getFileById(ddaFileId).getParents();
+        while (ddaIter.hasNext()) {
+          var ddaFolder = ddaIter.next();
+          ddaChain.push({ id: ddaFolder.getId(), name: ddaFolder.getName() });
+          ddaIter = ddaFolder.getParents();
+        }
+        _TF_RESULT = {
+          tag: 'fixture.debug_drive_ancestors',
+          data: { fileId: ddaFileId, ancestors: ddaChain }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'set_docdata_row': {
         // Upserts a DocData row, overriding only the fields supplied (GTaskSheet-me6w.6).
         // Used to set up the UpdateDoc-override scenarios (S3/S7) on a row already
@@ -1906,6 +1926,10 @@ function setupTestFixtures(scenario, data) {
         //   |- testTeamAChild (child, registered TestTeamAChild)
         //   `- testTeamAMid (unregistered)
         //      `- testTeamADeep (unregistered, no TeamData row)
+        //
+        //   testTeamNoTeam (sibling of testTeamA, unregistered, no TeamData
+        //   row) — used by S2/S6 for the folder-walk no-match path
+        //   (GTaskSheet-u2np).
         var stsfProps = PropertiesService.getScriptProperties();
 
         var stsfRootIter = DriveApp.getFileById(testSheetId).getParents();
@@ -1935,6 +1959,17 @@ function setupTestFixtures(scenario, data) {
         stsfDeepId = stsfDeep.getId();
         stsfProps.setProperty('TEAMSCOPE_FOLDER_A_DEEP', stsfDeepId);
 
+        // No-team folder (GTaskSheet-u2np): the live TeamData row
+        // 'TestGActionSheet' registers stsfRoot itself (testSheetId's parent
+        // "GActionSheet" folder) — so any descendant of stsfRoot walks up to
+        // a match. Create the no-team folder at My Drive root instead, which
+        // has no TeamData row, so the walk reaches no-match.
+        var stsfNoTeamId = stsfProps.getProperty('TEAMSCOPE_FOLDER_NOTEAM_ROOT');
+        var stsfNoTeam = stsfNoTeamId ? DriveApp.getFolderById(stsfNoTeamId)
+                                       : DriveApp.getRootFolder().createFolder('GActionSheet Test - TeamScope No-Team');
+        stsfNoTeamId = stsfNoTeam.getId();
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_NOTEAM_ROOT', stsfNoTeamId);
+
         // Idempotent TeamData rows: TestTeamA -> A, TestTeamAChild -> Child
         var stsfTeamSheet = _getOrCreateSheet(ss, 'TeamData');
         if (stsfTeamSheet.getLastRow() < 1) {
@@ -1960,7 +1995,8 @@ function setupTestFixtures(scenario, data) {
             testTeamA:      stsfParentId,
             testTeamAChild: stsfChildId,
             testTeamAMid:   stsfMidId,
-            testTeamADeep:  stsfDeepId
+            testTeamADeep:  stsfDeepId,
+            testTeamNoTeam: stsfNoTeamId
           }
         };
         docAlreadyClosed = true;
@@ -2454,7 +2490,12 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
       // which is correct — skip the mismatch for this case.
       var docNameEmpty   = floating.assigneeName === '';
       var sheetDerived   = _isEmailDerivedName(floating.assigneeEmail, sheet.assigneeName);
-      if (!(docNameEmpty && sheetDerived)) {
+      // GTaskSheet-mpe1: a directory-resolved chip name (e.g. "Northlake
+      // Minister") is propagated to the sheet on the next syncAll sweep, not
+      // immediately (see SyncManager.js sync.sheet-to-doc.done note) — skip
+      // this case too.
+      var docResolved = !docNameEmpty && !_isEmailDerivedName(floating.assigneeEmail, floating.assigneeName);
+      if (!((docNameEmpty || docResolved) && sheetDerived)) {
         result.issues.push('assigneeName mismatch (ID ' + sheet.id + '): doc="' +
           floating.assigneeName + '" sheet="' + sheet.assigneeName + '"');
       }

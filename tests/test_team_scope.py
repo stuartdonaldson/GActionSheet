@@ -17,12 +17,16 @@ Folder hierarchy (local.settings.json, set up via setup_team_scope_fixture):
   testTeamAChild — child of testTeamA, registered TeamData row TestTeamAChild
   testTeamADeep  — multi-level descendant of testTeamA, NOT under
                    testTeamAChild, no intermediate TeamData registration
+  testTeamNoTeam — sibling of testTeamA, unregistered, no TeamData row
+                   (GTaskSheet-u2np); returned dynamically by
+                   setup_team_scope_fixture and used by S2/S6 below.
 
-S2/S6 both exercise the folder-walk no-match path. S6's design precondition
-("TeamData tab is empty") cannot be created without disrupting the persistent,
-idempotent TestTeamA/TestTeamAChild rows required by S1a/S1b/S1c/S8 — so S6
-uses the same default-location (no TeamData ancestor match) setup as S2,
-which produces the same observable outcome (blank teamScope, no-match log).
+S2/S6 both exercise the folder-walk no-match path, by moving their docs into
+testTeamNoTeam. S6's design precondition ("TeamData tab is empty") cannot be
+created without disrupting the persistent, idempotent TestTeamA/TestTeamAChild
+rows required by S1a/S1b/S1c/S8 — so S6 uses the same no-team-folder setup as
+S2, which produces the same observable outcome (blank teamScope, no-match
+log).
 """
 from scn.engine import CheckpointKind, Surface
 from scn.session import ScenarioSession
@@ -118,7 +122,9 @@ def test_team_scope(settings, gas_log_dir, request):
         # unchanged; any newly-created rows are test-marked only (GTaskSheet-zc21) ─
         scn_0 = new_doc()
         rows_before = _team_data_rows(scn_0)
-        scn_0._post_fixture("setup_team_scope_fixture")
+        setup_resp = scn_0._post_fixture("setup_team_scope_fixture")
+        noteam_folder_id = (setup_resp.get("data") or {}).get("testTeamNoTeam")
+        assert noteam_folder_id, "setup_team_scope_fixture did not return testTeamNoTeam"
         rows_after = _team_data_rows(scn_0)
 
         before_by_id = {r.get("teamId"): r for r in rows_before}
@@ -211,6 +217,7 @@ def test_team_scope(settings, gas_log_dir, request):
 
         # ── S2 — no-match: doc in a folder not registered in TeamData ───────
         scn_2 = new_doc()
+        _move_to_folder(scn_2, noteam_folder_id)
         fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
         scn_2.sync()
         _assert_log(
@@ -273,6 +280,7 @@ def test_team_scope(settings, gas_log_dir, request):
         # ── S6 — TeamData/no-match: sync completes, no assignment ───────────
         # See module docstring re: equivalence with S2's no-match path.
         scn_6 = new_doc()
+        _move_to_folder(scn_6, noteam_folder_id)
         fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
         scn_6.sync()
         _assert_log(
