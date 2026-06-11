@@ -55,7 +55,7 @@
           "patterns": [
             {
               "hostPattern": "northlakeuu.org",
-              "pathPrefix": "NUTS"
+              "pathPrefix": "NUUTS"
             }
           ],
           "runFunction": "onLinkPreview"

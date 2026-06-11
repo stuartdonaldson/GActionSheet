@@ -18,19 +18,18 @@
  * insert/flush paths (EditorAddonCard, SyncManager) and the tracker ID links
  * (TrackerTable).
  *
- * Path is namespaced under `NUTS/` — the suite-level scope (Northlake Unitarian
- * Tool Suite). The action chip URL lives at `NUTS/action`; future tools take
- * sibling paths (e.g. `NUTS/llm` for an @-menu LLM trigger).
+ * Path is namespaced under `NUUTS` — the suite-level scope (Northlake Unitarian
+ * Tool Suite). The full chip URL is `https://northlakeuu.org/NUUTS?c=view&globalId=<id>`.
  *
- * The linkPreview `pathPrefix` in appsscript.json is `NUTS` (the suite root),
- * so any northlakeuu.org/NUTS/... URL triggers the preview. The redirect at
- * northlakeuu.org/NUTS/action → the /exec deployment must point to /exec (not
- * /dev) so Google's URL validation fetch succeeds for non-editor users.
+ * The linkPreview `pathPrefix` in appsscript.json is `NUUTS` (the suite root),
+ * so any northlakeuu.org/NUUTS... URL triggers the preview. The redirect at
+ * northlakeuu.org/NUUTS → the /exec deployment must point to /exec (not /dev)
+ * so Google's URL validation fetch succeeds for non-editor users.
  *
  * NOTE: `hostPattern` (`northlakeuu.org`) in appsscript.json must be kept in
  * sync manually — the manifest cannot read script globals.
  */
-var ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUTS/action';
+var ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUUTS';
 
 // 1-based column numbers from the authoritative schema.
 var _SCOL = CONTRACT_SCHEMA.sheetAction.columnsByField;

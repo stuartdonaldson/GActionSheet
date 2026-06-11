@@ -324,14 +324,15 @@ function _addPeopleSuggestions(suggestions, people, query) {
 }
 
 /**
- * Extracts the globalId from a chip URL.
- * Supports ?c=view&globalId=<encoded> (current) and legacy path-suffix form.
+ * Extracts the globalId from a chip URL (?c=view&globalId=<encoded>).
+ *
+ * @param {string} url  The matched chip/action URL.
+ * @return {?string} the decoded globalId, or null if the URL has no
+ *   globalId query parameter.
  */
 function _globalIdFromChipUrl(url) {
   var m = url.match(/[?&]globalId=([^&]+)/);
-  if (m) return decodeURIComponent(m[1]);
-  // Legacy: https://…/NUTS/action/{globalId} (path-based, pre query-param format)
-  return url.replace(ACTION_CHIP_URL_BASE + '/', '').replace(ACTION_CHIP_URL_BASE, '');
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 /**
