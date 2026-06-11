@@ -2089,3 +2089,20 @@ probe PNGs.)
   immediate signals (GAS `*.error` logs, non-JSON/error HTTP responses) are what can
   fail fast safely — eager-asserting durable surfaces (DOC/SHEET) would false-positive
   since they're async and not yet converged.
+
+### Update (same session) — smoke verified live + create_action fixed:
+Ran `npm run test:ui-smoke` against the live deployment. My first diagnosis (add-on
+not installed / bead 7gyt) was WRONG — the user confirmed the @-menu works manually.
+Retracted. Throwaway Playwright probes then root-caused FOUR pre-existing
+create_action automation bugs (it had never worked in automation; the journey Act 4
+failed too): (1) @-trigger needs continuous "@create" typing, not "@"+wait+"Create";
+(2) post-append the caret lands mid-text — needs Ctrl+End+Enter for a clean line;
+(3) the form renders inside the addons.gsuite.google.com iframe, not the top page —
+drive via frame_locator; (4) the submit button is "Create", not "Insert". Fixed in
+scn/ui.py (commit 3, GTaskSheet-80mo.18). Smoke now PASSES end-to-end (1 passed,
+~92s) exercising all five entry points. The observability trace pinpointed each
+failure instantly (e.g. "create_action ... FAIL (27.8s)"), which is exactly the
+value this work was meant to deliver. Note: ~92s exceeds the <1 min target — the
+time is real GAS round-trips (sync 17.6s, insert_tracker 14.5s, @-menu cold start
+16.6s); a future pass could trim these. Beads 80mo.16/.17/.18 closed. Three commits;
+not pushed.
