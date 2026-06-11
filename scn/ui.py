@@ -61,6 +61,8 @@ _CARD_IFRAME = (
     'iframe[src*="script.googleusercontent.com"], '
     'iframe[src*="script.google.com"]'
 )
+# Add-on iframe that hosts the @-menu Create-action form (addons.gsuite.google.com)
+_ADDON_FORM_IFRAME = 'iframe[src*="addons.gsuite.google.com"]'
 # Anything inside a rendered card
 _CARD_BODY = 'body, [role="main"]'
 # Busy/loading spinner that may appear after a card status click
@@ -86,8 +88,11 @@ _FORM_TEXT = (
     'input[aria-label*="ction"], '
     '[role="dialog"] textarea'
 )
-# Action-creation form — submit / insert button
+# Action-creation form — submit button (the add-on form labels it "Create";
+# "Insert"/submit kept as fallbacks for other entry points)
 _FORM_SUBMIT = (
+    'button[aria-label="Create"], '
+    'button:has-text("Create"), '
     'button[aria-label*="nsert"], '
     'button:has-text("Insert"), '
     'button[type="submit"]'
@@ -397,17 +402,22 @@ class UiDriver:
             self._ensure_doc()
 
             self._page.locator(_DOC_CONTENT).click()
-            self._page.keyboard.type("@")
+            # Move to a clean insertion point first. After an upstream
+            # append_paragraph the doc has content; clicking the editor lands the
+            # caret mid-text, where "@" does NOT start a smart-chip trigger.
+            # Ctrl+End + a fresh line gives the trigger a clean line.
+            self._page.keyboard.press("Control+End")
+            self._page.keyboard.press("Enter")
+            # Then type the @-trigger and query CONTINUOUSLY ("@create"), not "@"
+            # then a pause then "Create": the add-on smart-chip provider
+            # (createActionTriggers) only surfaces "Create action" for a live
+            # @-query. Diagnosed 2026-06-10: post-append "@create" mid-doc ->
+            # item ABSENT (18s); Ctrl+End + Enter + "@create" -> item present at
+            # once. The wait_for below polls the server-side provider.
+            self._page.keyboard.type("@create")
 
-            # Wait for @-menu dropdown.
-            self._page.wait_for_selector(
-                "[role='listbox'], [data-at-menu], .docs-at-picker-container",
-                timeout=5000,
-            )
-            self._page.keyboard.type("Create")
-
-            # GAS add-on items are fetched server-side (cold start 5-15s). The
-            # wait_for below already polls until visible — no fixed pre-sleep.
+            # The provider is fetched server-side (cold start 5-15s); wait_for
+            # polls until the "Create action" item becomes visible.
             item = self._page.locator(_AT_MENU_CREATE).first
             try:
                 item.wait_for(state="visible", timeout=20000)
@@ -419,30 +429,35 @@ class UiDriver:
                 ) from exc
             item.click()
 
-            # Wait for the action creation form to appear.
-            self._page.wait_for_selector(_FORM_ASSIGNEE, timeout=25000)
+            # The Create-action form renders INSIDE the add-on iframe
+            # (addons.gsuite.google.com), not the top-level page — operate within
+            # that frame. Diagnosed 2026-06-10: the 'Action' / 'Assignee (optional)'
+            # inputs live in that frame ~6s after the click; a top-level
+            # wait_for_selector never finds them (25s timeout).
+            form = self._page.frame_locator(_ADDON_FORM_IFRAME)
+            assignee = form.locator(_FORM_ASSIGNEE).first
+            assignee.wait_for(state="visible", timeout=30000)
 
             if target.assignee:
-                inp = self._page.locator(_FORM_ASSIGNEE).first
-                inp.fill(target.assignee)
+                assignee.fill(target.assignee)
                 # Poll for the autocomplete option directly (no fixed pre-sleep).
-                suggestion = self._page.locator('[role="option"]').first
+                suggestion = form.locator('[role="option"]').first
                 try:
                     suggestion.wait_for(state="visible", timeout=2000)
                     suggestion.click()
                 except Exception:
                     # No autocomplete suggestion — plain email, tab to confirm.
-                    inp.press("Tab")
+                    assignee.press("Tab")
 
             if target.action:
-                self._page.locator(_FORM_TEXT).first.fill(target.action)
+                form.locator(_FORM_TEXT).first.fill(target.action)
 
-            submit = self._page.locator(_FORM_SUBMIT).first
+            submit = form.locator(_FORM_SUBMIT).first
             submit.wait_for(state="visible", timeout=5000)
             submit.click()
 
-            # Wait for the form to close (chip inserted into doc).
-            self._page.wait_for_selector("[role='dialog']", state="hidden", timeout=10000)
+            # Form closes (chip inserted into doc): the assignee input detaches.
+            assignee.wait_for(state="hidden", timeout=10000)
         self._post_act_check()
 
     # ------------------------------------------------------------------
