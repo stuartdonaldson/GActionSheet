@@ -56,130 +56,107 @@ Twin-ticket rule (CLAUDE.md §Testing): every `[IMP]` has a paired `[TST]` creat
 same time; neither merges until both are green; the pre-code contract (entry-point signature,
 completion log tag, output schema) is the only shared artifact between them.
 
-### EPIC-A — Adopt TeamData/DocData schema and keep regression green
-Goal: adopt the TeamData + DocData schema and verify existing tests, updated for the new schema, continue to pass.
+### EPIC-A — Adopt TeamData/DocData schema and keep regression green — DELIVERED
 
-Review fidelity: **Slice** — sample TeamData/DocData tab + smoke on row round-trip and resolved-count single-authority (ADR-0013).
-Open seam: keep `teamScope` usable as a routing key for future Phase-3 per-team sheets.
+Closed as `GTaskSheet-5r4l`. TeamData/DocData schema, `File Id` column, and ADR-0014 are
+as-built. See `docs/DESIGN.md` §Team Scope Schema (ADR-0014).
 
-Depends on: GTaskSheet-knup (identity-terminology doc fix) must close before this epic is decomposed — see §Future design note. Otherwise first epic; no upstream epic dependency.
+### EPIC-B — Add Team Scope document property and bidirectional sync to sheet — DELIVERED
 
-Supporting files:
-- `knowledge-base/staging/epic-a-schema-adoption.md` (schema contract, rollout steps, verification checks)
-- `knowledge-base/adr/` (new ADR: team-scope schema — auto-assignment, DocData precedence, TeamData authority; do not conflate with ADR-0008)
-- `docs/DESIGN.md` (schema and write-path updates)
-- `docs/OPERATIONS.md` (schema rollout runbook and failure recovery)
+Closed as `GTaskSheet-me6w` (children `.1`-`.7`). `teamScope` document property,
+folder-walk auto-assignment, DocWins sync, `assertTeamAccess` security gate, and
+`UpdateDoc` write-back are all as-built and covered by `tests/test_team_scope.py`
+(scenarios S0-S8). These primitives are the reuse foundation for EPIC-D/E below —
+do not reimplement.
 
-Supporting beads to create:
-- `[INF] Author team-scope schema ADR + staging contract` — `model:opus` (decision record + precedence rules)
-- `[INF] Schema bootstrap and validation scaffolding` — `model:sonnet`
-- `[IMP] Update read/write paths to TeamData and DocData` — `model:sonnet`
-- `[TST] Regression suite run with tests updated for new schema (all green)` — `model:sonnet`
-- `[FIX] Repair schema-adoption regressions discovered by test run` — `model:sonnet` (escalate to `model:opus` if root cause is non-obvious)
+### EPIC-C — Reassign team from spreadsheet via DocData and sync — DELIVERED VIA EPIC-B
 
-Acceptance test scenario:
-- Given TeamData/DocData schema is active and existing regression tests have been updated for that schema, when the full test suite is run, then all tests pass.
+The full EPIC-C acceptance scenario (DocData row set to `SyncStatus='UpdateDoc'` with a
+new Team Id → sync applies the change, clears `SyncStatus`, idempotent on re-sync) was
+implemented as part of `GTaskSheet-me6w.4` (DocWins + UpdateDoc write-back,
+`src/SyncManager.js` `_syncTeamScopeForDoc`) and is covered by `tests/test_team_scope.py`
+S3 (UpdateDoc override) and S4 (idempotency). No new `[IMP]`/`[TST]` twin is needed.
 
-### EPIC-B — Add Team Scope document property and bidirectional sync to sheet
-Goal: add Team Scope as a document custom property (Team ID) and synchronize it with sheet-backed TeamData/DocData.
+Remaining gap: an operator-facing runbook in `docs/OPERATIONS.md` for this workflow.
+Tracked as `GTaskSheet-fk98` (`[INF]`, `model:haiku`).
 
-Review fidelity: **Spec** — design error visible from contract prose; test-first from frozen AC (ADR-0013).
+### EPIC-D-PRE — Tabbed-shell architecture slice + J-ACCESS-FILTER — `GTaskSheet-uz7h`
 
-Depends on: EPIC-A (schema baseline must be green first).
+EPIC-D/E's "tabbed sidebar" (below) was specified before the `html-sidebar-card-pivot`
+decision (2026-05-27, `GTaskSheet-cw5`) which committed the project to a CardService-only
+UI (no HtmlService sidebar). This prerequisite epic resolves that conflict and authors the
+shared `J-ACCESS-FILTER` journey, with a regression-proof-out gate before any EPIC-D/E
+`[IMP]` work, since the navigation refactor touches `buildHomepageCard()` — the production
+entry point for every user.
 
-Supporting files:
-- `knowledge-base/staging/epic-b-team-property-sync.md` (property lifecycle, precedence, sync contract)
-- `docs/CONTEXT.md` (capability updates)
-- `docs/DESIGN.md` (property resolution, sync states, security checks)
+Review fidelity: **Slice** (ADR-0013).
+Open seam: tab model must remain extensible for a Settings tab (Phase 2) without
+re-architecting.
 
-Supporting beads to create:
-- `[IMP] Add Team Scope document property read/write (Team ID)` — `model:sonnet`
-- `[IMP] Sync Team Scope with DocData.Team using DocWins rules` — `model:opus` (precedence/reconciliation logic)
-- `[IMP] Folder-hierarchy auto-assignment against TeamData on first sync` — `model:opus` (ancestry walk + first-match security implications)
-- `[TST] Entry-point coverage for Team Scope sync and security guard` — `model:sonnet`
-- `[FIX] Resolve Team Scope mismatches and edge-case defects` — `model:sonnet` (escalate to `model:opus` if non-obvious)
+Depends on: EPIC-B (closed).
 
-Acceptance test scenario:
-- Given a document with no `teamScope` and a matching ancestor folder in TeamData, when sync runs, then document `teamScope` is set to the matched Team ID (`Folder Id`), `DocData.TeamId` matches that Team ID, and team name display resolves via TeamData lookup.
-- **Folder-hierarchy resolution** (see `knowledge-base/staging/epic-b-team-property-sync.md` §Acceptance fixture): given TeamData rows `TestTeamA` (Folder Id = `local.settings.testTeamA`) and `TestTeamAChild` (Folder Id = `local.settings.testTeamAChild`, a child folder of `testTeamA`), and three fresh documents with no `teamScope` placed directly in `testTeamA`, `testTeamAChild`, and `testTeamADeep` (a multi-level, unregistered descendant of `testTeamA`) respectively — after sync, each document's `teamScope` and `DocData.Team Id` resolve to `TestTeamA`, `TestTeamAChild`, and `TestTeamA` respectively, and `DocData` for each document has all fields up to date.
-- **Sticky assignment**: given a document already assigned `teamScope = TestTeamA`, when it is moved into `testTeamAChild`'s folder and sync runs again, then `teamScope` and `DocData.Team Id` remain `TestTeamA` (no reassignment).
-- **Verification**: each scenario above is verified solely via `verifyConsistencyForTest(docId, {teamId})`, extended to assert `document.teamScope == DocData[fileId].Team Id == expected.teamId` plus existing docId/sheet/tracker consistency — so each scenario only needs to create the document under its initial condition, sync, and run this one check.
+Beads (all created):
+- `[INF] Design: CardService tab-navigation model for DocStatus/Import/Notify` —
+  `model:opus` — `GTaskSheet-fi0w`
+- `[INF] Design: J-ACCESS-FILTER shared journey + two-account fixture matrix` —
+  `model:opus` — `GTaskSheet-z1fr`
+- `[IMP] Slice: render placeholder Import/Notify tab cards via shared navigation shell` —
+  `model:sonnet` — `GTaskSheet-0r0s`
+- `[TST] Slice smoke: tab navigation round-trip + DocStatus regression check` —
+  `model:sonnet` — `GTaskSheet-gdll` (re-run at EPIC-D and EPIC-E gates)
+- `[GATE] Freeze EPIC-D-PRE slice — accept nav design, register open seams` —
+  `GTaskSheet-5fha`
 
-### EPIC-C — Reassign team from spreadsheet via DocData and sync
-Goal: allow team reassignment from spreadsheet by updating DocData and applying change on sync (`SyncStatus='UpdateDoc'`).
+### EPIC-D — Add Import tab and action forwarding workflow — `GTaskSheet-yb2w`
 
-Review fidelity: **Spec** — design error visible from contract prose; test-first from frozen AC (ADR-0013).
+Goal: add Import capability to pull open team-scoped actions into the current document and
+forward source actions safely.
 
-Depends on: EPIC-B (property + DocData sync contract must exist).
+Review fidelity: **Slice** (ADR-0013). Depends on: EPIC-D-PRE gate (`GTaskSheet-5fha`).
 
-Supporting files:
-- `knowledge-base/staging/epic-c-docdata-reassignment.md` (reassignment workflow, auditability, operator UX)
-- `docs/DESIGN.md` (write-back precedence and validation)
-- `docs/OPERATIONS.md` (operator steps for reassignment and verification)
+Access rule: Import must only list and import actions whose source documents are readable
+by the current user (J-ACCESS-FILTER).
 
-Supporting beads to create:
-- `[IMP] Implement DocData-driven team reassignment write-back` — `model:sonnet`
-- `[IMP] Clear SyncStatus after successful document update` — `model:haiku` (flag clear)
-- `[TST] Functional tests for reassignment, failure handling, and idempotency` — `model:sonnet`
-- `[FIX] Address reassignment drift and stale TeamData lookup failures` — `model:sonnet`
+Reuse (do not reimplement): `DocData`/`File Id` join (EPIC-A/B), `assertTeamAccess`
+(EPIC-B), `isResolved()` (extend for `Forwarded`), `_remarkRowDirty` for dirty-flagging,
+and the Token Manager / `_insertActionChip` AI-N insertion path in
+`src/EditorAddonCard.js`.
 
-Acceptance test scenario:
-- Given a document already synced to Team A and a DocData row updated to Team B with `SyncStatus='UpdateDoc'`, when sync runs, then document `teamScope` changes to Team B ID, `SyncStatus` is cleared, and a second sync performs no additional changes (idempotent).
-
-### EPIC-D — Add Import tab and action forwarding workflow
-Goal: add sidebar Import capability to pull open team-scoped actions into the current document and forward source actions safely.
-
-Review fidelity: **Slice** — rendered card placeholder; tabbed sidebar shell co-delivered with EPIC-E (ADR-0013).
-Open seam: tabbed sidebar shell must remain extensible for a Settings tab (Phase 2) without re-architecting the tab model.
-
-Depends on: EPIC-B (teamScope must resolve) and the shared `J-ACCESS-FILTER` journey (see §Shared [TST] structure). Co-delivers the tabbed-sidebar refactor with EPIC-E.
-
-Access rule: Import must only list and import actions whose source documents are readable by the current user. Team scope alone is not sufficient; per-document access filtering is required.
-
-Supporting files:
-- `knowledge-base/staging/epic-d-import-tab.md` (UI flow, import semantics, forwarding contract)
-- `docs/CONTEXT.md` (Import capability and actor flow)
-- `docs/DESIGN.md` (tabbed sidebar, markDirty flow, status transitions, per-document access filter)
-- `docs/OPERATIONS.md` (operator verification, recovery for partial imports, auth-account test setup)
-
-Supporting beads to create:
-- `[IMP] Build tabbed sidebar shell with DocStatus and Import tabs` — `model:sonnet` (UI shell; shared with EPIC-E)
-- `[IMP] Implement team-scoped Import list grouped by source document` — `model:sonnet`
-- `[IMP] Filter Import results to source docs readable by current user` — `model:opus` (per-document access gate — security-critical)
-- `[IMP] Import selected actions at cursor paragraph with new AI-N numbering` — `model:opus` (AI-N identity assignment per ADR-0008)
-- `[IMP] Forward source actions (Status=Forwarded, suffix, markDirty)` — `model:sonnet`
-- `[TST] Functional coverage for Import flow, forwarded status, and post-import sync` — `model:sonnet`
-- `[TST] Consume shared access-filter journey package (Import assertions)` — `model:sonnet`
-- `[FIX] Repair import edge cases (duplicate forwarding, numbering drift, dirty flag miss)` — `model:sonnet` (escalate to `model:opus` for numbering-drift root cause)
+Beads (all created):
+- `[IMP] Team-scoped Import list grouped by source document` — `model:sonnet` — `GTaskSheet-eore`
+- `[IMP] Import selected actions at cursor with new AI-N numbering` — `model:opus` — `GTaskSheet-fgh4`
+- `[IMP] Forward source actions (Status=Forwarded, suffix, dirty flag)` — `model:sonnet` — `GTaskSheet-st24`
+- `[TST] Bind Import assertions to J-ACCESS-FILTER (P1-P4)` — `model:sonnet` — `GTaskSheet-1dxz`
+- `[TST] Functional coverage: import flow, forwarded status, post-import sync` — `model:sonnet` — `GTaskSheet-4gsx`
+- `[FIX] Import edge cases (duplicate forwarding, numbering drift, dirty-flag miss)` — `model:sonnet` (escalate to `model:opus` for numbering-drift) — `GTaskSheet-wdh0`
+- `[GATE] Final sign-off for EPIC-D` (re-runs EPIC-D-PRE DocStatus regression smoke) — `GTaskSheet-fnvq`
 
 Acceptance test scenario:
 - Given two open team-scoped actions selected in Import from documents readable by the current user, when Import is executed at the current paragraph, then both actions are inserted as new floating actions with new AI-N values, source rows are set to `Forwarded` with `[Forward:<DocName> AI-N]` suffixes, rows are marked dirty, and a post-import sync updates the document action table; actions from unreadable source documents are never listed.
 
-### EPIC-E — Add Notify tab and assignee reminder email flow
-Goal: add sidebar Notify capability to send reminders to selected assignees with unresolved team-scoped actions.
+### EPIC-E — Add Notify tab and assignee reminder email flow — `GTaskSheet-gc43`
 
-Review fidelity: **Slice** — rendered card placeholder; co-delivers tabbed shell with EPIC-D (ADR-0013).
-Open seam: email-template contract must be reusable for the Assignee Reminder funnel entry when it is promoted.
+Goal: add Notify capability to send reminders to selected assignees with unresolved
+team-scoped actions.
 
-Depends on: EPIC-D (tabbed-sidebar shell + `J-ACCESS-FILTER` access filter are reused, not rebuilt). Align email-template approach with the Assignee reminder §Funnel entry before the first email bead.
+Review fidelity: **Slice** (ADR-0013). Depends on: EPIC-D (reuses its tabbed shell and
+J-ACCESS-FILTER bindings, not rebuilt).
+Open seam: email-template contract must be reusable for the Assignee Reminder funnel entry
+when it is promoted.
 
-Access rule: Notify must only aggregate and present actions from source documents readable by the current user.
+Access rule: Notify must only aggregate and present actions from source documents readable
+by the current user.
 
-Supporting files:
-- `knowledge-base/staging/epic-e-notify-tab.md` (assignee aggregation, template contract, send policy)
-- `docs/CONTEXT.md` (Notify capability and user outcome)
-- `docs/DESIGN.md` (assignee aggregation, unresolved calculation via isResolved, send flow, per-document access filter)
-- `docs/OPERATIONS.md` (notification runbook, troubleshooting, auth-account test setup)
-
-Supporting beads to create:
-- `[IMP] Build Notify tab with assignee list and unresolved counts` — `model:sonnet`
-- `[IMP] Send reminder emails using HtmlService template and GmailApp` — `model:opus` (template contract + XSS escaping — security-sensitive)
-- `[IMP] Reuse team-scope security gate on Notify reads` — `model:sonnet` (reuses EPIC-D filter)
-- `[IMP] Filter Notify aggregation to source docs readable by current user` — `model:sonnet` (binds to shared access filter)
-- `[TST] Functional coverage for assignee aggregation and selective notifications` — `model:sonnet`
-- `[TST] Consume shared access-filter journey package (Notify assertions)` — `model:sonnet`
-- `[TST] Template rendering and escaping checks for notification emails` — `model:sonnet`
-- `[FIX] Resolve notification count drift and send failures` — `model:sonnet`
+Beads (all created):
+- `[INF] Align email-template approach with Funnel "Assignee reminder" entry` — `model:opus` — `GTaskSheet-tv54`
+- `[IMP] Notify tab: assignee aggregation with unresolved counts` — `model:sonnet` — `GTaskSheet-xiv8`
+- `[IMP] Send reminder emails (HtmlService template + GmailApp, XSS escaping)` — `model:opus` — `GTaskSheet-f3v9`
+- `[IMP] Reuse team-scope security gate + access filter on Notify reads` — `model:sonnet` — `GTaskSheet-ajns`
+- `[TST] Bind Notify assertions to J-ACCESS-FILTER (P1-P4)` — `model:sonnet` — `GTaskSheet-ay5w`
+- `[TST] Cross-feature parity assertion (Import document set == Notify document set)` — `model:haiku` — `GTaskSheet-7fng`
+- `[TST] Template rendering and escaping checks for notification emails` — `model:sonnet` — `GTaskSheet-twwo`
+- `[FIX] Notification count drift and send failures` — `model:sonnet` — `GTaskSheet-1xpj`
+- `[GATE] Final sign-off for EPIC-E` (re-runs EPIC-D-PRE DocStatus regression smoke) — `GTaskSheet-s3ga`
 
 Acceptance test scenario:
 - Given team-scoped unresolved actions across multiple assignees from documents readable by the current user, when two assignees are selected in Notify and send is triggered, then only those assignees receive templated reminder emails with correct unresolved-action lists and counts, and actions from unreadable source documents are excluded from counts and emails.
@@ -191,36 +168,20 @@ Access-control validation for Import/Notify requires at least two authenticated 
 - Primary account: has read access to the full baseline test set.
 - Secondary restricted account: the additional auth account used in prior Probe tests; has read access to only a subset of source team documents.
 
-Required documentation updates before implementation starts:
+`GTaskSheet-z1fr` ([INF] Design: J-ACCESS-FILTER) is responsible for documenting this in
+`docs/OPERATIONS.md` (account roles, minimum permissions, setup steps) before EPIC-D/E
+`[IMP]` beads start.
 
-- Add a clear test-asset note in `docs/OPERATIONS.md` with account roles, minimum permissions, and setup steps.
-- Add scenario references in `knowledge-base/staging/epic-d-import-tab.md` and `knowledge-base/staging/epic-e-notify-tab.md` showing expected visibility differences between the two accounts.
+### J-ACCESS-FILTER shared journey (P1-P4)
 
-### Shared [TST] structure for ATDD scenario-journey reuse
+Single source of truth for visibility/authorization across Import and Notify, authored by
+`GTaskSheet-z1fr` and bound by `GTaskSheet-1dxz` (Import) / `GTaskSheet-ay5w` (Notify):
 
-To avoid duplicated access-rule tests across Import and Notify, define one shared journey
-that both features consume.
-
-Review fidelity: **Slice** — P1 happy-path + account matrix; no per-feature assertions bound until gate freezes the AC (ADR-0013).
-Open seam: journey part structure (P1–P4) must accommodate a third sidebar feature consuming the shared access filter without restructuring.
-
-Shared journey (single source of truth):
-- `J-ACCESS-FILTER`: visibility and authorization journey for team-scoped reads.
-
-Scenario parts within `J-ACCESS-FILTER`:
 1. `P1-PrimaryFullAccess`: primary account sees all eligible source documents.
 2. `P2-SecondaryRestrictedAccess`: restricted account sees only permitted documents.
 3. `P3-NoTeamFolderAccess`: read denied path returns no rows + explicit error.
-4. `P4-FeatureParity`: same visibility set drives both Import list and Notify aggregation.
-
-How [TST] beads should be structured:
-- `[TST] Author shared J-ACCESS-FILTER journey fixtures and account matrix` — `model:opus` (cross-cutting journey design + two-account fixture matrix)
-- `[TST] Bind Import assertions to J-ACCESS-FILTER parts (P1-P4)` — `model:sonnet`
-- `[TST] Bind Notify assertions to J-ACCESS-FILTER parts (P1-P4)` — `model:sonnet`
-- `[TST] Add cross-feature parity assertion (Import document set == Notify document set)` — `model:haiku` (single equality assertion)
-
-This shared journey is a prerequisite of EPIC-D and EPIC-E and should be authored (its
-first bead) before either feature's access-filter beads start.
+4. `P4-FeatureParity`: same visibility set drives both Import list and Notify aggregation
+   (`GTaskSheet-7fng`).
 
 Packaging guidance:
 - Integration package includes full journey (`P1`..`P4`) plus feature-specific assertions.
@@ -228,11 +189,12 @@ Packaging guidance:
 - Weekly/full regression runs full `P1`..`P4` for both Import and Notify.
 
 Sequencing:
-1. EPIC-A first (schema baseline + green tests)
-2. EPIC-B second (team property and sync contract)
-3. EPIC-C third (spreadsheet-driven reassignment)
-4. EPIC-D fourth (Import tab and forwarding workflow)
-5. EPIC-E fifth (Notify tab and reminder flow)
+1. ~~EPIC-A~~ — done
+2. ~~EPIC-B~~ — done (also delivers EPIC-C's acceptance scenario)
+3. EPIC-C closure doc (`GTaskSheet-fk98`)
+4. EPIC-D-PRE (`GTaskSheet-uz7h`) — nav-architecture design + regression-proof-out gate
+5. EPIC-D (`GTaskSheet-yb2w`) — Import tab and forwarding workflow
+6. EPIC-E (`GTaskSheet-gc43`) — Notify tab and reminder flow
 
 ---
 
