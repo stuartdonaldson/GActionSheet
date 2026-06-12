@@ -2375,3 +2375,16 @@ used by the add-ons platform... Object with values" error visible only in `clasp
 give every tab button (including the active one) the onShowTab action; re-selecting the active
 tab is a harmless no-op re-render. Captured as bd memory
 cardservice-textbutton-requires-onclick-action.
+
+## 2026-06-11 19:42:31
+
+### Summary:
+Closed GTaskSheet-gdll: added tests/test_sidebar.py::test_tab_navigation_docstatus_regression, covering the EPIC-D-PRE-4 ACs -- the cw5 DocStatus mutation entry points (onSyncNow/sidebarSetStatus/sidebarDeleteAction) pass through the new ADR-0015 tab shell with observable TRACKER/DOC/SHEET verification, and the DocStatus->Import->Notify->DocStatus onShowTab nav round trip preserves DocStatus state. This unblocked and closed GTaskSheet-5fha (verdict: approve to harden) and GTaskSheet-uz7h (EPIC-D-PRE, 5/5 complete), unblocking GTaskSheet-yb2w (EPIC-D - Import tab).
+
+Open seams registered per the 5fha gate: Settings-tab (Phase 2) extensibility on GTaskSheet-uz7h's design field; assertTeamAccess caller-supplied identity (service-account impersonation) on GTaskSheet-1dxz and GTaskSheet-ay5w (EPIC-D/E J-ACCESS-FILTER binding beads).
+
+### Key Learnings:
+- Found and fixed two pre-existing bugs in scn/ui.py (not caused by the tab-shell refactor): sidebar_set_status's selector looked for [aria-label="<status>"] but per-row ImageButtons in _buildActionListSection are labeled "Set <status>"; and _sidebar_row's get_by_text(...).locator(...) scoping never matched because CardService renders a row's label (DecoratedText) and its button row (ButtonSet) as sibling section widgets, not parent/child -- fixed via an xpath ancestor::[data-is-uikit-widget]/following-sibling::[data-is-uikit-widget] lookup. This let test_status_mutation_only_mutated_row drop its D4 HTTP fallback, and sidebar_delete is exercised by a test for the first time.
+- sidebarDeleteAction removes the ActionSheet row entirely via _deleteActionRowFromSheet (no "Deleted" stamp) -- distinct from the HTTP delete_action_row route used by scn.delete()/test_b7_write_routes.py, which does stamp Sync Status='Deleted'. Verification must match the actual entry point's contract.
+- Checkpoint/verify_consistency consolidation (3->2 checkpoints, 2->1 verify_consistency calls) didn't meaningfully cut wall-clock time (139s -> 142s) -- GAS-side sync execution (sidebar_sync busy-wait, s.sync() round trips) dominates over docx/xlsx download cost. A persistent Playwright/browser session across pytest invocations would be the real lever for iteration speed; flagged as a future infrastructure idea, not built.
+- One run hit a known flaky GAS Docs batchUpdate race ("Invalid deletion range", flush.error) matching the B7-class race condition already in memory; re-run passed cleanly. Filed GTaskSheet-tgof separately for an unrelated _remarkRowDirty null-getActiveSpreadsheet bug surfaced incidentally during full-module regression runs.
