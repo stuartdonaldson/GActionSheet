@@ -557,10 +557,22 @@ class UiDriver:
         return self._current_card
 
     def _sidebar_row(self, action_id: str) -> _PwLocator:
-        """Return a Locator scoped to the sidebar row whose text starts with action_id."""
+        """Return a Locator scoped to the per-row control widget for action_id.
+
+        _buildActionListSection (src/WorkspaceAddonCard.js) renders each action
+        as two sibling section widgets -- a DecoratedText label ("AI-N •
+        assignee • status") and, immediately following it, a ButtonSet of
+        per-row status/delete ImageButtons. There is no shared row container,
+        so the label can't be used directly as a scope (it's a leaf text
+        element with no descendants). Locate the label's widget ancestor
+        ([data-is-uikit-widget]) then its next-sibling widget, which holds the
+        controls.
+        """
         assert self._current_card is not None
-        return self._current_card.frame.get_by_text(
-            f"{action_id} •", exact=False
+        label = self._current_card.frame.get_by_text(f"{action_id} •", exact=False)
+        return label.locator(
+            "xpath=ancestor::div[@data-is-uikit-widget][1]"
+            "/following-sibling::div[@data-is-uikit-widget][1]"
         )
 
     # ------------------------------------------------------------------
@@ -649,9 +661,10 @@ class UiDriver:
             self._sidebar_card()
             assert self._current_card is not None
             row = self._sidebar_row(target.action_id or "")
-            status_btn = row.locator(
-                f'[aria-label="{status}"], button:has-text("{status}")'
-            )
+            # Per-row status controls are ImageButtons with setAltText('Set ' + status)
+            # (_buildActionListSection, src/WorkspaceAddonCard.js) -- not the bare
+            # status name.
+            status_btn = row.locator(f'[aria-label="Set {status}"]')
             status_btn.wait_for(state="visible", timeout=ms)
             status_btn.click()
 
