@@ -163,6 +163,7 @@ class ScenarioSession:
         self.sheet_id = sheet_id
         self.settings = settings
         self.tracker_present: bool = False
+        self._appended_actions: int = 0
         self.engine = CheckpointEngine()
         self._seq: int = 0
         self._request = request  # pytest FixtureRequest; enables JUnit + trace files (T24)
@@ -369,6 +370,7 @@ class ScenarioSession:
         """
         with self._act("append_paragraph", text[:60]):
             self._post_route("append_doc_paragraph", {"testDocId": self.doc_id, "text": text})
+        self._appended_actions += 1
 
     def insert_tracker(self) -> None:
         """Insert/refresh the tracker table; widens surface set of subsequent verify_all_expectations.
@@ -490,6 +492,11 @@ class ScenarioSession:
             return {"scope": "SHEET", "rows": len(rows)}
         result = self._post_route("verify_action_rows", {"docId": self.doc_id})
         chip = self._post_route("verify_chip_integrity", {"docId": self.doc_id})
+        if self._appended_actions > 0:
+            assert chip.get("checked_count", 0) > 0, (
+                f"verify_chip_integrity scanned 0 AI-N: paragraphs but "
+                f"{self._appended_actions} action(s) were appended this session"
+            )
         violations = chip.get("violations", [])
         if violations:
             lines = "\n".join(f"  {v['paragraph']}: {v['issue']}" for v in violations)

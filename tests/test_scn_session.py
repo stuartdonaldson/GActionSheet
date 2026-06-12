@@ -254,6 +254,25 @@ def test_verify_consistency_posts_verify_route(monkeypatch):
     assert result["ok"] is True
 
 
+def test_verify_consistency_fails_on_zero_checked_count_after_append(monkeypatch):
+    """GTaskSheet-bb66: a zero-item chip scan must not vacuously pass once the
+    session has appended an action — checked_count guards against fixture/format
+    drift silently producing zero AI-N: paragraphs."""
+
+    def fake_http(url, payload, timeout=360):
+        action = payload.get("action")
+        if action == "verify_chip_integrity":
+            return {"violations": [], "checked_count": 0}
+        return {"ok": True, "consistent": True, "violations": []}
+
+    _patch_http(monkeypatch, fake_http)
+    scn = _make_session()
+    scn.append_paragraph("AI-1: do the thing")
+
+    with pytest.raises(AssertionError, match="scanned 0 AI-N"):
+        scn.verify_consistency()
+
+
 # ---------------------------------------------------------------------------
 # Expectation delegation
 # ---------------------------------------------------------------------------

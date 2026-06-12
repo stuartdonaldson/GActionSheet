@@ -608,7 +608,7 @@ function _handleVerifyActionRows(payload) {
  *   3. Trailing (Status) token is consistent with the icon status.
  *
  * Payload: { testToken, action: 'verify_chip_integrity', docId }
- * Response: { violations: [{ paragraph, issue }] }
+ * Response: { violations: [{ paragraph, issue }], checked_count: number }
  */
 function _handleVerifyChipIntegrity(payload) {
   var docId = payload.docId || '';
@@ -638,6 +638,7 @@ function _handleVerifyChipIntegrity(payload) {
   urlToStatus[_ACTION_DEFAULT_IMAGE] = 'other'; // status-other.png = any non-standard status
 
   var violations = [];
+  var checkedCount = 0;
 
   for (var i = 0; i < content.length; i++) {
     var para = content[i].paragraph;
@@ -654,6 +655,7 @@ function _handleVerifyChipIntegrity(payload) {
     if (!tokenMatch) continue;
 
     var N = tokenMatch[1];
+    checkedCount++;
     var expectedGlobalId = docId + '/AI-' + N;
 
     // Check 1: leading element must be inlineObjectElement with brand-NUTS sourceUri
@@ -694,8 +696,8 @@ function _handleVerifyChipIntegrity(payload) {
     }
   }
 
-  GasLogger.log('verify_chip_integrity.done', { docId: docId, violations: violations.length });
-  return _jsonResponse({ violations: violations });
+  GasLogger.log('verify_chip_integrity.done', { docId: docId, checked: checkedCount, violations: violations.length });
+  return _jsonResponse({ violations: violations, checked_count: checkedCount });
 }
 
 function _loadRowsForDocUrl(actionsSheet, docUrl) {
