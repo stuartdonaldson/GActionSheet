@@ -1040,7 +1040,7 @@ function _syncTeamScope(ss, docId, token, docName) {
  */
 function _remarkRowDirty(globalId) {
   try {
-    var ss    = SpreadsheetApp.getActiveSpreadsheet();
+    var ss    = _openActionSheetSpreadsheet();
     var sheet = ss.getSheetByName('Actions');
     if (!sheet) return;
     var lastRow = sheet.getLastRow();
