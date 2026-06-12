@@ -663,6 +663,32 @@ class UiDriver:
                 pass
         self._post_act_check()
 
+    def show_tab(self, label: str, *, timeout: str = "15s") -> None:
+        """Click a homepage card tab-bar button (ADR-0015 onShowTab); wait out busy.
+
+        label is one of the _TABS[].label values in src/WorkspaceAddonCard.js
+        ("Doc status", "Import", "Notify"). onShowTab responds with
+        updateCard(_buildTabbedHomepageCard(tab)) — same re-render shape as
+        sidebar_set_status/sidebar_delete, so the busy-wait pattern matches.
+        """
+        with self.reporter.step("UIACT", "show_tab", label):
+            ms = _parse_timeout(timeout)
+            self._sidebar_card()
+            assert self._current_card is not None
+            tab_btn = self._current_card.frame.get_by_role(
+                "button", name=label, exact=True
+            )
+            tab_btn.wait_for(state="visible", timeout=ms)
+            tab_btn.click()
+
+            busy = self._current_card.frame.locator(_BUSY)
+            try:
+                busy.wait_for(state="visible", timeout=2000)
+                busy.wait_for(state="hidden", timeout=ms)
+            except Exception:
+                pass
+        self._post_act_check()
+
     def read_current(self) -> list[ai]:
         """Read the currently-rendered card as list[ai] for queue-drain (R1-impl §1).
 

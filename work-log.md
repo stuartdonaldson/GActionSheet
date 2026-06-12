@@ -2353,3 +2353,25 @@ Closed GTaskSheet-yuvq; updated GTaskSheet-16kh notes; created GTaskSheet-oqn4 (
 ### Key Learnings:
 - `_globalIdFromChipUrl` convention: return `null` (not `''`) when a chip URL has no `globalId` param -- all call sites already handle falsy/null safely.
 - Act5 hover-preview failures via Playwright `force=True` are a known, distinct, pre-existing issue (GTaskSheet-s9so) -- do not conflate with new regressions when triaging future journey runs.
+
+## 2026-06-11 18:26:36
+
+### Summary:
+Implemented GTaskSheet-0r0s (EPIC-D-PRE.3): refactored buildHomepageCard() into a thin
+delegator to new _buildTabbedHomepageCard(activeTab, ...) per ADR-0015, with a registry-driven
+tab bar (_TABS: docStatus/import/notify), onShowTab dispatch handler, and placeholder
+Import/Notify tab bodies ("coming soon"). DocStatus tab reuses all existing section builders
+verbatim — no parallel card-building path. Updated docs/DESIGN.md (Module Map + Building Block
+View) from "planned" to as-built. Deployed to TEST, verified via @smoke playwright run, a
+one-off tab-navigation round-trip test (Import/Notify/DocStatus), and test_sidebar.py regression.
+Closed GTaskSheet-0r0s; GTaskSheet-gdll (regression-smoke twin ticket) is now ready. Committed
+and pushed (e7d6e95) to inf/scn-observability-failfast.
+
+### Key Learnings:
+CardService TextButton requires setOnClickAction (or setOnClickOpenLinkAction) on every button,
+even an "active/inert" tab button — omitting it builds fine client-side (node --check passes,
+.build() succeeds) but fails at the add-ons platform layer with a cryptic "type that cannot be
+used by the add-ons platform... Object with values" error visible only in `clasp logs`. Fix:
+give every tab button (including the active one) the onShowTab action; re-selecting the active
+tab is a harmless no-op re-render. Captured as bd memory
+cardservice-textbutton-requires-onclick-action.
