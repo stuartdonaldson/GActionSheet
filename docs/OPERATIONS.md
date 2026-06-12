@@ -212,9 +212,6 @@ The harness selects the account per run via `PROBE_AUTH_STATE` (defaults to
 # Parser unit tests only (fast, no GAS/network):
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_floating_action_parser.py -x -v
 
-# UC-A acceptance tests (requires live GAS — npm run deploy:test first):
-/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_uc_a.py -x -v
-
 # §16.10 canonical ATDD journey — Acts 1–3 (requires live GAS — npm run deploy:test first):
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey_acts_1_3.py -x -v
 
@@ -300,17 +297,25 @@ their default unconditional locations (`test-results/runs/`,
 `test-results/gas-logs/`, etc.) as described above — the wrapper only adds
 per-invocation grouping and the README/INDEX audit trail.
 
-### UC-A Tests
-**Prerequisites:** `npm run deploy:test` (pushes `src/`, stamps the revision, repoints the TEST deployment).
+### UC Test Coverage & Sign-off
 
-The `uc_a_clear` fixture sets up the test doc automatically:
-1. Clears the ActionSheet and removes all named ranges from the test doc.
-2. Inserts a chip-led bullet list item via the Docs REST API (`insertPerson` + `createParagraphBullets`).
-3. Appends an email-led bullet list item via a second REST API call.
+The four use cases in `CONTEXT.md` (UC-A capture/track, UC-B update from
+either side, UC-C insert/refresh tracker table, UC-D archive closed actions)
+are covered by the following test files:
 
-**Tests:**
-- `test_uc_a_ac1_multi_format_detection` — one Sync; verifies chip-led and email-led items both appear in the ActionSheet with correct email, name, action text, and status.
-- `test_uc_a_ac2_idempotent_second_sync` — second Sync; verifies no duplicate rows, named range IDs unchanged, sheet rows and doc floating actions identical.
+| Use case | Covered by |
+|----------|------------|
+| UC-A — capture and track a new action (multi-format detection, idempotent re-sync) | `tests/test_journey.py`, `tests/test_journey_acts_1_3.py` (Acts 1–3) |
+| UC-B — update an action from either side and converge | `tests/test_team_scope.py`, later acts of `tests/test_journey.py` |
+| UC-C — insert/refresh the in-doc tracker table | `tests/test_tracker_view_only.py`, `tests/test_journey.py` |
+| UC-D — archive closed actions | `tests/test_archive.py` |
+| Timed sweep (`syncAll`) | `tests/test_sync_all.py` |
+
+**Sign-off (GTaskSheet-mol-06g, 2026-05-21):** all 8 UC scenarios pass — 14
+passed, 2 xfailed (pipe-delimited assignee, tracked under `GTaskSheet-tis`).
+This is the last full-suite run across the UC matrix; later regression runs
+(e.g. `GTaskSheet-gdll`) are targeted spot-checks against specific surfaces,
+not a re-run of the full UC matrix.
 
 ---
 
