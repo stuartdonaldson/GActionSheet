@@ -1,7 +1,7 @@
-# ADR-0011: NUTS suite identity and `NUTS/<tool>` URL namespace
+# ADR-0011: NUTS suite identity and `NUUTS` chip URL namespace
 
 Status: Accepted
-Date: 2026-05-29
+Date: 2026-05-29 (amended 2026-06-11)
 Refines: ADR-0008 (chip-URL consequence only — identity decision unchanged)
 
 ## Context
@@ -17,45 +17,49 @@ files are organized (ADR-0010) and from the action-identity mechanism (ADR-0008)
 
 ## Decision
 
-Adopt **Northlake Unitarian Tool Suite (NUTS)** as the internal umbrella name and namespace all
-suite tool URLs under `https://northlakeuu.org/NUTS/<tool>/…` — one host, one `pathPrefix` per
-tool, so each tool registers a distinct `linkPreview` (and future `@`-menu) pattern.
+Adopt **Northlake Unitarian Tool Suite (NUTS)** as the internal umbrella name, and namespace all
+suite tool chip URLs under a single shared path, `https://northlakeuu.org/NUUTS`, dispatched by
+query parameters rather than per-tool path segments.
 
-- The action chip URL base is `https://northlakeuu.org/NUTS/action`, defined as
-  `ACTION_CHIP_URL_BASE` (`SyncManager.js`). The `appsscript.json` `linkPreview`
-  `hostPattern` (`northlakeuu.org`) / `pathPrefix` (`NUTS` — the suite root) is
-  hand-synced — the manifest cannot read script globals.
-- The `pathPrefix` is `NUTS` (not `NUTS/action`) so that Google's URL validation
-  succeeds for the action chip URL and all future sibling tools with one pattern.
-- Sibling tools take sibling paths under `NUTS/`, e.g. `NUTS/llm`.
-- `NUTS` is the preferred top-level scoping prefix for any suite-wide identifier; `GActionSheet`
-  continues to denote the action tool specifically.
+- The action chip URL base is `https://northlakeuu.org/NUUTS`, defined as
+  `ACTION_CHIP_URL_BASE` (`SyncManager.js`). The full action chip URL is
+  `ACTION_CHIP_URL_BASE + '?c=view&globalId=' + encodeURIComponent(globalId)` →
+  `https://northlakeuu.org/NUUTS?c=view&globalId=<id>`.
+- The `appsscript.json` `linkPreview` pattern is `hostPattern: northlakeuu.org`,
+  `pathPrefix: NUUTS` — hand-synced to `ACTION_CHIP_URL_BASE`, since the manifest cannot
+  read script globals.
+- The `c` query parameter is the suite-wide command/tool dispatch key (`c=view` for the
+  action preview). One registered `pathPrefix` (`NUUTS`) covers every present and future
+  suite tool.
+- Sibling tools (e.g. a future `@`-menu LLM trigger) reuse the `NUUTS` path with a
+  distinct `c` value, rather than a sibling path segment.
+- `NUTS` is the preferred top-level scoping prefix for suite-wide internal identifiers
+  (naming, bd memory keys, etc.); `NUUTS` is specifically the chip-URL path token.
+  `GActionSheet` continues to denote the action tool specifically.
 
 ## Rationale
 
-- A per-tool path under one host lets each tool own its `linkPreview` pattern without a new host or
-  domain, and decouples the URL scheme from the action-specific product name.
-- A single source of truth (`ACTION_CHIP_URL_BASE`) plus a documented manual sync to the manifest
-  keeps the two unavoidable copies (script + manifest) from drifting.
-- An internal suite name can be adopted immediately without the cost/risk of renaming the repo,
-  scriptId, or published add-on.
+- A single shared path with `c`-param dispatch lets every suite tool share one
+  `linkPreview` registration, rather than each tool needing its own path-based pattern.
+- Query-param dispatch decouples the URL scheme from the action-specific product name
+  and from any individual tool's lifecycle.
+- `ACTION_CHIP_URL_BASE` as a single source of truth, plus documented manual sync to the
+  manifest `pathPrefix`, keeps the two unavoidable copies (script + manifest) from
+  drifting.
+- An internal suite name can be adopted immediately without the cost/risk of renaming
+  the repo, scriptId, or published add-on.
 
 ## Consequences
 
-- **Refines ADR-0008 §Consequences "Single-tenant chip URL":** the chip link path changes from
-  `…/GActionSheet/action/{globalId}` to `…/NUTS/action/{globalId}`. ADR-0008's identity decision
-  (the in-text `AI-N:` token and `globalId` key) is unchanged and not superseded.
-- **pathPrefix amendment (2026-06-02):** changed from `NUTS/action` to `NUTS`. Root cause:
-  Google validates the chip URL (fetches it) before calling `onLinkPreview`; a narrower prefix
-  that points at a redirect to an auth-gated endpoint causes a system error for non-editor users.
-  The suite-root prefix `NUTS` is broader, leaves room for sibling tools, and the northlakeuu.org
-  redirect at `/NUTS/action` points to the `/exec` deployment (publicly accessible).
-- **Migration:** chips inserted under the old `GActionSheet/action` path stop firing
-  `onLinkPreview` until re-flushed; a sync rewrites each chip to the new `NUTS/action` URL.
-  Acceptable pre-production — no live deployment yet (GTaskSheet-erc). The manifest change takes
-  effect only after `npm run deploy:test`.
-- The published add-on display name is already generic ("Northlake Doc Tools"); a published rename
-  to NUTS, and any repo/scriptId rename, are **not** decided here.
-- The future multi-tenant, sheet-ID-encoded form (`…/action/{sheetId}/{globalId}`) noted in
-  `knowledge-base/ROADMAP.md` remains compatible — it slots under `NUTS/action/…`.
-- Recorded in bd memory `nuts-suite-name-url-scoping` and the toolset-direction staging doc.
+- **Refines ADR-0008 §Consequences "Single-tenant chip URL":** the chip link path
+  changes from `…/GActionSheet/action/{globalId}` to
+  `…/NUUTS?c=view&globalId={globalId}`. ADR-0008's identity decision (the in-text
+  `AI-N:` token and `globalId` key) is unchanged and not superseded.
+- The published add-on display name is already generic ("Northlake Doc Tools"); a
+  published rename to NUTS/NUUTS, and any repo/scriptId rename, are **not** decided
+  here.
+- The future multi-tenant, sheet-ID-encoded form noted in `knowledge-base/ROADMAP.md`
+  remains compatible — it slots in as an additional query parameter under
+  `NUUTS?c=view&...`.
+- Recorded in bd memory `nuts-suite-name-url-scoping` and the toolset-direction staging
+  doc.
