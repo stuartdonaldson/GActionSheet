@@ -471,6 +471,13 @@ proposal. It has been moved out of this as-built design to `knowledge-base/ROADM
 §"Future design: per-document tracker-sheet resolution". The related multi-tenant chip URL
 (`…/action/{sheetId}/{globalId}`) is tracked there too.
 
+**Homepage tab-navigation model** (planned, EPIC-D-PRE): the homepage card will gain a
+DocStatus/Import/Notify tab bar. `buildHomepageCard()` will delegate to a single
+`_buildTabbedHomepageCard(activeTab, …)` helper, with the DocStatus tab reusing the current section
+builders and card actions unchanged (no parallel card-building path). Decision recorded in
+`knowledge-base/adr/0015-cardservice-tab-navigation-model.md`; implemented by the slice
+`GTaskSheet-0r0s`. This §Building Block View will be updated to as-built when that slice lands.
+
 ---
 
 ## Sync Scenarios

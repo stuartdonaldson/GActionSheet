@@ -84,7 +84,8 @@ Tracked as `GTaskSheet-fk98` (`[INF]`, `model:haiku`).
 
 EPIC-D/E's "tabbed sidebar" (below) was specified before the `html-sidebar-card-pivot`
 decision (2026-05-27, `GTaskSheet-cw5`) which committed the project to a CardService-only
-UI (no HtmlService sidebar). This prerequisite epic resolves that conflict and authors the
+UI (no HtmlService sidebar). This prerequisite epic resolves that conflict (navigation model:
+`knowledge-base/adr/0015-cardservice-tab-navigation-model.md`) and authors the
 shared `J-ACCESS-FILTER` journey, with a regression-proof-out gate before any EPIC-D/E
 `[IMP]` work, since the navigation refactor touches `buildHomepageCard()` — the production
 entry point for every user.
