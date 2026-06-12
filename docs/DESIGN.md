@@ -79,7 +79,7 @@ Context column refers to the execution contexts defined in §Runtime Architectur
 
 | File | Role | Context |
 |------|------|---------|
-| `src/WorkspaceAddonCard.js` | Workspace homepage card builder + button/mutation handlers (Sync, VerifySync, status, delete) — CardService | ① |
+| `src/WorkspaceAddonCard.js` | Workspace homepage card builder with DocStatus/Import/Notify tab navigation (`_buildTabbedHomepageCard`, `_TABS` registry, `onShowTab`) + button/mutation handlers (Sync, VerifySync, status, delete) — CardService | ① |
 | `src/EditorAddonCard.js` | Docs editor add-on: `@`-menu create-action card, smart-chip `onLinkPreview`, preview status taps, `ACTION_SHEET_QUEUE` enqueue — CardService | ② |
 | `src/ContractSchema.js` | Authoritative machine-readable contract definitions shared by app and tests | all |
 | `src/SyncManager.js` | Scanner (`_scanFloatingActions`), token assignment, `syncDocument` / `syncAll`, REST paragraph flush (`_flushActionParagraph`), shared chip-badge style (`_chipBadgeStyleRequest`), chip URL base (`ACTION_CHIP_URL_BASE`), `onActionSheetEdit` | ① ② ④ |
@@ -234,7 +234,9 @@ Grouped by execution context (see §Runtime Architecture).
 
 | Component | Responsibility |
 |-----------|---------------|
-| Homepage card | Renders the homepage card for the active doc using CardService. Sections: (1) overview — sync state and record count; (2) action buttons — **Sync now**, **VerifySync**, **Insert tracker** (hidden when a tracker is already present); (3) action list — each action shows status icon buttons (Open / In Progress / In Review / Done / Closed) firing `onSetActionStatus`, and a **Delete** button firing `onDeleteAction`. Mutations complete a full doc+sheet round-trip before returning the refreshed card |
+| Tab navigation | `_buildTabbedHomepageCard(activeTab, …)` renders, in order: shared header (`_buildHomepageHeader`) → tab-bar section (`_buildTabBarSection`, a ButtonSet of TextButtons — active tab styled FILLED, every tab including the active one fires `onShowTab` with `{tab: id}`; CardService requires every TextButton to carry an onClick action, so re-selecting the active tab is a harmless no-op re-render) → the active tab's body → version footer. `buildHomepageCard()` is a thin delegator to `_buildTabbedHomepageCard('docStatus', …)`, so all existing entry points land on DocStatus unchanged. The `_TABS` registry (`docStatus`, `import`, `notify`) drives both the tab bar and `onShowTab` dispatch; adding a tab (e.g. a future Settings tab) is a registry entry plus a body builder |
+| Homepage card — DocStatus tab | Renders the DocStatus tab body for the active doc using CardService. Sections: (1) overview — sync state and record count; (2) action buttons — **Sync now**, **VerifySync**, **Insert tracker** (hidden when a tracker is already present); (3) action list — each action shows status icon buttons (Open / In Progress / In Review / Done / Closed) firing `onSetActionStatus`, and a **Delete** button firing `onDeleteAction`. Mutations complete a full doc+sheet round-trip before returning the refreshed card |
+| Homepage card — Import / Notify tabs | Placeholder bodies (`_buildImportTabSection`, `_buildNotifyTabSection`) showing "Import — coming soon" / "Notify — coming soon". Business logic lands in EPIC-D (Import) and EPIC-E (Notify) |
 | VerifySync | Reads floating actions from the doc, reads ActionSheet rows for the same doc via a non-mutating Web App call, parses the in-doc tracker table when present, and reports progress plus mismatches; a floating action without an explicit trailing `(Status)` token is itself a verification failure |
 
 ### ② Docs editor add-on surface (active user)
@@ -471,12 +473,11 @@ proposal. It has been moved out of this as-built design to `knowledge-base/ROADM
 §"Future design: per-document tracker-sheet resolution". The related multi-tenant chip URL
 (`…/action/{sheetId}/{globalId}`) is tracked there too.
 
-**Homepage tab-navigation model** (planned, EPIC-D-PRE): the homepage card will gain a
-DocStatus/Import/Notify tab bar. `buildHomepageCard()` will delegate to a single
-`_buildTabbedHomepageCard(activeTab, …)` helper, with the DocStatus tab reusing the current section
-builders and card actions unchanged (no parallel card-building path). Decision recorded in
-`knowledge-base/adr/0015-cardservice-tab-navigation-model.md`; implemented by the slice
-`GTaskSheet-0r0s`. This §Building Block View will be updated to as-built when that slice lands.
+**Homepage tab-navigation model** (implemented, `GTaskSheet-0r0s`): the homepage card has a
+DocStatus/Import/Notify tab bar — see §Building Block View → "Tab navigation" above. Decision
+recorded in `knowledge-base/adr/0015-cardservice-tab-navigation-model.md`. The open seam for a
+future Settings tab (Phase 2, `GTaskSheet-5fha`) is a `_TABS` registry entry plus a body builder —
+no navigation restructuring required.
 
 ---
 

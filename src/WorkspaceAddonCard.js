@@ -17,6 +17,23 @@ var _ICON_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/brand-NU
  *   avoids a second ~3s WebApp round-trip just to rebuild the card.
  */
 function buildHomepageCard(eventOrVerificationResult, opts) {
+  return _buildTabbedHomepageCard('docStatus', eventOrVerificationResult, opts);
+}
+
+/**
+ * Builds the homepage card for the given active tab (ADR-0015). Renders, in
+ * order: shared header, tab-bar section, the active tab's body only, and the
+ * version footer. DocStatus is the only tab with a non-placeholder body and
+ * is reused verbatim from the pre-tab implementation, including the
+ * skipSheetFetch fast path.
+ *
+ * @param {string=} activeTab  One of _TABS[].id. Defaults to 'docStatus'.
+ * @param {object=} eventOrVerificationResult
+ * @param {object=} opts
+ * @param {boolean=} opts.skipSheetFetch  DocStatus tab only — see buildHomepageCard.
+ */
+function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
+  var tab = _resolveTab(activeTab);
   var verificationResult = _isVerificationResult(eventOrVerificationResult)
     ? eventOrVerificationResult
     : null;
@@ -30,22 +47,28 @@ function buildHomepageCard(eventOrVerificationResult, opts) {
     var card = CardService.newCardBuilder()
       .setHeader(_buildHomepageHeader(doc));
 
-    if (!doc) {
-      card.addSection(
-        CardService.newCardSection().addWidget(
-          CardService.newTextParagraph().setText('Open a Google Doc to use Action Sync.')
-        )
-      );
-    } else {
-      var homepageState = _buildHomepageState(doc, verificationResult, skipSheetFetch);
-      card
-        .addSection(_buildOverviewSection(homepageState))
-        .addSection(_buildActionButtonsSection(homepageState))
-        .addSection(_buildActionListSection(homepageState));
-    }
+    card.addSection(_buildTabBarSection(tab.id));
 
-    if (verificationResult) {
-      card.addSection(_buildVerificationSection(verificationResult));
+    if (tab.id === 'docStatus') {
+      if (!doc) {
+        card.addSection(
+          CardService.newCardSection().addWidget(
+            CardService.newTextParagraph().setText('Open a Google Doc to use Action Sync.')
+          )
+        );
+      } else {
+        var homepageState = _buildHomepageState(doc, verificationResult, skipSheetFetch);
+        card
+          .addSection(_buildOverviewSection(homepageState))
+          .addSection(_buildActionButtonsSection(homepageState))
+          .addSection(_buildActionListSection(homepageState));
+      }
+
+      if (verificationResult) {
+        card.addSection(_buildVerificationSection(verificationResult));
+      }
+    } else {
+      card.addSection(tab.bodyBuilder());
     }
 
     card.addSection(
@@ -78,6 +101,86 @@ function buildHomepageCard(eventOrVerificationResult, opts) {
       )
       .build();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Tab navigation (ADR-0015) — registry-driven tab bar + dispatch. DocStatus is
+// special-cased in _buildTabbedHomepageCard (its body depends on doc state /
+// verificationResult / skipSheetFetch), so its bodyBuilder is null and is
+// never invoked through tab.bodyBuilder().
+// ---------------------------------------------------------------------------
+
+var _TABS = [
+  { id: 'docStatus', label: 'Doc status', bodyBuilder: null },
+  { id: 'import',    label: 'Import',     bodyBuilder: _buildImportTabSection },
+  { id: 'notify',    label: 'Notify',     bodyBuilder: _buildNotifyTabSection }
+];
+
+/**
+ * Resolves activeTab to a _TABS entry, defaulting to 'docStatus' for
+ * unknown/missing values.
+ */
+function _resolveTab(activeTab) {
+  for (var i = 0; i < _TABS.length; i++) {
+    if (_TABS[i].id === activeTab) {
+      return _TABS[i];
+    }
+  }
+  return _TABS[0];
+}
+
+/**
+ * Builds the tab-bar section: one TextButton per _TABS entry. The active tab
+ * renders FILLED; all tabs (including the active one) carry an onShowTab
+ * action — CardService requires every TextButton to have an onClick action,
+ * and re-selecting the active tab is a harmless no-op re-render.
+ */
+function _buildTabBarSection(activeTab) {
+  var buttonSet = CardService.newButtonSet();
+
+  for (var i = 0; i < _TABS.length; i++) {
+    var tab = _TABS[i];
+    var button = CardService.newTextButton()
+      .setText(tab.label)
+      .setOnClickAction(_buildCardAction('onShowTab').setParameters({ tab: tab.id }));
+
+    if (tab.id === activeTab) {
+      button.setTextButtonStyle(CardService.TextButtonStyle.FILLED);
+    }
+
+    buttonSet.addButton(button);
+  }
+
+  return CardService.newCardSection().addWidget(buttonSet);
+}
+
+/**
+ * Card action handler: switches the homepage card to the tab named in
+ * e.parameters.tab (set by _buildTabBarSection's inactive-tab buttons).
+ */
+function onShowTab(e) {
+  var tab = (e && e.parameters && e.parameters.tab) || 'docStatus';
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(_buildTabbedHomepageCard(tab)))
+    .build();
+}
+
+/**
+ * Placeholder Import tab body (GTaskSheet-0r0s). Business logic lands in EPIC-D.
+ */
+function _buildImportTabSection() {
+  return CardService.newCardSection().addWidget(
+    CardService.newTextParagraph().setText('Import — coming soon')
+  );
+}
+
+/**
+ * Placeholder Notify tab body (GTaskSheet-0r0s). Business logic lands in EPIC-E.
+ */
+function _buildNotifyTabSection() {
+  return CardService.newCardSection().addWidget(
+    CardService.newTextParagraph().setText('Notify — coming soon')
+  );
 }
 
 function _resolveActiveDocForRead(doc) {
