@@ -189,7 +189,8 @@ if (require.main === module) {
   if (command === 'sync') {
     (async () => {
       clearLogs();
-      const browser = await chromium.launch({ headless: false });
+      const headless = !process.argv.includes('--headed');
+      const browser = await chromium.launch({ headless });
       const context = await browser.newContext({ storageState });
       const page    = await context.newPage();
       try {

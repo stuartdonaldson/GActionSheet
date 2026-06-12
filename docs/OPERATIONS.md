@@ -109,6 +109,32 @@ Opening the add-on in a blank doc shows the card with a **Sync now** button and 
 
 ---
 
+## Team Reassignment Runbook
+
+To move a document to a different team, edit the master GActionSheet's `DocData`
+tab — no code changes or redeployment needed:
+
+1. In `DocData`, find the row for the target document and set `Team Id` to the
+   new team and `Sync Status` to `UpdateDoc`.
+2. Run a sync for that document — menu **Action Sync > Sync** from the doc, or
+   wait for the 30-minute `syncAll` sweep (see §Automation).
+3. Verify the change took effect: the document's `teamScope` app property and
+   `DocData.Team Id` should both equal the new Team Id, and `Sync Status` should
+   be cleared back to empty.
+
+This is handled by `_syncTeamScope` (`src/SyncManager.js`): when
+`DocData.Sync Status === 'UpdateDoc'`, it overwrites the document's `teamScope`
+app property from `DocData.Team Id`, logs `sync.teamScope.overridden`, and
+clears `Sync Status`. The folder-walk auto-assignment (used when `teamScope` is
+blank) is bypassed in this path. `assertTeamAccess` (`src/SyncManager.js`)
+gates team-scoped reads on Drive folder access for the calling user.
+
+Regression coverage: `tests/test_team_scope.py` S3 (UpdateDoc override) and S4
+(idempotent re-sync — re-running sync without further DocData changes makes no
+additional writes).
+
+---
+
 ## Automation
 
 The automation feature set runs on the ActionSheet container and requires no user interaction after initialization.
@@ -263,6 +289,23 @@ Every scenario run writes a per-step trace to `test-results/runs/<node>_<utc>.tr
 - **`SCN_FAILFAST`** — fail-fast GAS-error monitoring is ON by default: a `*.error` GAS log entry (or an unexpected/non-JSON HTTP response) following any act aborts the run immediately at the source, instead of surfacing 10 minutes later at the consistency checkpoint. Set `SCN_FAILFAST=0` to disable raising (trace-only).
 - **`npm run test:ui-smoke`** — the fast (<1 min) high-risk UI smoke test (new doc → floating action → `@`-action → sidebar sync → insert table); streams the live trace.
 - **`python scripts/trace_report.py [trace.jsonl]`** — renders a timeline, per-phase totals, slowest steps, and CHECK coverage rollup from a trace. Defaults to the latest run under `test-results/runs/`.
+
+#### Allure step naming and UI-failure screenshots
+
+`engine.drain()` wraps each per-surface CHECK in an Allure step named
+`"<tag> <surface>"` (e.g. `journey sync-create UI`), giving the Allure report
+one step per (expectation, surface) pair regardless of which checkpoint
+drained it. On a `Surface.UI` FAIL-severity miss, a screenshot of the live
+page is attached to the report named `"<tag> UI FAIL"`. Both apply uniformly
+to every pytest scenario — no per-test opt-in.
+
+The JS Playwright smoke layer (`tests/playwright/*.test.js`) already retains
+its own traces and screenshots: `playwright.config.js` sets `screenshot:
+'only-on-failure'`, `video: 'retain-on-failure'`, and reports through
+`allure-playwright` into the same `test-results/allure-results/` directory as
+the pytest suite. Combined with the pytest-side step naming and screenshots
+above, the Allure report is uniform across both stacks — failures in either
+stack carry a screenshot, and pytest steps carry their `[uc AC#]`-style tag.
 
 #### `scripts/run_test_exec.py` — self-contained TestExec-NNN/ folders
 

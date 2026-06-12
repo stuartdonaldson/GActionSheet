@@ -2388,3 +2388,19 @@ Open seams registered per the 5fha gate: Settings-tab (Phase 2) extensibility on
 - sidebarDeleteAction removes the ActionSheet row entirely via _deleteActionRowFromSheet (no "Deleted" stamp) -- distinct from the HTTP delete_action_row route used by scn.delete()/test_b7_write_routes.py, which does stamp Sync Status='Deleted'. Verification must match the actual entry point's contract.
 - Checkpoint/verify_consistency consolidation (3->2 checkpoints, 2->1 verify_consistency calls) didn't meaningfully cut wall-clock time (139s -> 142s) -- GAS-side sync execution (sidebar_sync busy-wait, s.sync() round trips) dominates over docx/xlsx download cost. A persistent Playwright/browser session across pytest invocations would be the real lever for iteration speed; flagged as a future infrastructure idea, not built.
 - One run hit a known flaky GAS Docs batchUpdate race ("Invalid deletion range", flush.error) matching the B7-class race condition already in memory; re-run passed cleanly. Filed GTaskSheet-tgof separately for an unrelated _remarkRowDirty null-getActiveSpreadsheet bug surfaced incidentally during full-module regression runs.
+
+## 2026-06-12 09:04:54
+
+### Summary:
+Reviewed GTaskSheet-mol-7gg (docs/OPERATIONS.md update for All-UC verification and test suite sign-off, blocked dependency mol-isu closed earlier today). Found it not yet done: OPERATIONS.md still referenced a deleted tests/test_uc_a.py and never recorded the All-UC sign-off result. Replaced the stale "UC-A Tests" section with a UC-A/B/C/D -> current-test-file coverage table and recorded the mol-06g sign-off (8 UC scenarios: 14 passed, 2 xfailed, GTaskSheet-tis). Closed mol-7gg, committed, and pushed (0fde038), unblocking GTaskSheet-mol-b4e (final sign-off gate, left for Stuart).
+
+### Key Learnings:
+tests/test_uc_a.py and test_acceptance.py were removed during the np7s/k22t ID-map re-base (2026-06-11) but OPERATIONS.md was never updated to match -- only stale .pyc files remained in tests/__pycache__/ as evidence. UC-A coverage now lives in tests/test_journey.py / test_journey_acts_1_3.py.
+
+## 2026-06-12 09:30:00
+
+### Summary:
+Resolved four small ready-to-close items. (1) mol-b4e: human GO sign-off for v1 Ship epic mol-kqr (13/14 children done, mol-7gg recorded UC-A/B/C/D coverage + sign-off) -- closed mol-b4e, auto-closed mol-kqr. (2) fk98: added docs/OPERATIONS.md §Team Reassignment Runbook (DocData Team Id + SyncStatus=UpdateDoc -> sync -> verify), citing _syncTeamScope (src/SyncManager.js) and tests/test_team_scope.py S3/S4; updated ROADMAP.md EPIC-C to fully-delivered (also fixed stale _syncTeamScopeForDoc name to _syncTeamScope). (3) 80mo.12/80mo.12.1: documented the Allure step-naming convention ("<tag> <surface>" per drained expectation) and UI-failure screenshot attachment (engine.drain step_cm/on_ui_fail hooks from GTaskSheet-16kh) in docs/OPERATIONS.md §Test observability, confirmed JS smoke layer's existing allure-playwright config satisfies the cross-stack uniformity requirement (F6); closed 80mo.12.1, 80mo.12, and the now-100%-complete 80mo epic. (4) 4qd: switched tests/playwright/open_sheet.js, seed_doc.js, addon_helpers.js to default-headless (--headed override), matching invoke_gas.js's existing pattern; playwright.config.js and invoke_gas.js were already headless-by-default so left unchanged; auth.setup.js intentionally kept headless:false (one-time interactive Google login).
+
+### Key Learnings:
+Several "ready to close" beads were docs/config graduations of already-shipped work -- the bd description for 4qd was partly stale (playwright.config.js and invoke_gas.js had already been switched to headless-by-default in earlier work), so the actual remaining scope was just the 3 CLI helper scripts plus a deliberate carve-out for auth.setup.js's interactive login flow.

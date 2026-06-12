@@ -74,11 +74,11 @@ do not reimplement.
 The full EPIC-C acceptance scenario (DocData row set to `SyncStatus='UpdateDoc'` with a
 new Team Id → sync applies the change, clears `SyncStatus`, idempotent on re-sync) was
 implemented as part of `GTaskSheet-me6w.4` (DocWins + UpdateDoc write-back,
-`src/SyncManager.js` `_syncTeamScopeForDoc`) and is covered by `tests/test_team_scope.py`
+`src/SyncManager.js` `_syncTeamScope`) and is covered by `tests/test_team_scope.py`
 S3 (UpdateDoc override) and S4 (idempotency). No new `[IMP]`/`[TST]` twin is needed.
 
-Remaining gap: an operator-facing runbook in `docs/OPERATIONS.md` for this workflow.
-Tracked as `GTaskSheet-fk98` (`[INF]`, `model:haiku`).
+The operator-facing runbook for this workflow is in `docs/OPERATIONS.md`
+§Team Reassignment Runbook (`GTaskSheet-fk98`). EPIC-C is fully delivered.
 
 ### EPIC-D-PRE — Tabbed-shell architecture slice + J-ACCESS-FILTER — `GTaskSheet-uz7h`
 
