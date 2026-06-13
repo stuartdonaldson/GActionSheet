@@ -21,17 +21,20 @@ human performs the gesture the harness verifies the durable result.
 
     pytest -m interactive tests/test_interactive.py -s
 
-`-s` is required so the instructions print and the input() prompt is reachable.
-Run from an interactive terminal (not a background/CI context) — it blocks on
-stdin by design.
+`-s` is required so the instructions and live progress print. The test does NOT
+read stdin: it prints what to do, then AUTO-DETECTS the result (polls for the
+preview card to render, and re-reads the sheet for the status change) within
+timed windows — so it works whether a human launches it or an orchestrator does.
+A visible Chromium opens; perform the gestures it asks for while it waits.
 """
 import pathlib
+import time
 
 import pytest
 
 from scn.ai import ai
 from scn.session import ScenarioSession
-from scn.ui import UiDriver, _CHIP_ANCHOR_JS
+from scn.ui import UiDriver, _CARD_BODY, _CARD_IFRAME, _CHIP_ANCHOR_JS
 
 pytestmark = pytest.mark.interactive
 
@@ -42,12 +45,29 @@ def _banner(title: str, steps: list[str]) -> None:
     print(f"\n{bar}\n  👤 HUMAN ACTION REQUIRED — {title}\n{bar}")
     for i, step in enumerate(steps, 1):
         print(f"  {i}. {step}")
-    print(bar)
+    print(bar, flush=True)
 
 
-def _confirm(question: str) -> bool:
-    """Ask the operator a yes/no question; return True for yes."""
-    return input(f"  ❓ {question} [y/N] ").strip().lower().startswith("y")
+def _card_visible(page) -> bool:
+    """True if the onLinkPreview card iframe body is currently visible."""
+    try:
+        return page.frame_locator(_CARD_IFRAME).first.locator(_CARD_BODY).first.is_visible()
+    except Exception:
+        return False
+
+
+def _wait_until(cond, *, timeout_s: float, waiting_msg: str, poll_s: float = 1.0) -> bool:
+    """Poll cond() until True or timeout; print a one-time waiting message."""
+    deadline = time.monotonic() + timeout_s
+    announced = False
+    while time.monotonic() < deadline:
+        if cond():
+            return True
+        if not announced:
+            print(f"  ⏳ {waiting_msg}", flush=True)
+            announced = True
+        time.sleep(poll_s)
+    return False
 
 
 @pytest.fixture
@@ -93,45 +113,56 @@ def test_link_preview_hover_human(scn):
     action_id = match.action_id
     assert action_id, f"synced action has no AI-N id: {match}"
 
-    # 2. Reload so the REST-inserted chip is rendered in the editor, then point the
-    #    operator at the actual chip (DOM-scan its on-screen position for clarity).
-    scn.ui.reload()
+    # 2. Open the doc fresh in the browser (the page starts at about:blank — the
+    #    seed+sync above were HTTP, no navigation). A fresh load renders the
+    #    REST-inserted chip; then point the operator at the actual chip.
+    scn.ui._ensure_doc()
     chip = scn.ui.locate(text=action_id, occurrence=1)
     chip.wait_for(state="visible", timeout=15000)
     anchor = scn.ui._page.evaluate(_CHIP_ANCHOR_JS, chip.bounding_box())
 
+    where = f" (near x≈{int(anchor['x'])}, y≈{int(anchor['y'])})" if anchor else ""
     _banner(
         f"link-preview card for {action_id}",
         [
-            f"Find the chip “{action_id}: …” in the document"
-            + (f" (near x≈{int(anchor['x'])}, y≈{int(anchor['y'])})." if anchor else "."),
-            "Hover the mouse over it and HOLD until a preview card pops up.",
+            f"Find the chip “{action_id}: …” in the document{where}.",
+            "Hover the mouse over it and HOLD still until a preview card pops up.",
+            f"   → the harness is watching and will detect the card automatically.",
             f"Confirm the card header shows “{action_id}: …” and a clickable link.",
-            "In that card, open the status control and set it to “In Progress”.",
-            "Wait for the card’s busy spinner to clear, then return to this terminal.",
+            "Then, in that card, open the status control and set it to “In Progress”.",
+            "Leave the browser as-is; the harness verifies the result on its own.",
         ],
     )
 
-    card_rendered = _confirm(f"Did the preview card render with “{action_id}:” and a link?")
-    status_set = _confirm("Did you set the status to “In Progress” in the card?")
-    input("  ⏎ Press Enter to let the harness verify the durable result… ")
+    page = scn.ui._page
 
-    # 3. rwz AC1/AC2 — the rendered card is a human-confirmed fidelity check.
-    assert card_rendered, (
-        "Operator reported the onLinkPreview card did NOT render on a real hover — "
-        "this is a genuine link-preview product gap, not a harness limitation "
-        "(see GTaskSheet-s9so analysis)."
+    # 3. rwz AC1/AC2 — auto-detect the rendered card on a real human hover (120s).
+    card_rendered = _wait_until(
+        lambda: _card_visible(page),
+        timeout_s=120,
+        waiting_msg="watching for the onLinkPreview card — hover the chip and hold…",
     )
-
-    # 4. Durable verification of the in-card status change (Act-5 flow).
-    if status_set:
-        scn.sync()
-        after = scn.find_sheet_actions()
-        row = next((r for r in after if r.action_id == action_id), None)
-        assert row is not None, f"action {action_id} missing after status change; rows={after}"
-        assert (row.status or "").lower() == "in progress", (
-            f"expected {action_id} status 'In Progress' after the in-card change, "
-            f"got {row.status!r}"
-        )
+    if card_rendered:
+        print("  ✅ onLinkPreview card detected on hover.", flush=True)
     else:
-        pytest.skip("Operator did not perform the in-card status change; durable check skipped.")
+        print("  ⚠️  No preview card detected within 120s.", flush=True)
+
+    # 4. Give the operator time to set the status in the card, then verify durably.
+    print("  → Now set the card status to “In Progress”. Verifying shortly…", flush=True)
+    time.sleep(40)
+    scn.sync()
+    after = scn.find_sheet_actions()
+    row = next((r for r in after if r.action_id == action_id), None)
+    status_now = (row.status or "").lower() if row else None
+
+    assert card_rendered, (
+        "onLinkPreview card did NOT render on a real human hover within 120s — this is "
+        "a genuine link-preview product gap (Google Docs doesn't convert the add-on's "
+        "plain-hyperlink action chips into smart chips), not a harness limitation. "
+        "File a follow-up bead (see GTaskSheet-s9so analysis)."
+    )
+    assert status_now == "in progress", (
+        f"expected {action_id} status 'In Progress' after the in-card change, got "
+        f"{status_now!r}. If the card rendered but status didn't change, the "
+        f"_setStatusFromPreview flow needs review."
+    )
