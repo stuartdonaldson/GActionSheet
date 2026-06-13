@@ -289,7 +289,8 @@ def test_tab_navigation_docstatus_regression(settings, browser_page):
         )
         a1, a2, a3 = rows[0], rows[1], rows[2]
 
-        # ENTRY POINT: per-row sidebar status control (sidebarSetStatus)
+        # ENTRY POINT: per-row sidebar status control — card action onSetActionStatus
+        # (the Playwright click drives the card button -> onSetActionStatus -> sidebarSetStatus)
         new_status = "In Progress" if a1.status != "In Progress" else "Open"
         s.ui.sidebar_set_status(a1, new_status, timeout="15s")
         a1.status = new_status
@@ -299,9 +300,9 @@ def test_tab_navigation_docstatus_regression(settings, browser_page):
         # correctly -- one docx download covers baseline (a2/a3) and the change (a1).
         s.verify(
             a1, on=TRACKER, status=new_status,
-            tag="[gdll status-changed]", entry_point="sidebarSetStatus",
+            tag="[gdll status-changed]", entry_point="onSetActionStatus",
         )
-        s.verify(a2, on=TRACKER, tag="[gdll baseline]", entry_point="onSyncNow")
+        s.verify(a2, on=TRACKER, tag="[gdll baseline]", entry_point="syncDocument.onSyncNow")
         s.verify(a3, on=TRACKER, tag="[gdll baseline]")
         s.verify_consistency(scope=DOC)
         s.checkpoint(INTEGRITY)
@@ -313,7 +314,8 @@ def test_tab_navigation_docstatus_regression(settings, browser_page):
         s.ui.sidebar_delete(a2, timeout="15s")
         s.sync()  # converge async mutation to sheet
 
-        s.expect_absent(a2, on=DOC, tag="[gdll deleted]")
+        # ENTRY POINT: per-row sidebar delete control — card action onDeleteAction
+        s.expect_absent(a2, on=DOC, tag="[gdll deleted]", entry_point="onDeleteAction")
         for a in (a1, a3):
             s.verify(a, on=TRACKER, tag="[gdll delete-unaffected]")
         s.checkpoint(INTEGRITY)

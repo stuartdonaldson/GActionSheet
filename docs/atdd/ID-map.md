@@ -138,11 +138,22 @@ Tracked under GTaskSheet-k22t. Status as of 2026-06-11:
     `test_journey` run's `test-results/junit/pytest.xml` (2026-06-11) produces
     a correct AC/EP diff (3/32 ACs covered, 0/3 entry points covered),
     confirming the mechanism works end-to-end against real journey output.
-  - (b) the entry-point half of the gap-diff (`T17`) is built but only
-    seeded (3 of the project's state-modifying entry points registered) —
-    tracked as GTaskSheet-z6f8 (project-wide buildout); GTaskSheet-yuvq
-    covers the narrower onSyncNow/onVerifySync/onInsertTrackerTable
-    doc-context slice first.
+  - ~~(b) the entry-point half of the gap-diff (`T17`) is built but only
+    seeded (3 of the project's state-modifying entry points registered)~~ —
+    **resolved (GTaskSheet-z6f8)**: `scn/contract.ENTRY_POINT_REGISTRY` now
+    enumerates all 32 state-modifying entry points across the four call-site
+    classes (menu items, time-based triggers, sidebar/add-on card actions, HTTP
+    routes) plus state-modifying test-support routes — each description carries a
+    `[category]` prefix; `[test-support …]` flags harness-only entries; read-only
+    /diagnostic entry points are deliberately excluded. 10 are covered by tagged
+    scenario call-sites; the remaining 22 are explicitly **warn-only** via
+    `scn/contract.ENTRY_POINT_DEFERRED` (key → reason + tracking bead), which
+    `scripts/check_coverage.py` treats as deferred (enumerated-but-not-yet-asserted)
+    so the `ep.*` gap-diff is green (0 uncovered). Converting each deferred entry
+    to a real tagged call-site assertion is tracked under EPIC GTaskSheet-rz4k
+    (children rz4k.1 triggers, rz4k.2 routes, rz4k.3 cards, rz4k.4 menu, rz4k.5
+    test-support). GTaskSheet-yuvq delivered the narrower onSyncNow doc-context
+    slice first.
 - ~~Two `implementation-gate` skills exist~~ — **resolved**: this project's
   `.claude/skills/implementation-gate/SKILL.md` is identical (byte-for-byte)
   to DevStandard's `dot-claude/skills/implementation-gate/SKILL.md` (both

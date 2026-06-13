@@ -31,9 +31,11 @@ INTEGRITY = CheckpointKind.INTEGRITY
 STEP = CheckpointKind.STEP
 
 
-@pytest.fixture(scope="module")
-def scn(settings):
-    s = ScenarioSession.new_doc(settings)
+@pytest.fixture
+def scn(settings, request):
+    # request=request wires JUnit ac.*/ep.* emission to this test node (T24) — without it
+    # the session is a no-op reporter and no coverage properties reach pytest.xml.
+    s = ScenarioSession.new_doc(settings, request=request)
     yield s
     s.close()                               # trash; assert queue empty
 
@@ -112,8 +114,9 @@ def test_b7_write_routes(scn):
 
     # Defer full surface verification to INTEGRITY (sheet-wins only after sync)
     target_edit.status = "In Progress"
-    scn.verify(target_edit, on=DOC, at=INTEGRITY, tag="[b7 write-edit]")   # doc paragraph must reflect new status
-    scn.verify(target_edit, on=SHEET, at=INTEGRITY, tag="[b7 write-edit]") # sheet row: status="In Progress", Dirty cleared
+    # ENTRY POINT: edit_action_row HTTP route (Dirty stamp; onActionSheetEdit surrogate)
+    scn.verify(target_edit, on=DOC, at=INTEGRITY, tag="[b7 write-edit]", entry_point="edit_action_row")   # doc paragraph must reflect new status
+    scn.verify(target_edit, on=SHEET, at=INTEGRITY, tag="[b7 write-edit]", entry_point="edit_action_row") # sheet row: status="In Progress", Dirty cleared
 
     scn.sync()                              # Dirty → sheetWins flush; doc paragraph updated
     scn.checkpoint(INTEGRITY)              # drain: DOC + SHEET expectations for target_edit
@@ -139,8 +142,9 @@ def test_b7_write_routes(scn):
 
     # Durable outcomes deferred to INTEGRITY (async; not resolved until sync drains queue)
     target_status.status = "In Progress"
-    scn.verify(target_status, on=SHEET, at=INTEGRITY, tag="[b7 write-status]")  # sheet receives the status
-    scn.verify(target_status, on=DOC, at=INTEGRITY, tag="[b7 write-status]")    # doc paragraph updated
+    # ENTRY POINT: patch_action_status HTTP route (sidebar fast-path async upsert)
+    scn.verify(target_status, on=SHEET, at=INTEGRITY, tag="[b7 write-status]", entry_point="patch_action_status")  # sheet receives the status
+    scn.verify(target_status, on=DOC, at=INTEGRITY, tag="[b7 write-status]", entry_point="patch_action_status")    # doc paragraph updated
 
     scn.sync()                              # forces convergence (§16.11 #4: queue drains)
     scn.checkpoint(INTEGRITY)              # drain: SHEET + DOC expectations for target_status

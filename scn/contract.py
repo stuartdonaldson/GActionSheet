@@ -87,29 +87,114 @@ AC_REGISTRY: dict[str, str] = {
 }
 
 # Entry-Point Registry (T1/T17 entry-point coverage; T24 gap-diff — see GTaskSheet-me6w.2)
-# Maps a state-modifying GAS entry point to its description. Each scenario tags the entry
-# point it exercises; ScenarioSession emits ep.<entry_point>.<surface> JUnit properties
-# alongside ac.<tag>.<surface>. scripts/check_coverage.py diffs these keys against the
-# emitted ep.* properties — the entry-point half of the gap-diff, binding on new harness
-# work per the ratified T24 status note. Seeded with EPIC-B's two entry points; this is the
-# minimal slice that proves the entry-point diff shape for GTaskSheet-me6w.6.
+# Maps every *state-modifying* GAS entry point across the project to its description. Each
+# scenario tags the entry point it exercises; ScenarioSession emits ep.<entry_point>.<surface>
+# JUnit properties alongside ac.<tag>.<surface>. scripts/check_coverage.py diffs these keys
+# against the emitted ep.* properties — the entry-point half of the gap-diff (T17), binding on
+# new harness work per the ratified T24 status note.
+#
+# Project-wide buildout per GTaskSheet-z6f8 (T24 follow-up 2(b)): enumerates every
+# state-modifying entry point in the four call-site classes the entry-point-coverage invariant
+# names — menu items, time-based triggers, sidebar/add-on card actions, HTTP routes — plus the
+# state-modifying test-support routes. Each description is prefixed with a [category] tag;
+# [test-support ...] flags entries that exist only for the test harness (not product surface).
+# Read-only / diagnostic entry points (e.g. onVerifySync, menuVerifyConsistency, find_sheet_actions,
+# verify_action_rows, get_test_config, onShowTab, onImportSelectAll) are intentionally NOT
+# registered — the invariant scopes to state-modifying call-sites only.
+#
+# Entry points with no current scenario call-site are listed in ENTRY_POINT_DEFERRED below;
+# check_coverage.py treats those as explicitly warn-only (enumerated but not yet asserted),
+# so the gap-diff stays green while the deferral backlog (EPIC GTaskSheet-rz4k) converts each
+# to a real, tagged, durable-state call-site assertion.
 ENTRY_POINT_REGISTRY: dict[str, str] = {
-    "syncDocument": "syncDocument(docId) — auto-assign / UpdateDoc-override / idempotent re-sync",
-    "syncDocument.onSyncNow": "syncDocument(docId) via onSyncNow (WorkspaceAddonCard.js 'Sync now' "
-        "button, doc-context) — distinct call-site from the run_fixture/Web-App path; "
-        "getActiveSpreadsheet() is null here (GTaskSheet-yuvq)",
-    "assertTeamAccess": "assertTeamAccess(teamId, ss) — team-scoped security gate on filtered reads",
-    "setup_team_scope_fixture": "setup_team_scope_fixture — idempotent TeamData/folder fixture setup for team-scope scenarios",
-    "importList": "list_importable_actions via Import tab render (show_tab('Import') -> "
-        "_buildImportTabSection) — AC-1/EPIC-D team-scoped read",
-    "importSelectedSubmit": "_submitImport(e) — Import tab 'Import selected' button: "
-        "select+insert+upsert+forward (AC-2/AC-3/EPIC-D). NOT YET COVERED: CHECK_BOX "
-        "SelectionInput state cannot be driven via Playwright (see importSelectedForTest "
-        "and EPIC GTaskSheet-pw5x for the interim path back to this entry point)",
-    "importSelectedForTest": "import_selected_for_test testToken route — interactive-test-"
-        "entry-point (GTaskSheet-8qe5/EPIC GTaskSheet-pw5x) standing in for "
-        "importSelectedSubmit's AC-2/AC-3 select+insert+upsert+forward logic "
-        "(_importSelectedRows) until the Import tab checkbox UI can be driven via Playwright",
+    # ── Core / covered ─────────────────────────────────────────────────────────────
+    "syncDocument": "[core] syncDocument(docId) — auto-assign / UpdateDoc-override / idempotent re-sync",
+    "assertTeamAccess": "[core] assertTeamAccess(teamId, ss) — team-scoped security gate on filtered reads",
+    # ── Workspace add-on card actions (WorkspaceAddonCard.js) ────────────────────────
+    "syncDocument.onSyncNow": "[workspace-card] syncDocument(docId) via onSyncNow ('Sync now' button, "
+        "doc-context) — distinct call-site from the run_fixture/Web-App path; getActiveSpreadsheet() "
+        "is null here (GTaskSheet-yuvq)",
+    "onSetActionStatus": "[workspace-card] onSetActionStatus(e) — per-row status control -> sidebarSetStatus",
+    "onDeleteAction": "[workspace-card] onDeleteAction(e) — per-row delete control -> sidebarDeleteAction",
+    "onInsertTrackerTable": "[workspace-card] onInsertTrackerTable() — 'Insert tracker' button -> insertTrackerTable",
+    "importSelectedSubmit": "[workspace-card] _submitImport(e) — Import tab 'Import selected' button: "
+        "select+insert+upsert+forward (AC-2/AC-3/EPIC-D). The CHECK_BOX SelectionInput state cannot be "
+        "driven via Playwright; importSelectedForTest is the interim surrogate (EPIC GTaskSheet-pw5x)",
+    # ── Editor add-on card actions (EditorAddonCard.js) ──────────────────────────────
+    "_submitCreateAction": "[editor-card] _submitCreateAction(e) — editor add-on create-action submit",
+    "_setStatusFromPreview": "[editor-card] _setStatusFromPreview(e) — link-preview status dropdown -> _scheduleSheetUpdate",
+    # ── Installable triggers ─────────────────────────────────────────────────────────
+    "syncAll": "[trigger] syncAll() — 30-min time-based sweep (TriggerManager.js); ID-map P1-1 call-site",
+    "onActionSheetEdit": "[trigger] onActionSheetEdit(e) — onEdit installable trigger (SyncManager.js); ID-map P1-2",
+    "_processPendingSheetUpdates": "[trigger] _processPendingSheetUpdates(e) — async ACTION_SHEET_QUEUE drain (EditorAddonCard.js)",
+    # ── Sheets menu items (MenuHandler.js) — state-modifying only ────────────────────
+    "menuSync": "[menu] menuSync -> syncAll() (Action Sync > Sync)",
+    "menuEnsureSheetStructure": "[menu] menuEnsureSheetStructure -> ensureSheetStructure() (Setup submenu)",
+    "menuInitializeTriggers": "[menu] menuInitializeTriggers -> initializeTriggers() (Setup submenu)",
+    "menuBootstrap": "[menu] menuBootstrap -> bootstrap() (Setup submenu)",
+    "menuRunArchive": "[menu] menuRunArchive -> ArchiveManager.archive() (Test menu)",
+    # ── HTTP routes (WebApp.js doPost) — state-modifying production routes ────────────
+    "patch_action_status": "[route] patch_action_status — sidebar fast-path status enqueue (unconditional upsert)",
+    "edit_action_row": "[route] edit_action_row — stamps Sync Status='Dirty' + Date Modified (onActionSheetEdit surrogate)",
+    "upsert_action_rows": "[route] upsert_action_rows — programmatic write path (WEBAPP_SECRET-gated); no Dirty stamp",
+    "sync_action_rows": "[route] sync_action_rows — bidirectional reconcile write route",
+    "mark_doc_not_found": "[route] mark_doc_not_found — stamps DocData SyncStatus='Doc Not Found'",
+    "delete_action_row": "[route] delete_action_row — stamps Sync Status='Deleted' (ADR-0009 §B terminal)",
+    "forward_action_rows": "[route] forward_action_rows — AC-3 mark source rows Forwarded + suffix + dirty",
+    "importList": "[route] list_importable_actions via Import tab render (show_tab('Import') -> "
+        "_buildImportTabSection) — AC-1/EPIC-D team-scoped read; retained as the established import entry point",
+    # ── Test-support entry points (harness only; flagged [test-support]) ─────────────
+    "importSelectedForTest": "[test-support route] import_selected_for_test testToken route — interactive "
+        "test entry point (GTaskSheet-8qe5/EPIC GTaskSheet-pw5x) standing in for the Import tab "
+        "'Import selected' (_submitImport) AC-2/AC-3 select+insert+upsert+forward logic until the "
+        "CHECK_BOX SelectionInput can be driven via Playwright",
+    "setup_team_scope_fixture": "[test-support] setup_team_scope_fixture — idempotent TeamData/folder fixture setup",
+    "run_fixture": "[test-support route] run_fixture — seeds doc/sheet fixtures for a scenario",
+    "set_test_token": "[test-support route] set_test_token — writes the per-run test token script property",
+    "bootstrap": "[test-support route] bootstrap — bootstraps test script properties",
+    "begin_journey_session": "[test-support route] begin_journey_session — opens a journey test-session marker",
+    "end_journey_session": "[test-support route] end_journey_session — closes a journey test-session marker",
+}
+
+# Deferred entry points (GTaskSheet-z6f8 / EPIC GTaskSheet-rz4k). Maps a registered entry point
+# with NO current tagged scenario call-site to a one-line reason + tracking bead. check_coverage.py
+# treats these as explicitly warn-only (not uncovered), so the T17 gap-diff stays green while the
+# epic converts each to a real durable-state call-site assertion. "Warn-only" == enumerated but not
+# yet asserted at its own call-site — documented debt, not coverage. Empty this dict as coverage lands.
+ENTRY_POINT_DEFERRED: dict[str, str] = {
+    # rz4k.1 — installable triggers
+    "syncAll": "exercised by test_sync_all.py via raw asserts, not a tagged call-site (ID-map P1-1) — GTaskSheet-rz4k.1",
+    "onActionSheetEdit": "exercised only via edit_action_row HTTP surrogate, not the live trigger (ID-map P1-2) — GTaskSheet-rz4k.1",
+    "_processPendingSheetUpdates": "async sheet-update queue drain; no current coverage — GTaskSheet-rz4k.1",
+    # rz4k.2 — production HTTP write routes
+    "upsert_action_rows": "exercised by test_45k via raw asserts, not tagged at the route call-site — GTaskSheet-rz4k.2",
+    "sync_action_rows": "exercised as the sync mechanism, not asserted distinctly from syncDocument — GTaskSheet-rz4k.2",
+    "mark_doc_not_found": "no tagged durable-state call-site assertion yet — GTaskSheet-rz4k.2",
+    "delete_action_row": "Deleted-stamp asserted via raw asserts in test_b7 ACT C, not tagged — GTaskSheet-rz4k.2",
+    "forward_action_rows": "forward logic covered via importSelectedForTest, route call-site not tagged — GTaskSheet-rz4k.2",
+    # rz4k.3 — workspace/editor card mutations
+    "onInsertTrackerTable": "tracker-refresh logic covered via onSyncNow; the card call-site is not asserted — GTaskSheet-rz4k.3",
+    "onSetActionStatus": "tagged in test_sidebar.py but that session lacks request= (no JUnit emission) and "
+        "test_tab_navigation_docstatus_regression currently fails on a pre-existing UI-driver locator "
+        "regression (see test_scn_ui TestSidebarSetStatus) — GTaskSheet-rz4k.3",
+    "onDeleteAction": "tagged in test_sidebar.py but that session lacks request= (no JUnit emission) and "
+        "test_tab_navigation_docstatus_regression currently fails on a pre-existing UI-driver locator "
+        "regression (see test_scn_ui TestSidebarDelete) — GTaskSheet-rz4k.3",
+    "_submitCreateAction": "editor add-on create-action submit; no coverage — GTaskSheet-rz4k.3",
+    "_setStatusFromPreview": "editor link-preview status dropdown; no coverage (onLinkPreview render blocked by GTaskSheet-s9so) — GTaskSheet-rz4k.3",
+    "importSelectedSubmit": "real Import-tab submit; CHECK_BOX SelectionInput not Playwright-drivable — covered via importSelectedForTest surrogate, EPIC GTaskSheet-pw5x — GTaskSheet-rz4k.3",
+    # rz4k.4 — menu entry points
+    "menuSync": "menu click call-site not driven; delegates to covered syncAll — GTaskSheet-rz4k.4",
+    "menuEnsureSheetStructure": "menu click call-site not driven — GTaskSheet-rz4k.4",
+    "menuInitializeTriggers": "menu click call-site not driven — GTaskSheet-rz4k.4",
+    "menuBootstrap": "menu click call-site not driven — GTaskSheet-rz4k.4",
+    "menuRunArchive": "menu click call-site not driven — GTaskSheet-rz4k.4",
+    # rz4k.5 — test-support routes
+    "run_fixture": "exercised as setup everywhere, never as a tagged asserted call-site — GTaskSheet-rz4k.5",
+    "set_test_token": "harness plumbing; no tagged call-site assertion — GTaskSheet-rz4k.5",
+    "bootstrap": "harness plumbing; no tagged call-site assertion — GTaskSheet-rz4k.5",
+    "begin_journey_session": "session marker; no tagged call-site assertion — GTaskSheet-rz4k.5",
+    "end_journey_session": "session marker; no tagged call-site assertion — GTaskSheet-rz4k.5",
 }
 
 __all__ = [
@@ -124,4 +209,5 @@ __all__ = [
     "MODEL_NAMES",
     "AC_REGISTRY",
     "ENTRY_POINT_REGISTRY",
+    "ENTRY_POINT_DEFERRED",
 ]

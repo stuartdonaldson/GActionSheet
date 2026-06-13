@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from scn.contract import AC_REGISTRY, ENTRY_POINT_REGISTRY
+from scn.contract import AC_REGISTRY, ENTRY_POINT_REGISTRY, ENTRY_POINT_DEFERRED
 
 
 def _collect(root, prefix):
@@ -37,8 +37,19 @@ def _collect(root, prefix):
     return covered, warn_only
 
 
-def _report(label, noun, registry, covered, warn_only, verbose):
-    """Print a coverage section; return 1 if any registry key is uncovered, else 0."""
+def _report(label, noun, registry, covered, warn_only, verbose, deferred=None):
+    """Print a coverage section; return 1 if any registry key is uncovered, else 0.
+
+    deferred (T17, GTaskSheet-z6f8): a dict {key: reason} of registered entry points
+    with no current scenario call-site. These are treated as explicitly warn-only —
+    enumerated but not yet asserted — so the gap-diff stays green while EPIC
+    GTaskSheet-rz4k converts each to a real tagged call-site. A deferred key that
+    gains real PASS coverage is reported as covered, not warn-only.
+    """
+    deferred = deferred or {}
+    # Registry-declared deferrals count as warn-only unless a scenario already covers them.
+    deferred_warn = (set(deferred) & set(registry)) - covered
+    warn_only = set(warn_only) | deferred_warn
     uncovered = set(registry.keys()) - covered - warn_only
 
     print(label)
@@ -58,7 +69,9 @@ def _report(label, noun, registry, covered, warn_only, verbose):
         if warn_only:
             print(f"Warn-only {noun}:")
             for key in sorted(warn_only):
-                print(f"  ⚠ {key}")
+                reason = deferred.get(key)
+                suffix = f" (deferred: {reason})" if key in deferred_warn and reason else ""
+                print(f"  ⚠ {key}{suffix}")
             print()
 
     if uncovered:
@@ -94,7 +107,8 @@ def main():
     rc = 0
     rc |= _report("AC Coverage Report", "ACs", AC_REGISTRY, ac_covered, ac_warn, args.verbose)
     rc |= _report("Entry-Point Coverage Report", "entry points",
-                  ENTRY_POINT_REGISTRY, ep_covered, ep_warn, args.verbose)
+                  ENTRY_POINT_REGISTRY, ep_covered, ep_warn, args.verbose,
+                  deferred=ENTRY_POINT_DEFERRED)
     return rc
 
 

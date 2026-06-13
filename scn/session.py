@@ -588,8 +588,13 @@ class ScenarioSession:
         on: Surface,
         at=AUTO,
         tag: str = "",
+        entry_point: str = "",
     ) -> None:
-        """Enqueue an absence expectation (terminal; sheet Sync Status = 'Deleted')."""
+        """Enqueue an absence expectation (terminal; sheet Sync Status = 'Deleted').
+
+        entry_point (T1/T17): the state-modifying entry point this expectation exercises;
+        when set, emits an ep.<entry_point>.<surface> property for entry-point coverage.
+        """
         exp = Expectation(
             seq=self._seq,
             expected=_snapshot(target),
@@ -601,6 +606,7 @@ class ScenarioSession:
             severity=Severity.FAIL,
             needs_consistency=False,
             tag=tag or _current_test_tag(),
+            entry_point=entry_point,
         )
         self._enqueue(exp)
 
