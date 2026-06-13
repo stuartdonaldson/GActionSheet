@@ -57,6 +57,13 @@ def test_ui_smoke(scn):
     floating = ai(action="Smoke: a floating action authored before sync")
     scn.append_paragraph(floating.as_text())
 
+    # 2.5. Warm the add-on before the @-menu act: open the homepage sidebar so the
+    # editor add-on (createActionTriggers provider + Create-action form) is
+    # initialised. On a stone-cold add-on the @-menu provider and the form render
+    # are slow AND run-to-run variable (GTaskSheet-1rqm) — the full journey never
+    # hits this because Act 0/3b open the sidebar before Act 4's create_action.
+    scn.ui.open_sidebar()
+
     # 3. @action — high-risk @-menu Create-action entry point.
     created = ai(
         action="Smoke: action created via the @-menu trigger",

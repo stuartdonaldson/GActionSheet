@@ -454,17 +454,28 @@ class UiDriver:
             # sidebar (Act 3b) is open (sidebar iframe + Docs' own kix-appview
             # iframe), in addition to the Create-action form's iframe — so a
             # single frame_locator(...) is ambiguous (strict-mode violation).
-            # Poll page.frames directly for the one frame whose assignee input
-            # becomes visible.
-            deadline = time.monotonic() + 30.0
+            # Find the add-on form frame by querying its DOM directly (JS), which
+            # is robust against transient frame re-renders during the autocomplete
+            # form's cold boot. On a COLD add-on (no sidebar opened first, as in
+            # test_ui_smoke) the editor form is slow AND variable to render — the
+            # probe at the GTaskSheet-1rqm timeout showed the assignee input
+            # present+visible (match_count=1, is_visible=True) only at ~77 s; the
+            # journey doesn't hit this because Act 3b warms the add-on first. Budget
+            # 120 s for the cold path. The assignee field is
+            # <input role="combobox" aria-label="Assignee (optional)">.
+            _assignee_visible_js = """() => {
+              const el = document.querySelector(
+                'input[aria-label*="ssignee"], input[placeholder*="ssignee"], [role="dialog"] input');
+              return !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+            }"""
+            deadline = time.monotonic() + 120.0
             form = None
             while time.monotonic() < deadline:
                 for frame in self._page.frames:
                     if "addons.gsuite.google.com" not in frame.url:
                         continue
                     try:
-                        candidate = frame.locator(_FORM_ASSIGNEE).first
-                        if candidate.is_visible():
+                        if frame.evaluate(_assignee_visible_js):
                             form = frame
                             break
                     except Exception:
@@ -473,9 +484,36 @@ class UiDriver:
                     break
                 time.sleep(0.5)
             if form is None:
+                # Capture the page state at the timeout so the failure can be
+                # interpreted visually, and probe the exact locator per frame:
+                # match-count vs Playwright is_visible()/bounding_box tells us
+                # whether this is a selector/frame miss (count 0) or a
+                # visibility-detection problem (count>0 but is_visible False).
+                shot = "test-results/create_action_timeout.png"
+                try:
+                    self._page.screenshot(path=shot, full_page=True)
+                    self.reporter.attach_screenshot(self._page, name="create_action timeout")
+                except Exception:
+                    pass
+                probe = []
+                for f in self._page.frames:
+                    try:
+                        cnt = f.locator(_FORM_ASSIGNEE).count()
+                        if cnt:
+                            loc = f.locator(_FORM_ASSIGNEE).first
+                            probe.append(
+                                f"{f.url}\n      match_count={cnt} "
+                                f"is_visible={loc.is_visible()} bbox={loc.bounding_box()}"
+                            )
+                    except Exception as _e:
+                        probe.append(f"{f.url}\n      PROBE-ERROR: {_e!r}")
                 raise TimeoutError(
                     "create_action: no add-on iframe with a visible assignee "
-                    "input found within 30s"
+                    f"input found. Screenshot: {shot}\n"
+                    "Locator probe (_FORM_ASSIGNEE per frame):\n  "
+                    + ("\n  ".join(probe) if probe else "(no frame matched _FORM_ASSIGNEE)")
+                    + "\nFrames seen:\n  "
+                    + "\n  ".join(f.url for f in self._page.frames)
                 )
             assignee = form.locator(_FORM_ASSIGNEE).first
 
