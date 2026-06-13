@@ -1335,6 +1335,33 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'uc_c_idempotent_refresh': {
+        // Insert two chip-led FAs, sync+insert tracker, then call insertTrackerTable
+        // again with NO intervening changes. The second call must be a no-op
+        // (tracker.skip — GTaskSheet-yo9q): same {id, action, status} rows as
+        // the first call.
+        var ucCIRToken = ScriptApp.getOAuthToken();
+        var ucCIREmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
+                      || Session.getActiveUser().getEmail();
+
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+
+        _tfInsertPersonChipListItem(ucCIRToken, testDocId, ucCIREmail,
+                                    'UCC-IDEMPOTENT: Confirm the venue booking (Open)');
+        _tfAppendPersonChipListItem(ucCIRToken, testDocId, ucCIREmail,
+                                    'UCC-IDEMPOTENT: Send the agenda (In Review)');
+
+        syncDocument(testDocId);
+        insertTrackerTable(testDocId);
+
+        // No changes since the first call — must skip the rewrite.
+        insertTrackerTable(testDocId);
+
+        GasLogger.log('fixture.uc_c_idempotent_refresh', { idempotentRefreshDone: true });
+        break;
+      }
+
       // -----------------------------------------------------------------------
       // Sync Status column scenarios (GTaskSheet-ly5 AC1–AC7)
       //

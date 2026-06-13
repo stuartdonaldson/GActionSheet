@@ -10,6 +10,7 @@ Bead: GTaskSheet-80mo.8
 from scn.engine import Surface
 from scn.session import ScenarioSession
 from scn.surfaces import TrackerReader
+from tests.helpers.gas_log import assert_log, clear_logs
 
 DOC = Surface.DOC
 
@@ -48,5 +49,38 @@ def test_cell_edit_overwritten(settings):
                 assert "-EDITED" not in str(value or ""), (
                     f"Tracker row field still contains stale cell edit: {value!r}"
                 )
+    finally:
+        s.close()
+
+
+# ---------------------------------------------------------------------------
+# GTaskSheet-yo9q: idempotent refresh — second call with unchanged data is a no-op
+# ---------------------------------------------------------------------------
+
+def test_idempotent_refresh_skips_rewrite(settings, gas_log_dir):
+    """A second insertTrackerTable call with identical underlying data is a no-op.
+
+    uc_c_idempotent_refresh fixture: seeds two chip-led actions -> syncs ->
+    inserts the tracker table -> immediately calls insertTrackerTable again with
+    no intervening changes. The second call must compare the rendered
+    {id, action, status} rows (VerifySync._readTrackerTableState — the same
+    normalized shape _compareVerificationState already uses for tracker rows)
+    against the desired rows and skip the rewrite, logging tracker.skip.
+    """
+    s = ScenarioSession.new_doc(settings)
+    try:
+        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        s._post_fixture("uc_c_idempotent_refresh")
+
+        assert_log(
+            gas_log_dir, fence,
+            lambda e: e.get("tag") == "tracker.skip"
+            and e.get("data", {}).get("docId") == s.doc_id
+            and e.get("data", {}).get("rowCount") == 2,
+            "tracker.skip on unchanged second insertTrackerTable call",
+        )
+
+        # Server authority: tracker rows still match floating/sheet rows.
+        s.verify_consistency(scope=DOC)
     finally:
         s.close()

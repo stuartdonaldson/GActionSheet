@@ -2470,3 +2470,27 @@ Resolved GTaskSheet-wdh0 ([FIX] Import edge cases: duplicate forwarding, numberi
 
 ### Key Learnings:
 The duplicate-forwarding and within-payload-dedup guards in `_handleForwardActionRows` are defensive hardening for paths not reachable through the current production entry point (`_listImportableActionsData`'s `isResolved()` filter already prevents an already-'Forwarded' row from re-entering `_importSelectedRows`'s forwards payload) — left as cheap defense-in-depth rather than building new test plumbing to exercise an otherwise-unreachable path.
+
+## 2026-06-13 01:58:50
+
+### Summary:
+Resolved GTaskSheet-yo9q (idempotent tracker refresh). insertTrackerTable() now reads the
+currently-rendered tracker rows via VerifySync._readTrackerTableState (the {id, action, status}
+shape _compareVerificationState already treats as the tracker row's semantic identity) and
+compares them against the desired rows from _buildTrackerDataRows via a new _trackerRowsMatch
+helper. If they match, the call logs `tracker.skip` (rowCount included) and saves/closes without
+removing/rebuilding the section or firing any insertPerson/insertIdLinks REST batchUpdate calls.
+Assignee is intentionally excluded from the comparison, consistent with the existing
+_compareVerificationState precedent (person-chip cell text isn't reliably comparable via getText()).
+
+Extended the existing UC-C tracker fixture family (TestFixtures.js) with `uc_c_idempotent_refresh`:
+seeds two chip-led actions, syncs, inserts the tracker, then calls insertTrackerTable again with no
+changes. Added test_idempotent_refresh_skips_rewrite to tests/test_tracker_view_only.py, asserting
+the tracker.skip log (docId + rowCount==2) and that verify_consistency still passes afterwards.
+
+### Key Learnings:
+No new normalization shape was needed — _readTrackerTableState (VerifySync.js) + _buildTrackerDataRows
+(TrackerTable.js) together already form the "shared tracker normalization contract" anticipated by
+GTaskSheet-gxot; the idempotency check just needed to compare them on the fields
+_compareVerificationState already trusts (id/action/status), reusing existing cross-file global
+functions (consistent with how TrackerTable.js already calls _scanFloatingActions/parseGlobalId).

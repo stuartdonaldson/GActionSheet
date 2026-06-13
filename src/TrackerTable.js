@@ -53,6 +53,14 @@ function insertTrackerTable(docId, options) {
     var sheetRows = _readTrackerSheetRows(ss, docId);
     var dataRows  = _buildTrackerDataRows(floatingActions, sheetRows);
 
+    var existing = _readTrackerTableState(doc);
+    if (existing.found && _trackerRowsMatch(existing.rows, dataRows)) {
+      doc.saveAndClose();
+      GasLogger.log('tracker.skip', { msg: 'rendered rows match desired rows', docId: docId, rowCount: dataRows.length });
+      GasLogger.flush();
+      return;
+    }
+
     var removed = _removeTrackerSection(doc);
 
     if (onlyIfExists && removed.index === -1) {
@@ -158,6 +166,29 @@ function _buildTrackerDataRows(floatingActions, sheetRows) {
     });
   }
   return rows;
+}
+
+/**
+ * Compares the currently-rendered tracker rows (from _readTrackerTableState,
+ * VerifySync.js) against the desired rows (from _buildTrackerDataRows) using
+ * the same {id, action, status} fields _compareVerificationState already
+ * treats as the tracker row's semantic identity — assignee is excluded
+ * because person-chip cell text is not reliably comparable via getText().
+ *
+ * @param {Array} renderedRows  tracker.rows from _readTrackerTableState: {id, assignee, action, status}
+ * @param {Array} desiredRows   Output of _buildTrackerDataRows: {id, globalId, assigneeEmail, assigneeName, action, status}
+ * @returns {boolean}
+ */
+function _trackerRowsMatch(renderedRows, desiredRows) {
+  if (renderedRows.length !== desiredRows.length) return false;
+  for (var i = 0; i < desiredRows.length; i++) {
+    var rendered = renderedRows[i];
+    var desired  = desiredRows[i];
+    if (String(rendered.id || '') !== String(desired.id || '')) return false;
+    if ((rendered.action || '') !== (desired.action || '')) return false;
+    if ((rendered.status || 'Open') !== (desired.status || 'Open')) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
