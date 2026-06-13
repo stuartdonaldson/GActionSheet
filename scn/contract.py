@@ -181,7 +181,10 @@ ENTRY_POINT_DEFERRED: dict[str, str] = {
         "test_tab_navigation_docstatus_regression currently fails on a pre-existing UI-driver locator "
         "regression (see test_scn_ui TestSidebarDelete) — GTaskSheet-rz4k.3",
     "_submitCreateAction": "editor add-on create-action submit; no coverage — GTaskSheet-rz4k.3",
-    "_setStatusFromPreview": "editor link-preview status dropdown; no coverage (onLinkPreview render blocked by GTaskSheet-s9so) — GTaskSheet-rz4k.3",
+    "_setStatusFromPreview": "editor link-preview status dropdown. onLinkPreview cannot be rendered "
+        "under Playwright (Docs fires it only for converted smart chips, not the add-on's plain-hyperlink "
+        "action links — GTaskSheet-s9so, resolved); the rendered-card path moves to the headed interactive "
+        "test GTaskSheet-15e8 (epic GTaskSheet-pw5x). Journey now drives the same core via patch_action_status — GTaskSheet-rz4k.3",
     "importSelectedSubmit": "real Import-tab submit; CHECK_BOX SelectionInput not Playwright-drivable — covered via importSelectedForTest surrogate, EPIC GTaskSheet-pw5x — GTaskSheet-rz4k.3",
     # rz4k.4 — menu entry points
     "menuSync": "menu click call-site not driven; delegates to covered syncAll — GTaskSheet-rz4k.4",

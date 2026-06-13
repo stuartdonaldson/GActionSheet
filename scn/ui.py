@@ -65,6 +65,38 @@ _CARD_IFRAME = (
 _ADDON_FORM_IFRAME = 'iframe[src*="addons.gsuite.google.com"]'
 # Anything inside a rendered card
 _CARD_BODY = 'body, [role="main"]'
+# GTaskSheet-s9so: locate the action chip's link anchor in the doc body. The
+# AI-N token is inserted as linked text whose href carries the chip URL
+# (?c=view&globalId=…). Given the located text element's bbox, return the
+# anchor rect overlapping it (preferred) or the first action anchor on the page.
+_CHIP_ANCHOR_JS = """(bbox) => {
+  const anchors = [...document.querySelectorAll('a[href*="globalId"], a[href*="action"]')];
+  const overlaps = (r) => !(r.right < bbox.x || r.left > bbox.x + bbox.width ||
+                            r.bottom < bbox.y || r.top > bbox.y + bbox.height);
+  let hit = null;
+  for (const a of anchors) {
+    const r = a.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    if (overlaps(r)) { hit = r; break; }
+    if (!hit) hit = r;  // first sized anchor as fallback
+  }
+  return hit ? {x: hit.x, y: hit.y, width: hit.width, height: hit.height} : null;
+}"""
+# GTaskSheet-s9so diagnostic: dump doc-body chip/anchor/person-chip DOM so a
+# hover-target miss is interpretable without a headed run.
+_CHIP_DOM_PROBE_JS = """() => {
+  const fmt = (el) => {
+    const r = el.getBoundingClientRect();
+    return {tag: el.tagName, cls: (el.className || '').toString().slice(0, 60),
+            href: el.getAttribute && el.getAttribute('href'),
+            text: (el.textContent || '').trim().slice(0, 40),
+            x: Math.round(r.x), y: Math.round(r.y),
+            w: Math.round(r.width), h: Math.round(r.height)};
+  };
+  const anchors = [...document.querySelectorAll('a[href*="globalId"], a[href*="action"]')].map(fmt);
+  const persons = [...document.querySelectorAll('[href*="contacts"], [data-hovercard-id], .kix-smart-canvas-person, [role="link"][aria-label*="@"]')].slice(0, 8).map(fmt);
+  return {anchors, persons};
+}"""
 # Busy/loading spinner that may appear after a card status click
 _BUSY = '[aria-label="Loading"], .A8Shqc, [role="progressbar"]'
 # Workspace Add-on icon button in the Google Docs right side-panel
@@ -269,17 +301,104 @@ class UiDriver:
         chrome (a <span jsslot> overlay) on top of smart-chip links, which
         intercepts the synthetic hover event even though the element itself
         is visible and present.
+
+        GTaskSheet-s9so: a single locator.hover(force=True) dispatches one
+        mouseenter/mousemove at the element centre. Google Docs' smart-chip
+        hover detection — which is what fires the onLinkPreview add-on trigger
+        and pops the card — needs a realistic pointer trajectory plus dwell;
+        without it the preview card never renders (times out identically at 5s
+        and 15s). Drive the real mouse: approach the chip in steps, dwell, and
+        re-nudge each poll so the hover-intent timer keeps re-arming while the
+        cold onLinkPreview round trip completes.
         """
         ms = _parse_timeout(timeout)
         locator.wait_for(state="visible", timeout=ms)
-        locator.hover(force=True)
 
+        box = locator.bounding_box()
         card_frame = self._page.frame_locator(_CARD_IFRAME).first
-        card_frame.locator(_CARD_BODY).first.wait_for(state="visible", timeout=ms)
 
-        card = Card(card_frame)
-        self._current_card = card
-        return card
+        # GTaskSheet-s9so: get_by_text(action_id) resolves a wide text element
+        # whose centre overlaps the adjacent assignee PERSON chip — hovering it
+        # fired Google's contacts hovercard, never our onLinkPreview card. The
+        # fragment is `[status image, linked][AI-N: text, linked][person chip]…`
+        # (EditorAddonCard._applyActionFragment), so the chip URL link lives on
+        # the LEFT (the AI-N token), the person chip on the right. Target the
+        # actual link anchor (href carries globalId) to land on the link, not
+        # the person chip; fall back to the left edge of the text element.
+        cx = cy = None
+        if box is not None:
+            anchor = None
+            try:
+                anchor = self._page.evaluate(_CHIP_ANCHOR_JS, box)
+            except Exception:
+                anchor = None
+            if anchor is not None:
+                cx = anchor["x"] + anchor["width"] / 2
+                cy = anchor["y"] + anchor["height"] / 2
+            else:
+                # Left edge of the text element — the AI-N: token sits here,
+                # before the person chip.
+                cx = box["x"] + min(box["width"], 24) / 2
+                cy = box["y"] + box["height"] / 2
+            # Start off the chip so the move generates a real trajectory of
+            # mousemove events, then glide onto the link in steps.
+            self._page.mouse.move(max(cx - 120, 0), max(cy - 80, 0))
+            self._page.mouse.move(cx, cy, steps=12)
+        else:
+            # No bounding box (detached/zero-size) — fall back to the o5py gesture.
+            locator.hover(force=True)
+
+        deadline = time.monotonic() + ms / 1000.0
+        last_err: Exception | None = None
+        while time.monotonic() < deadline:
+            try:
+                card_frame.locator(_CARD_BODY).first.wait_for(
+                    state="visible", timeout=1000
+                )
+                card = Card(card_frame)
+                self._current_card = card
+                return card
+            except Exception as e:  # not yet rendered — re-arm hover intent
+                last_err = e
+                if cx is not None:
+                    # 1px jiggle keeps the pointer on the chip while reissuing
+                    # mousemove so Docs' dwell timer stays alive.
+                    self._page.mouse.move(cx + 1, cy + 1)
+                    self._page.mouse.move(cx, cy, steps=3)
+
+        # Timeout — capture the page state so the failure is interpretable
+        # (GTaskSheet-3tkf). The decisive signal: whether ANY card-candidate
+        # frame (script.google* / googleusercontent) exists. None → the
+        # onLinkPreview trigger never fired (gesture problem); present but body
+        # not visible → a render/visibility problem.
+        shot = "test-results/link_preview_timeout.png"
+        try:
+            self._page.screenshot(path=shot, full_page=True)
+            self.reporter.attach_screenshot(self._page, name="link_preview hover timeout")
+        except Exception:
+            pass
+        card_frames = [
+            f.url
+            for f in self._page.frames
+            if "script.google" in f.url or "googleusercontent" in f.url
+        ]
+        try:
+            dom = self._page.evaluate(_CHIP_DOM_PROBE_JS)
+        except Exception as _e:
+            dom = {"probe_error": repr(_e)}
+        raise TimeoutError(
+            "hover: onLinkPreview card iframe body never became visible within "
+            f"{timeout}. Screenshot: {shot}\n"
+            f"chip bbox (located text element)={box}\n"
+            f"hover point used=({cx}, {cy})\n"
+            "Card-candidate frames (script.google*/googleusercontent):\n  "
+            + ("\n  ".join(card_frames) if card_frames
+               else "(NONE — onLinkPreview frame was never created)")
+            + f"\nDoc-body action anchors: {dom.get('anchors') if isinstance(dom, dict) else dom}"
+            + f"\nDoc-body person chips: {dom.get('persons') if isinstance(dom, dict) else ''}"
+            + "\nAll frames:\n  "
+            + "\n  ".join(f.url for f in self._page.frames)
+        ) from last_err
 
     def hover_until(self, locator: _PwLocator, *, timeout: str = "5s") -> Card:
         """Hover and wait until the preview card appears (semantic alias of hover)."""

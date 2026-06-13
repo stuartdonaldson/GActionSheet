@@ -109,43 +109,62 @@ class TestLocate:
 # ---------------------------------------------------------------------------
 
 class TestHover:
-    def _setup_card_frame(self, mock_page):
-        """Wire frame_locator so hover() finds a card body."""
+    # GTaskSheet-s9so: hover() drives a real mouse trajectory to the chip's link
+    # anchor (located by a doc-DOM scan, _CHIP_ANCHOR_JS) and polls for the card
+    # body, rather than a single locator.hover(force=True). These tests assert
+    # that new contract.
+    def _setup(self, mock_page, locator, *, anchor=None):
+        """Wire frame_locator + mouse + DOM-scan so hover() succeeds offline.
+
+        anchor=None → page.evaluate returns no anchor, so hover() falls back to
+        the located element's left edge (both paths yield real numeric coords).
+        """
         frame = MagicMock()
-        frame.locator.return_value.first = MagicMock()
+        frame.locator.return_value.first = MagicMock()  # card-body wait_for() succeeds
         mock_page.frame_locator.return_value.first = frame
+        mock_page.evaluate.return_value = anchor
+        locator.bounding_box.return_value = {"x": 100, "y": 200, "width": 150, "height": 20}
         return frame
 
     def test_waits_for_locator_visible(self, driver, mock_page):
-        self._setup_card_frame(mock_page)
         locator = MagicMock()
+        self._setup(mock_page, locator)
         driver.hover(locator, timeout="5s")
         locator.wait_for.assert_called_once_with(state="visible", timeout=5000)
 
-    def test_calls_hover_on_locator(self, driver, mock_page):
-        self._setup_card_frame(mock_page)
+    def test_drives_real_mouse_to_target(self, driver, mock_page):
         locator = MagicMock()
+        self._setup(mock_page, locator)
         driver.hover(locator, timeout="3s")
-        locator.hover.assert_called_once()
+        assert mock_page.mouse.move.called  # real trajectory, not locator.hover
+
+    def test_targets_link_anchor_when_found(self, driver, mock_page):
+        locator = MagicMock()
+        self._setup(mock_page, locator, anchor={"x": 50, "y": 60, "width": 10, "height": 10})
+        driver.hover(locator, timeout="5s")
+        # anchor centre (55, 65) is the final glide-to point
+        final_move = [c for c in mock_page.mouse.move.call_args_list if c.kwargs.get("steps") == 12]
+        assert final_move and final_move[-1].args == (55.0, 65.0)
 
     def test_returns_card_instance(self, driver, mock_page):
-        self._setup_card_frame(mock_page)
         locator = MagicMock()
+        self._setup(mock_page, locator)
         result = driver.hover(locator, timeout="5s")
         assert isinstance(result, Card)
 
     def test_sets_current_card_context(self, driver, mock_page):
-        self._setup_card_frame(mock_page)
         locator = MagicMock()
+        self._setup(mock_page, locator)
         card = driver.hover(locator, timeout="5s")
         assert driver._current_card is card
 
-    def test_waits_for_card_body_with_timeout(self, driver, mock_page):
-        frame = self._setup_card_frame(mock_page)
+    def test_polls_card_body_for_visibility(self, driver, mock_page):
         locator = MagicMock()
+        frame = self._setup(mock_page, locator)
         driver.hover(locator, timeout="7s")
-        frame.locator.return_value.first.wait_for.assert_called_once_with(
-            state="visible", timeout=7000
+        # body visibility is polled in short slices (1s), not one full-timeout wait
+        frame.locator.return_value.first.wait_for.assert_called_with(
+            state="visible", timeout=1000
         )
 
     def test_hover_until_delegates_to_hover(self, driver):

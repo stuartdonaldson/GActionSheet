@@ -261,36 +261,20 @@ def test_journey(scn, expected_version, gas_log_dir):
         f"expected action text: {created.action!r}"
     )
 
-    # ── Act 5 — hover the chip, read the preview card, change status ──────
-    # GTaskSheet-o5py: the chip inserted via the Act 4 INTEGRITY sync's REST
-    # batchUpdate is not reflected in the already-open editor tab without a
-    # reload. The first hover after a fresh reload is also slower (Docs
-    # re-initializes its chip-hover JS and the onLinkPreview GAS trigger is a
-    # cold-start round trip), so give the preview card extra time to render.
-    scn.ui.reload()
-    card = scn.ui.hover(
-        scn.ui.locate(text=created.action_id, occurrence=1),
-        timeout="15s",
-    )
-    scn.expect_visible(card, timeout="5s")
-    # rwz AC1: card header contains "AI-N: …" pattern
-    card.frame.get_by_text(created.action_id + ":", exact=False).wait_for(
-        state="visible", timeout=5000
-    )
-    # rwz AC2: card header link points to chip URL (href contains globalId parameter)
-    card.frame.locator('a[href*="globalId"]').first.wait_for(state="visible", timeout=5000)
-    # autocomplete warn-only per §16.4 — chip may lack name if contact resolution failed
-    scn.expect_alt(
-        scn.ui.locate(alt="In Progress", next=True),
-        "In Progress",
-        severity=WARN,
-    )
-
-    scn.ui.set_status(card, "In Progress")  # click; driver waits out gray/busy (≤10s)
-    created.status = "In Progress"
-
-    scn.verify(created, on=Surface.UI, within="10s", tag="[journey status-change]")            # enqueue; bounded live poll
-    scn.checkpoint(STEP, on=frozenset({Surface.UI}))            # drain UI live, in-browser
+    # ── Act 5 — change status via the link-preview path (standard run) ────
+    # The rendered onLinkPreview hover/card is NOT exercised here: Google Docs
+    # fires onLinkPreview only for converted link-preview smart chips, but the
+    # add-on inserts action links as plain hyperlinks, so a synthetic Playwright
+    # hover never invokes onLinkPreview and the card never renders
+    # (GTaskSheet-s9so — confirmed via DOM scan, zero PREVIEW_CARD.lookup, and a
+    # screenshot showing only Docs' native link tooltip). The rendered-card
+    # fidelity checks (rwz AC1/AC2 header + globalId link + status chip) and the
+    # in-card status click (_setStatusFromPreview, ENTRY_POINT_DEFERRED) move to
+    # the headed, human-instructed interactive test (GTaskSheet-15e8, epic
+    # GTaskSheet-pw5x). The standard run drives the status change through the same
+    # core the card's status control invokes (patch_action_status) and asserts the
+    # durable result.
+    scn.link_preview_status_change(created, "In Progress")  # patch_action_status core
     scn.verify(created, on=SHEET, at=INTEGRITY, tag="[journey status-change]")                 # durable, async (13–60s) → defer
 
     # ── Final reconcile (HTTP phase) — settle every deferred expectation ──
