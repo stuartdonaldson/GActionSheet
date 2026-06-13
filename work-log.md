@@ -2438,3 +2438,20 @@ Resolved GTaskSheet-fgh4 (AC-2 import-select) and GTaskSheet-st24 (AC-3 forward 
 
 ### Key Learnings:
 AC-3's design assumed `isResolved()` needed extending for 'Forwarded' — it didn't. `isDelegated()` (SyncManager.js:1324) already lists 'forwarded', so `isResolved('Forwarded')` was already `true`. Recorded as bd memory `ac3-forwarded-already-resolved` to save a future re-derivation. Full AC-1->AC-2->AC-3 e2e journey verification remains GTaskSheet-4gsx's scope (now unblocked); avoided mutating the canonical shared fixture doc during smoke-testing to not corrupt other tests' state.
+
+## 2026-06-12 21:23:27
+
+### Summary:
+Closed out GTaskSheet-4gsx (AC-1->AC-2->AC-3 import functional journey) and GTaskSheet-1dxz (J-ACCESS-FILTER P1-P4 binding) by resolving AC-2/AC-3's checkbox-automation blocker via a new "interactive test entry point" pattern (epic GTaskSheet-pw5x, child GTaskSheet-8qe5, both closed/8qe5 closed pw5x left open as umbrella).
+
+- New testToken-gated WebApp route `import_selected_for_test` (`_handleImportSelectedForTest` in WebApp.js) drives the same `_importSelectedRows` core as `_submitImport`, with an explicit `{testDocId, globalIds}` payload instead of CardService form-collected checkboxes — the Import tab's CHECK_BOX SelectionInput cannot be driven via Playwright (wrapper clicks toggle `.checked` but the add-on host iframe's `e.formInputs` bridge doesn't reflect it).
+- Refactored EditorAddonCard.js: extracted `_resolveEndIndex` (REST end-of-body index) and `_importSelectedRows(doc, docId, token, index, importRows)` (shared insert+upsert+forward loop) out of `_submitImport`.
+- Refactored WebApp.js: extracted `_listImportableActionsData(docId)` out of `_handleListImportableActions` so the new route reuses the team-scoped read.
+- ContractSchema.js/json: added `import_selected_for_test` to testRouteNames + messages.
+- scn/ui.py: added `read_import_list`, `select_import`, `click_import` (select_import documented as currently-unused/blocked, kept for future UI-automation migration). scn/contract.py: added `import access-*`/`import ac*` AC_REGISTRY entries and `importSelectedForTest` entry point (kept `importSelectedSubmit` registered as a known, not-yet-covered gap).
+- New tests/helpers/access_filter.py + tests/test_import.py (test_import_access_filter, test_import_flow_forward_sync) — both pass live (219s and 345s respectively).
+- Bug fix: forward_action_rows's `_remarkRowDirty` write (`sync_status='Dirty'`) wasn't visible to the harness's next `find_sheet_actions` (separate doPost execution) — added `SpreadsheetApp.flush()` after the loop, matching `_syncTeamScope`'s existing pattern.
+- Deployed to TEST, ContractSchema.json regenerated, committed (36b8d96) and pushed to inf/scn-observability-failfast.
+
+### Key Learnings:
+CardService CHECK_BOX SelectionInput items render as `<input type="checkbox">` wrapped in a Material `<div jsaction="click:h5M12e;...">`; `.click(force=True)` on the wrapper toggles `.checked`/CSS state but `_collectImportSelection`'s `e.formInputs` stays empty — confirmed via three separate Playwright techniques (force-click on input, on wrapper, pointerdown/pointerup dispatch). Per user direction, the fix is architectural (a parallel non-UI test entry point + epic for future recurrences), not another UI workaround. Also: cross-execution Sheet writes via `_openActionSheetSpreadsheet()`/`getActiveSpreadsheet()` need an explicit `SpreadsheetApp.flush()` to be visible to a subsequent doPost — this is now the second call site needing this (first was `_syncTeamScope`), suggesting it's a recurring pitfall worth watching for in future WebApp write handlers. GTaskSheet-wdh0 (Import edge-case hardening, including excluding Doc-Not-Found/deleted source docs from the Import list) is now unblocked but left open as separate follow-up.
