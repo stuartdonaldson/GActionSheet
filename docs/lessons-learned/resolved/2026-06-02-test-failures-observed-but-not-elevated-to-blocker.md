@@ -73,3 +73,17 @@ c: update session-start-check skill — at session start, if open test-failure i
 
 Preferred: the merge-gate skill change (c) is the enforcement point where the decision should
 happen; the CLAUDE.md rule (b) is the backstop for sessions that don't run the skill explicitly.
+
+## Resolution (2026-06-12)
+
+Already applied. `merge-gate` skill v1.1 Step 0 "Debt state check" requires synthesizing
+known debt (test failures, stale issues, convention drift), presenting it to the human, and
+asking explicitly "address before merging, or proceed with it tracked?" — with the line
+"Filing a tracking issue does not constitute permission to proceed." This is the c option
+verbatim, including the anti-pattern entry citing this exact incident (GTaskSheet-w6vg).
+No CLAUDE.md backstop or session-start-check addition needed — merge-gate is the enforcement
+point and it fires automatically.
+
+Verify: had Step 0 existed at the 2026-06-01 merge, the 11 known failures would have required
+an explicit human proceed/address decision before the squash-merge to master, rather than
+being discharged by filing GTaskSheet-w6vg.

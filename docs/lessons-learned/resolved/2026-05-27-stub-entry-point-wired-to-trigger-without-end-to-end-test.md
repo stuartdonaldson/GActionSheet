@@ -73,3 +73,19 @@ Partial implementation applied to this project to test effectiveness before full
 Not yet resolved — staging file remains open. Full resolve (scoring options, selecting lever tier,
 archiving to resolved/) deferred to next gate/phase transition. These interim levers are under
 observation; effectiveness will be assessed against future incidents.
+
+## Resolution (2026-06-12)
+
+The three interim levers (implementation-gate Step 5, project CLAUDE.md "Entry point coverage
+invariant" + "Regression coverage — retroactive path", code-review skill entry-point check)
+remain in place — confirmed present in project CLAUDE.md and `.claude/skills/code-review/SKILL.md`
+v1.1. `merge-gate` v1.1 (resolved separately, 2026-06-02-scanner-change-did-not-audit-fixture-producers.md
+and 2026-06-02-test-failures-observed-but-not-elevated-to-blocker.md) extends the set with a
+merge-time test-infrastructure check and debt gate. Formal scoring/archive of this LL is tracked
+as item 3 of `GTaskSheet-mpi9` (open) — cross-referenced there. Archiving this file now per
+that tracking; mpi9 remains the open issue for any further refinement.
+
+Verify: the lever set (Path A pre-code check + Path B retroactive CLAUDE.md rule + Path C
+code-review check + merge-gate test-infra/debt gates) covers pre-code, post-bug, and merge-time
+detection of an unwired stub entry point — any one of the three paths would have caught the
+original `syncAll()` stub.

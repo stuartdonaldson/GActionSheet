@@ -82,3 +82,15 @@ d: add to merge-gate template (if one exists) — checklist item: "test infrastr
 
 Preferred ordering: c (merge-gate skill update) is most durable — fires automatically at the right
 transition point without requiring recall; b (CLAUDE.md) is a backstop for sessions without a merge gate.
+
+## Resolution (2026-06-12)
+
+Already applied. `merge-gate` skill v1.1 (`/home/stuar/.claude/skills/merge-gate/SKILL.md`)
+Step 1 "Test-infrastructure compatibility check" enumerates exactly the four categories
+proposed (detection format, route/contract shape, sheet structure, log tag format) and
+blocks reviewer spawning if any is affected and unconfirmed. Selected lever: c (merge-gate
+skill, already implemented). No CLAUDE.md backstop needed — the durable lever fired.
+
+Verify: if this check had existed before `d37af7d` (6ov.7), the scanner format change would
+have been flagged at the merge-gate "detection format" category before reviewers spawned,
+catching the fixture-helper drift before it merged.

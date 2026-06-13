@@ -50,3 +50,22 @@ Root cause B: Test design lacks a convention distinguishing "did this mutation a
 - f: Create implementation issues to retrofit UC-B, UC-A tests with full-data consistency verification; create test-design gate (GTaskSheet-qea) blocking UC-C/D until reconciliation strategy (including all-field consistency) is approved.
 
 [Developed fully at resolve phase]
+
+## Resolution (2026-06-12)
+
+Tracked as item 4 of `GTaskSheet-mpi9` (open): CLAUDE.md reconciliation-discipline rule
+(all-field consistency across floating action / ActionSheet / tracker table for sync/state-mutation
+UC tests) + implementation-gate Step 3 reconciliation-postcondition check. mpi9 records the
+explicit precondition: human approval of the UC-C/D reconciliation spec is required before
+this lever is applied — so this is intentionally not a same-session apply. Archiving this
+file now per that tracking; mpi9 remains the open issue and carries the precondition.
+
+UC-B/UC-A retrofit and the `docTitle`→`docName` rename (separate implementation defect noted
+in the Observation) are out of scope for this LL resolve — tracked as separate [TST]/[FIX]
+work per mpi9's note.
+
+Verify: once mpi9's CLAUDE.md rule and implementation-gate Step 3 addition are applied (post
+human approval of the reconciliation spec), any future sync/state-mutation UC's AC would be
+required to state all-field consistency invariants, and test design would be gated on
+including reconciliation assertions — directly addressing the postcondition-vs-AC-bullets
+gap this LL identified.

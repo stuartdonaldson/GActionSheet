@@ -58,3 +58,21 @@ Branch B:
   c: lessons-learned skill — add trigger: "task required rework or debugging because
      the wrong toolchain entry point was used (direct CLI instead of npm/make/project
      script)"
+
+## Resolution (2026-06-12)
+
+Branch A — already applied. Project `docs/OPERATIONS.md` §Deploying now documents
+`npm run deploy:test` / `npm run deploy:prod` as the required commands in a table, and
+states explicitly: "Running `clasp push` or `npm run push` alone leaves the versioned Web
+App deployment stale — the test suite will call the old revision and produce
+`sync.warn: Non-JSON response` failures." This matches candidate a+c verbatim. Selected
+lever: a+c (OPERATIONS.md, already implemented).
+
+Branch B — no separate edit. The lessons-learned skill's existing general trigger "A task
+requires rework after code was written" already covers this class — this very LL was
+captured under that trigger, just later than mid-session. A more specific trigger phrase
+would not catch anything the general one doesn't; not adding it.
+
+Verify: a developer/agent reading OPERATIONS.md §Deploying before deploying would now use
+`npm run deploy:test`, avoiding the stale-deployment `sync.warn: Non-JSON response` failure
+that occurred in this incident.

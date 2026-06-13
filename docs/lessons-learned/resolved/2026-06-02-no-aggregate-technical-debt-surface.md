@@ -189,3 +189,24 @@ They should be resolved as a group in a single batch, not individually, to avoid
 four separate incremental patches to the same artifacts. The aggregate resolution should
 produce one updated merge-gate skill, one updated session-start-check, and one coherent
 CLAUDE.md testing strategy section — not four separate edits that may contradict or duplicate.
+
+## Resolution (2026-06-12)
+
+Largely applied as a group, per the note above. `/technical-debt` skill v1.0 exists
+(`/home/stuar/.claude/skills/technical-debt/SKILL.md`) and implements Direction 2 (LLM
+synthesis before presenting): it aggregates test failures, open [FIX]/[TST] issues,
+`bd stale`, `bd doctor --check=conventions`, and implicit-resolve candidates (commit↔description
+matching), groups them into named incidents, and requires an explicit a/b/c human decision.
+`merge-gate` v1.1 Step 0 invokes it. Selected lever: c (the skill itself), as preferred.
+
+Residual, not blocking: the title-convention (Direction 1, "[DEBT:...]" markers) was not
+added — the synthesis-first skill makes it optional polish rather than load-bearing.
+Category-2 (implicitly-resolved issues) refinements — title-matching against molecule-step
+children, `bd stale` threshold tuning, and the "100%-children-closed-parent-open" check —
+are carried forward in `2026-06-12-molecule-placeholder-issues-stayed-open-after-scope-delivered-elsewhere.md`
+(still staged), which itself proposes a follow-up bd issue for `/technical-debt` v1.1.
+
+Verify: had this skill existed before 2026-06-01, `merge-gate` Step 0 would have aggregated
+the 11 failures into one named "scanner rewrite" incident and required a proceed/address
+decision — addressing this LL's category 1 directly (categories 2/3 addressed to the extent
+described above).

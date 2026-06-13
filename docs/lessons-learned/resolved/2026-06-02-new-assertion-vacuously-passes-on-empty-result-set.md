@@ -90,3 +90,21 @@ Shared (improve the journey test convention):
   b: add to project CLAUDE.md — "every scenario test that calls verify_consistency() must also call
      verify_all_expectations(a) for at least one action; this prevents verify_consistency from passing
      vacuously if the preceding sync produced no output"
+
+## Resolution (2026-06-12)
+
+Branch B + Shared (process/convention levers) — tracked as items 1 & 2 of `GTaskSheet-mpi9`
+(open): CLAUDE.md backstop rules (verify_consistency/verify_all_expectations pairing,
+proof-of-effectiveness for new assertions) and implementation-gate Step 3 addition. Archiving
+this file now per that tracking; mpi9 remains the open issue.
+
+Branch A (fix the check itself — GAS-level minimum-count guard) — split out as
+`GTaskSheet-bb66` ([FIX] verify_chip_integrity / verify_consistency vacuously pass when
+scanner detects zero items), since it is implementation work distinct from mpi9's
+CLAUDE.md/skill policy scope.
+
+Verify: bb66's acceptance criteria (checked_count field + verify_consistency guard + a test
+proving failure on zero-detection) would have caught this incident directly — the chip
+integrity check would report a violation instead of `[]` when chips were expected but none
+were written. mpi9's process levers (proof-of-effectiveness requirement) would have caught
+it one layer up, at the time the assertion was first wired in.
