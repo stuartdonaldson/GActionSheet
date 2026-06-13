@@ -328,10 +328,15 @@ def test_tab_navigation_docstatus_regression(settings, browser_page):
         )
 
         # --- Part B: tab navigation round trip (ADR-0015 onShowTab) ---------
+        # The Import tab is no longer a placeholder (EPIC-D / GTaskSheet-eore): it
+        # renders the importable-actions list or the "No open team actions to import."
+        # empty-state, both doc-state-dependent. Assert we navigated AWAY from
+        # DocStatus (its Sync now control is gone) rather than matching volatile
+        # Import-tab content — that is the regression this test guards.
         s.ui.show_tab("Import")
-        card.frame.get_by_text("Import — coming soon", exact=False).wait_for(
-            state="visible", timeout=10000
-        )
+        card.frame.get_by_role(
+            "button", name=re.compile(r"sync now", re.I)
+        ).wait_for(state="detached", timeout=10000)
         assert card.frame.get_by_role(
             "button", name=re.compile(r"sync now", re.I)
         ).count() == 0, "DocStatus controls must not render on the Import tab"

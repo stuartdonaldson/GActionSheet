@@ -464,12 +464,15 @@ class TestSidebarDelete:
         target = Ai(action="some action", action_id=action_id)
 
         frame = MagicMock()
-        row_locator = MagicMock()
-        delete_btn = MagicMock()
+        label = MagicMock()        # the "AI-N •" DecoratedText label (frame.get_by_text)
+        row_locator = MagicMock()  # _sidebar_row result: label.locator(xpath sibling)
+        delete_btn = MagicMock()   # actual button: row.locator('[aria-label="Delete action"]')
         busy = MagicMock()
-        # _sidebar_row returns row_locator; row_locator.locator returns delete_btn
+        # _sidebar_row: label = frame.get_by_text("AI-N •"); row = label.locator(xpath).
+        # sidebar_delete then locates the button via row.locator(_SIDEBAR_DELETE).
+        label.locator.return_value = row_locator
         row_locator.locator.return_value = delete_btn
-        frame.get_by_text.return_value = row_locator
+        frame.get_by_text.return_value = label
         frame.locator.return_value = busy
 
         card = Card(frame)
@@ -539,11 +542,15 @@ class TestSidebarSetStatus:
         target = Ai(action="some action", action_id=action_id)
 
         frame = MagicMock()
-        row_locator = MagicMock()
-        status_btn = MagicMock()
+        label = MagicMock()        # the "AI-N •" DecoratedText label (frame.get_by_text)
+        row_locator = MagicMock()  # _sidebar_row result: label.locator(xpath sibling)
+        status_btn = MagicMock()   # actual button: row.locator('[aria-label="Set <status>"]')
         busy = MagicMock()
+        # _sidebar_row: label = frame.get_by_text("AI-N •"); row = label.locator(xpath).
+        # sidebar_set_status then locates the button via row.locator('[aria-label="Set ..."]').
+        label.locator.return_value = row_locator
         row_locator.locator.return_value = status_btn
-        frame.get_by_text.return_value = row_locator
+        frame.get_by_text.return_value = label
         frame.locator.return_value = busy
 
         card = Card(frame)
