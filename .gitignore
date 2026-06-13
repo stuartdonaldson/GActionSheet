@@ -5,7 +5,8 @@
 .beads-credential-key
 
 # Test infrastructure
-.auth/
+.auth/*
+!.auth/README.md
 local.settings.json
 bdreport.md
 # allure-results: ignore generated files; keep categories.json and history/

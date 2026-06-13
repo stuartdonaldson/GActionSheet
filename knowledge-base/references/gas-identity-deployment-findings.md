@@ -152,7 +152,7 @@ The probe implementation can be reused for any GAS project:
 | `src/PROBE.js` | `PROBE_log(surface, data)`, `PROBE_setRunId()`, `PROBE_getRunId()`, `PROBE_docState()` |
 | `tests/playwright/probe.test.js` | Automated surface exerciser; set `PROBE_AUTH_STATE` env var for multi-account runs |
 | `npm run probe` | Single-account probe run |
-| `npm run probe:user2` | Second-account probe run (requires `.auth/user2.json`) |
+| `npm run probe:test.u2` | Second-account probe run (requires `.auth/test.u2.json`) |
 | `staging/probe-runs.md` | Run registry — copy runId before exercising any surface |
 
 Enable/disable: set `PROBE_ENABLED = true/false` in `PROBE.js`. All call sites remain; they become no-ops when disabled.

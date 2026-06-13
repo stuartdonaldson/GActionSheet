@@ -17,7 +17,7 @@ tier: standard
 Ideas not yet evaluated. One-liners only. To advance: evaluate at planning review; add lean business case to §Review.
 
 - Assignee token normalization — canonicalize person tiles and bare emails to `Display Name <email>` on rewrite (deferred per requirements §7.10)
-- Assignee reminder — menu/card-triggered from any document; scope is all open actions in the GActionSheet for the team identified by the active document's `ActionTeam` property; "open" is defined by a shared `isResolved()` function that returns true for Closed, Done, and Rejected (single source of truth for all resolution checks); card (CardService initially; HtmlService upgrade deferred) shows each assignee with their open-action count; user selects one, many, or all; confirmation step before send; email sent as active user via `GmailApp` with per-action text, status, and source document link; email body rendered from an HTML template using `HtmlService.createTemplateFromFile()` per the pattern in bead **F3Go30-i1m** (renderer + builder + XSS escaping; `GmailApp` sends as active user); requires assignee normalization (§7.10) as prerequisite
+- Assignee reminder — menu/card-triggered from any document; scope is all open actions in the GActionSheet for the team identified by the active document's `ActionTeam` property; "open" is defined by a shared `isResolved()` function that returns true for Closed, Done, and Rejected (single source of truth for all resolution checks); card (CardService initially; HtmlService upgrade deferred) shows each assignee with their open-action count; user selects one, many, or all; confirmation step before send; email sent as active user via `GmailApp` with per-action text, status, and source document link; email body rendered from an HTML template using `HtmlService.createTemplateFromFile()` per the project email-sending standard (**ADR-0016**, which binds the GAS-Practices `gas-email-templating` pattern: renderer + builder + XSS escaping; `GmailApp` sends as active user). When promoted, this item reuses EPIC-E's template/renderer — one implementation, not a second. Requires assignee normalization (§7.10) as prerequisite
 - Overdue indicator — mark actions whose created date is past a configurable threshold
 - Status preset view — sheet view hiding Closed actions for daily triage
 - Document health indicator — warn when a document in scope is missing `=== Tracked Actions ===`
@@ -143,7 +143,8 @@ team-scoped actions.
 Review fidelity: **Slice** (ADR-0013). Depends on: EPIC-D (reuses its tabbed shell and
 J-ACCESS-FILTER bindings, not rebuilt).
 Open seam: email-template contract must be reusable for the Assignee Reminder funnel entry
-when it is promoted.
+when it is promoted — resolved by the email-sending standard in **ADR-0016** (shared
+template/renderer/sender; `GTaskSheet-tv54`).
 
 Access rule: Notify must only aggregate and present actions from source documents readable
 by the current user.
@@ -539,11 +540,10 @@ use the canonical implementation as the reference.
   document link).
 - XSS escaping is required on all interpolated values.
 
-> **GAS email-sending practices:** no canonical standard exists yet in this project.
-> When this feature is promoted to delivery, define and record the standard (template
-> location, escaping contract, `GmailApp` vs `MailApp` choice) before implementation.
-> Cross-reference the Assignee reminder Funnel entry — both features must use the
-> same standard.
+> **GAS email-sending standard:** see **ADR-0016** (binds the GAS-Practices
+> `gas-email-templating` pattern — template location/naming, `escapeHtml_()` contract,
+> `GmailApp`-as-active-user, and the `sendConfiguredEmail_()` test-mode policy). The Notify
+> send and the Assignee reminder Funnel entry share one template/renderer — not two.
 
 ---
 

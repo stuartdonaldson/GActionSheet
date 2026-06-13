@@ -30,7 +30,7 @@ const settingsPath = path.join(__dirname, '..', '..', 'local.settings.json');
 const settings     = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
 
 // Auth state file — override with PROBE_AUTH_STATE env var to run as a different account.
-// Default: .auth/user.json (deployer account). For second-user probes: .auth/user2.json
+// Default: .auth/user.json (deployer account). For second-user probes: .auth/test.u2.json
 const storageState = process.env.PROBE_AUTH_STATE
   ? path.resolve(process.cwd(), process.env.PROBE_AUTH_STATE)
   : path.join(__dirname, '..', '..', '.auth', 'user.json');
