@@ -28,13 +28,16 @@ timed windows — so it works whether a human launches it or an orchestrator doe
 A visible Chromium opens; perform the gestures it asks for while it waits.
 """
 import pathlib
+import queue
+import subprocess
+import threading
 import time
 
 import pytest
 
 from scn.ai import ai
 from scn.session import ScenarioSession
-from scn.ui import UiDriver, _CARD_BODY, _CARD_IFRAME, _CHIP_ANCHOR_JS
+from scn.ui import UiDriver, _CHIP_ANCHOR_JS
 
 pytestmark = pytest.mark.interactive
 
@@ -48,26 +51,42 @@ def _banner(title: str, steps: list[str]) -> None:
     print(bar, flush=True)
 
 
-def _card_visible(page) -> bool:
-    """True if the onLinkPreview card iframe body is currently visible."""
-    try:
-        return page.frame_locator(_CARD_IFRAME).first.locator(_CARD_BODY).first.is_visible()
-    except Exception:
-        return False
+def _clasp_log_stream():
+    """Start `clasp logs --watch` and return (proc, queue-of-lines).
+
+    Server-truth signal for the operator's gesture: the onLinkPreview round
+    trip and the in-card status edit both log distinctive tags (PREVIEW_CARD.*,
+    POC_EDIT_ACTION.complete) within seconds, even when the card iframe takes
+    much longer to become visible in the DOM (GTaskSheet-mxmh).
+    """
+    proc = subprocess.Popen(
+        ["clasp", "logs", "--watch"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        text=True, bufsize=1,
+    )
+    q: "queue.Queue[str]" = queue.Queue()
+
+    def _reader():
+        for line in proc.stdout:
+            q.put(line)
+
+    threading.Thread(target=_reader, daemon=True).start()
+    return proc, q
 
 
-def _wait_until(cond, *, timeout_s: float, waiting_msg: str, poll_s: float = 1.0) -> bool:
-    """Poll cond() until True or timeout; print a one-time waiting message."""
+def _wait_for_log(q: "queue.Queue[str]", *, contains: list[str], timeout_s: float) -> bool:
+    """True once a log line containing every string in `contains` arrives."""
     deadline = time.monotonic() + timeout_s
-    announced = False
-    while time.monotonic() < deadline:
-        if cond():
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        try:
+            line = q.get(timeout=remaining)
+        except queue.Empty:
+            return False
+        if all(s in line for s in contains):
             return True
-        if not announced:
-            print(f"  ⏳ {waiting_msg}", flush=True)
-            announced = True
-        time.sleep(poll_s)
-    return False
 
 
 @pytest.fixture
@@ -102,8 +121,16 @@ def test_link_preview_hover_human(scn):
     drives a durable status change (rwz AC1/AC2 + Act-5 status flow, s9so).
     """
     # 1. Seed an action and sync — sync's _flushActionParagraph inserts the chip
-    #    hyperlink exactly as the journey does.
-    seed = ai(action="Interactive link-preview check")
+    #    hyperlink exactly as the journey does. The instruction lives in the
+    #    action text itself (GTaskSheet-mxmh) so an operator working purely
+    #    from the doc — without the terminal banner — still knows the target
+    #    status.
+    seed = ai(
+        action=(
+            "Interactive link-preview check — hover this chip, wait for the "
+            "preview card, then set its status to In Progress"
+        )
+    )
     scn.append_paragraph(seed.as_text())
     scn.sync()
 
@@ -112,6 +139,7 @@ def test_link_preview_hover_human(scn):
     assert match is not None, f"seeded action not found after sync; rows={rows}"
     action_id = match.action_id
     assert action_id, f"synced action has no AI-N id: {match}"
+    global_id = f"{scn.doc_id}/{action_id}"
 
     # 2. Open the doc fresh in the browser (the page starts at about:blank — the
     #    seed+sync above were HTTP, no navigation). A fresh load renders the
@@ -126,43 +154,55 @@ def test_link_preview_hover_human(scn):
         f"link-preview card for {action_id}",
         [
             f"Find the chip “{action_id}: …” in the document{where}.",
-            "Hover the mouse over it and HOLD still until a preview card pops up.",
-            f"   → the harness is watching and will detect the card automatically.",
-            f"Confirm the card header shows “{action_id}: …” and a clickable link.",
-            "Then, in that card, open the status control and set it to “In Progress”.",
+            "The action text itself says what to do — hover, wait for the card, "
+            "then set status to “In Progress”.",
+            "Hover and HOLD still — the card can take up to ~2 minutes to render "
+            "(GTaskSheet-mxmh); the harness watches clasp logs, not the screen.",
+            "Once the card appears, open its status control and set it to “In Progress”.",
             "Leave the browser as-is; the harness verifies the result on its own.",
         ],
     )
 
-    page = scn.ui._page
+    # 3. rwz AC1/AC2 — auto-detect the rendered card and the status edit via
+    #    clasp logs (server-truth, GTaskSheet-mxmh). The DOM iframe can lag
+    #    the server round trip by minutes, so it is no longer the signal.
+    log_proc, log_q = _clasp_log_stream()
+    try:
+        card_rendered = _wait_for_log(
+            log_q,
+            contains=["PREVIEW_CARD.lookup", global_id],
+            timeout_s=180,
+        )
+        if card_rendered:
+            print("  ✅ onLinkPreview card requested (PREVIEW_CARD.lookup seen).", flush=True)
+        else:
+            print("  ⚠️  No PREVIEW_CARD.lookup observed within 180s.", flush=True)
 
-    # 3. rwz AC1/AC2 — auto-detect the rendered card on a real human hover (120s).
-    card_rendered = _wait_until(
-        lambda: _card_visible(page),
-        timeout_s=120,
-        waiting_msg="watching for the onLinkPreview card — hover the chip and hold…",
-    )
-    if card_rendered:
-        print("  ✅ onLinkPreview card detected on hover.", flush=True)
-    else:
-        print("  ⚠️  No preview card detected within 120s.", flush=True)
+        # 4. Give the operator time to set the status in the card, then verify durably.
+        print("  → Now set the card status to “In Progress”. Verifying via clasp logs…", flush=True)
+        status_seen = _wait_for_log(
+            log_q,
+            contains=["POC_EDIT_ACTION.complete", global_id, '"status":"In Progress"'],
+            timeout_s=180,
+        )
+    finally:
+        log_proc.terminate()
 
-    # 4. Give the operator time to set the status in the card, then verify durably.
-    print("  → Now set the card status to “In Progress”. Verifying shortly…", flush=True)
-    time.sleep(40)
     scn.sync()
     after = scn.find_sheet_actions()
     row = next((r for r in after if r.action_id == action_id), None)
     status_now = (row.status or "").lower() if row else None
 
     assert card_rendered, (
-        "onLinkPreview card did NOT render on a real human hover within 120s — this is "
-        "a genuine link-preview product gap (Google Docs doesn't convert the add-on's "
-        "plain-hyperlink action chips into smart chips), not a harness limitation. "
-        "File a follow-up bead (see GTaskSheet-s9so analysis)."
+        "onLinkPreview was never requested (no PREVIEW_CARD.lookup in clasp logs) "
+        "for a real human hover within 180s — this is a genuine link-preview "
+        "product gap (Google Docs doesn't fire onLinkPreview for the add-on's "
+        "plain-hyperlink action chips), not a harness limitation. File a follow-up "
+        "bead (see GTaskSheet-s9so analysis)."
     )
-    assert status_now == "in progress", (
+    assert status_seen and status_now == "in progress", (
         f"expected {action_id} status 'In Progress' after the in-card change, got "
-        f"{status_now!r}. If the card rendered but status didn't change, the "
-        f"_setStatusFromPreview flow needs review."
+        f"{status_now!r} (clasp log saw POC_EDIT_ACTION.complete: {status_seen}). "
+        "If the card rendered but status didn't change, the _setStatusFromPreview "
+        "flow needs review."
     )

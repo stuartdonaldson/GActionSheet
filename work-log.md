@@ -2494,3 +2494,40 @@ No new normalization shape was needed — _readTrackerTableState (VerifySync.js)
 GTaskSheet-gxot; the idempotency check just needed to compare them on the fields
 _compareVerificationState already trusts (id/action/status), reusing existing cross-file global
 functions (consistent with how TrackerTable.js already calls _scanFloatingActions/parseGlobalId).
+
+## 2026-06-13 10:12:07
+
+### Summary:
+Resolved GTaskSheet-z6f8 (project-wide ENTRY_POINT_REGISTRY buildout), then ran the full live suite and resolved every in-scope failure.
+
+- **z6f8** — expanded `scn/contract.ENTRY_POINT_REGISTRY` 7→32 entries enumerating every state-modifying entry point (menu/trigger/card/route + test-support, each `[category]`-prefixed; read-only entry points excluded). Added `ENTRY_POINT_DEFERRED` (key→reason+bead) and taught `scripts/check_coverage.py` to treat it as explicitly warn-only, so the T17 `ep.*` gap-diff is green (8 covered / 24 warn-only / 0 uncovered). Re-tagged existing green checkpoints (test_b7 `edit_action_row`/`patch_action_status`, test_sidebar). Added `entry_point=` to `expect_absent`. Deferral→coverage backlog under EPIC **GTaskSheet-rz4k** (rz4k.1–.5). Commit `b57974e`.
+- **Full live suite** — 263 passed / 9 failed. Fixed test_b7 fixture (`request=` → JUnit emission; recovered its `ac.*` coverage too).
+- **GTaskSheet-1rqm** (closed) — 8 of 9 failures were stale/flaky tests: 6× `test_scn_ui` Sidebar mocks (two-level `_sidebar_row` — fixed offline), `test_sidebar` tab-nav (`"Import — coming soon"` → Import tab implemented — fixed live), `test_ui_smoke` `create_action` (cold-start add-on flake — warm via `open_sidebar` first + JS-evaluate form detection + 120s budget + screenshot/probe on timeout — fixed live). Commits `f1a8dd5`, `2a2f1ae`.
+- The 9th failure (`test_journey`) is the pre-existing **s9so** (Act 5 onLinkPreview preview card), not 1rqm — re-attributed after the frame trace.
+- **GTaskSheet-3tkf** — filed per user directive: make screenshot + frame/DOM capture universal for all Playwright failures, and update test guidance/standards.
+
+### Key Learnings:
+- `ScenarioSession.new_doc(settings)` emits NO JUnit `ac.*`/`ep.*` properties unless passed `request=request` (function-scoped fixture). test_b7 silently emitted nothing for this reason.
+- A misattributed failure cost a speculative `open_sidebar` change (reverted): always confirm the failing frame from the traceback (`scn/ui.py:278` hover = Act 5/s9so) before hypothesizing — the FrameLocator-vs-Frame pattern in the error locator is the tell.
+- The editor add-on is slow AND run-to-run variable when cold (menu provider not ready in 20s; form render ~42–77s). Playwright `locator.is_visible()` is correct once rendered (probe: `count=1, is_visible=True`) — it was latency, not detection. `frame.evaluate(querySelectorAll + offset/getClientRects)` is the robust way to find a form across transient cold-boot re-renders. Warming the add-on (open sidebar first), as the journey does, is the durable fix.
+
+## 2026-06-13 16:56:57
+
+### Summary:
+Resumed RESTART-HANDOFF.md to complete the one-time human-fidelity check for GTaskSheet-15e8
+(interactive onLinkPreview test). First run FAILED on `card_rendered` within 120s, but clasp
+logs proved the server-side onLinkPreview round trip and in-card status edit both completed
+successfully (PREVIEW_CARD.lookup/result, POC_EDIT_ACTION.complete) — the failure was a harness
+bug, not the s9so "Docs never converts plain-hyperlink chips" product gap the assertion claimed.
+Filed and fixed GTaskSheet-mxmh: tests/test_interactive.py now (1) embeds the operator
+instruction ("hover, then set status to In Progress") directly in the seeded action text so the
+doc is self-describing, and (2) replaces unreliable DOM iframe polling with a `clasp logs --watch`
+stream, asserting on PREVIEW_CARD.lookup and POC_EDIT_ACTION.complete (180s windows each). Re-ran
+with a real human hover: PASSED in 152s. mxmh closed.
+
+### Key Learnings:
+- The onLinkPreview card can take up to ~2 minutes to render visually after hover even though the
+  server round trip (PREVIEW_CARD.lookup/result) completes in ~15-20s — DOM-based `_card_visible()`
+  polling within a 120s window is not a reliable pass/fail signal for this interaction.
+- `clasp logs --watch` streams continuously (does not exit) and is a fast, reliable server-truth
+  signal for interactive tests; `clasp logs --json` round-trips in ~2s for one-off checks.
