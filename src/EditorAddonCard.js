@@ -172,6 +172,203 @@ function _submitCreateAction(e) {
   }
 }
 
+/**
+ * Handles the Import tab's "Import selected" button (AC-2, GTaskSheet-fgh4).
+ *
+ * Collects the union of e.formInput values for every 'importSelection::'+docId
+ * field (AC-1 renders one CHECK_BOX SelectionInput per source-doc group; each
+ * item's value is a source globalId). Re-fetches the authoritative rows via
+ * list_importable_actions — client-supplied action text is never trusted
+ * (ADR-0008) — and inserts each selected action as a NEW floating action at
+ * the cursor with a newly assigned sequential AI-N (baseN computed once via
+ * _getNextActionN, then incremented locally per epic-d-import-contract-seams
+ * #4). After doc inserts succeed, writes the new rows to the ActionSheet
+ * (upsert_action_rows) and marks each source row Forwarded (AC-3,
+ * GTaskSheet-st24, forward_action_rows).
+ *
+ * @param {GoogleAppsScript.Addons.EventObject} e
+ * @returns {GoogleAppsScript.Card_Service.ActionResponse}
+ */
+function _submitImport(e) {
+  try {
+    var selected = _collectImportSelection(e);
+    if (selected.length === 0) {
+      GasLogger.log('IMPORT_SELECTED.validation', { msg: 'no selection' });
+      GasLogger.flush();
+      return CardService.newActionResponseBuilder()
+        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Nothing selected', 'Select at least one action.')))
+        .build();
+    }
+
+    var doc    = DocumentApp.getActiveDocument();
+    var cursor = doc.getCursor();
+    if (!cursor) {
+      GasLogger.log('INSERT_CHIP.warn', { msg: 'no cursor' });
+      GasLogger.flush();
+      return CardService.newActionResponseBuilder()
+        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('No cursor', 'No cursor position found — click in the document to place your cursor, then try again.')))
+        .build();
+    }
+
+    var docId = doc.getId();
+    var token = ScriptApp.getOAuthToken();
+
+    // Re-fetch authoritative rows — never trust client-supplied action text (ADR-0008).
+    var listResult = _callWebApp('list_importable_actions', { docId: docId });
+    if (!listResult || listResult.error) {
+      GasLogger.log('IMPORT_SELECTED.error', { msg: 'list_importable_actions failed', err: listResult && listResult.error });
+      GasLogger.flush();
+      return CardService.newActionResponseBuilder()
+        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Unable to load importable actions right now.')))
+        .build();
+    }
+
+    var selectedSet = {};
+    for (var s = 0; s < selected.length; s++) selectedSet[selected[s]] = true;
+
+    var importRows = (listResult.rows || []).filter(function (row) {
+      return selectedSet[row.global_id];
+    });
+
+    if (importRows.length === 0) {
+      GasLogger.log('IMPORT_SELECTED.validation', { msg: 'selection not found in importable rows' });
+      GasLogger.flush();
+      return CardService.newActionResponseBuilder()
+        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Nothing selected', 'Select at least one action.')))
+        .build();
+    }
+
+    // Resolve cursorIndex ONCE — multi-insert advances it arithmetically
+    // (REST inserts are not seen by DocumentApp mid-run).
+    var cursorResult = _resolveCursorIndex(doc, cursor, token);
+    if (cursorResult.index === null) {
+      GasLogger.log('IMPORT_SELECTED.error', { msg: cursorResult.error, paraText: (cursorResult.paraText || '').slice(0, 60), paraOffset: cursorResult.paraOffset });
+      GasLogger.flush();
+      return CardService.newActionResponseBuilder()
+        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Insert failed', cursorResult.error)))
+        .build();
+    }
+
+    var baseN    = _getNextActionN(doc);
+    var index    = cursorResult.index;
+    var newRows  = [];
+    var forwards = [];
+
+    for (var k = 0; k < importRows.length; k++) {
+      var src         = importRows[k];
+      var N           = baseN + k;
+      var newGlobalId = docId + '/AI-' + N;
+
+      var fragResult = _applyActionFragment(docId, token, index, {
+        N:             N,
+        globalId:      newGlobalId,
+        actionText:    src.action_text,
+        assigneeEmail: src.assignee_email,
+        status:        src.status,
+        assigneeName:  src.assignee_name || src.assignee_email
+      }, k > 0);
+
+      if (!fragResult.ok) {
+        GasLogger.log('IMPORT_SELECTED.error', { msg: 'chip insert failed', err: fragResult.error, k: k });
+        GasLogger.flush();
+        return CardService.newActionResponseBuilder()
+          .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Insert failed', 'Action ' + (k + 1) + ' of ' + importRows.length + ' could not be inserted.\n\n' + fragResult.error)))
+          .build();
+      }
+
+      index += fragResult.insertedLength;
+
+      newRows.push({
+        globalId:      newGlobalId,
+        actionText:    src.action_text,
+        assigneeEmail: src.assignee_email,
+        assigneeName:  src.assignee_name || src.assignee_email,
+        status:        src.status
+      });
+      forwards.push({ sourceGlobalId: src.global_id, newGlobalId: newGlobalId });
+    }
+
+    // Write new rows to the current doc's ActionSheet only after doc inserts succeed.
+    var upsertResult = _callWebApp('upsert_action_rows', {
+      docUrl:   doc.getUrl(),
+      docTitle: doc.getName(),
+      rows:     newRows
+    });
+
+    if (!upsertResult || upsertResult.error) {
+      GasLogger.log('IMPORT_SELECTED.error', { msg: 'upsert failed', err: upsertResult && upsertResult.error });
+      GasLogger.flush();
+      return CardService.newActionResponseBuilder()
+        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Actions were inserted in the document but could not be saved: ' + ((upsertResult && upsertResult.error) || 'unknown error'))))
+        .build();
+    }
+
+    // AC-3 — mark each source row Forwarded (status + suffix + dirty).
+    var forwardResult = _callWebApp('forward_action_rows', {
+      forwards:      forwards,
+      targetDocName: doc.getName()
+    });
+    if (!forwardResult || forwardResult.error) {
+      GasLogger.log('IMPORT_SELECTED.error', { msg: 'forward failed', err: forwardResult && forwardResult.error });
+    }
+
+    GasLogger.log('IMPORT_SELECTED.done', { inserted: newRows.length, baseN: baseN });
+    GasLogger.flush();
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().updateCard(_buildTabbedHomepageCard('import')))
+      .build();
+  } catch (err) {
+    GasLogger.log('IMPORT_SELECTED.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
+    GasLogger.flush();
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().updateCard(
+        _buildMessageCard('Error', 'Could not import selected actions. Please report this to your administrator.\n\n' + String(err))
+      ))
+      .build();
+  }
+}
+
+/**
+ * Collects the union of selected source globalIds across every
+ * 'importSelection::'+docId CHECK_BOX field (AC-1 renders one per source-doc
+ * group). Reads e.formInputs (array values) when present, falling back to
+ * e.formInput's comma-separated string for fields not present in formInputs.
+ *
+ * @param {GoogleAppsScript.Addons.EventObject} e
+ * @returns {Array<string>}  Selected source globalIds, de-duplicated
+ */
+function _collectImportSelection(e) {
+  var formInputs = (e && e.formInputs) || {};
+  var formInput  = (e && e.formInput)  || {};
+  var seen       = {};
+  var selected   = [];
+
+  function add(value) {
+    if (value && !seen[value]) {
+      seen[value] = true;
+      selected.push(value);
+    }
+  }
+
+  var key;
+  for (key in formInputs) {
+    if (key.indexOf('importSelection') !== 0) continue;
+    var values = (formInputs[key].stringInputs && formInputs[key].stringInputs.value) || [];
+    for (var i = 0; i < values.length; i++) add(values[i]);
+  }
+  for (key in formInput) {
+    if (key.indexOf('importSelection') !== 0) continue;
+    if (formInputs[key]) continue; // already collected via formInputs
+    var parts = (formInput[key] || '').split(',');
+    for (var j = 0; j < parts.length; j++) {
+      var v = parts[j].trim();
+      if (v) add(v);
+    }
+  }
+
+  return selected;
+}
+
 // ---------------------------------------------------------------------------
 // Card builders
 // ---------------------------------------------------------------------------
@@ -663,6 +860,45 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
     return 'No cursor position found — click in the document to place your cursor, then try again.';
   }
 
+  var docId = doc.getId();
+  var token = ScriptApp.getOAuthToken();
+
+  var cursorResult = _resolveCursorIndex(doc, cursor, token);
+  if (cursorResult.index === null) {
+    GasLogger.log('INSERT_CHIP.error', { msg: cursorResult.error, paraText: (cursorResult.paraText || '').slice(0, 60), paraOffset: cursorResult.paraOffset });
+    return cursorResult.error;
+  }
+
+  var fragResult = _applyActionFragment(docId, token, cursorResult.index, {
+    N: N, globalId: globalId, actionText: actionText,
+    assigneeEmail: assigneeEmail, status: status, assigneeName: assigneeName
+  }, false);
+
+  if (!fragResult.ok) return fragResult.error;
+
+  GasLogger.log('INSERT_CHIP.done', { globalId: globalId, cursorIndex: cursorResult.index });
+  return null;
+}
+
+/**
+ * Resolves the Docs REST API character index for the document's current
+ * cursor position.
+ *
+ * Strategy: capture cursor paragraph text + offset via DocumentApp BEFORE any
+ * mutation, GET the document (pre-mutation = in sync), then locate the cursor
+ * index in the response.
+ *
+ * Shared by _insertActionChip (single create) and _submitImport (multi-import
+ * — cursor resolved ONCE; subsequent fragment positions are advanced
+ * arithmetically via _applyActionFragment's insertedLength, since REST inserts
+ * are not seen by DocumentApp mid-run).
+ *
+ * @param {GoogleAppsScript.Document.Document} doc
+ * @param {GoogleAppsScript.Document.Position} cursor
+ * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
+ * @returns {{index: number}|{index: null, error: string, paraText: string, paraOffset: number}}
+ */
+function _resolveCursorIndex(doc, cursor, token) {
   // Step 1 — capture cursor position via DocumentApp before any mutation.
   var cursorOffset  = cursor.getOffset();
   var cursorElement = cursor.getElement();
@@ -692,9 +928,6 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
   var paraText = cursorPara.getText();
 
   var docId   = doc.getId();
-  var chipUrl = ACTION_CHIP_URL_BASE + '?c=view&globalId=' + encodeURIComponent(globalId);
-  var imgUrl  = _ACTION_STATUS_IMAGES[status] || _ACTION_DEFAULT_IMAGE;
-  var token   = ScriptApp.getOAuthToken();
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
 
   // Step 2 — GET doc before any mutation (DocumentApp changes are deferred).
@@ -703,56 +936,98 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
     { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
   );
   if (getResp.getResponseCode() !== 200) {
-    var getErr = 'Could not read document (HTTP ' + getResp.getResponseCode() + ')';
-    GasLogger.log('INSERT_CHIP.error', { msg: getErr });
-    return getErr;
+    return { index: null, error: 'Could not read document (HTTP ' + getResp.getResponseCode() + ')', paraText: paraText, paraOffset: paraOffset };
   }
 
   var content     = (JSON.parse(getResp.getContentText()).body || {}).content || [];
   var cursorIndex = _findCursorIndex(content, paraText, paraOffset);
 
   if (cursorIndex === null) {
-    var errMsg = 'cursor position not found in document';
-    GasLogger.log('INSERT_CHIP.error', { msg: errMsg, paraText: paraText.slice(0, 60), paraOffset: paraOffset });
-    return errMsg;
+    return { index: null, error: 'cursor position not found in document', paraText: paraText, paraOffset: paraOffset };
   }
 
-  // Step 3 — single batchUpdate. All inserts target cursorIndex; each successive
-  // insert pushes prior inserts rightward, so requests are listed in reverse final order.
+  return { index: cursorIndex };
+}
+
+/**
+ * Builds and applies the Docs REST batchUpdate request set for one canonical
+ * floating-action fragment:
+ *
+ *   [status image, linked]  [AI-N: text, linked]  [optional person chip]  action text (status)
+ *
+ * Step-3 request-build extracted from _insertActionChip so single-create and
+ * multi-import (_submitImport) share one builder (epic-d-import-contract-seams
+ * #3 — do NOT fork the chip path). All ranges are relative to `index`.
+ * `insertedLength` tells the caller how far to advance `index` for the next
+ * fragment — REST inserts are not seen by DocumentApp mid-run, so multi-insert
+ * advances arithmetically rather than re-resolving the cursor.
+ *
+ * @param {string} docId
+ * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
+ * @param {number} index  Target REST character index
+ * @param {{N:number, globalId:string, actionText:string, assigneeEmail:string,
+ *          status:string, assigneeName:(string|undefined)}} fields
+ * @param {boolean} precedeWithNewline  Insert a paragraph break before the fragment
+ *   (used for the 2nd+ fragment in a multi-import — each lands on its own paragraph)
+ * @returns {{ok: boolean, error: (string|null), insertedLength: number}}
+ */
+function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
+  var N             = fields.N;
+  var globalId      = fields.globalId;
+  var actionText    = fields.actionText;
+  var assigneeEmail = fields.assigneeEmail;
+  var status        = fields.status;
+
+  var chipUrl = ACTION_CHIP_URL_BASE + '?c=view&globalId=' + encodeURIComponent(globalId);
+  var imgUrl  = _ACTION_STATUS_IMAGES[status] || _ACTION_DEFAULT_IMAGE;
+  var baseUrl = 'https://docs.googleapis.com/v1/documents/';
+
+  // Single batchUpdate. All inserts target fragIndex; each successive insert
+  // pushes prior inserts rightward, so requests are listed in reverse final order.
   // Final paragraph order: [status image][AI-N: text][optional person chip][action text (status)]
   var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);
+  var tokenLen   = ('AI-' + N + ': ').length;
+  var fragIndex  = precedeWithNewline ? index + 1 : index;
+
+  var requests = [];
+  if (precedeWithNewline) {
+    requests.push({ insertText: { text: '\n', location: { index: index } } });
+  }
 
   // 1. Trailing text (listed first → ends up rightmost)
-  var requests = [];
   if (validEmail) {
-    requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: cursorIndex } } });
+    requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: fragIndex } } });
     // insertPerson rejects any name field in personProperties — email only
-    requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: cursorIndex } } });
+    requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: fragIndex } } });
   } else {
-    requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: cursorIndex } } });
+    requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: fragIndex } } });
   }
 
   // 2. AI-N: text
-  requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: cursorIndex } } });
+  requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: fragIndex } } });
 
-  // 3. Status image (listed last → ends up at cursorIndex)
+  // 3. Status image (listed last → ends up at fragIndex)
   requests.push({
     insertInlineImage: {
-      uri: imgUrl, location: { index: cursorIndex },
+      uri: imgUrl, location: { index: fragIndex },
       objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
     }
   });
 
   // 4. Link on image (1 char) + AI-N: text
-  var tokenLen = ('AI-' + N + ': ').length;
   requests.push({
     updateTextStyle: {
-      range:     { startIndex: cursorIndex, endIndex: cursorIndex + 1 + tokenLen },
+      range:     { startIndex: fragIndex, endIndex: fragIndex + 1 + tokenLen },
       textStyle: { link: { url: chipUrl } },
       fields:    'link'
     }
   });
-  requests.push(_chipBadgeStyleRequest(cursorIndex + 1, cursorIndex + 1 + tokenLen));
+  requests.push(_chipBadgeStyleRequest(fragIndex + 1, fragIndex + 1 + tokenLen));
+
+  var trailingLen = validEmail
+    ? 1 + (' ' + actionText + ' (' + status + ')').length
+    : (actionText + ' (' + status + ')').length;
+  var insertedLength = (precedeWithNewline ? 1 : 0) + 1 + tokenLen + trailingLen;
 
   var batchResp = UrlFetchApp.fetch(
     baseUrl + docId + ':batchUpdate',
@@ -770,11 +1045,10 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
       msg:  'batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
       body: batchResp.getContentText().substring(0, 300)
     });
-    return batchErr;
+    return { ok: false, error: batchErr, insertedLength: insertedLength };
   }
 
-  GasLogger.log('INSERT_CHIP.done', { globalId: globalId, cursorIndex: cursorIndex });
-  return null;
+  return { ok: true, error: null, insertedLength: insertedLength };
 }
 
 /**

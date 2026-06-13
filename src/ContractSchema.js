@@ -96,6 +96,7 @@ var CONTRACT_SCHEMA = Object.freeze({
       'delete_action_row',
       'patch_action_status',
       'list_importable_actions',
+      'forward_action_rows',
       'run_fixture'
     ]),
 
@@ -182,6 +183,19 @@ var CONTRACT_SCHEMA = Object.freeze({
         request:  Object.freeze(['action', 'secret', 'docId', 'clientVersion', 'caller']),
         response: Object.freeze(['ok', 'teamId', 'rows']),
         completionSignal: "synchronous response; rows scoped to current doc's team, excluding current doc"
+      }),
+
+      // forward_action_rows — Import tab AC-3 (GTaskSheet-st24). Marks each
+      // imported SOURCE action as 'Forwarded' (already counted as resolved
+      // via isDelegated's 'forwarded' word), appends a
+      // ' [Forward:<targetDocName> AI-<n>]' suffix to its Action text, and
+      // re-marks it Dirty (_remarkRowDirty) so the source document reflects
+      // 'Forwarded' on the next sync_action_rows.
+      //   Completion signal: synchronous response; GasLogger 'FORWARD_ROWS.done'.
+      forward_action_rows: Object.freeze({
+        request:  Object.freeze(['action', 'secret', 'forwards', 'targetDocName', 'clientVersion', 'caller']),
+        response: Object.freeze(['ok', 'forwarded']),
+        completionSignal: "synchronous response; source rows stamped Status='Forwarded' + Sync Status='Dirty'"
       })
     })
   }),

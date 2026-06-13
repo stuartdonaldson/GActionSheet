@@ -189,6 +189,8 @@ function doPost(e) {
     result = _handlePatchActionStatus(payload);
   } else if (payload.action === 'list_importable_actions') {
     result = _handleListImportableActions(payload);
+  } else if (payload.action === 'forward_action_rows') {
+    result = _handleForwardActionRows(payload);
   } else {
     // Legacy POC — retained for diagnostics
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
@@ -958,6 +960,71 @@ function _handleListImportableActions(payload) {
   GasLogger.log('IMPORT_LIST.done', { teamId: teamId, count: rows.length, docCount: Object.keys(docIds).length });
   GasLogger.flush();
   return _jsonResponse({ ok: true, teamId: teamId, rows: rows });
+}
+
+// ---------------------------------------------------------------------------
+// forward_action_rows handler  (production route, WEBAPP_SECRET-gated,
+// GTaskSheet-st24 — EPIC-D AC-3 forward source actions)
+// ---------------------------------------------------------------------------
+
+/**
+ * Marks each SOURCE action (addressed by global_id, like patch_action_status)
+ * as Forwarded — it leaves the open/import pool ('forwarded' is already a
+ * isDelegated word, so isResolved() treats it as resolved with no further
+ * change needed) and records where it went.
+ *
+ * Per row: Status = 'Forwarded'; append ' [Forward:<targetDocName> AI-<n>]'
+ * to the Action text (newAiToken parsed from newGlobalId); _remarkRowDirty
+ * (reuse — no new dirty path) so the source document reflects 'Forwarded' on
+ * the next sync_action_rows.
+ *
+ * Payload shape (ContractSchema.js messages.forward_action_rows):
+ *   { secret, action: 'forward_action_rows',
+ *     forwards: [ { sourceGlobalId, newGlobalId } ], targetDocName }
+ *
+ * Response shape:
+ *   { ok: true, forwarded: [sourceGlobalId, ...] }
+ */
+function _handleForwardActionRows(payload) {
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found', forwarded: [] });
+  }
+
+  var forwards      = payload.forwards      || [];
+  var targetDocName = payload.targetDocName || '';
+  if (forwards.length === 0) {
+    return _jsonResponse({ ok: true, forwarded: [] });
+  }
+
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var now         = new Date();
+  var forwarded   = [];
+
+  WriteGuard.wrapPersistent(function () {
+    for (var i = 0; i < forwards.length; i++) {
+      var f      = forwards[i];
+      var entry  = existingMap[f.sourceGlobalId];
+      if (!entry) continue;
+
+      var newAiToken = parseGlobalId(f.newGlobalId).actionId; // 'AI-N'
+      var newText    = entry.action + ' [Forward:' + targetDocName + ' ' + newAiToken + ']';
+
+      actionsSheet.getRange(entry.rowIndex, _ACOL.action_text).setValue(newText);
+      actionsSheet.getRange(entry.rowIndex, _ACOL.status).setValue('Forwarded');
+      actionsSheet.getRange(entry.rowIndex, _ACOL.modified_date).setValue(now);
+      forwarded.push(f.sourceGlobalId);
+    }
+  });
+
+  for (var j = 0; j < forwarded.length; j++) {
+    _remarkRowDirty(forwarded[j]);
+  }
+
+  GasLogger.log('FORWARD_ROWS.done', { count: forwarded.length });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, forwarded: forwarded });
 }
 
 // ---------------------------------------------------------------------------

@@ -94,6 +94,7 @@
       "delete_action_row",
       "patch_action_status",
       "list_importable_actions",
+      "forward_action_rows",
       "run_fixture"
     ],
     "testRouteNames": [
@@ -182,6 +183,21 @@
           "rows"
         ],
         "completionSignal": "synchronous response; rows scoped to current doc's team, excluding current doc"
+      },
+      "forward_action_rows": {
+        "request": [
+          "action",
+          "secret",
+          "forwards",
+          "targetDocName",
+          "clientVersion",
+          "caller"
+        ],
+        "response": [
+          "ok",
+          "forwarded"
+        ],
+        "completionSignal": "synchronous response; source rows stamped Status='Forwarded' + Sync Status='Dirty'"
       }
     }
   },

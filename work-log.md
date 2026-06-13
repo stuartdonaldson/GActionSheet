@@ -2404,3 +2404,37 @@ Resolved four small ready-to-close items. (1) mol-b4e: human GO sign-off for v1 
 
 ### Key Learnings:
 Several "ready to close" beads were docs/config graduations of already-shipped work -- the bd description for 4qd was partly stale (playwright.config.js and invoke_gas.js had already been switched to headless-by-default in earlier work), so the actual remaining scope was just the 3 CLI helper scripts plus a deliberate carve-out for auth.setup.js's interactive login flow.
+
+## 2026-06-12 14:24:18
+
+### Summary:
+Reviewed bd open issues post-mol-7gg closure (27 -> 24 ready; mol-b4e/mol-kqr/80mo/80mo.12/fk98/4qd closed, newly unblocking the P1 GTaskSheet-erc production-deployment chain). Produced a prioritized grouping/execution-order recommendation across all open beads, then a detailed prioritized plan for EPIC-D (Import tab, 0/7 children complete): critical path eore->fgh4->st24->4gsx->wdh0->fnvq with 1dxz running in parallel after eore. Wrote per-group implementation prompts emphasizing reuse (single chip-insertion path, single isResolved extension, ONE functional journey not three), debt-check-before-building, and right-sizing test cost (targeted route tests for single-AC increments; full test_journey/4gsx run only after eore+fgh4+st24 land as one "significant chunk").
+
+Worked through several design iterations on the EPIC-D/E shared access-filter test fixture (knowledge-base/staging/j-access-filter-journey.md, GTaskSheet-z1fr's contract for 1dxz/ay5w/7fng) and committed an amendment: added a third test account (TeamA-only, .auth/user3.json) symmetric to the existing Restricted account, and a genuinely independent new team TeamB (new testTeamB folder + TestTeamB TeamData row, NOT nested under testTeamA -- testTeamAChild stays as EPIC-B's nested-child-folder case, not repurposed). Added a "assignee identity = access account" pattern (seed each doc's action assigned to the account that can read it, via plain-email format) so the same fixture drives both P1-P4 access assertions and gives Notify's per-assignee aggregation real differentiated data, with a worked example. Flagged as an OPEN ITEM (not solved here, needs Stuart's confirmation before eore builds it): AC-1's within-team grouping/AI-N-sort test still needs >=2 source docs in the SAME team as the target/journey doc -- docTeamA/docTeamB/docTeamAChild are deliberately three different teams so this fixture doesn't provide that.
+
+### Key Learnings:
+- insertPerson-based chip assignees require the email to be in the document owner's (Primary's) contacts/Workspace directory -- new test accounts used as assignees should use the plain-email (non-chip) format instead to avoid a manual contacts-setup dependency.
+- testTeamAChild is a CHILD folder under testTeamA (EPIC-B folder-walk hierarchy case, with testTeamAMid/testTeamADeep nested further) -- repurposing it as an independent "TeamB" for a symmetric access matrix conflates two different test concepts (nested-folder resolution vs. independent-sibling-team exclusion) and should be avoided; mint a real independent TeamB instead.
+- Distinguish three identity axes that are easy to conflate when designing shared test fixtures: (1) the authenticated "current user" driving a read (J-ACCESS-FILTER accounts), (2) team/folder structure (TeamData + Drive hierarchy), and (3) action assignees (PERSON chip/email in floating-action text). Collapsing (1) and (3) onto the same identities (assignee = an access-differentiated test account) is good reuse; collapsing (1)/(2) onto pre-existing hierarchy nodes that serve another test's purpose (testTeamAChild) is not.
+
+## 2026-06-12 17:32:00
+
+### Summary:
+Implemented GTaskSheet-eore (EPIC-D AC-1 — Import tab list, read+render). Added production WebApp route `list_importable_actions` (ContractSchema.js route + message contract, WebApp.js handler reusing `_readDocDataRow`/`assertTeamAccess`/`isResolved`/`parseGlobalId`, new `_readDocDataRows` helper in SyncManager.js). Replaced the Import tab placeholder in WorkspaceAddonCard.js with `_buildImportTabSection(docId)`, rendering one CardSection per source document (link header + CHECK_BOX SelectionInput, `importSelection::<docId>` field per the AC-2 seam). Tab dispatcher now passes docId and supports multi-section bodies. Regenerated ContractSchema.json; tests/test_contract.py passes.
+
+### Key Learnings:
+Verified end-to-end via a one-off script against the deployed test webapp (ScenarioSession + direct POST with webappSecret): cross-team listing, self-exclusion of the current doc's own actions, exclusion of resolved ("Done") statuses, and TeamNotFound access-denial (zero rows, no leak) all confirmed via `IMPORT_LIST.done`/`IMPORT_LIST.access_denied` GAS log tags. Full functional/regression coverage for the Import flow remains in GTaskSheet-1dxz and GTaskSheet-4gsx (downstream, blocked by this issue).
+
+## 2026-06-12 17:44:29
+
+### Summary:
+Resolved GTaskSheet-fgh4 (AC-2 import-select) and GTaskSheet-st24 (AC-3 forward source actions), the IMP side of EPIC-D's Import tab.
+
+- Refactored `_insertActionChip` (EditorAddonCard.js) into `_resolveCursorIndex` (cursor->REST index, resolved once) + `_applyActionFragment` (shared single-fragment batchUpdate builder returning `insertedLength`), so single-create and the new multi-import path share one chip-insertion implementation per epic-d-import-contract-seams #3.
+- Added `_submitImport` entry point + `_collectImportSelection` helper: collects the union of `importSelection::*` checkbox selections, re-fetches authoritative rows via `list_importable_actions` (never trusts client text, ADR-0008), assigns sequential new AI-N (baseN computed once via `_getNextActionN`), inserts each as a new floating action (subsequent ones on new paragraphs via `precedeWithNewline`), writes new rows via `upsert_action_rows`, then calls the new `forward_action_rows`.
+- Added `onImportSelectAll` + "Select all"/"Import selected" buttons to `_buildImportTabSection` (WorkspaceAddonCard.js); threaded `opts.selectAllImports` through `_buildTabbedHomepageCard`.
+- New production WebApp route `forward_action_rows` (WebApp.js `_handleForwardActionRows`): sets source row Status='Forwarded', appends `' [Forward:<targetDocName> AI-<n>]'` suffix to Action text, and `_remarkRowDirty`s it. Added to ContractSchema routeNames + messages; regenerated ContractSchema.json.
+- Deployed to TEST and smoke-verified `list_importable_actions` (no regression from the chip-path refactor) and `forward_action_rows` (empty-forwards dispatch).
+
+### Key Learnings:
+AC-3's design assumed `isResolved()` needed extending for 'Forwarded' — it didn't. `isDelegated()` (SyncManager.js:1324) already lists 'forwarded', so `isResolved('Forwarded')` was already `true`. Recorded as bd memory `ac3-forwarded-already-resolved` to save a future re-derivation. Full AC-1->AC-2->AC-3 e2e journey verification remains GTaskSheet-4gsx's scope (now unblocked); avoided mutating the canonical shared fixture doc during smoke-testing to not corrupt other tests' state.

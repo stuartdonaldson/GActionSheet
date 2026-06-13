@@ -31,6 +31,8 @@ function buildHomepageCard(eventOrVerificationResult, opts) {
  * @param {object=} eventOrVerificationResult
  * @param {object=} opts
  * @param {boolean=} opts.skipSheetFetch  DocStatus tab only — see buildHomepageCard.
+ * @param {boolean=} opts.selectAllImports  Import tab only — pre-selects every
+ *   checklist item across all source-doc groups (AC-2, onImportSelectAll).
  */
 function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
   var tab = _resolveTab(activeTab);
@@ -68,7 +70,7 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
         card.addSection(_buildVerificationSection(verificationResult));
       }
     } else {
-      var tabSections = tab.bodyBuilder(doc ? doc.getId() : '');
+      var tabSections = tab.bodyBuilder(doc ? doc.getId() : '', opts && opts.selectAllImports);
       (Array.isArray(tabSections) ? tabSections : [tabSections]).forEach(function (section) {
         card.addSection(section);
       });
@@ -169,18 +171,33 @@ function onShowTab(e) {
 }
 
 /**
+ * Card action handler for the Import tab's "Select all" button (AC-2,
+ * GTaskSheet-fgh4). Re-renders the Import tab with every checklist item
+ * across ALL source-doc groups pre-selected — server-side, so the client
+ * never needs to be trusted with the full selection set.
+ */
+function onImportSelectAll(e) { // eslint-disable-line no-unused-vars
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(_buildTabbedHomepageCard('import', null, { selectAllImports: true })))
+    .build();
+}
+
+/**
  * Import tab body — AC-1 read+render (GTaskSheet-eore). Calls
  * list_importable_actions for OPEN team-scoped actions from OTHER documents,
  * then renders one CardSection per source document: a header TextParagraph
  * linking to the document, followed by a CHECK_BOX SelectionInput (one item
  * per action, fieldName 'importSelection::'+doc_id, value=global_id) per the
- * frozen contract (epic-d-import-contract-seams). Select/import wiring is
- * AC-2 (GTaskSheet-fgh4) — out of scope here.
+ * frozen contract (epic-d-import-contract-seams). Also renders the "Select
+ * all" / "Import selected" buttons (AC-2, GTaskSheet-fgh4): Select all
+ * re-renders this section with selectAll=true so every item across all
+ * groups is pre-checked server-side; Import selected submits to _submitImport.
  *
  * @param {string} docId  Active document id, or '' if no doc is open.
+ * @param {boolean=} selectAll  When true, every checklist item is rendered pre-checked.
  * @return {Array<CardSection>}
  */
-function _buildImportTabSection(docId) {
+function _buildImportTabSection(docId, selectAll) {
   if (!docId) {
     return [
       CardService.newCardSection().addWidget(
@@ -250,13 +267,29 @@ function _buildImportTabSection(docId) {
       selectionInput.addItem(
         'AI-' + n + ' · ' + _escapeAddonHtml(action.action_text),
         action.global_id,
-        false
+        !!selectAll
       );
     }
 
     section.addWidget(selectionInput);
     sections.push(section);
   }
+
+  sections.push(
+    CardService.newCardSection().addWidget(
+      CardService.newButtonSet()
+        .addButton(
+          CardService.newTextButton()
+            .setText('Select all')
+            .setOnClickAction(_buildCardAction('onImportSelectAll'))
+        )
+        .addButton(
+          CardService.newTextButton()
+            .setText('Import selected')
+            .setOnClickAction(_buildCardAction('_submitImport'))
+        )
+    )
+  );
 
   return sections;
 }
