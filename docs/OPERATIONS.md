@@ -194,30 +194,35 @@ The `scn/` package provides the scenario harness (`ai`, `engine`, `session`, `su
 ### Test Accounts
 
 Most tests run as a single primary account. The access-filter journey (`J-ACCESS-FILTER`,
-used by the Import and Notify features) additionally requires a **second, restricted**
-account so the read-denied path is genuinely exercised rather than simulated.
+used by the Import and Notify features) additionally requires one or more **restricted**
+accounts so the read-denied path is genuinely exercised rather than simulated.
 
 | Account | Auth artifact | Role | Minimum Drive permissions |
 |---------|---------------|------|---------------------------|
-| Primary | `.auth/user.json` | Full-access baseline | Reader (or owner) on **all** team folders registered in `TeamData` |
-| Restricted | `.auth/user2.json` | Least-privilege subset | Reader on a **strict subset** of team folders only — must have **no** access to at least one team folder the primary can read |
+| Primary | `.auth/user.json` | Full-access baseline (currently also the dev deployer) | Reader (or owner) on **all** team folders registered in `TeamData` |
+| `test.u1` | `.auth/test.u1.json` *(not yet captured)* | Primary end user, non-deployer — target taxonomy | Same Drive access as Primary, but a separate account from the deployer (see `docs/security-architecture.md` §5) |
+| `test.u2` | `.auth/test.u2.json` | Restricted — single-team subset | Reader on a **strict subset** of team folders only — must have **no** access to at least one team folder the primary can read |
+| `test.u3` | `.auth/test.u3.json` *(not yet captured)* | Restricted — other-team subset (J-ACCESS-FILTER's `TeamA-only`) | Reader on a *different* single team than `test.u2`, no access to the rest |
+| `nuuts.service` | `.auth/nuuts.service.json` *(future)* | Production service/deployer account | Reader/Editor on team folders + the ActionSheet only |
 
-The restricted account is the same second Google account used by the Probe tests
-(`npm run probe:user2`). Setup:
+`test.u2` is the same second Google account used by the Probe tests
+(`npm run probe:test.u2`). Setup for a restricted account:
 
-1. Capture its storage state: `node tests/playwright/auth.setup.js --output .auth/user2.json`
-   (sign in as the restricted account when prompted).
-2. In Drive, share `testTeamAChild`'s folder with the restricted account as **Reader**.
-   Do **not** share `testTeamA` — that asymmetry is what produces the deny path.
-3. Seed one source document with ≥1 team-scoped action in each of `testTeamA` and
-   `testTeamAChild` (the access-filter fixture; idempotent check-exists-or-create).
+1. Capture its storage state: `node tests/playwright/auth.setup.js --account=test.u2`
+   (sign in as the restricted account when prompted). Or `npm run auth:test.u2`.
+2. In Drive, share the intended team folder with the restricted account as **Reader**.
+   Do **not** share the other team folders — that asymmetry is what produces the deny path.
+3. Seed one source document with ≥1 team-scoped action in each relevant team folder
+   (the access-filter fixture; idempotent check-exists-or-create).
 
 The harness selects the account per run via `PROBE_AUTH_STATE` (defaults to
-`.auth/user.json`). Tests that assert the restricted view set `PROBE_AUTH_STATE=.auth/user2.json`.
+`.auth/user.json`). Tests that assert a restricted view set `PROBE_AUTH_STATE=.auth/test.u2.json`
+(or `.auth/test.u3.json`).
 
-> This is a **shared test asset** for EPIC-D (Import) and EPIC-E (Notify). The two-account
+> This is a **shared test asset** for EPIC-D (Import) and EPIC-E (Notify). The account
 > fixture matrix and the journey it backs are specified in
-> `knowledge-base/staging/j-access-filter-journey.md`.
+> `knowledge-base/staging/j-access-filter-journey.md`. The full account-role taxonomy
+> and naming rationale are in `docs/security-architecture.md` §5 and `.auth/README.md`.
 
 ### Test Patterns
 
@@ -298,6 +303,45 @@ one step per (expectation, surface) pair regardless of which checkpoint
 drained it. On a `Surface.UI` FAIL-severity miss, a screenshot of the live
 page is attached to the report named `"<tag> UI FAIL"`. Both apply uniformly
 to every pytest scenario — no per-test opt-in.
+
+**Screenshot on every UI failure (GTaskSheet-3tkf).** Beyond drained-checkpoint
+misses, *any* failing UI test — timeout or assertion — automatically saves a
+full-page PNG and reports diagnostics, via two layers so there is no
+copy-pasted capture logic:
+
+- **Bounded driver waits** (`scn/ui.py`: `hover`, `create_action`, …) call
+  `UiDriver.capture_failure(label, probes={...})` before raising. It saves
+  `test-results/<label>.png`, attaches it to Allure, and embeds the screenshot
+  path + every `page.frames` URL + each probe selector's per-frame
+  `match_count` / `is_visible` / `bounding_box` into the raised error — so a
+  selector/frame miss (count 0) is distinguishable from a visibility-detection
+  problem (count > 0 but not visible) without a re-run.
+- **A catch-all** `pytest_runtest_makereport` hook in `tests/conftest.py`
+  screenshots the active page (found via the `browser_page` fixture or a
+  `ScenarioSession.ui._page`) on any failed UI test, saving
+  `test-results/FAIL-<nodeid>.png`, echoing the path + frame URLs into the
+  failure report, and attaching the PNG to Allure. It is a no-op for non-UI
+  (mock-based) tests.
+
+#### Interactive (headed) tests for human-only UI gestures
+
+Some Workspace Add-on / Docs interactions only respond to a real human gesture
+(the first is the `onLinkPreview` link-preview card — Docs never fires it for
+the add-on's plain-hyperlink action chips under synthetic events; see
+GTaskSheet-s9so). These live in `tests/test_interactive.py`, marked
+`interactive`, and are **excluded from the default run** (`addopts` carries
+`-m 'not interactive'`). The harness sets up the doc and verifies the durable
+result; a human supplies only the un-automatable gesture. Run from an
+interactive terminal:
+
+```
+/mnt/c/dev/venvs/uv1/bin/python -m pytest -m interactive tests/test_interactive.py -s
+```
+
+`-s` is required (the test prints numbered instructions and blocks on `input()`).
+A visible Chromium opens; follow the on-screen `👤 HUMAN ACTION REQUIRED` block,
+then return to the terminal to answer the confirmation prompts. Tracked under
+epic GTaskSheet-pw5x (GTaskSheet-15e8).
 
 The JS Playwright smoke layer (`tests/playwright/*.test.js`) already retains
 its own traces and screenshots: `playwright.config.js` sets `screenshot:

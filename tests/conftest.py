@@ -2,9 +2,71 @@
 import json
 import os
 import pathlib
+import re
+
 import pytest
 
 _SETTINGS_PATH = pathlib.Path(__file__).parent.parent / "local.settings.json"
+_TEST_RESULTS = pathlib.Path(__file__).parent.parent / "test-results"
+
+
+def _find_page(item):
+    """Locate the active Playwright page from a failing test's fixtures.
+
+    Supports the two harness shapes: a direct `browser_page` fixture
+    (test_ui_smoke / test_interactive) and a `ScenarioSession` exposing
+    `.ui._page`. Returns None for non-UI tests (e.g. mock-based unit tests),
+    which makes the failure hook a no-op there.
+    """
+    fa = getattr(item, "funcargs", {})
+    page = fa.get("browser_page")
+    if page is not None:
+        return page
+    for value in fa.values():
+        ui = getattr(value, "ui", None)
+        if ui is not None and getattr(ui, "_page", None) is not None:
+            return ui._page
+    return None
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Universal UI-failure diagnostics (GTaskSheet-3tkf).
+
+    On ANY failed UI test (timeout or assertion), save a full-page screenshot
+    under test-results/, echo its path + the page.frames URLs into the failure
+    report, and attach the PNG to Allure — so a human can review the failure
+    without a re-run. No-op when no active page is found (non-UI tests).
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if report.when != "call" or not report.failed:
+        return
+    page = _find_page(item)
+    if page is None:
+        return
+    try:
+        _TEST_RESULTS.mkdir(exist_ok=True)
+        slug = re.sub(r"[^a-z0-9]+", "-", item.nodeid.lower()).strip("-")[:80] or "ui-test"
+        shot = _TEST_RESULTS / f"FAIL-{slug}.png"
+        page.screenshot(path=str(shot), full_page=True)
+        frames = "\n  ".join(getattr(f, "url", "?") for f in page.frames)
+        report.sections.append(
+            ("UI failure diagnostics (GTaskSheet-3tkf)",
+             f"Screenshot: {shot}\nFrames:\n  {frames}")
+        )
+        try:
+            import allure
+            allure.attach(
+                page.screenshot(),
+                name=f"FAIL {item.name}",
+                attachment_type=allure.attachment_type.PNG,
+            )
+        except Exception:
+            pass
+    except Exception:
+        # Diagnostics must never mask the original failure.
+        pass
 
 
 def _load_settings() -> dict:

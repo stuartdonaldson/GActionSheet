@@ -222,6 +222,53 @@ class UiDriver:
         if self._session is not None:
             self._session._check_gas_errors()
 
+    def capture_failure(self, label: str, *, probes: dict | None = None) -> str:
+        """Capture a screenshot + frame/locator diagnostics for a UI failure (GTaskSheet-3tkf).
+
+        The single, reusable failure-capture mechanism for bounded UI waits: saves
+        a full-page PNG under test-results/, attaches it to Allure, and returns a
+        human-readable diagnostic block (screenshot path, every page.frames URL,
+        and — for each {name: selector} in `probes` — the per-frame match-count /
+        is_visible / bounding_box of that selector). The returned string is meant
+        to be embedded in the TimeoutError/RuntimeError the caller raises, so a
+        human can interpret the failure without re-running. Never raises —
+        diagnostics must not mask the original failure.
+        """
+        slug = (re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "ui-failure")[:60]
+        shot = f"test-results/{slug}.png"
+        try:
+            self._page.screenshot(path=shot, full_page=True)
+        except Exception:
+            shot = "(screenshot capture failed)"
+        try:
+            self.reporter.attach_screenshot(self._page, name=label)
+        except Exception:
+            pass
+        lines = [f"Screenshot: {shot}"]
+        if probes:
+            for name, sel in probes.items():
+                hits = []
+                for f in self._page.frames:
+                    try:
+                        cnt = f.locator(sel).count()
+                        if cnt:
+                            loc = f.locator(sel).first
+                            hits.append(
+                                f"{f.url}\n        match_count={cnt} "
+                                f"is_visible={loc.is_visible()} bbox={loc.bounding_box()}"
+                            )
+                    except Exception as _e:
+                        hits.append(f"{f.url}\n        PROBE-ERROR: {_e!r}")
+                lines.append(
+                    f"{name} (selector {sel!r}):\n      "
+                    + ("\n      ".join(hits) if hits else "(no frame matched)")
+                )
+        try:
+            lines.append("Frames seen:\n  " + "\n  ".join(f.url for f in self._page.frames))
+        except Exception:
+            pass
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -366,17 +413,12 @@ class UiDriver:
                     self._page.mouse.move(cx + 1, cy + 1)
                     self._page.mouse.move(cx, cy, steps=3)
 
-        # Timeout — capture the page state so the failure is interpretable
-        # (GTaskSheet-3tkf). The decisive signal: whether ANY card-candidate
-        # frame (script.google* / googleusercontent) exists. None → the
-        # onLinkPreview trigger never fired (gesture problem); present but body
-        # not visible → a render/visibility problem.
-        shot = "test-results/link_preview_timeout.png"
-        try:
-            self._page.screenshot(path=shot, full_page=True)
-            self.reporter.attach_screenshot(self._page, name="link_preview hover timeout")
-        except Exception:
-            pass
+        # Timeout — centralized capture (screenshot + frames, GTaskSheet-3tkf)
+        # plus the hover-specific signal: whether ANY card-candidate frame
+        # (script.google* / googleusercontent) exists. None → the onLinkPreview
+        # trigger never fired (gesture/conversion problem); present but body not
+        # visible → a render/visibility problem.
+        diag = self.capture_failure("link_preview hover timeout")
         card_frames = [
             f.url
             for f in self._page.frames
@@ -388,16 +430,14 @@ class UiDriver:
             dom = {"probe_error": repr(_e)}
         raise TimeoutError(
             "hover: onLinkPreview card iframe body never became visible within "
-            f"{timeout}. Screenshot: {shot}\n"
+            f"{timeout}.\n{diag}\n"
             f"chip bbox (located text element)={box}\n"
             f"hover point used=({cx}, {cy})\n"
-            "Card-candidate frames (script.google*/googleusercontent):\n  "
-            + ("\n  ".join(card_frames) if card_frames
+            "Card-candidate frames (script.google*/googleusercontent): "
+            + (", ".join(card_frames) if card_frames
                else "(NONE — onLinkPreview frame was never created)")
             + f"\nDoc-body action anchors: {dom.get('anchors') if isinstance(dom, dict) else dom}"
             + f"\nDoc-body person chips: {dom.get('persons') if isinstance(dom, dict) else ''}"
-            + "\nAll frames:\n  "
-            + "\n  ".join(f.url for f in self._page.frames)
         ) from last_err
 
     def hover_until(self, locator: _PwLocator, *, timeout: str = "5s") -> Card:
@@ -603,36 +643,15 @@ class UiDriver:
                     break
                 time.sleep(0.5)
             if form is None:
-                # Capture the page state at the timeout so the failure can be
-                # interpreted visually, and probe the exact locator per frame:
-                # match-count vs Playwright is_visible()/bounding_box tells us
-                # whether this is a selector/frame miss (count 0) or a
-                # visibility-detection problem (count>0 but is_visible False).
-                shot = "test-results/create_action_timeout.png"
-                try:
-                    self._page.screenshot(path=shot, full_page=True)
-                    self.reporter.attach_screenshot(self._page, name="create_action timeout")
-                except Exception:
-                    pass
-                probe = []
-                for f in self._page.frames:
-                    try:
-                        cnt = f.locator(_FORM_ASSIGNEE).count()
-                        if cnt:
-                            loc = f.locator(_FORM_ASSIGNEE).first
-                            probe.append(
-                                f"{f.url}\n      match_count={cnt} "
-                                f"is_visible={loc.is_visible()} bbox={loc.bounding_box()}"
-                            )
-                    except Exception as _e:
-                        probe.append(f"{f.url}\n      PROBE-ERROR: {_e!r}")
+                # Centralized failure capture (GTaskSheet-3tkf): screenshot +
+                # per-frame _FORM_ASSIGNEE probe (match-count / is_visible / bbox
+                # tells us selector/frame miss vs visibility-detection problem).
+                diag = self.capture_failure(
+                    "create_action timeout", probes={"_FORM_ASSIGNEE": _FORM_ASSIGNEE}
+                )
                 raise TimeoutError(
-                    "create_action: no add-on iframe with a visible assignee "
-                    f"input found. Screenshot: {shot}\n"
-                    "Locator probe (_FORM_ASSIGNEE per frame):\n  "
-                    + ("\n  ".join(probe) if probe else "(no frame matched _FORM_ASSIGNEE)")
-                    + "\nFrames seen:\n  "
-                    + "\n  ".join(f.url for f in self._page.frames)
+                    "create_action: no add-on iframe with a visible assignee input found.\n"
+                    + diag
                 )
             assignee = form.locator(_FORM_ASSIGNEE).first
 

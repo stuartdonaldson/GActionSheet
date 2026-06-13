@@ -175,6 +175,56 @@ class TestHover:
 
 
 # ---------------------------------------------------------------------------
+# capture_failure() — centralized UI-failure diagnostics (GTaskSheet-3tkf)
+# ---------------------------------------------------------------------------
+
+class TestCaptureFailure:
+    def _wire_frames(self, mock_page, urls, *, probe_count=0, visible=True, bbox=None):
+        frames = []
+        for url in urls:
+            f = MagicMock()
+            f.url = url
+            loc = f.locator.return_value
+            loc.count.return_value = probe_count
+            loc.first.is_visible.return_value = visible
+            loc.first.bounding_box.return_value = bbox
+            frames.append(f)
+        mock_page.frames = frames
+
+    def test_saves_screenshot_to_test_results(self, driver, mock_page):
+        self._wire_frames(mock_page, ["https://docs.google.com/document/d/X/edit"])
+        msg = driver.capture_failure("My Label Timeout")
+        # screenshot taken at a slugified test-results path, path echoed in message
+        assert mock_page.screenshot.called
+        assert "test-results/my-label-timeout.png" in msg
+
+    def test_lists_all_frame_urls(self, driver, mock_page):
+        urls = ["https://docs.google.com/a", "https://addons.gsuite.google.com/b"]
+        self._wire_frames(mock_page, urls)
+        msg = driver.capture_failure("x")
+        assert all(u in msg for u in urls)
+
+    def test_probe_reports_match_count_when_found(self, driver, mock_page):
+        self._wire_frames(
+            mock_page, ["https://addons.gsuite.google.com/form"],
+            probe_count=1, visible=True, bbox={"x": 1, "y": 2, "width": 3, "height": 4},
+        )
+        msg = driver.capture_failure("create_action timeout", probes={"FORM": "input"})
+        assert "match_count=1" in msg and "is_visible=True" in msg
+
+    def test_probe_reports_no_match(self, driver, mock_page):
+        self._wire_frames(mock_page, ["https://docs.google.com/a"], probe_count=0)
+        msg = driver.capture_failure("x", probes={"FORM": "input"})
+        assert "(no frame matched)" in msg
+
+    def test_never_raises_on_screenshot_failure(self, driver, mock_page):
+        mock_page.screenshot.side_effect = RuntimeError("boom")
+        self._wire_frames(mock_page, ["https://docs.google.com/a"])
+        msg = driver.capture_failure("x")  # must not raise
+        assert "(screenshot capture failed)" in msg
+
+
+# ---------------------------------------------------------------------------
 # click() and mouse_down_hold()
 # ---------------------------------------------------------------------------
 

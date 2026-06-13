@@ -118,6 +118,8 @@ references are mapped in `docs/atdd/ID-map.md` — start there):
 
 For long running tests, always route test output to a fail rather than pipe to tail so we have the file for later analysis and to use to monitor progress of the test.
 
+Every Playwright/UI test failure must, as a matter of course, capture a screenshot + diagnostics (screenshot path, frame URLs, and for locator waits the per-frame match-count / is_visible / bbox). This is automated (GTaskSheet-3tkf): bounded driver waits call `UiDriver.capture_failure(...)` before raising, and a `pytest_runtest_makereport` hook in `tests/conftest.py` screenshots the active page on any UI-test failure. Add a new bounded wait? Route its failure through `capture_failure` — never copy-paste a capture block. Interactions Playwright cannot drive synthetically (e.g. the `onLinkPreview` link-preview hover) go in `tests/test_interactive.py` (marker `interactive`, excluded from the default run; `pytest -m interactive ... -s`), with the standard run driving the equivalent durable change via a callable route-fallback method — see OPERATIONS.md §Running Tests and epic GTaskSheet-pw5x.
+
 Methodology declaration — Testing: `atdd-bdd` (DevStandard). Key rules for every session:
 
 **Issue title prefixes (required on all new issues):**
