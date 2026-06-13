@@ -95,6 +95,7 @@ var CONTRACT_SCHEMA = Object.freeze({
       'mark_doc_not_found',
       'delete_action_row',
       'patch_action_status',
+      'list_importable_actions',
       'run_fixture'
     ]),
 
@@ -167,6 +168,20 @@ var CONTRACT_SCHEMA = Object.freeze({
         request:  Object.freeze(['action', 'testToken', 'docId']),
         response: Object.freeze(['ok', 'docId', 'rows']),
         completionSignal: 'synchronous response; rows scoped to docId'
+      }),
+
+      // list_importable_actions — Import tab AC-1 (GTaskSheet-eore). Read-only;
+      // returns OPEN actions from OTHER documents in the current doc's team
+      // scope (DocData join on docId -> Team Id), gated by assertTeamAccess.
+      // Access failure or unknown team -> { ok:true, teamId, rows:[] }, never
+      // an error leak. rows are pre-sorted by doc_name ASC then AI-N ASC, but
+      // the renderer groups/sorts again per the frozen contract (epic-d-import-
+      // contract-seams).
+      //   Completion signal: synchronous response; GasLogger 'IMPORT_LIST.done'.
+      list_importable_actions: Object.freeze({
+        request:  Object.freeze(['action', 'secret', 'docId', 'clientVersion', 'caller']),
+        response: Object.freeze(['ok', 'teamId', 'rows']),
+        completionSignal: "synchronous response; rows scoped to current doc's team, excluding current doc"
       })
     })
   }),

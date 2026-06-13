@@ -187,6 +187,8 @@ function doPost(e) {
     result = _handleDeleteActionRow(payload);
   } else if (payload.action === 'patch_action_status') {
     result = _handlePatchActionStatus(payload);
+  } else if (payload.action === 'list_importable_actions') {
+    result = _handleListImportableActions(payload);
   } else {
     // Legacy POC — retained for diagnostics
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
@@ -863,6 +865,99 @@ function _handlePatchActionStatus(payload) {
 
   GasLogger.log('sidebar.status.patched', { globalId: globalId, newStatus: newStatus, row: entry.rowIndex });
   return _jsonResponse({ patched: 1 });
+}
+
+// ---------------------------------------------------------------------------
+// list_importable_actions handler  (production route, WEBAPP_SECRET-gated,
+// GTaskSheet-eore — EPIC-D AC-1 import list)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lists OPEN actions from documents OTHER than docId that share docId's
+ * Team Id, for the Import tab's read+render (AC-1). Read-only.
+ *
+ * Reuse (per epic-d-e-reuse-inventory): Team Id resolution via
+ * _readDocDataRow's docId -> DocData join; assertTeamAccess(teamId, ss) as
+ * the security gate (TeamNotFound:/TeamAccessDenied: -> zero rows, never a
+ * leak); isResolved(status) for the open-actions filter.
+ *
+ * Response rows are pre-sorted by doc_name ASC then AI-N ASC so callers/tests
+ * can assert order, though the renderer groups/sorts again regardless
+ * (epic-d-import-contract-seams).
+ *
+ * Payload: { action:'list_importable_actions', docId, secret, clientVersion, caller }
+ * Response: { ok:true, teamId, rows:[ {global_id, action_id, action_text,
+ *   assignee_email, assignee_name, status, doc_id, doc_name, doc_url,
+ *   created_date(ISO)} ] }
+ */
+function _handleListImportableActions(payload) {
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var docId = payload.docId || '';
+
+  var currentDocDataRow = _readDocDataRow(ss, docId);
+  var teamId = currentDocDataRow ? currentDocDataRow.teamId : '';
+  if (!teamId) {
+    return _jsonResponse({ ok: true, teamId: teamId, rows: [] });
+  }
+
+  try {
+    assertTeamAccess(teamId, ss);
+  } catch (e) {
+    GasLogger.log('IMPORT_LIST.access_denied', { docId: docId, teamId: teamId, err: e.message });
+    return _jsonResponse({ ok: true, teamId: teamId, rows: [] });
+  }
+
+  var actionsSheet = ss.getSheetByName('Actions');
+  var lastRow = actionsSheet ? actionsSheet.getLastRow() : 0;
+  if (!actionsSheet || lastRow < 2) {
+    return _jsonResponse({ ok: true, teamId: teamId, rows: [] });
+  }
+
+  var data = actionsSheet.getRange(2, 1, lastRow - 1, SHEET_HEADERS.length).getValues();
+
+  var docDataByFileId = {};
+  var docDataRows = _readDocDataRows(ss);
+  for (var i = 0; i < docDataRows.length; i++) {
+    docDataByFileId[docDataRows[i].fileId] = docDataRows[i];
+  }
+
+  var rows = [];
+  for (var i = 0; i < data.length; i++) {
+    var status = data[i][_ACOL.status - 1] || '';
+    if (isResolved(status)) continue;
+
+    var fileId = data[i][_ACOL.file_id - 1] || '';
+    if (!fileId || fileId === docId) continue;
+
+    var docData = docDataByFileId[fileId];
+    if (!docData || docData.teamId !== teamId) continue;
+
+    var createdRaw = data[i][_ACOL.created_date - 1];
+    rows.push({
+      global_id:      data[i][_ACOL.global_id      - 1] || '',
+      action_id:      data[i][_ACOL.action_id       - 1] || '',
+      action_text:    data[i][_ACOL.action_text     - 1] || '',
+      assignee_email: data[i][_ACOL.assignee_email  - 1] || '',
+      assignee_name:  data[i][_ACOL.assignee_name   - 1] || '',
+      status:         status,
+      doc_id:         fileId,
+      doc_name:       docData.docName || '',
+      doc_url:        'https://docs.google.com/document/d/' + fileId + '/edit',
+      created_date:   createdRaw instanceof Date ? createdRaw.toISOString() : (createdRaw || '')
+    });
+  }
+
+  rows.sort(function (a, b) {
+    if (a.doc_name !== b.doc_name) return a.doc_name < b.doc_name ? -1 : 1;
+    return parseGlobalId(a.global_id).N - parseGlobalId(b.global_id).N;
+  });
+
+  var docIds = {};
+  for (var j = 0; j < rows.length; j++) docIds[rows[j].doc_id] = true;
+
+  GasLogger.log('IMPORT_LIST.done', { teamId: teamId, count: rows.length, docCount: Object.keys(docIds).length });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, teamId: teamId, rows: rows });
 }
 
 // ---------------------------------------------------------------------------

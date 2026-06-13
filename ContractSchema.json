@@ -93,6 +93,7 @@
       "mark_doc_not_found",
       "delete_action_row",
       "patch_action_status",
+      "list_importable_actions",
       "run_fixture"
     ],
     "testRouteNames": [
@@ -166,6 +167,21 @@
           "rows"
         ],
         "completionSignal": "synchronous response; rows scoped to docId"
+      },
+      "list_importable_actions": {
+        "request": [
+          "action",
+          "secret",
+          "docId",
+          "clientVersion",
+          "caller"
+        ],
+        "response": [
+          "ok",
+          "teamId",
+          "rows"
+        ],
+        "completionSignal": "synchronous response; rows scoped to current doc's team, excluding current doc"
       }
     }
   },

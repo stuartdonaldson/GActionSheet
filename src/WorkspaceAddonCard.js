@@ -68,7 +68,10 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
         card.addSection(_buildVerificationSection(verificationResult));
       }
     } else {
-      card.addSection(tab.bodyBuilder());
+      var tabSections = tab.bodyBuilder(doc ? doc.getId() : '');
+      (Array.isArray(tabSections) ? tabSections : [tabSections]).forEach(function (section) {
+        card.addSection(section);
+      });
     }
 
     card.addSection(
@@ -166,12 +169,96 @@ function onShowTab(e) {
 }
 
 /**
- * Placeholder Import tab body (GTaskSheet-0r0s). Business logic lands in EPIC-D.
+ * Import tab body — AC-1 read+render (GTaskSheet-eore). Calls
+ * list_importable_actions for OPEN team-scoped actions from OTHER documents,
+ * then renders one CardSection per source document: a header TextParagraph
+ * linking to the document, followed by a CHECK_BOX SelectionInput (one item
+ * per action, fieldName 'importSelection::'+doc_id, value=global_id) per the
+ * frozen contract (epic-d-import-contract-seams). Select/import wiring is
+ * AC-2 (GTaskSheet-fgh4) — out of scope here.
+ *
+ * @param {string} docId  Active document id, or '' if no doc is open.
+ * @return {Array<CardSection>}
  */
-function _buildImportTabSection() {
-  return CardService.newCardSection().addWidget(
-    CardService.newTextParagraph().setText('Import — coming soon')
-  );
+function _buildImportTabSection(docId) {
+  if (!docId) {
+    return [
+      CardService.newCardSection().addWidget(
+        CardService.newTextParagraph().setText('Open a Google Doc to use Action Sync.')
+      )
+    ];
+  }
+
+  var result = _callWebApp('list_importable_actions', { docId: docId });
+  if (!result || result.error) {
+    return [
+      CardService.newCardSection().addWidget(
+        CardService.newTextParagraph().setText('Unable to load importable actions right now.')
+      )
+    ];
+  }
+
+  var rows = result.rows || [];
+  if (rows.length === 0) {
+    return [
+      CardService.newCardSection().addWidget(
+        CardService.newTextParagraph().setText('No open team actions to import.')
+      )
+    ];
+  }
+
+  // Group by doc_id, then order groups by doc_name ASC and each group's
+  // actions by AI-N ASC — applied here regardless of the API's own ordering
+  // (epic-d-import-contract-seams).
+  var groups = [];
+  var groupsByDocId = {};
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var group = groupsByDocId[row.doc_id];
+    if (!group) {
+      group = { docId: row.doc_id, docName: row.doc_name, docUrl: row.doc_url, actions: [] };
+      groupsByDocId[row.doc_id] = group;
+      groups.push(group);
+    }
+    group.actions.push(row);
+  }
+
+  groups.sort(function (a, b) {
+    return a.docName < b.docName ? -1 : (a.docName > b.docName ? 1 : 0);
+  });
+
+  var sections = [];
+  for (var g = 0; g < groups.length; g++) {
+    var grp = groups[g];
+    grp.actions.sort(function (a, b) {
+      return parseGlobalId(a.global_id).N - parseGlobalId(b.global_id).N;
+    });
+
+    var section = CardService.newCardSection().addWidget(
+      CardService.newTextParagraph().setText(
+        '<a href="' + grp.docUrl + '">' + _escapeAddonHtml(grp.docName) + '</a>'
+      )
+    );
+
+    var selectionInput = CardService.newSelectionInput()
+      .setType(CardService.SelectionInputType.CHECK_BOX)
+      .setFieldName('importSelection::' + grp.docId);
+
+    for (var a = 0; a < grp.actions.length; a++) {
+      var action = grp.actions[a];
+      var n = parseGlobalId(action.global_id).N;
+      selectionInput.addItem(
+        'AI-' + n + ' · ' + _escapeAddonHtml(action.action_text),
+        action.global_id,
+        false
+      );
+    }
+
+    section.addWidget(selectionInput);
+    sections.push(section);
+  }
+
+  return sections;
 }
 
 /**

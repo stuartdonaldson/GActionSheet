@@ -928,6 +928,42 @@ function _readDocDataRow(ss, docId) {
 }
 
 /**
+ * Reads all DocData rows. Read-only. Used to build a fileId -> row lookup map
+ * (e.g. for Import's per-action Team Id join, GTaskSheet-eore) without calling
+ * _readDocDataRow once per ActionSheet row.
+ *
+ * @param {Spreadsheet} ss
+ * @return {Array<{fileId: string, docName: string, docModified: Date, docUpdated: Date,
+ *   syncStatus: string, teamId: string, actionCount: number, resolvedCount: number}>}
+ *   Empty array if the DocData tab is missing or has no data rows. Rows with
+ *   no FileId are skipped.
+ */
+function _readDocDataRows(ss) {
+  var sheet = ss.getSheetByName('DocData');
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var cols   = CONTRACT_SCHEMA.sheetDocData.columnsByField;
+  var values = sheet.getRange(2, 1, lastRow - 1, CONTRACT_SCHEMA.sheetDocData.headers.length).getValues();
+  var rows   = [];
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (!row[cols.file_id - 1]) continue;
+    rows.push({
+      fileId:        row[cols.file_id - 1],
+      docName:       row[cols.doc_name - 1],
+      docModified:   row[cols.doc_modified - 1],
+      docUpdated:    row[cols.doc_updated - 1],
+      syncStatus:    row[cols.sync_status - 1],
+      teamId:        row[cols.team_id - 1],
+      actionCount:   row[cols.action_count - 1],
+      resolvedCount: row[cols.resolved_count - 1]
+    });
+  }
+  return rows;
+}
+
+/**
  * Finds the DocData row matching fileId and overwrites it with the given
  * values, or appends a new row if none exists. doc_updated is always set to
  * the current time.
