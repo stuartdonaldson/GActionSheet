@@ -702,6 +702,155 @@ class UiDriver:
                 pass
         self._post_act_check()
 
+    def read_import_list(self) -> list[dict]:
+        """Parse the rendered Import tab (AC-1, _buildImportTabSection).
+
+        Each CardSection groups one source document: a header TextParagraph
+        rendered as ``<a href="doc_url">doc_name</a>`` (Google rewrites this
+        through a ``google.com/url?q=...`` redirect, but the doc_id is still
+        present), followed by a CHECK_BOX SelectionInput rendered as
+        ``<input type="checkbox" value=global_id aria-label="AI-N · action_text">``
+        — value's docId prefix (before '/AI-N') groups items back to their
+        source-doc header without relying on DOM nesting.
+
+        Returns [{doc_name, doc_url, actions: [{label, global_id, n}]}] in
+        render order (groups by doc_name ASC, actions by AI-N ASC — already
+        sorted by the card builder). Returns [] if no group headers are
+        rendered (empty-list / error placeholder text).
+        """
+        if self._current_card is None:
+            return []
+        frame = self._current_card.frame
+
+        # The Import tab re-render (onShowTab/onImportSelectAll) is a server
+        # round trip; poll briefly for the rendered result (link, checklist
+        # item, or one of the placeholder texts) rather than assume the
+        # show_tab busy-spinner wait already covered it.
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            if (
+                frame.locator('a[href*="/document/d/"]').count() > 0
+                or frame.locator('input[type="checkbox"][value*="/AI-"]').count() > 0
+                or frame.get_by_text("No open team actions to import.").count() > 0
+                or frame.get_by_text("Unable to load importable actions").count() > 0
+            ):
+                break
+            time.sleep(0.5)
+
+        doc_order: list[str] = []
+        doc_info: dict[str, dict] = {}
+        links = frame.locator('a[href*="/document/d/"]')
+        for i in range(links.count()):
+            link = links.nth(i)
+            href = link.get_attribute("href") or ""
+            m = re.search(r"/document/d/([^/&]+)", href)
+            if not m:
+                continue
+            doc_id = m.group(1)
+            if doc_id not in doc_info:
+                doc_info[doc_id] = {
+                    "doc_name": (link.text_content() or "").strip(),
+                    "doc_url": f"https://docs.google.com/document/d/{doc_id}/edit",
+                    "actions": [],
+                }
+                doc_order.append(doc_id)
+
+        items = frame.locator('input[type="checkbox"][value*="/AI-"]')
+        for j in range(items.count()):
+            item = items.nth(j)
+            value = item.get_attribute("value") or ""
+            m = re.match(r"(.+)/AI-(\d+)$", value)
+            if not m:
+                continue
+            doc_id, n = m.group(1), int(m.group(2))
+            if doc_id not in doc_info:
+                continue
+            label_text = (item.get_attribute("aria-label") or "").strip()
+            doc_info[doc_id]["actions"].append({"label": label_text, "global_id": value, "n": n})
+
+        return [doc_info[d] for d in doc_order]
+
+    def select_import(self, action_ids: list[str] | str = "all", *, timeout: str = "15s") -> None:
+        """Check Import-tab checklist items (AC-2, GTaskSheet-fgh4).
+
+        The rendered CHECK_BOX item is an `<input type="checkbox">` wrapped in
+        a Material widget div that owns the jsaction click handlers; the
+        add-on framework's form-submission model is updated by that wrapper's
+        click handler, not by toggling the `<input>`'s checked state directly
+        (`.check()`/`.set_checked()` leave `e.formInputs` empty). So every path
+        below clicks the `<input>`'s parent wrapper div.
+
+        action_ids="all" clicks 'Select all' (onImportSelectAll) — a server
+        round trip that re-renders the tab with every item pre-checked — then
+        clicks the wrapper for any item whose <input> didn't end up checked
+        (the server-side selected=true on addItem does not reliably translate
+        into a submittable checked state). Otherwise clicks the wrapper(s) for
+        the checkbox item(s) whose value equals one of the given global_id
+        strings (fallback: match by the rendered 'AI-<n> · ...' label, derived
+        from the id's trailing AI-N token, if value isn't matched directly).
+
+        Known limitation (GTaskSheet-8qe5/EPIC GTaskSheet-pw5x): clicking the
+        wrapper toggles `.checked` and the wrapper's CSS state, but the add-on
+        host iframe's e.formInputs bridge does not reflect it, so
+        `click_import()` still sees "no selection". AC-2/AC-3 currently drive
+        the import via the `import_selected_for_test` testToken route instead
+        of this method — kept for when UI form-state automation is solved.
+        """
+        with self.reporter.step("UIACT", "select_import", str(action_ids)):
+            ms = _parse_timeout(timeout)
+            self._sidebar_card()
+            assert self._current_card is not None
+            frame = self._current_card.frame
+
+            if action_ids == "all":
+                btn = frame.get_by_role("button", name="Select all", exact=True)
+                btn.wait_for(state="visible", timeout=ms)
+                btn.click()
+
+                busy = frame.locator(_BUSY)
+                try:
+                    busy.wait_for(state="visible", timeout=2000)
+                    busy.wait_for(state="hidden", timeout=ms)
+                except Exception:
+                    pass
+
+                items = frame.locator('input[type="checkbox"][value*="/AI-"]')
+                for k in range(items.count()):
+                    item = items.nth(k)
+                    if not item.is_checked():
+                        item.locator("xpath=..").click(force=True)
+            else:
+                ids = [action_ids] if isinstance(action_ids, str) else action_ids
+                for target in ids:
+                    item = frame.locator(f'input[type="checkbox"][value="{target}"]').first
+                    if item.count() == 0:
+                        m = re.search(r"AI-(\d+)$", target)
+                        n = m.group(1) if m else ""
+                        item = frame.locator(
+                            f'input[type="checkbox"][aria-label^="AI-{n} ·"]'
+                        ).first
+                    item.wait_for(state="attached", timeout=ms)
+                    item.locator("xpath=..").click(force=True)
+        self._post_act_check()
+
+    def click_import(self, *, timeout: str = "15s") -> None:
+        """Click 'Import selected' (_submitImport, AC-2/AC-3)."""
+        with self.reporter.step("UIACT", "click_import"):
+            ms = _parse_timeout(timeout)
+            self._sidebar_card()
+            assert self._current_card is not None
+            btn = self._current_card.frame.get_by_role("button", name="Import selected", exact=True)
+            btn.wait_for(state="visible", timeout=ms)
+            btn.click()
+
+            busy = self._current_card.frame.locator(_BUSY)
+            try:
+                busy.wait_for(state="visible", timeout=2000)
+                busy.wait_for(state="hidden", timeout=ms)
+            except Exception:
+                pass
+        self._post_act_check()
+
     def read_current(self) -> list[ai]:
         """Read the currently-rendered card as list[ai] for queue-drain (R1-impl §1).
 

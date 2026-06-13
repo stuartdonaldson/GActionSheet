@@ -249,71 +249,13 @@ function _submitImport(e) {
         .build();
     }
 
-    var baseN    = _getNextActionN(doc);
-    var index    = cursorResult.index;
-    var newRows  = [];
-    var forwards = [];
-
-    for (var k = 0; k < importRows.length; k++) {
-      var src         = importRows[k];
-      var N           = baseN + k;
-      var newGlobalId = docId + '/AI-' + N;
-
-      var fragResult = _applyActionFragment(docId, token, index, {
-        N:             N,
-        globalId:      newGlobalId,
-        actionText:    src.action_text,
-        assigneeEmail: src.assignee_email,
-        status:        src.status,
-        assigneeName:  src.assignee_name || src.assignee_email
-      }, k > 0);
-
-      if (!fragResult.ok) {
-        GasLogger.log('IMPORT_SELECTED.error', { msg: 'chip insert failed', err: fragResult.error, k: k });
-        GasLogger.flush();
-        return CardService.newActionResponseBuilder()
-          .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Insert failed', 'Action ' + (k + 1) + ' of ' + importRows.length + ' could not be inserted.\n\n' + fragResult.error)))
-          .build();
-      }
-
-      index += fragResult.insertedLength;
-
-      newRows.push({
-        globalId:      newGlobalId,
-        actionText:    src.action_text,
-        assigneeEmail: src.assignee_email,
-        assigneeName:  src.assignee_name || src.assignee_email,
-        status:        src.status
-      });
-      forwards.push({ sourceGlobalId: src.global_id, newGlobalId: newGlobalId });
-    }
-
-    // Write new rows to the current doc's ActionSheet only after doc inserts succeed.
-    var upsertResult = _callWebApp('upsert_action_rows', {
-      docUrl:   doc.getUrl(),
-      docTitle: doc.getName(),
-      rows:     newRows
-    });
-
-    if (!upsertResult || upsertResult.error) {
-      GasLogger.log('IMPORT_SELECTED.error', { msg: 'upsert failed', err: upsertResult && upsertResult.error });
-      GasLogger.flush();
+    var result = _importSelectedRows(doc, docId, token, cursorResult.index, importRows);
+    GasLogger.flush();
+    if (!result.ok) {
       return CardService.newActionResponseBuilder()
-        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Actions were inserted in the document but could not be saved: ' + ((upsertResult && upsertResult.error) || 'unknown error'))))
+        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard(result.title, result.error)))
         .build();
     }
-
-    // AC-3 — mark each source row Forwarded (status + suffix + dirty).
-    var forwardResult = _callWebApp('forward_action_rows', {
-      forwards:      forwards,
-      targetDocName: doc.getName()
-    });
-    if (!forwardResult || forwardResult.error) {
-      GasLogger.log('IMPORT_SELECTED.error', { msg: 'forward failed', err: forwardResult && forwardResult.error });
-    }
-
-    GasLogger.log('IMPORT_SELECTED.done', { inserted: newRows.length, baseN: baseN });
-    GasLogger.flush();
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().updateCard(_buildTabbedHomepageCard('import')))
       .build();
@@ -947,6 +889,117 @@ function _resolveCursorIndex(doc, cursor, token) {
   }
 
   return { index: cursorIndex };
+}
+
+/**
+ * Resolves the Docs REST API character index for the end of the document body
+ * (just before the body's trailing newline) — the insertion point used by the
+ * import_selected_for_test route (GTaskSheet-8qe5), which has no cursor.
+ *
+ * @param {string} docId
+ * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
+ * @returns {{index: number}|{index: null, error: string}}
+ */
+function _resolveEndIndex(docId, token) {
+  var baseUrl = 'https://docs.googleapis.com/v1/documents/';
+  var getResp = UrlFetchApp.fetch(
+    baseUrl + docId + '?fields=body.content',
+    { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+  );
+  if (getResp.getResponseCode() !== 200) {
+    return { index: null, error: 'Could not read document (HTTP ' + getResp.getResponseCode() + ')' };
+  }
+  var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
+  if (!content.length) {
+    return { index: null, error: 'document body is empty' };
+  }
+  return { index: content[content.length - 1].endIndex - 1 };
+}
+
+/**
+ * Inserts each selected importable row as a new floating action at `index`,
+ * upserts the new rows into the current doc's ActionSheet (AC-2), and marks
+ * each source row Forwarded (AC-3, forward_action_rows).
+ *
+ * Shared core extracted from _submitImport (epic-d-import-contract-seams #4,
+ * GTaskSheet-8qe5) — reused by the production CardService handler (cursor-
+ * resolved index) and the import_selected_for_test route (end-of-body index,
+ * explicit globalIds selection instead of CardService form-collected
+ * checkboxes).
+ *
+ * @param {GoogleAppsScript.Document.Document} doc
+ * @param {string} docId
+ * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
+ * @param {number} index  Target REST character index for the first insert
+ * @param {Array<Object>} importRows  Rows from list_importable_actions, filtered to the selection
+ * @returns {{ok: true, inserted: number, baseN: number}
+ *          |{ok: false, title: string, error: string}}
+ */
+function _importSelectedRows(doc, docId, token, index, importRows) {
+  var baseN    = _getNextActionN(doc);
+  var newRows  = [];
+  var forwards = [];
+
+  for (var k = 0; k < importRows.length; k++) {
+    var src         = importRows[k];
+    var N           = baseN + k;
+    var newGlobalId = docId + '/AI-' + N;
+
+    var fragResult = _applyActionFragment(docId, token, index, {
+      N:             N,
+      globalId:      newGlobalId,
+      actionText:    src.action_text,
+      assigneeEmail: src.assignee_email,
+      status:        src.status,
+      assigneeName:  src.assignee_name || src.assignee_email
+    }, k > 0);
+
+    if (!fragResult.ok) {
+      GasLogger.log('IMPORT_SELECTED.error', { msg: 'chip insert failed', err: fragResult.error, k: k });
+      return {
+        ok: false, title: 'Insert failed',
+        error: 'Action ' + (k + 1) + ' of ' + importRows.length + ' could not be inserted.\n\n' + fragResult.error
+      };
+    }
+
+    index += fragResult.insertedLength;
+
+    newRows.push({
+      globalId:      newGlobalId,
+      actionText:    src.action_text,
+      assigneeEmail: src.assignee_email,
+      assigneeName:  src.assignee_name || src.assignee_email,
+      status:        src.status
+    });
+    forwards.push({ sourceGlobalId: src.global_id, newGlobalId: newGlobalId });
+  }
+
+  // Write new rows to the current doc's ActionSheet only after doc inserts succeed.
+  var upsertResult = _callWebApp('upsert_action_rows', {
+    docUrl:   doc.getUrl(),
+    docTitle: doc.getName(),
+    rows:     newRows
+  });
+
+  if (!upsertResult || upsertResult.error) {
+    GasLogger.log('IMPORT_SELECTED.error', { msg: 'upsert failed', err: upsertResult && upsertResult.error });
+    return {
+      ok: false, title: 'Error',
+      error: 'Actions were inserted in the document but could not be saved: ' + ((upsertResult && upsertResult.error) || 'unknown error')
+    };
+  }
+
+  // AC-3 — mark each source row Forwarded (status + suffix + dirty).
+  var forwardResult = _callWebApp('forward_action_rows', {
+    forwards:      forwards,
+    targetDocName: doc.getName()
+  });
+  if (!forwardResult || forwardResult.error) {
+    GasLogger.log('IMPORT_SELECTED.error', { msg: 'forward failed', err: forwardResult && forwardResult.error });
+  }
+
+  GasLogger.log('IMPORT_SELECTED.done', { inserted: newRows.length, baseN: baseN });
+  return { ok: true, inserted: newRows.length, baseN: baseN };
 }
 
 /**

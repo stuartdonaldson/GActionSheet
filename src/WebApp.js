@@ -133,6 +133,9 @@ function doPost(e) {
   if (payload.action === 'verify_chip_integrity') {
     return _handleVerifyChipIntegrity(payload);
   }
+  if (payload.action === 'import_selected_for_test') {
+    return _handleImportSelectedForTest(payload);
+  }
   // patch_action_status and delete_action_row are production routes (WEBAPP_SECRET-gated
   // when called by the add-on). When called by the ATDD harness they arrive with a
   // testToken and snake_case field names per ContractSchema.js messages (§16.11 #3).
@@ -893,26 +896,40 @@ function _handlePatchActionStatus(payload) {
  *   created_date(ISO)} ] }
  */
 function _handleListImportableActions(payload) {
-  var ss    = SpreadsheetApp.getActiveSpreadsheet();
-  var docId = payload.docId || '';
+  var data = _listImportableActionsData(payload.docId || '');
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, teamId: data.teamId, rows: data.rows });
+}
+
+/**
+ * Core row-building for list_importable_actions (GTaskSheet-8qe5) — extracted
+ * so the import_selected_for_test route can re-derive the same team-scoped
+ * importable rows without going through a second HTTP round trip / response
+ * wrapper. No behaviour change versus the inlined version.
+ *
+ * @param {string} docId
+ * @returns {{teamId: string, rows: Array<Object>}}
+ */
+function _listImportableActionsData(docId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   var currentDocDataRow = _readDocDataRow(ss, docId);
   var teamId = currentDocDataRow ? currentDocDataRow.teamId : '';
   if (!teamId) {
-    return _jsonResponse({ ok: true, teamId: teamId, rows: [] });
+    return { teamId: teamId, rows: [] };
   }
 
   try {
     assertTeamAccess(teamId, ss);
   } catch (e) {
     GasLogger.log('IMPORT_LIST.access_denied', { docId: docId, teamId: teamId, err: e.message });
-    return _jsonResponse({ ok: true, teamId: teamId, rows: [] });
+    return { teamId: teamId, rows: [] };
   }
 
   var actionsSheet = ss.getSheetByName('Actions');
   var lastRow = actionsSheet ? actionsSheet.getLastRow() : 0;
   if (!actionsSheet || lastRow < 2) {
-    return _jsonResponse({ ok: true, teamId: teamId, rows: [] });
+    return { teamId: teamId, rows: [] };
   }
 
   var data = actionsSheet.getRange(2, 1, lastRow - 1, SHEET_HEADERS.length).getValues();
@@ -958,8 +975,66 @@ function _handleListImportableActions(payload) {
   for (var j = 0; j < rows.length; j++) docIds[rows[j].doc_id] = true;
 
   GasLogger.log('IMPORT_LIST.done', { teamId: teamId, count: rows.length, docCount: Object.keys(docIds).length });
+  return { teamId: teamId, rows: rows };
+}
+
+// ---------------------------------------------------------------------------
+// import_selected_for_test handler  (testToken-gated, GTaskSheet-8qe5 —
+// interactive-test-entry-point, EPIC GTaskSheet-pw5x)
+// ---------------------------------------------------------------------------
+
+/**
+ * Drives _importSelectedRows (the same AC-2/AC-3 core as _submitImport) with
+ * an explicit globalIds selection, inserting new floating actions at the end
+ * of testDocId's body instead of at a CardService cursor. Unblocks
+ * GTaskSheet-4gsx: the Import tab's CHECK_BOX SelectionInput cannot be driven
+ * via Playwright (clicking the widget toggles the underlying <input>'s
+ * checked state, but the add-on host iframe's form-state bridge to
+ * e.formInputs does not pick it up).
+ *
+ * Payload shape: { action: 'import_selected_for_test', testToken, testDocId, globalIds }
+ * Response shape: { ok: true, inserted, baseN } | { error }
+ */
+function _handleImportSelectedForTest(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId     = payload.testDocId || '';
+  var globalIds = payload.globalIds || [];
+  if (!docId) {
+    return _jsonResponse({ error: 'testDocId required for import_selected_for_test' });
+  }
+  if (globalIds.length === 0) {
+    return _jsonResponse({ ok: true, inserted: 0, baseN: null });
+  }
+
+  var listData    = _listImportableActionsData(docId);
+  var selectedSet = {};
+  for (var s = 0; s < globalIds.length; s++) selectedSet[globalIds[s]] = true;
+  var importRows = (listData.rows || []).filter(function (row) {
+    return selectedSet[row.global_id];
+  });
+
+  if (importRows.length === 0) {
+    GasLogger.flush();
+    return _jsonResponse({ ok: true, inserted: 0, baseN: null });
+  }
+
+  var doc   = DocumentApp.openById(docId);
+  var token = ScriptApp.getOAuthToken();
+
+  var indexResult = _resolveEndIndex(docId, token);
+  if (indexResult.index === null) {
+    GasLogger.flush();
+    return _jsonResponse({ error: indexResult.error });
+  }
+
+  var result = _importSelectedRows(doc, docId, token, indexResult.index, importRows);
   GasLogger.flush();
-  return _jsonResponse({ ok: true, teamId: teamId, rows: rows });
+  if (!result.ok) {
+    return _jsonResponse({ error: result.error });
+  }
+  return _jsonResponse({ ok: true, inserted: result.inserted, baseN: result.baseN });
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,6 +1096,12 @@ function _handleForwardActionRows(payload) {
   for (var j = 0; j < forwarded.length; j++) {
     _remarkRowDirty(forwarded[j]);
   }
+
+  // Cross-execution read visibility (same pattern as _syncTeamScope's
+  // SpreadsheetApp.flush() — SyncManager.js): the test harness's next
+  // find_sheet_actions runs as a separate doPost execution and would not
+  // otherwise see these writes.
+  SpreadsheetApp.flush();
 
   GasLogger.log('FORWARD_ROWS.done', { count: forwarded.length });
   GasLogger.flush();

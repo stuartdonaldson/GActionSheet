@@ -59,6 +59,11 @@ AC_REGISTRY: dict[str, str] = {
     "sidebar sync-SHEET": "Sidebar SHEET surface sync",
     "sidebar tracker-insert": "Sidebar tracker insert operation",
     "t": "Generic test marker",
+    "import access-readable": "1dxz P1-P3 - list_importable_actions exposes actions for a readable team",
+    "import access-absent": "1dxz P4 - list_importable_actions returns rows:[] for a TeamNotFound docId",
+    "import ac1-list": "4gsx AC-1 - Import tab list grouped by source doc (doc_name ASC) and AI-N ASC within group",
+    "import ac2-select": "4gsx AC-2 - select all + Import selected inserts new sequential AI-N rows",
+    "import ac3-forward": "4gsx AC-3 - source rows marked Forwarded, suffixed, and dirty after import",
     "teamscope teamdata-safety": "S0 - TeamData fixture setup leaves pre-existing rows unchanged; new rows are test-marked only",
     "teamscope direct-match": "S1a - auto-assign when doc is directly in a registered team's folder",
     "teamscope subteam-match": "S1b - auto-assign matches a more specific sub-team folder over its registered parent",
@@ -95,6 +100,16 @@ ENTRY_POINT_REGISTRY: dict[str, str] = {
         "getActiveSpreadsheet() is null here (GTaskSheet-yuvq)",
     "assertTeamAccess": "assertTeamAccess(teamId, ss) — team-scoped security gate on filtered reads",
     "setup_team_scope_fixture": "setup_team_scope_fixture — idempotent TeamData/folder fixture setup for team-scope scenarios",
+    "importList": "list_importable_actions via Import tab render (show_tab('Import') -> "
+        "_buildImportTabSection) — AC-1/EPIC-D team-scoped read",
+    "importSelectedSubmit": "_submitImport(e) — Import tab 'Import selected' button: "
+        "select+insert+upsert+forward (AC-2/AC-3/EPIC-D). NOT YET COVERED: CHECK_BOX "
+        "SelectionInput state cannot be driven via Playwright (see importSelectedForTest "
+        "and EPIC GTaskSheet-pw5x for the interim path back to this entry point)",
+    "importSelectedForTest": "import_selected_for_test testToken route — interactive-test-"
+        "entry-point (GTaskSheet-8qe5/EPIC GTaskSheet-pw5x) standing in for "
+        "importSelectedSubmit's AC-2/AC-3 select+insert+upsert+forward logic "
+        "(_importSelectedRows) until the Import tab checkbox UI can be driven via Playwright",
 }
 
 __all__ = [

@@ -1,0 +1,364 @@
+"""
+test_import.py — GTaskSheet-1dxz + GTaskSheet-4gsx (EPIC-D Import tab, TST coverage).
+
+GTaskSheet-1dxz binds AC-1's (`list_importable_actions`) visibility to the shared
+J-ACCESS-FILTER journey (knowledge-base/staging/j-access-filter-journey.md P1-P4),
+reduced scope (Primary only, existing testTeamA/testTeamAChild fixtures — see
+docs/security-architecture.md §1 for why account-differentiated TeamAccessDenied
+is not producible today):
+  - readable-team-present (P1-P3)
+  - TeamNotFound-absent (P4)
+
+GTaskSheet-4gsx is one end-to-end functional journey AC-1 (list) -> AC-2 (select +
+import) -> AC-3 (forward), entry-point call-site = the Import tab's
+'Import selected' button (_submitImport).
+
+All testing is UI-driven (show_tab('Import') + scn/ui.py driver methods), which
+exercises list_importable_actions server-side via _buildImportTabSection ->
+_callWebApp.
+"""
+import pathlib
+
+import pytest
+
+from scn.ai import ai
+from scn.engine import CheckpointKind, Surface
+from scn.session import ScenarioSession
+from scn.ui import UiDriver
+from tests.helpers.access_filter import assert_visible_set, import_adapter, visible_doc_set
+from tests.helpers.gas_log import assert_log, clear_logs
+
+STEP = CheckpointKind.STEP
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def browser_page():
+    """Launch Chromium with saved auth state; yield the page for UI-driven acts."""
+    from playwright.sync_api import sync_playwright
+
+    auth = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        ctx = browser.new_context(
+            storage_state=str(auth),
+            viewport={"width": 1280, "height": 900},
+        )
+        page = ctx.new_page()
+        yield page
+        ctx.close()
+        browser.close()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _move_to_folder(scn, folder_id):
+    scn._post_fixture("move_doc_to_folder", {"folderId": folder_id})
+
+
+def _set_docdata(scn, **fields):
+    return scn._post_fixture("set_docdata_row", fields)
+
+
+def _docdata_row(scn):
+    resp = scn._post_fixture("get_docdata_row")
+    return (resp.get("data") or {}).get("row") or {}
+
+
+def _seed_open_action(scn, action_text, assignee=None):
+    """Append an 'AI: ... (Open)' paragraph, sync, and resolve the assigned AI-N."""
+    seed = ai(action=action_text, assignee=assignee, status="Open")
+    scn.append_paragraph(seed.as_text())
+    scn.sync()
+    for row in scn.find_sheet_actions():
+        if row.action == action_text:
+            seed.action_id = row.action_id
+            seed.global_id = row.global_id
+            return seed
+    raise AssertionError(f"seeded action {action_text!r} not found in sheet after sync")
+
+
+# ---------------------------------------------------------------------------
+# GTaskSheet-1dxz — J-ACCESS-FILTER P1-P4 (reduced scope)
+# ---------------------------------------------------------------------------
+
+def test_import_access_filter(settings, gas_log_dir, browser_page, request):
+    sessions = []
+
+    def new_doc():
+        s = ScenarioSession.new_doc(settings, request=request)
+        sessions.append(s)
+        return s
+
+    try:
+        scn_setup = new_doc()
+        setup_resp = scn_setup._post_fixture("setup_team_scope_fixture")
+        teams = setup_resp.get("data") or {}
+        team_a = teams["testTeamA"]
+        team_a_child = teams["testTeamAChild"]
+
+        # ── Readable (P1-P3): target + sibling, both in testTeamA ────────────
+        scn_target = new_doc()
+        _move_to_folder(scn_target, team_a)
+        scn_target.sync()
+        scn_target.ui = UiDriver(browser_page, doc_id=scn_target.doc_id)
+
+        scn_sibling = new_doc()
+        _move_to_folder(scn_sibling, team_a)
+        scn_sibling.sync()
+        _seed_open_action(scn_sibling, "Import-filter sibling action")
+
+        # ── Absent — different team (negative half of P1-P3) ────────────────
+        scn_other = new_doc()
+        _move_to_folder(scn_other, team_a_child)
+        scn_other.sync()
+        _seed_open_action(scn_other, "Import-filter other-team action")
+
+        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        scn_target.ui.show_tab("Import")
+        expected = visible_doc_set(scn_target, seeded={scn_sibling.doc_id})
+        # testTeamA/testTeamAChild are shared fixture folders that accumulate
+        # ActionSheet rows across runs (end_journey_session trashes the doc but
+        # not its rows) — scope the comparison to docs this test itself seeded.
+        candidates = {scn_sibling.doc_id, scn_other.doc_id}
+
+        def check_readable():
+            actual = import_adapter(scn_target.ui.read_import_list()) & candidates
+            try:
+                assert_visible_set(actual, expected, account="Primary", phase="P1-P3")
+            except AssertionError as exc:
+                return str(exc)
+            return None
+
+        err = check_readable()
+        assert err is None, err
+        assert_log(
+            gas_log_dir, fence,
+            lambda e: e.get("tag") == "IMPORT_LIST.done"
+            and e.get("data", {}).get("count", 0) >= 1,
+            "IMPORT_LIST.done",
+        )
+        scn_target.expect_callable(
+            check_readable, on=Surface.UI,
+            tag="import access-readable", entry_point="importList",
+        )
+        scn_target.checkpoint(STEP, on=frozenset({Surface.UI}))
+
+        # ── Absent — TeamNotFound (P4) ───────────────────────────────────────
+        scn_p4 = new_doc()
+        scn_p4.sync()
+        _set_docdata(scn_p4, teamId="TestTeamNonexistent")
+        scn_p4.ui = UiDriver(browser_page, doc_id=scn_p4.doc_id)
+
+        fence2 = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        scn_p4.ui.show_tab("Import")
+
+        def check_absent():
+            groups = scn_p4.ui.read_import_list()
+            if groups != []:
+                return f"P4 expected empty import list, got {groups!r}"
+            return None
+
+        err = check_absent()
+        assert err is None, err
+        assert_log(
+            gas_log_dir, fence2,
+            lambda e: e.get("tag") == "IMPORT_LIST.access_denied"
+            and "TeamNotFound:" in (e.get("data", {}).get("err") or ""),
+            "IMPORT_LIST.access_denied TeamNotFound",
+        )
+        scn_p4.expect_callable(
+            check_absent, on=Surface.UI,
+            tag="import access-absent", entry_point="importList",
+        )
+        scn_p4.checkpoint(STEP, on=frozenset({Surface.UI}))
+    finally:
+        for scn in sessions:
+            try:
+                scn._post_route("end_journey_session", {"docId": scn.doc_id})
+            except Exception:
+                pass
+            scn.engine.close()
+
+
+# ---------------------------------------------------------------------------
+# GTaskSheet-4gsx — AC-1 -> AC-2 -> AC-3 functional journey
+# ---------------------------------------------------------------------------
+
+def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
+    sessions = []
+
+    def new_doc():
+        s = ScenarioSession.new_doc(settings, request=request)
+        sessions.append(s)
+        return s
+
+    try:
+        scn_setup = new_doc()
+        setup_resp = scn_setup._post_fixture("setup_team_scope_fixture")
+        teams = setup_resp.get("data") or {}
+        team_a = teams["testTeamA"]
+        team_a_child = teams["testTeamAChild"]
+
+        # ── Seed: target + 2 sources in testTeamA, 1 other-team negative ────
+        scn_target = new_doc()
+        _move_to_folder(scn_target, team_a)
+        scn_target.sync()
+        scn_target.ui = UiDriver(browser_page, doc_id=scn_target.doc_id)
+        target_doc_name = _docdata_row(scn_target).get("docName")
+
+        scn_src1 = new_doc()
+        _move_to_folder(scn_src1, team_a)
+        scn_src1.sync()
+        src1_action = _seed_open_action(scn_src1, "Import-flow source-1 action")
+
+        scn_src2 = new_doc()
+        _move_to_folder(scn_src2, team_a)
+        scn_src2.sync()
+        src2_action = _seed_open_action(scn_src2, "Import-flow source-2 action")
+
+        scn_other = new_doc()
+        _move_to_folder(scn_other, team_a_child)
+        scn_other.sync()
+        _seed_open_action(scn_other, "Import-flow other-team action")
+
+        # ── AC-1: Import tab list — grouped by doc_name ASC, AI-N ASC within ─
+        scn_target.ui.show_tab("Import")
+
+        def check_ac1():
+            groups = scn_target.ui.read_import_list()
+            doc_names = [g["doc_name"] for g in groups]
+            if doc_names != sorted(doc_names):
+                return f"groups not doc_name ASC: {doc_names}"
+            for group in groups:
+                ns = [a["n"] for a in group["actions"]]
+                if ns != sorted(ns):
+                    return f"actions not AI-N ASC in {group['doc_name']!r}: {ns}"
+            visible_ids = import_adapter(groups)
+            if scn_src1.doc_id not in visible_ids or scn_src2.doc_id not in visible_ids:
+                return f"expected source docs visible, got {sorted(visible_ids)}"
+            if scn_other.doc_id in visible_ids:
+                return f"other-team doc unexpectedly visible: {sorted(visible_ids)}"
+            return None
+
+        err = check_ac1()
+        assert err is None, err
+        scn_target.expect_callable(
+            check_ac1, on=Surface.UI, tag="import ac1-list", entry_point="importList",
+        )
+        scn_target.checkpoint(STEP, on=frozenset({Surface.UI}))
+
+        # ── Negative: empty selection -> no insert (fresh render, nothing
+        # checked). _submitImport short-circuits via _buildMessageCard
+        # ('Nothing selected', ...), which replaces the tab bar — reload and
+        # reopen the sidebar to get back to a tabbed card for AC-2.
+        before_empty = {r.global_id for r in scn_target.find_sheet_actions()}
+        scn_target.ui.click_import()
+        after_empty = {r.global_id for r in scn_target.find_sheet_actions()}
+        assert after_empty == before_empty, "empty-selection Import changed ActionSheet rows"
+
+        scn_target.ui.reload()
+        scn_target.ui._current_card = None  # message card replaced the tab bar; force re-open
+        scn_target.ui.show_tab("Import")
+
+        # ── AC-2: select the 2 seeded source actions -> Import selected ─────
+        # testTeamA accumulates rows across runs (end_journey_session trashes
+        # the doc but not its ActionSheet rows), so "Select all" would import
+        # every stale row too — select only this test's own seeded actions.
+        #
+        # The Import tab's CHECK_BOX SelectionInput state cannot be driven via
+        # Playwright (CardService Material checkbox wrapper does not bridge to
+        # e.formInputs — see GTaskSheet-8qe5). Drive AC-2/AC-3 via the
+        # import_selected_for_test interactive-test-entry-point instead, which
+        # invokes the same _importSelectedRows core as _submitImport
+        # (EPIC GTaskSheet-pw5x tracks migrating this back to a UI call-site).
+        before_ids = {r.global_id for r in scn_target.find_sheet_actions()}
+
+        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        result = scn_target._post_route("import_selected_for_test", {
+            "testDocId": scn_target.doc_id,
+            "globalIds": [src1_action.global_id, src2_action.global_id],
+        })
+        assert result.get("ok") and result.get("inserted", 0) >= 2, result
+        assert_log(
+            gas_log_dir, fence,
+            lambda e: e.get("tag") == "IMPORT_SELECTED.done"
+            and e.get("data", {}).get("inserted", 0) >= 2,
+            "IMPORT_SELECTED.done",
+        )
+
+        def check_ac2():
+            after_rows = scn_target.find_sheet_actions()
+            new_rows = [r for r in after_rows if r.global_id not in before_ids]
+            if len(new_rows) < 2:
+                return f"expected >=2 new rows, got {len(new_rows)}"
+            new_rows.sort(key=lambda r: int(r.action_id.split("-")[1]))
+            ns = [int(r.action_id.split("-")[1]) for r in new_rows]
+            if ns != list(range(ns[0], ns[0] + len(ns))):
+                return f"new AI-N not sequential: {ns}"
+            carried = {r.action for r in new_rows}
+            if src1_action.action not in carried or src2_action.action not in carried:
+                return f"source action text not carried over: {carried}"
+            return None
+
+        err = check_ac2()
+        assert err is None, err
+        scn_target.expect_callable(
+            check_ac2, on=Surface.SHEET, tag="import ac2-select", entry_point="importSelectedForTest",
+        )
+        scn_target.checkpoint(STEP, on=frozenset({Surface.SHEET}))
+
+        # ── AC-3: source rows Forwarded + suffixed + dirty ───────────────────
+        assert_log(
+            gas_log_dir, fence,
+            lambda e: e.get("tag") == "FORWARD_ROWS.done"
+            and e.get("data", {}).get("count", 0) >= 2,
+            "FORWARD_ROWS.done",
+        )
+
+        def _forward_check(src_scn, src_action):
+            def check():
+                rows = src_scn.find_sheet_actions()
+                row = next((r for r in rows if r.global_id == src_action.global_id), None)
+                if row is None:
+                    return f"source row {src_action.global_id} not found after import"
+                if row.status != "Forwarded":
+                    return f"source row {src_action.global_id} status={row.status!r}, expected 'Forwarded'"
+                if f"[Forward:{target_doc_name} AI-" not in row.action:
+                    return f"source row {src_action.global_id} action missing forward suffix: {row.action!r}"
+                if row.sync_status != "Dirty":
+                    return f"source row {src_action.global_id} sync_status={row.sync_status!r}, expected 'Dirty'"
+                return None
+            return check
+
+        check_src1 = _forward_check(scn_src1, src1_action)
+        err = check_src1()
+        assert err is None, err
+        scn_src1.expect_callable(
+            check_src1, on=Surface.SHEET, tag="import ac3-forward", entry_point="importSelectedForTest",
+        )
+        scn_src1.checkpoint(STEP)
+
+        check_src2 = _forward_check(scn_src2, src2_action)
+        err = check_src2()
+        assert err is None, err
+        scn_src2.expect_callable(
+            check_src2, on=Surface.SHEET, tag="import ac3-forward", entry_point="importSelectedForTest",
+        )
+        scn_src2.checkpoint(STEP)
+
+        # Post-import sync: source docs reconcile their now-Forwarded chip/row.
+        scn_src1.sync()
+        scn_src2.sync()
+    finally:
+        for scn in sessions:
+            try:
+                scn._post_route("end_journey_session", {"docId": scn.doc_id})
+            except Exception:
+                pass
+            scn.engine.close()

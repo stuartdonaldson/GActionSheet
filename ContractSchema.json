@@ -100,7 +100,8 @@
     "testRouteNames": [
       "edit_action_row",
       "find_sheet_actions",
-      "verify_chip_integrity"
+      "verify_chip_integrity",
+      "import_selected_for_test"
     ],
     "messages": {
       "sync_action_rows": {
@@ -198,6 +199,20 @@
           "forwarded"
         ],
         "completionSignal": "synchronous response; source rows stamped Status='Forwarded' + Sync Status='Dirty'"
+      },
+      "import_selected_for_test": {
+        "request": [
+          "action",
+          "testToken",
+          "testDocId",
+          "globalIds"
+        ],
+        "response": [
+          "ok",
+          "inserted",
+          "baseN"
+        ],
+        "completionSignal": "synchronous response; same as _submitImport's IMPORT_SELECTED.done"
       }
     }
   },

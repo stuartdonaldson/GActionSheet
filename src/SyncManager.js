@@ -1085,10 +1085,11 @@ function _remarkRowDirty(globalId) {
     for (var i = 0; i < ids.length; i++) {
       if (ids[i][0] === globalId) {
         sheet.getRange(i + 2, _SCOL.sync_status).setValue('Dirty');
-        GasLogger.log('flush.remarked-dirty', { globalId: globalId });
+        GasLogger.log('flush.remarked-dirty', { globalId: globalId, row: i + 2 });
         return;
       }
     }
+    GasLogger.log('flush.remark-dirty.no-match', { globalId: globalId, lastRow: lastRow, sampleIds: ids.slice(0, 3).map(function (r) { return r[0]; }) });
   } catch (e) {
     GasLogger.log('flush.remark-dirty.error', { globalId: globalId, msg: e.message });
   }

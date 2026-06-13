@@ -105,9 +105,12 @@ var CONTRACT_SCHEMA = Object.freeze({
     // of routeNames so production route enumeration stays clean. Gated to the test
     // token. Pre-code contract for GTaskSheet-5vwu.2; implemented by .9.
     testRouteNames: Object.freeze([
-      'edit_action_row',       // the §16.9 `edit_sheet` act
-      'find_sheet_actions',    // the §16.9 `find_sheet_actions` read query
-      'verify_chip_integrity'  // post-sync doc chip assertion (6ov.8)
+      'edit_action_row',          // the §16.9 `edit_sheet` act
+      'find_sheet_actions',       // the §16.9 `find_sheet_actions` read query
+      'verify_chip_integrity',    // post-sync doc chip assertion (6ov.8)
+      'import_selected_for_test'  // GTaskSheet-8qe5: interactive-test-entry-point for
+                                   // AC-2/AC-3 (Import tab CHECK_BOX selection cannot be
+                                   // driven via Playwright — EPIC GTaskSheet-pw5x)
     ]),
 
     // Per-route request/response shapes + completion signals. Field names that
@@ -196,6 +199,19 @@ var CONTRACT_SCHEMA = Object.freeze({
         request:  Object.freeze(['action', 'secret', 'forwards', 'targetDocName', 'clientVersion', 'caller']),
         response: Object.freeze(['ok', 'forwarded']),
         completionSignal: "synchronous response; source rows stamped Status='Forwarded' + Sync Status='Dirty'"
+      }),
+
+      // import_selected_for_test — GTaskSheet-8qe5 interactive-test-entry-point
+      // (EPIC GTaskSheet-pw5x). Drives the same core logic as _submitImport's
+      // AC-2/AC-3 loop (_importSelectedRows: insert chip fragment, upsert
+      // ActionSheet rows, forward source rows) with an explicit globalIds
+      // selection instead of CardService form-collected checkboxes. Inserts at
+      // the end of the document body (_resolveEndIndex), not at a cursor.
+      //   Completion signal: synchronous response; GasLogger 'IMPORT_SELECTED.done'.
+      import_selected_for_test: Object.freeze({
+        request:  Object.freeze(['action', 'testToken', 'testDocId', 'globalIds']),
+        response: Object.freeze(['ok', 'inserted', 'baseN']),
+        completionSignal: "synchronous response; same as _submitImport's IMPORT_SELECTED.done"
       })
     })
   }),
