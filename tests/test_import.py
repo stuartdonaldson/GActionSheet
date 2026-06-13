@@ -149,6 +149,33 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         )
         scn_target.checkpoint(STEP, on=frozenset({Surface.UI}))
 
+        # ── Absent — source doc trashed (GTaskSheet-wdh0) ────────────────────
+        # Same-team doc whose DocData row has sync_status='Deleted' (source doc
+        # removed/inaccessible) must be excluded from the import list even
+        # though its team matches — list_importable_actions filters on
+        # DocData.syncStatus in addition to the team-scope join.
+        scn_trashed = new_doc()
+        _move_to_folder(scn_trashed, team_a)
+        scn_trashed.sync()
+        _seed_open_action(scn_trashed, "Import-filter trashed-doc action")
+        _set_docdata(scn_trashed, syncStatus="Deleted")
+
+        scn_target.ui.show_tab("Import")
+
+        def check_trashed_absent():
+            visible_ids = import_adapter(scn_target.ui.read_import_list())
+            if scn_trashed.doc_id in visible_ids:
+                return f"trashed-source doc unexpectedly visible: {sorted(visible_ids)}"
+            return None
+
+        err = check_trashed_absent()
+        assert err is None, err
+        scn_target.expect_callable(
+            check_trashed_absent, on=Surface.UI,
+            tag="import source-deleted-absent", entry_point="importList",
+        )
+        scn_target.checkpoint(STEP, on=frozenset({Surface.UI}))
+
         # ── Absent — TeamNotFound (P4) ───────────────────────────────────────
         scn_p4 = new_doc()
         scn_p4.sync()

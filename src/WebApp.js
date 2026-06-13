@@ -886,6 +886,11 @@ function _handlePatchActionStatus(payload) {
  * the security gate (TeamNotFound:/TeamAccessDenied: -> zero rows, never a
  * leak); isResolved(status) for the open-actions filter.
  *
+ * Excludes rows whose source is gone (GTaskSheet-wdh0): an ActionSheet row
+ * with sync_status 'Deleted' (action removed from its doc) or 'Doc Not
+ * Found', or whose source doc's DocData row has sync_status 'Deleted'/'Doc
+ * Not Found' (doc trashed/inaccessible).
+ *
  * Response rows are pre-sorted by doc_name ASC then AI-N ASC so callers/tests
  * can assert order, though the renderer groups/sorts again regardless
  * (epic-d-import-contract-seams).
@@ -945,11 +950,15 @@ function _listImportableActionsData(docId) {
     var status = data[i][_ACOL.status - 1] || '';
     if (isResolved(status)) continue;
 
+    var rowSyncStatus = data[i][_ACOL.sync_status - 1] || '';
+    if (rowSyncStatus === 'Deleted' || rowSyncStatus === 'Doc Not Found') continue;
+
     var fileId = data[i][_ACOL.file_id - 1] || '';
     if (!fileId || fileId === docId) continue;
 
     var docData = docDataByFileId[fileId];
     if (!docData || docData.teamId !== teamId) continue;
+    if (docData.syncStatus === 'Deleted' || docData.syncStatus === 'Doc Not Found') continue;
 
     var createdRaw = data[i][_ACOL.created_date - 1];
     rows.push({
@@ -1049,9 +1058,18 @@ function _handleImportSelectedForTest(payload) {
  * change needed) and records where it went.
  *
  * Per row: Status = 'Forwarded'; append ' [Forward:<targetDocName> AI-<n>]'
- * to the Action text (newAiToken parsed from newGlobalId); _remarkRowDirty
- * (reuse — no new dirty path) so the source document reflects 'Forwarded' on
- * the next sync_action_rows.
+ * to the Action text (newAiToken parsed from newGlobalId); sync_status =
+ * 'Dirty' so the source document reflects 'Forwarded' on the next
+ * sync_action_rows. The Dirty stamp is written in the same WriteGuard batch
+ * as the other field writes (GTaskSheet-wdh0) rather than via a separate
+ * post-loop _remarkRowDirty pass, so an error between the two passes can't
+ * leave a forwarded row un-flagged.
+ *
+ * Rows already resolved (e.g. status already 'Forwarded' — a duplicate
+ * forward from a stale Import-tab selection or a repeated sourceGlobalId in
+ * the same payload) are skipped and omitted from the response's `forwarded`
+ * list (GTaskSheet-wdh0) — re-forwarding would append a second
+ * '[Forward:...]' suffix to the action text.
  *
  * Payload shape (ContractSchema.js messages.forward_action_rows):
  *   { secret, action: 'forward_action_rows',
@@ -1076,12 +1094,16 @@ function _handleForwardActionRows(payload) {
   var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
   var now         = new Date();
   var forwarded   = [];
+  var seen        = {};
 
   WriteGuard.wrapPersistent(function () {
     for (var i = 0; i < forwards.length; i++) {
       var f      = forwards[i];
       var entry  = existingMap[f.sourceGlobalId];
       if (!entry) continue;
+      if (seen[f.sourceGlobalId]) continue;       // duplicate within this payload
+      if (isResolved(entry.status)) continue;     // already forwarded/resolved — no re-forward
+      seen[f.sourceGlobalId] = true;
 
       var newAiToken = parseGlobalId(f.newGlobalId).actionId; // 'AI-N'
       var newText    = entry.action + ' [Forward:' + targetDocName + ' ' + newAiToken + ']';
@@ -1089,13 +1111,10 @@ function _handleForwardActionRows(payload) {
       actionsSheet.getRange(entry.rowIndex, _ACOL.action_text).setValue(newText);
       actionsSheet.getRange(entry.rowIndex, _ACOL.status).setValue('Forwarded');
       actionsSheet.getRange(entry.rowIndex, _ACOL.modified_date).setValue(now);
+      actionsSheet.getRange(entry.rowIndex, _ACOL.sync_status).setValue('Dirty');
       forwarded.push(f.sourceGlobalId);
     }
   });
-
-  for (var j = 0; j < forwarded.length; j++) {
-    _remarkRowDirty(forwarded[j]);
-  }
 
   // Cross-execution read visibility (same pattern as _syncTeamScope's
   // SpreadsheetApp.flush() — SyncManager.js): the test harness's next

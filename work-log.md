@@ -2455,3 +2455,18 @@ Closed out GTaskSheet-4gsx (AC-1->AC-2->AC-3 import functional journey) and GTas
 
 ### Key Learnings:
 CardService CHECK_BOX SelectionInput items render as `<input type="checkbox">` wrapped in a Material `<div jsaction="click:h5M12e;...">`; `.click(force=True)` on the wrapper toggles `.checked`/CSS state but `_collectImportSelection`'s `e.formInputs` stays empty — confirmed via three separate Playwright techniques (force-click on input, on wrapper, pointerdown/pointerup dispatch). Per user direction, the fix is architectural (a parallel non-UI test entry point + epic for future recurrences), not another UI workaround. Also: cross-execution Sheet writes via `_openActionSheetSpreadsheet()`/`getActiveSpreadsheet()` need an explicit `SpreadsheetApp.flush()` to be visible to a subsequent doPost — this is now the second call site needing this (first was `_syncTeamScope`), suggesting it's a recurring pitfall worth watching for in future WebApp write handlers. GTaskSheet-wdh0 (Import edge-case hardening, including excluding Doc-Not-Found/deleted source docs from the Import list) is now unblocked but left open as separate follow-up.
+
+## 2026-06-12 21:58:21
+
+### Summary:
+Resolved GTaskSheet-wdh0 ([FIX] Import edge cases: duplicate forwarding, numbering drift, dirty-flag miss), extending the existing AC-1/AC-2/AC-3 import journey and access-filter tests rather than adding new ones.
+
+- `src/WebApp.js` `_listImportableActionsData`: excludes rows whose own `sync_status` is 'Deleted'/'Doc Not Found', and rows whose source doc's DocData `sync_status` is 'Deleted'/'Doc Not Found' — closes the additional edge case found during 1dxz live-test authoring (trashed source doc rows lingering in the Import list).
+- `src/WebApp.js` `_handleForwardActionRows`: added a duplicate-forward guard — rows already `isResolved()` (e.g. already 'Forwarded') or repeated within the same `forwards` payload are skipped and excluded from the response's `forwarded` array, preventing a second `[Forward:...]` suffix on re-import.
+- Same handler: moved the `sync_status='Dirty'` stamp into the same `WriteGuard.wrapPersistent()` batch as the other field writes (using the already-loaded `entry.rowIndex`), removing the separate post-loop `_remarkRowDirty` re-scan — closes the dirty-flag-miss window between mutation and dirty-stamp.
+- Numbering-drift: per the bead's own design notes, AC-2's base-AI-N-computed-once-then-incremented-locally design already prevents this by construction; no further code change needed.
+- `tests/test_import.py` `test_import_access_filter`: added a new sub-scenario seeding a same-team source doc, then setting its DocData `syncStatus='Deleted'` via the existing `set_docdata_row` fixture, asserting it's absent from `read_import_list()`.
+- Deployed to TEST; both `test_import_access_filter` and `test_import_flow_forward_sync` pass live (test-results/wdh0-import-edge-cases.log).
+
+### Key Learnings:
+The duplicate-forwarding and within-payload-dedup guards in `_handleForwardActionRows` are defensive hardening for paths not reachable through the current production entry point (`_listImportableActionsData`'s `isResolved()` filter already prevents an already-'Forwarded' row from re-entering `_importSelectedRows`'s forwards payload) — left as cheap defense-in-depth rather than building new test plumbing to exercise an otherwise-unreachable path.
