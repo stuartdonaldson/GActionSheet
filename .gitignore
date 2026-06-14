@@ -13,6 +13,14 @@ bdreport.md
 test-results/allure-results/*.json
 !test-results/allure-results/categories.json
 test-results/allure-results/environment.properties
+test-results/allure-results/*-attachment.*
+# ad-hoc debug logs/screenshots/junit dropped directly in test-results/ during
+# investigations (e.g. `pytest ... | tee test-results/<issue>-run.log`) — not
+# durable artifacts; delete when no longer needed for the active investigation.
+test-results/*.log
+test-results/*.xml
+test-results/*.png
+!test-results/probe-*.png
 # junit XML output and archive
 test-results/junit/
 # playwright test artifacts (screenshots, videos, error-context)
