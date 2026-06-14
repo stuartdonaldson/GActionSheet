@@ -20,7 +20,7 @@
  *
  * Path is namespaced under `NUUTS` — the suite-level scope (Northlake Unitarian
  * Tool Suite). The full chip URL is
- * `https://northlakeuu.org/NUUTS?c=view&docId=<docId>&ain=AI-<N>` — see
+ * `https://northlakeuu.org/NUUTS?cmd=preview&docId=<docId>&ain=AI-<N>` — see
  * _buildChipUrl(). `docId`/`ain` are passed as separate params (rather than a
  * single `globalId={docId}/AI-{N}`) because the encoded '/' in globalId
  * confuses downstream URL-rewrite tooling. The legacy `globalId=<docId>/AI-<N>`
@@ -43,11 +43,11 @@ var ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUUTS';
  *
  * @param {string} globalId  {docFileId}/AI-{N}
  * @return {string} chip URL of the form
- *   `ACTION_CHIP_URL_BASE + '?c=view&docId=<docId>&ain=AI-<N>'`
+ *   `ACTION_CHIP_URL_BASE + '?cmd=preview&docId=<docId>&ain=AI-<N>'`
  */
 function _buildChipUrl(globalId) {
   var parsed = parseGlobalId(globalId);
-  return ACTION_CHIP_URL_BASE + '?c=view&docId=' + encodeURIComponent(parsed.docId) +
+  return ACTION_CHIP_URL_BASE + '?cmd=preview&docId=' + encodeURIComponent(parsed.docId) +
     '&ain=' + encodeURIComponent(parsed.actionId);
 }
 

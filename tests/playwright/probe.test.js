@@ -260,7 +260,7 @@ test.describe('PROBE session', () => {
   // #docs-link-bubble.appsElementsLinkPreview — WITHOUT any mouse hover.
   // Confirmed reproducible (2x) against a freshly-synced action: the
   // bubble's anchor href / [data-url] attributes carry the chip's
-  // ?c=view&docId=<docId>&ain=AI-N URL (separate params, GTaskSheet-0v61;
+  // ?cmd=preview&docId=<docId>&ain=AI-N URL (separate params, GTaskSheet-0v61;
   // older chips may still carry ?c=view&globalId=<docId>/AI-N), readable via
   // page.evaluate (no screenshot/hover-dwell needed).
 

@@ -466,8 +466,8 @@ function _addPeopleSuggestions(suggestions, people, query) {
  * Extracts the globalId from a chip URL, reconstructing it as {docId}/AI-{N}.
  *
  * Current chip URLs carry docId and ain (e.g. 'AI-3') as separate params
- * (?c=view&docId=<encoded>&ain=<encoded>) — see _buildChipUrl(). Older chips
- * already inserted in live documents carry a single encoded
+ * (?cmd=preview&docId=<encoded>&ain=<encoded>) — see _buildChipUrl(). Older
+ * chips already inserted in live documents carry a single encoded
  * ?c=view&globalId=<docId>/AI-<N> param; that legacy form is still accepted.
  *
  * @param {string} url  The matched chip/action URL.
