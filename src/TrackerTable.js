@@ -457,7 +457,6 @@ function _insertTrackerAssigneeChips(docId, assigneeEmails, assigneeNames) {
 }
 
 function _insertTrackerIdLinks(docId, globalIds) {
-  var chipUrlBase = ACTION_CHIP_URL_BASE;
   var token       = ScriptApp.getOAuthToken();
   var baseUrl     = 'https://docs.googleapis.com/v1/documents/';
 
@@ -510,7 +509,7 @@ function _insertTrackerIdLinks(docId, globalIds) {
     cellText = cellText.replace(/\n$/, '');
     if (!cellText) continue;
     var cellStart = cellContent[0].startIndex;
-    var chipUrl   = chipUrlBase + '?c=view&globalId=' + encodeURIComponent(globalId);
+    var chipUrl   = _buildChipUrl(globalId);
     requests.push({ updateTextStyle: { range: { startIndex: cellStart, endIndex: cellStart + cellText.length }, textStyle: { link: { url: chipUrl } }, fields: 'link' } });
     requests.push(_chipBadgeStyleRequest(cellStart, cellStart + cellText.length));
   }

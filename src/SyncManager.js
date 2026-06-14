@@ -19,7 +19,13 @@
  * (TrackerTable).
  *
  * Path is namespaced under `NUUTS` — the suite-level scope (Northlake Unitarian
- * Tool Suite). The full chip URL is `https://northlakeuu.org/NUUTS?c=view&globalId=<id>`.
+ * Tool Suite). The full chip URL is
+ * `https://northlakeuu.org/NUUTS?c=view&docId=<docId>&ain=AI-<N>` — see
+ * _buildChipUrl(). `docId`/`ain` are passed as separate params (rather than a
+ * single `globalId={docId}/AI-{N}`) because the encoded '/' in globalId
+ * confuses downstream URL-rewrite tooling. The legacy `globalId=<docId>/AI-<N>`
+ * form is still accepted on parse (_globalIdFromChipUrl) for chips already
+ * inserted in live documents.
  *
  * The linkPreview `pathPrefix` in appsscript.json is `NUUTS` (the suite root),
  * so any northlakeuu.org/NUUTS... URL triggers the preview. The redirect at
@@ -30,6 +36,20 @@
  * sync manually — the manifest cannot read script globals.
  */
 var ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUUTS';
+
+/**
+ * Builds the chip/link-preview URL for a globalId ({docId}/AI-{N}), encoding
+ * docId and the AI-N action-item designation as separate query params.
+ *
+ * @param {string} globalId  {docFileId}/AI-{N}
+ * @return {string} chip URL of the form
+ *   `ACTION_CHIP_URL_BASE + '?c=view&docId=<docId>&ain=AI-<N>'`
+ */
+function _buildChipUrl(globalId) {
+  var parsed = parseGlobalId(globalId);
+  return ACTION_CHIP_URL_BASE + '?c=view&docId=' + encodeURIComponent(parsed.docId) +
+    '&ain=' + encodeURIComponent(parsed.actionId);
+}
 
 // 1-based column numbers from the authoritative schema.
 var _SCOL = CONTRACT_SCHEMA.sheetAction.columnsByField;
@@ -1202,7 +1222,7 @@ function _chipBadgeStyleRequest(startIndex, endIndex) {
  */
 function _flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail, assigneeName) {
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
-  var chipUrl = ACTION_CHIP_URL_BASE + '?c=view&globalId=' + encodeURIComponent(globalId);
+  var chipUrl = _buildChipUrl(globalId);
   var imgUrl = _ACTION_STATUS_IMAGES[status] || _ACTION_DEFAULT_IMAGE;
 
   var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);

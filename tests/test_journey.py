@@ -187,7 +187,7 @@ def test_journey(scn, expected_version, gas_log_dir):
     scn.mark("act3.post-tracker-id-urls")
     for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
         url = id_urls.get(a.action_id, "")
-        assert url and "globalId=" in url, (
+        assert url and "docId=" in url and "ain=" in url, (
             f"Tracker ID cell for {a.action_id!r} missing chip URL hyperlink; got {url!r}"
         )
 

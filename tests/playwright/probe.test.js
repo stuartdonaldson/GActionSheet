@@ -260,13 +260,14 @@ test.describe('PROBE session', () => {
   // #docs-link-bubble.appsElementsLinkPreview — WITHOUT any mouse hover.
   // Confirmed reproducible (2x) against a freshly-synced action: the
   // bubble's anchor href / [data-url] attributes carry the chip's
-  // ?c=view&globalId=<docId>/AI-N URL, readable via page.evaluate (no
-  // screenshot/hover-dwell needed).
+  // ?c=view&docId=<docId>&ain=AI-N URL (separate params, GTaskSheet-0v61;
+  // older chips may still carry ?c=view&globalId=<docId>/AI-N), readable via
+  // page.evaluate (no screenshot/hover-dwell needed).
 
   const DOCS_LINK_BUBBLE_PROBE_JS = `() => {
     const bubble = document.querySelector('#docs-link-bubble.appsElementsLinkPreview');
     if (!bubble) return null;
-    const anchor = bubble.querySelector('a[href*="globalId"], [data-url*="globalId"]');
+    const anchor = bubble.querySelector('a[href*="docId"], [data-url*="docId"], a[href*="globalId"], [data-url*="globalId"]');
     return {
       cls: bubble.className,
       href: anchor ? anchor.href || null : null,
@@ -296,7 +297,7 @@ test.describe('PROBE session', () => {
     const bubble = await page.evaluate(DOCS_LINK_BUBBLE_PROBE_JS);
     const target = bubble && (bubble.href || bubble.dataUrl);
 
-    if (target && target.includes('globalId')) {
+    if (target && (target.includes('docId') || target.includes('globalId'))) {
       console.log('  chipHover: #docs-link-bubble FOUND — ' + JSON.stringify(bubble));
     } else {
       console.log('  chipHover: #docs-link-bubble not found (best effort — doc may not contain "AI-1:")');

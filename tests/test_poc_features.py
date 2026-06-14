@@ -27,7 +27,13 @@ ACTION_CHIP_URL_BASE = "https://northlakeuu.org/NUUTS"
 
 
 def _chip_url(global_id: str) -> str:
-    """Construct the chip URL that _setStatusFromPreview expects."""
+    """Construct a legacy-form chip URL (?c=view&globalId=<id>).
+
+    Current chip generation emits separate docId/ain params (GTaskSheet-0v61),
+    but _globalIdFromChipUrl/_setStatusFromPreview still accept this older
+    single-param form for chips already inserted in live documents — this
+    exercises that backward-compat fallback.
+    """
     return f"{ACTION_CHIP_URL_BASE}?c=view&globalId={urllib.parse.quote(global_id, safe='')}"
 
 

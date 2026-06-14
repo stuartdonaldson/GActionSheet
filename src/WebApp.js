@@ -679,12 +679,14 @@ function _handleVerifyChipIntegrity(payload) {
       violations.push({ paragraph: 'AI-' + N, issue: 'sourceUri not a brand-NUTS image: ' + sourceUri });
     }
 
-    // Check 2: AI-N: textRun (element[1]) link.url must contain the globalId
+    // Check 2: AI-N: textRun (element[1]) link.url must resolve to the
+    // expected globalId — via either the current docId+ain params or the
+    // legacy globalId= param (_globalIdFromChipUrl accepts both).
     var tokenEl = elements[1] || {};
     var linkUrl = (((tokenEl.textRun || {}).textStyle || {}).link || {}).url || '';
-    var encoded = encodeURIComponent(expectedGlobalId);
-    if (!linkUrl || (linkUrl.indexOf(encoded) === -1 && linkUrl.indexOf(expectedGlobalId) === -1)) {
-      violations.push({ paragraph: 'AI-' + N, issue: 'AI-N: link.url missing globalId — got: ' + linkUrl });
+    var actualGlobalId = linkUrl ? _globalIdFromChipUrl(linkUrl) : null;
+    if (actualGlobalId !== expectedGlobalId) {
+      violations.push({ paragraph: 'AI-' + N, issue: 'AI-N: link.url globalId mismatch — expected ' + expectedGlobalId + ', got: ' + linkUrl });
     }
 
     // Check 3: trailing (Status) token must be consistent with icon
