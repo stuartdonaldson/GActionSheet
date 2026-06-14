@@ -14,9 +14,9 @@ def _find_page(item):
     """Locate the active Playwright page from a failing test's fixtures.
 
     Supports the two harness shapes: a direct `browser_page` fixture
-    (test_ui_smoke / test_interactive) and a `ScenarioSession` exposing
-    `.ui._page`. Returns None for non-UI tests (e.g. mock-based unit tests),
-    which makes the failure hook a no-op there.
+    (test_ui_smoke) and a `ScenarioSession` exposing `.ui._page`. Returns None
+    for non-UI tests (e.g. mock-based unit tests), which makes the failure
+    hook a no-op there.
     """
     fa = getattr(item, "funcargs", {})
     page = fa.get("browser_page")

@@ -17,8 +17,7 @@ ui = ["playwright>=1.49"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--alluredir=test-results/allure-results --junitxml=test-results/junit/pytest.xml -m 'not interactive'"
+addopts = "--alluredir=test-results/allure-results --junitxml=test-results/junit/pytest.xml"
 markers = [
     "smoke: fast (<1 min) high-risk UI-surface scenario (GTaskSheet-80mo.17)",
-    "interactive: headed, human-instructed test for UI interactions Playwright cannot drive (GTaskSheet-15e8, epic GTaskSheet-pw5x); excluded from the default run via -m 'not interactive' — run explicitly with: pytest -m interactive tests/test_interactive.py -s",
 ]

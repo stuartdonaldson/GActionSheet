@@ -262,18 +262,14 @@ def test_journey(scn, expected_version, gas_log_dir):
     )
 
     # ── Act 5 — change status via the link-preview path (standard run) ────
-    # The rendered onLinkPreview hover/card is NOT exercised here: Google Docs
-    # fires onLinkPreview only for converted link-preview smart chips, but the
-    # add-on inserts action links as plain hyperlinks, so a synthetic Playwright
-    # hover never invokes onLinkPreview and the card never renders
-    # (GTaskSheet-s9so — confirmed via DOM scan, zero PREVIEW_CARD.lookup, and a
-    # screenshot showing only Docs' native link tooltip). The rendered-card
-    # fidelity checks (rwz AC1/AC2 header + globalId link + status chip) and the
-    # in-card status click (_setStatusFromPreview, ENTRY_POINT_DEFERRED) move to
-    # the headed, human-instructed interactive test (GTaskSheet-15e8, epic
-    # GTaskSheet-pw5x). The standard run drives the status change through the same
-    # core the card's status control invokes (patch_action_status) and asserts the
-    # durable result.
+    # The rendered onLinkPreview card is NOT exercised here: rendering it
+    # requires a cursor-placement + retry sequence (Ctrl+F -> Enter -> Escape,
+    # move away, re-place — GTaskSheet-39jk/cug8) that takes ~1-2 min and is
+    # covered separately by tests/test_link_preview.py (rwz AC1/AC2 header +
+    # globalId bubble + in-card status click, ENTRY_POINT_DEFERRED). The
+    # standard journey drives the status change through the same core the
+    # card's status control invokes (patch_action_status) and asserts the
+    # durable result, keeping this journey fast.
     scn.link_preview_status_change(created, "In Progress")  # patch_action_status core
     scn.verify(created, on=SHEET, at=INTEGRITY, tag="[journey status-change]")                 # durable, async (13–60s) → defer
 

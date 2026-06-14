@@ -412,21 +412,20 @@ class ScenarioSession:
             self._post_route("patch_action_status", {"global_id": self._gid(target), "status": status})
 
     def link_preview_status_change(self, target: ai, status: str) -> None:
-        """Standard-run substitute for the Act-5 link-preview hover + in-card status change.
+        """Standard-run substitute for the Act-5 link-preview card + in-card status change.
 
-        The onLinkPreview card cannot be rendered under Playwright: Google Docs
-        fires onLinkPreview only for converted link-preview *smart chips*, but the
-        add-on inserts action links as plain hyperlinks (textStyle.link), which
-        Docs shows with its native link tooltip — onLinkPreview is never invoked
-        (no PREVIEW_CARD.lookup in cloud logs; GTaskSheet-s9so). The rendered-card
-        fidelity checks (card header 'AI-N:', globalId link, status chip) and the
-        in-card status click (_setStatusFromPreview, ENTRY_POINT_DEFERRED) are
-        exercised by the headed, human-instructed interactive test
-        (GTaskSheet-15e8, epic GTaskSheet-pw5x).
+        Rendering the onLinkPreview card requires a cursor-placement + retry
+        sequence (Ctrl+F -> Enter -> Escape, move away, re-place —
+        GTaskSheet-39jk/cug8, UiDriver.open_link_preview) that takes ~1-2 min.
+        The rendered-card fidelity checks (card header 'AI-N:', globalId
+        bubble, status chip) and the in-card status click
+        (_setStatusFromPreview, ENTRY_POINT_DEFERRED) are exercised by
+        tests/test_link_preview.py.
 
-        For the automated journey this drives the status change through the same
-        core the card's status control invokes — the patch_action_status route —
-        leaving durable-surface verification to the caller.
+        For the (fast) automated journey this drives the status change
+        through the same core the card's status control invokes — the
+        patch_action_status route — leaving durable-surface verification to
+        the caller.
         """
         self.set_status(target, status)
         target.status = status

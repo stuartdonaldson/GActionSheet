@@ -323,25 +323,19 @@ copy-pasted capture logic:
   failure report, and attaching the PNG to Allure. It is a no-op for non-UI
   (mock-based) tests.
 
-#### Interactive (headed) tests for human-only UI gestures
+#### onLinkPreview card rendering — `tests/test_link_preview.py`
 
-Some Workspace Add-on / Docs interactions only respond to a real human gesture
-(the first is the `onLinkPreview` link-preview card — Docs never fires it for
-the add-on's plain-hyperlink action chips under synthetic events; see
-GTaskSheet-s9so). These live in `tests/test_interactive.py`, marked
-`interactive`, and are **excluded from the default run** (`addopts` carries
-`-m 'not interactive'`). The harness sets up the doc and verifies the durable
-result; a human supplies only the un-automatable gesture. Run from an
-interactive terminal:
-
-```
-/mnt/c/dev/venvs/uv1/bin/python -m pytest -m interactive tests/test_interactive.py -s
-```
-
-`-s` is required (the test prints numbered instructions and blocks on `input()`).
-A visible Chromium opens; follow the on-screen `👤 HUMAN ACTION REQUIRED` block,
-then return to the terminal to answer the confirmation prompts. Tracked under
-epic GTaskSheet-pw5x (GTaskSheet-15e8).
+The `onLinkPreview` add-on card (rendered via `addons.gsuite.google.com`) was
+previously believed to require a real human mouse hover (GTaskSheet-s9so) and
+was covered only by a headed, human-instructed interactive test. GTaskSheet-39jk
+and GTaskSheet-cug8 found that placing the text cursor on the `AI-N:` chip link
+via `Ctrl+F` -> type -> `Enter` -> `Escape` (no mouse) fires the add-on's
+`onLinkPreview` trigger, and re-placing the cursor after moving it away renders
+the card — reproducible headless. `tests/test_link_preview.py` drives this
+automatically, asserts the rendered card header + the native link-preview
+bubble's `globalId` (rwz AC1/AC2), then sets the status via the in-card control
+and asserts the durable result. It runs as part of the default suite — no
+human interaction required. See `UiDriver.open_link_preview` (`scn/ui.py`).
 
 The JS Playwright smoke layer (`tests/playwright/*.test.js`) already retains
 its own traces and screenshots: `playwright.config.js` sets `screenshot:

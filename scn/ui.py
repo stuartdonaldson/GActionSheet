@@ -56,10 +56,14 @@ except Exception:
 # Private selector constants — scenarios never see these
 # ---------------------------------------------------------------------------
 
-# GAS card iframe pattern (link-preview card rendered by onLinkPreview)
+# GAS card iframe pattern (link-preview card rendered by onLinkPreview).
+# addons.gsuite.google.com hosts the onLinkPreview CardService card
+# (GTaskSheet-cug8) — the legacy script.google* patterns are kept for any
+# other card surface that may still use them.
 _CARD_IFRAME = (
     'iframe[src*="script.googleusercontent.com"], '
-    'iframe[src*="script.google.com"]'
+    'iframe[src*="script.google.com"], '
+    'iframe[src*="addons.gsuite.google.com"]'
 )
 # Add-on iframe that hosts the @-menu Create-action form (addons.gsuite.google.com)
 _ADDON_FORM_IFRAME = 'iframe[src*="addons.gsuite.google.com"]'
@@ -444,6 +448,60 @@ class UiDriver:
         """Hover and wait until the preview card appears (semantic alias of hover)."""
         return self.hover(locator, timeout=timeout)
 
+    def open_link_preview(self, action_id: str, *, timeout: str = "120s") -> Card:
+        """Render the onLinkPreview card for action_id via keyboard cursor placement.
+
+        GTaskSheet-cug8 (building on the native-bubble finding of 39jk):
+        Ctrl+F -> type "{action_id}:" -> Enter -> Escape places the text cursor
+        ON the chip link without any mouse hover, and fires the add-on's
+        onLinkPreview trigger server-side (PREVIEW_CARD.lookup). The
+        addons.gsuite.google.com card iframe does not render on the first such
+        placement, but DOES render once the cursor is moved away (Ctrl+Home)
+        and placed on the link again — confirmed reproducible headless. This
+        retries that two-step sequence until the card body becomes visible or
+        timeout elapses.
+
+        Sets the current card context for subsequent next=True locate() calls,
+        matching hover()'s contract.
+        """
+        ms = _parse_timeout(timeout)
+        self._ensure_doc()
+        card_frame = self._page.frame_locator(_CARD_IFRAME).first
+
+        def _place_cursor_on_link() -> None:
+            self._page.locator(".kix-appview-editor").click()
+            self._page.keyboard.press("Control+f")
+            self._page.wait_for_timeout(500)
+            self._page.keyboard.type(f"{action_id}:")
+            self._page.wait_for_timeout(1000)
+            self._page.keyboard.press("Enter")
+            self._page.wait_for_timeout(1000)
+            self._page.keyboard.press("Escape")
+            self._page.wait_for_timeout(500)
+
+        def _move_cursor_away() -> None:
+            self._page.locator(".kix-appview-editor").click()
+            self._page.keyboard.press("Control+Home")
+            self._page.wait_for_timeout(500)
+
+        deadline = time.monotonic() + ms / 1000.0
+        _place_cursor_on_link()
+        while time.monotonic() < deadline:
+            try:
+                card_frame.locator(_CARD_BODY).first.wait_for(state="visible", timeout=8000)
+                card = Card(card_frame)
+                self._current_card = card
+                return card
+            except Exception:
+                _move_cursor_away()
+                _place_cursor_on_link()
+
+        diag = self.capture_failure("open_link_preview timeout")
+        raise TimeoutError(
+            f"open_link_preview: onLinkPreview card for {action_id!r} never "
+            f"became visible within {timeout}.\n{diag}"
+        )
+
     def open_sidebar(self, addon_name: str = _ADDON_NAME, *, timeout: str = "15s") -> Card:
         """Click the add-on icon to open the homepage card; return a Card handle.
 
@@ -546,9 +604,13 @@ class UiDriver:
         the update.  The driver absorbs that wait; scenarios do not.
         """
         with self.reporter.step("UIACT", "set_status", f"card -> {status}"):
+            # onLinkPreview card buttons use the 'Set {status}' aria-label
+            # (GTaskSheet-cug8, matches sidebar_set_status's convention);
+            # other cards may use the bare status text.
             status_btn = card.frame.locator(
-                f'[aria-label="{status}"], button:has-text("{status}")'
-            )
+                f'[aria-label="Set {status}"], [aria-label="{status}"], '
+                f'button:has-text("{status}")'
+            ).first
             status_btn.wait_for(state="visible", timeout=10000)
             status_btn.click()
 
