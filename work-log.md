@@ -2531,3 +2531,22 @@ with a real human hover: PASSED in 152s. mxmh closed.
   polling within a 120s window is not a reliable pass/fail signal for this interaction.
 - `clasp logs --watch` streams continuously (does not exit) and is a fast, reliable server-truth
   signal for interactive tests; `clasp logs --json` round-trips in ~2s for one-off checks.
+
+## 2026-06-14 07:40:27
+
+### Summary:
+Committed and pushed the GTaskSheet-mxmh interactive-test fix plus a backlog of pending changes
+that had accumulated uncommitted across prior sessions: (1) fix(test) clasp-log-detection commit
+for tests/test_interactive.py, (2) reorg of resolved lessons-learned docs into
+docs/lessons-learned/resolved/, (3) multi-account auth taxonomy (test.u1/u2/u3, nuuts.service),
+ADR-0016 email-sending standard, and deployment-ledger/Version.js updates. Also removed a stray
+`--goals` junk file and ~50 obsolete ad-hoc debug logs/screenshots from test-results/ (restoring
+4 tracked probe-*.png reference shots caught by the same glob), then added a .gitignore rule
+(test-results/*.log, *.xml, *.png except probe-*.png) so future investigation artifacts don't
+accumulate as untracked clutter. All four commits pushed to inf/scn-observability-failfast;
+working tree clean.
+
+### Key Learnings:
+- Before bulk-deleting files matching a glob in a tracked directory, check `git status` for any
+  that are tracked (D) vs untracked (??) — a broad glob can catch committed reference files
+  (test-results/probe-*.png) alongside throwaway debug output.
