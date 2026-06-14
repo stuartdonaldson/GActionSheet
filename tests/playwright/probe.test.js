@@ -250,25 +250,57 @@ test.describe('PROBE session', () => {
     }
   });
 
-  // ── 5. Chip hover (best effort) ──────────────────────────────────────────
+  // ── 5. Chip hover — native Docs link-preview bubble (GTaskSheet-39jk) ─────
+  //
+  // The AI-N: link text is rendered onto <canvas> with no DOM <a>/chip to
+  // hover (the smoke-test soft-pass exists for this reason). But the
+  // operator's "click once on the link before hover works" observation has
+  // a keyboard equivalent: Ctrl+F to "AI-N:" + Enter + Escape lands the text
+  // cursor ON the link, which makes Google Docs render the native
+  // #docs-link-bubble.appsElementsLinkPreview — WITHOUT any mouse hover.
+  // Confirmed reproducible (2x) against a freshly-synced action: the
+  // bubble's anchor href / [data-url] attributes carry the chip's
+  // ?c=view&globalId=<docId>/AI-N URL, readable via page.evaluate (no
+  // screenshot/hover-dwell needed).
 
-  test('chipHover — existing doc (best effort)', async ({ page }) => {
+  const DOCS_LINK_BUBBLE_PROBE_JS = `() => {
+    const bubble = document.querySelector('#docs-link-bubble.appsElementsLinkPreview');
+    if (!bubble) return null;
+    const anchor = bubble.querySelector('a[href*="globalId"], [data-url*="globalId"]');
+    return {
+      cls: bubble.className,
+      href: anchor ? anchor.href || null : null,
+      dataUrl: anchor ? anchor.getAttribute('data-url') : null
+    };
+  }`;
+
+  test('chipHover — native link-preview bubble via Ctrl+F (GTaskSheet-39jk)', async ({ page }) => {
+    test.setTimeout(30000);
+
     if (!page.url().includes(DOC_ID)) {
       await page.goto(DOC_URL);
       await page.waitForSelector('.docs-title-outer', { timeout: 30000 });
     }
+    await page.waitForTimeout(2000); // let the canvas finish its initial render
 
-    const chipLink = page.locator('a[href*="northlakeuu.org/NUUTS"]').first();
-    const visible  = await chipLink.isVisible().catch(() => false);
+    await page.locator('.kix-appview-editor').click();
+    await page.keyboard.press('Control+f');
+    await page.waitForTimeout(500);
+    await page.keyboard.type('AI-1:');
+    await page.waitForTimeout(1000);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(1000);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(1000);
 
-    if (visible) {
-      await chipLink.hover({ force: true });
-      await page.waitForTimeout(3000);
-      const entry = await waitForProbe('chipHover.existing', 20000)
-                      .catch(() => waitForProbe('chipHover.new', 5000).catch(() => null));
-      logFound('chipHover', entry && entry.data);
+    const bubble = await page.evaluate(DOCS_LINK_BUBBLE_PROBE_JS);
+    const target = bubble && (bubble.href || bubble.dataUrl);
+
+    if (target && target.includes('globalId')) {
+      console.log('  chipHover: #docs-link-bubble FOUND — ' + JSON.stringify(bubble));
     } else {
-      console.log('  chipHover: chip link not in DOM — trigger requires cursor hover in Google Docs editor; manual verification needed');
+      console.log('  chipHover: #docs-link-bubble not found (best effort — doc may not contain "AI-1:")');
+      console.log('  diagnostic: ' + JSON.stringify(bubble ?? null));
     }
   });
 
