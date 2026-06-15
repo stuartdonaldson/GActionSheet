@@ -157,10 +157,13 @@ ENTRY_POINT_REGISTRY: dict[str, str] = {
 }
 
 # Deferred entry points (GTaskSheet-z6f8 / EPIC GTaskSheet-rz4k). Maps a registered entry point
-# with NO current tagged scenario call-site to a one-line reason + tracking bead. check_coverage.py
-# treats these as explicitly warn-only (not uncovered), so the T17 gap-diff stays green while the
-# epic converts each to a real durable-state call-site assertion. "Warn-only" == enumerated but not
-# yet asserted at its own call-site — documented debt, not coverage. Empty this dict as coverage lands.
+# with NO current tagged scenario call-site to a one-line reason. check_coverage.py treats
+# these as explicitly warn-only (not uncovered), so the T17 gap-diff stays green. Most entries
+# here are *backlog* (a tracking bead converts them to a real tagged call-site); rz4k.5's
+# entries are *permanent exemptions* with rationale (epic AC alternative (b)) -- pure
+# test-harness plumbing exercised implicitly by every scenario, where a dedicated
+# entry_point= tag would be redundant with the suite-wide failure a regression here would
+# already cause. "Warn-only" == enumerated but not asserted at its own call-site.
 ENTRY_POINT_DEFERRED: dict[str, str] = {
     # rz4k.3 — workspace/editor card mutations
     "importSelectedSubmit": "real Import-tab submit; CHECK_BOX SelectionInput not Playwright-drivable — covered via importSelectedForTest surrogate, EPIC GTaskSheet-pw5x — GTaskSheet-rz4k.3",
@@ -170,12 +173,24 @@ ENTRY_POINT_DEFERRED: dict[str, str] = {
     "menuInitializeTriggers": "menu click call-site not driven — GTaskSheet-rz4k.4",
     "menuBootstrap": "menu click call-site not driven — GTaskSheet-rz4k.4",
     "menuRunArchive": "menu click call-site not driven — GTaskSheet-rz4k.4",
-    # rz4k.5 — test-support routes
-    "run_fixture": "exercised as setup everywhere, never as a tagged asserted call-site — GTaskSheet-rz4k.5",
-    "set_test_token": "harness plumbing; no tagged call-site assertion — GTaskSheet-rz4k.5",
-    "bootstrap": "harness plumbing; no tagged call-site assertion — GTaskSheet-rz4k.5",
-    "begin_journey_session": "session marker; no tagged call-site assertion — GTaskSheet-rz4k.5",
-    "end_journey_session": "session marker; no tagged call-site assertion — GTaskSheet-rz4k.5",
+    # rz4k.5 — test-support routes (PERMANENT EXEMPTIONS, resolved GTaskSheet-rz4k.5)
+    "run_fixture": "every scn._post_fixture(...) call across the suite POSTs run_fixture "
+        "(hundreds of call-sites per run); a regression here surfaces as an immediate "
+        "FixtureError/non-JSON response failing essentially every scenario's setup or act -- "
+        "a dedicated entry_point= tag would be redundant with that suite-wide signal.",
+    "set_test_token": "invoked once per `npm run deploy:test`, outside the pytest run, to mint "
+        "the TEST_TOKEN every testToken-gated call depends on; a regression here fails every "
+        "such call with test-token-unauthorized/expired (fixture_invoke.FixtureTokenError) "
+        "before any test body runs.",
+    "bootstrap": "one-time script-properties setup (TEST_DOC_ID/TEST_SHEET_ID/GAS_LOGGER_FOLDER_ID), "
+        "run manually from the Apps Script editor after the first clasp push "
+        "(clasp-bootstrap-pattern) -- not part of the per-run pytest harness loop.",
+    "begin_journey_session": "every ScenarioSession.new_doc() call POSTs this (hundreds of "
+        "call-sites per run); a regression here raises RuntimeError('begin_journey_session "
+        "response missing docId') immediately for every test using new_doc.",
+    "end_journey_session": "every ScenarioSession.close() call POSTs this; a regression here "
+        "fails the engine.close() drain-invariant assertion for every test, surfacing "
+        "immediately and suite-wide.",
 }
 
 __all__ = [
