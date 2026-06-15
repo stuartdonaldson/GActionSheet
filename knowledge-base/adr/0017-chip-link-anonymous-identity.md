@@ -169,5 +169,5 @@ verified identity, and every status change records the verified `au` in the audi
 
 | Phase | Epic | Children |
 |---|---|---|
-| Phase 1 (interim) | `GTaskSheet-krz5` — Anonymous chip-preview notice | `mus0` [IMP], `zb3l` [TST] |
+| Phase 1 (interim) — **done** | `GTaskSheet-krz5` — Anonymous chip-preview notice (closed) | `mus0` [IMP] (closed), `zb3l` [TST] (closed) — `doGet ?cmd=preview` implemented in `src/WebApp.js` (`_handlePreviewNotice` / `_renderPreviewNotice`), covered by `tests/test_chip_preview.py` |
 | Phase 2 (deferred) | `GTaskSheet-79dw` — Authorized web app AI editing | `hc6v` [INF], `1hyh` [IMP authz], `6dlp` [IMP edit] (blocked by hc6v + 1hyh) |

@@ -20,8 +20,10 @@ import copy
 import json
 import os
 import pathlib
+import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from scn.ai import ai
@@ -138,6 +140,42 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
         )
 
     return result
+
+
+def _http_get(url: str, timeout: int = 60) -> str:
+    """Low-level HTTP GET; returns the raw response body as text.
+
+    Used for doGet HTML routes (e.g. ADR-0017 ?cmd=preview), which return
+    HtmlOutput rather than JSON.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return exc.read().decode("utf-8", errors="replace")
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Network error fetching {url!r}: {exc.reason}") from exc
+
+
+_GOOG_SCRIPT_INIT_RE = re.compile(r'goog\.script\.init\("((?:[^"\\]|\\.)*)"')
+_HEX_ESCAPE_RE = re.compile(r'\\x([0-9a-fA-F]{2})')
+
+
+def extract_html_output(wrapper: str) -> str:
+    """Decode the HtmlService body served via doGet.
+
+    GAS wraps `HtmlService.createHtmlOutput(...)` in a sandboxed-iframe
+    bootstrap page where the actual markup is triple-escaped (JS hex-escapes
+    plus two layers of JSON-string-escaping) inside a `goog.script.init(...)`
+    call. Undo all three layers so callers can assert against the rendered
+    HTML directly.
+    """
+    m = _GOOG_SCRIPT_INIT_RE.search(wrapper)
+    if not m:
+        raise ValueError(f"goog.script.init(...) not found in response: {wrapper[:200]!r}")
+    literal = _HEX_ESCAPE_RE.sub(r'\\u00\1', m.group(1))
+    config = json.loads(json.loads('"' + literal + '"'))
+    return config["userHtml"]
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +502,20 @@ class ScenarioSession:
         resp = self._post_route("find_sheet_actions", {"docId": self.doc_id})
         rows = resp.get("rows") or []
         return [_row_dict_to_ai(r) for r in rows]
+
+    def fetch_preview_html(self, ain: str, *, doc_id: str | None = None) -> str:
+        """GET the ADR-0017 Phase 1 anonymous chip-preview notice page.
+
+        Hits doGet ?cmd=preview&docId=<doc_id>&ain=<ain> (no test token —
+        this route is the anonymous, unauthenticated chip-link landing page).
+        Returns the decoded HtmlOutput markup (see extract_html_output).
+        """
+        url = self.settings.get("webappTestUrl") or ""
+        if not url:
+            raise RuntimeError("webappTestUrl not set in local.settings.json")
+        qs = urllib.parse.urlencode({"cmd": "preview", "docId": doc_id or self.doc_id, "ain": ain})
+        with self._reporter.step("QUERY", "fetch_preview_html"):
+            return extract_html_output(_http_get(f"{url}?{qs}"))
 
     def tracker_id_urls(self) -> dict:
         """Return {action_id: id_url} for tracker rows that have an ID-column hyperlink."""

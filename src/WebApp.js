@@ -64,6 +64,10 @@ function doGet(e) {
     pathInfo:    (e && e.pathInfo)     || ''
   });
 
+  if (e && e.parameter && e.parameter.cmd === 'preview') {
+    return _handlePreviewNotice(e);
+  }
+
   var params = (e && e.parameter) ? JSON.stringify(e.parameter) : '{}';
   return ContentService.createTextOutput(
     'GActionSheet ' + BUILD_INFO.version + '\n' +
@@ -76,6 +80,85 @@ function doGet(e) {
     'pathInfo:      ' + ((e && e.pathInfo)     || '(none)') + '\n' +
     'contentLength: ' + ((e && e.contentLength != null) ? e.contentLength : '-1')
   );
+}
+
+/**
+ * doGet ?cmd=preview&docId=<docId>&ain=AI-N — ADR-0017 Phase 1 anonymous chip
+ * notice. Discloses only non-confidential metadata (doc name, team, AI-N,
+ * status, doc link) and never the action text. Unknown/missing globalId
+ * renders a non-leaking not-found variant.
+ *
+ * @param {Object} e doGet event; reads e.parameter.docId and e.parameter.ain.
+ * @return {HtmlOutput}
+ */
+function _handlePreviewNotice(e) {
+  var docId = (e && e.parameter && e.parameter.docId) || '';
+  var ain   = (e && e.parameter && e.parameter.ain)   || '';
+  var globalId = docId + '/' + ain;
+
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  var row          = actionsSheet ? _loadExistingRowsByGlobalId(actionsSheet)[globalId] : null;
+
+  GasLogger.log('webapp.preview.notice', { docId: docId, ain: ain, found: !!row });
+  GasLogger.flush();
+
+  if (!row) {
+    return _renderPreviewNotice(null);
+  }
+
+  var docDataRow = _readDocDataRow(ss, docId);
+  return _renderPreviewNotice({
+    docName:  (docDataRow && docDataRow.docName) || '(unknown document)',
+    teamName: (docDataRow && docDataRow.teamId) || '',
+    actionId: ain,
+    status:   row.status || 'Open',
+    docLink:  'https://docs.google.com/document/d/' + encodeURIComponent(docId) + '/edit'
+  });
+}
+
+/**
+ * Renders the ADR-0017 Phase 1 notice page HTML. `model === null` renders the
+ * non-leaking not-found variant. `model` must never carry action text.
+ *
+ * @param {?{docName: string, teamName: string, actionId: string, status: string, docLink: string}} model
+ * @return {HtmlOutput}
+ */
+function _renderPreviewNotice(model) {
+  var body;
+  if (!model) {
+    body =
+      '<h1>Action not found</h1>' +
+      '<p>This link no longer points to a known action.</p>';
+  } else {
+    var teamRow = model.teamName
+      ? '<p><strong>Team:</strong> ' + _escapeHtml(model.teamName) + '</p>'
+      : '';
+    body =
+      '<h1>' + _escapeHtml(model.actionId) + '</h1>' +
+      '<p><strong>Document:</strong> ' + _escapeHtml(model.docName) + '</p>' +
+      teamRow +
+      '<p><strong>Status:</strong> ' + _escapeHtml(model.status) + '</p>' +
+      '<p><a href="' + _escapeHtml(model.docLink) + '" target="_blank">' +
+        'Open the document to view or edit this action</a></p>';
+  }
+
+  var html =
+    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>GActionSheet</title>' +
+    '<style>body{font-family:Arial,sans-serif;max-width:480px;margin:40px auto;' +
+    'padding:0 16px;color:#202124}h1{font-size:1.25rem}a{color:#1a73e8}</style>' +
+    '</head><body>' + body + '</body></html>';
+
+  return HtmlService.createHtmlOutput(html).setTitle('GActionSheet');
+}
+
+/**
+ * Escapes HTML special characters for safe interpolation into the notice page.
+ */
+function _escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
 }
 
 function doPost(e) {

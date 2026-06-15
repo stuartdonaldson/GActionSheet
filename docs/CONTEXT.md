@@ -103,6 +103,7 @@ The tracker table is located by a sentinel heading paragraph so refresh can repl
 - Periodic timed sweep (owned by the ActionSheet automation script) reconciles all docs referenced by ActionSheet rows, catching docs no one opened recently
 - Archive ActionSheet rows with `Status = Closed` and `Last Modified > 30 days` to the archive sheet
 - Team Scope: on first sync, auto-assign a document to a team by walking its Drive folder ancestry for a `TeamData` match; the assignment is sticky (stored as the `teamScope` Drive file property) and survives the document being moved to another team's folder, unless explicitly overridden via `DocData.SyncStatus = UpdateDoc`
+- Anonymous chip-preview notice (ADR-0017 Phase 1): any recipient who clicks an `AI-N` chip's link lands on `doGet ?cmd=preview&docId&ain`, a branded page showing only non-confidential metadata (document name, team, `AI-N`, status) and a Drive-ACL-gated link to open the document — never the action text. Unknown/missing actions render a non-leaking not-found page
 
 ---
 

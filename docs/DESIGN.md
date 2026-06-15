@@ -83,7 +83,7 @@ Context column refers to the execution contexts defined in §Runtime Architectur
 | `src/EditorAddonCard.js` | Docs editor add-on: `@`-menu create-action card, smart-chip `onLinkPreview`, preview status taps, `ACTION_SHEET_QUEUE` enqueue — CardService | ② |
 | `src/ContractSchema.js` | Authoritative machine-readable contract definitions shared by app and tests | all |
 | `src/SyncManager.js` | Scanner (`_scanFloatingActions`), token assignment, `syncDocument` / `syncAll`, REST paragraph flush (`_flushActionParagraph`), shared chip-badge style (`_chipBadgeStyleRequest`), chip URL base (`ACTION_CHIP_URL_BASE`), `onActionSheetEdit` | ① ② ④ |
-| `src/WebApp.js` | `doGet` (self-register URL), `doPost` router + all sheet writes | ③ |
+| `src/WebApp.js` | `doGet` (self-register URL; `?cmd=preview` anonymous chip notice, ADR-0017 Phase 1), `doPost` router + all sheet writes | ③ |
 | `src/TrackerTable.js` | Insert/refresh the in-doc tracker table (DocumentApp + REST) | ① ② ④ |
 | `src/VerifySync.js` | Non-mutating doc ↔ tracker ↔ sheet verification | ① |
 | `src/WriteGuard.js` | In-process suppression of `onActionSheetEdit` during programmatic writes | ④ |
@@ -161,6 +161,7 @@ graph TB
         end
         subgraph deployer["Context ③ — Web App — runs as the DEPLOYER (USER_DEPLOYING)"]
             WEB["doPost router · all ActionSheet writes<br/>sync/upsert/patch/delete/verify_action_rows · mark_doc_not_found"]
+            PREV["doGet ?cmd=preview&docId&ain — anonymous chip notice (ADR-0017 Phase 1)<br/>no-auth, non-confidential metadata only"]
         end
         subgraph owner["Context ④ — container-bound triggers — run as the SHEET OWNER"]
             OE["onActionSheetEdit — installable onEdit"]
