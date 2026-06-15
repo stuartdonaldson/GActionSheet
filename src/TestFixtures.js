@@ -2038,6 +2038,38 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      // ── rz4k.4: Sheets-menu entry points driven via their own MenuHandler.js ──
+      // wrappers. Each case invokes the menu function itself — the call-site the
+      // entry-point-coverage invariant scopes to — NOT the core function it
+      // delegates to (driving syncAll()/ensureSheetStructure()/ArchiveManager
+      // directly would not cover the menu call-site). No getUi() is reachable from
+      // these wrappers (only onOpen touches UI), so they are safe in run_fixture.
+      case 'menu_sync': {
+        // menuSync() -> syncAll(); mirrors the sync_all fixture through the wrapper.
+        menuSync();
+        SpreadsheetApp.flush();
+        _TF_RESULT = { tag: 'fixture.menu_sync', data: { ok: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'menu_ensure_sheet_structure': {
+        // menuEnsureSheetStructure() -> ensureSheetStructure().
+        menuEnsureSheetStructure();
+        _TF_RESULT = { tag: 'fixture.menu_ensure_sheet_structure', data: { ensured: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'menu_run_archive': {
+        // menuRunArchive() -> ArchiveManager.archive(getActiveSpreadsheet()).
+        menuRunArchive();
+        SpreadsheetApp.flush();
+        _TF_RESULT = { tag: 'fixture.menu_run_archive', data: { archiveTriggered: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'trash_doc': {
         var trashDocId = data.docId || testDocId;
         DriveApp.getFileById(trashDocId).setTrashed(true);

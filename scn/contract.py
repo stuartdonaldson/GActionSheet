@@ -167,12 +167,19 @@ ENTRY_POINT_REGISTRY: dict[str, str] = {
 ENTRY_POINT_DEFERRED: dict[str, str] = {
     # rz4k.3 — workspace/editor card mutations
     "importSelectedSubmit": "real Import-tab submit; CHECK_BOX SelectionInput not Playwright-drivable — covered via importSelectedForTest surrogate, EPIC GTaskSheet-pw5x — GTaskSheet-rz4k.3",
-    # rz4k.4 — menu entry points
-    "menuSync": "menu click call-site not driven; delegates to covered syncAll — GTaskSheet-rz4k.4",
-    "menuEnsureSheetStructure": "menu click call-site not driven — GTaskSheet-rz4k.4",
-    "menuInitializeTriggers": "menu click call-site not driven — GTaskSheet-rz4k.4",
-    "menuBootstrap": "menu click call-site not driven — GTaskSheet-rz4k.4",
-    "menuRunArchive": "menu click call-site not driven — GTaskSheet-rz4k.4",
+    # rz4k.4 — menu entry points. menuSync / menuEnsureSheetStructure / menuRunArchive
+    # are now covered at their own menu-wrapper call-sites (tests/test_menu_entry_points.py
+    # via the menu_sync / menu_ensure_sheet_structure / menu_run_archive fixtures) and have
+    # been removed from this map. The two below are PERMANENT EXEMPTIONS (epic AC alt (b)):
+    "menuBootstrap": "menu wrapper over bootstrap() — itself a permanent exemption below. "
+        "One-time script-property setup; driving it mid-suite would overwrite "
+        "TEST_DOC_ID/TEST_SHEET_ID and break every subsequent scenario. A dedicated tag "
+        "would require save/restore plumbing redundant with the bootstrap-route exemption "
+        "— GTaskSheet-rz4k.4.",
+    "menuInitializeTriggers": "menu wrapper over initializeTriggers(); driving it mid-suite "
+        "delete+recreates the live deployment's installable triggers — shared-deployment "
+        "state outside the per-doc scenario sandbox. Trigger registration is exercised "
+        "operationally by every `npm run deploy:test` — GTaskSheet-rz4k.4.",
     # rz4k.5 — test-support routes (PERMANENT EXEMPTIONS, resolved GTaskSheet-rz4k.5)
     "run_fixture": "every scn._post_fixture(...) call across the suite POSTs run_fixture "
         "(hundreds of call-sites per run); a regression here surfaces as an immediate "
