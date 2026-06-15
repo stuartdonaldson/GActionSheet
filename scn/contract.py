@@ -162,10 +162,6 @@ ENTRY_POINT_REGISTRY: dict[str, str] = {
 # epic converts each to a real durable-state call-site assertion. "Warn-only" == enumerated but not
 # yet asserted at its own call-site — documented debt, not coverage. Empty this dict as coverage lands.
 ENTRY_POINT_DEFERRED: dict[str, str] = {
-    # rz4k.1 — installable triggers
-    "syncAll": "exercised by test_sync_all.py via raw asserts, not a tagged call-site (ID-map P1-1) — GTaskSheet-rz4k.1",
-    "onActionSheetEdit": "exercised only via edit_action_row HTTP surrogate, not the live trigger (ID-map P1-2) — GTaskSheet-rz4k.1",
-    "_processPendingSheetUpdates": "async sheet-update queue drain; no current coverage — GTaskSheet-rz4k.1",
     # rz4k.2 — production HTTP write routes
     "upsert_action_rows": "exercised by test_45k via raw asserts, not tagged at the route call-site — GTaskSheet-rz4k.2",
     "sync_action_rows": "exercised as the sync mechanism, not asserted distinctly from syncDocument — GTaskSheet-rz4k.2",

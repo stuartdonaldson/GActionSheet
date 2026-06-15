@@ -17,9 +17,13 @@ import datetime
 import secrets
 import pytest
 
+from scn.engine import CheckpointKind, Surface
 from scn.session import ScenarioSession
 from scn.surfaces import SheetReader
 from tests.helpers.download import download_xlsx
+
+SHEET = Surface.SHEET
+STEP = CheckpointKind.STEP
 
 _35_DAYS_AGO = (
     datetime.datetime.utcnow() - datetime.timedelta(days=35)
@@ -38,8 +42,8 @@ def _archive_rows_for(settings: dict, doc_id: str) -> list:
     return SheetReader().read(xlsx, doc_id, tab_name="Archive")
 
 
-@pytest.fixture(scope="module")
-def sync_ctx(settings):
+@pytest.fixture
+def sync_ctx(settings, request):
     """Set up the mixed ActionSheet; yield context; teardown trashes all journey docs.
 
     Setup order:
@@ -54,7 +58,7 @@ def sync_ctx(settings):
     # Unique-per-session fake docId (44 URL-safe chars, will never resolve in Drive).
     invalid_doc_id = secrets.token_urlsafe(33)[:44]
 
-    scn_mod = ScenarioSession.new_doc(settings)
+    scn_mod = ScenarioSession.new_doc(settings, request=request)
     scn_unmod = ScenarioSession.new_doc(settings)
     scn_trash = ScenarioSession.new_doc(settings)
 
@@ -137,6 +141,25 @@ def test_sync_all(sync_ctx):
         assert getattr(row, "sync_status", None) == "Doc Not Found", (
             f"[r3d] invalid-doc row: expected 'Doc Not Found', got {row.sync_status!r}"
         )
+
+    # entry_point: syncAll (30-min time-based sweep, ID-map P1-1) — durable-state
+    # assertion at the sweep's own call-site (GTaskSheet-rz4k.1). Re-checks the
+    # [r3d] invalid-doc condition above via the tagged scn mechanism.
+    def _invalid_doc_not_found() -> str | None:
+        rows = _sheet_rows_for(settings, invalid_id)
+        if not rows:
+            return "[r3d] invalid-doc row disappeared from Actions after Sweep 1"
+        for row in rows:
+            if getattr(row, "sync_status", None) != "Doc Not Found":
+                return (
+                    f"[r3d] invalid-doc row: expected 'Doc Not Found', got {row.sync_status!r}"
+                )
+        return None
+
+    scn_mod.expect_callable(
+        _invalid_doc_not_found, on=SHEET, tag="[r3d syncAll sweep1]", entry_point="syncAll",
+    )
+    scn_mod.checkpoint(STEP)
 
     # [grxl] trashed doc → Sync Status = 'Doc Not Found'
     # Both paths (inaccessible + trashed) produce the same durable status.

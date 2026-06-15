@@ -188,6 +188,43 @@ def test_b7_write_routes(scn):
 
 
 # ---------------------------------------------------------------------------
+# onActionSheetEdit — live onEdit-trigger call-site (GTaskSheet-rz4k.1)
+# ---------------------------------------------------------------------------
+
+def test_onActionSheetEdit_sync_status_column_noop(scn):
+    """entry_point: onActionSheetEdit's live onEdit-trigger call-site, via the
+    sync_status_on_edit fixture -- distinct from the edit_action_row HTTP
+    surrogate exercised by test_b7_write_routes above (ID-map P1-2,
+    GTaskSheet-rz4k.1).
+
+    Editing the Sync Status column (col 11) is outside onActionSheetEdit's
+    watched-column set ({assignee_email, assignee_name, action_text, status}
+    -- SyncManager.js:388), so the row must not be marked Dirty by this call."""
+    result = scn._post_fixture("sync_status_on_edit")
+    assert (result.get("data") or {}).get("sentinelDateModified"), (
+        f"[rz4k.1] sync_status_on_edit fixture did not return sentinelDateModified: {result!r}"
+    )
+
+    def _not_marked_dirty() -> str | None:
+        rows = scn.find_sheet_actions()
+        row = next((r for r in rows if "SS-EDIT:" in (r.action or "")), None)
+        if row is None:
+            return "[rz4k.1] SS-EDIT row not found after sync_status_on_edit fixture"
+        if row.sync_status == "Dirty":
+            return (
+                "[rz4k.1] onActionSheetEdit should not mark Dirty for a Sync Status "
+                f"column edit (col 11 is outside its watched-column set); got {row.sync_status!r}"
+            )
+        return None
+
+    scn.expect_callable(
+        _not_marked_dirty, on=SHEET, tag="[rz4k.1 onActionSheetEdit noop]",
+        entry_point="onActionSheetEdit",
+    )
+    scn.checkpoint(STEP)
+
+
+# ---------------------------------------------------------------------------
 # [45k] upsert_action_rows UPDATE path — cols 3+4 written
 # ---------------------------------------------------------------------------
 

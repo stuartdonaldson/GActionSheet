@@ -19,9 +19,13 @@ import urllib.parse
 import pytest
 
 from scn.ai import ai
+from scn.engine import CheckpointKind, Surface
 from scn.session import ScenarioSession
 from scn.surfaces import SheetReader
 from tests.helpers.download import download_xlsx
+
+SHEET = Surface.SHEET
+INTEGRITY = CheckpointKind.INTEGRITY
 
 ACTION_CHIP_URL_BASE = "https://northlakeuu.org/NUUTS"
 
@@ -37,9 +41,9 @@ def _chip_url(global_id: str) -> str:
     return f"{ACTION_CHIP_URL_BASE}?c=view&globalId={urllib.parse.quote(global_id, safe='')}"
 
 
-@pytest.fixture(scope="module")
-def scn(settings):
-    s = ScenarioSession.new_doc(settings)
+@pytest.fixture
+def scn(settings, request):
+    s = ScenarioSession.new_doc(settings, request=request)
     yield s
     s.close()
 
@@ -101,11 +105,24 @@ def test_poc_edit_action_propagation(scn, settings):
     scn._post_fixture("process_pending_sheet_updates")
 
     # ── Step 4: assert durable sheet status ──────────────────────────────────
-    xlsx_post_drain = download_xlsx(sheet_id)
-    post_drain_rows = SheetReader().read(xlsx_post_drain, scn.doc_id)
-    post_drain_row = next((r for r in post_drain_rows if r.action_id == action.action_id), None)
-    assert post_drain_row is not None, "[0n3] row not found in sheet after drain"
-    assert getattr(post_drain_row, "status", None) == new_status, (
-        f"[0n3] expected sheet status={new_status!r} after queue drain, "
-        f"got {getattr(post_drain_row, 'status', None)!r}"
+    # entry_point: _processPendingSheetUpdates -- the async queue-drain trigger
+    # whose durable result (sheet row status converged) is the observable
+    # state change of this entry point (GTaskSheet-rz4k.1).
+    def _drain_converged() -> str | None:
+        xlsx_post_drain = download_xlsx(sheet_id)
+        post_drain_rows = SheetReader().read(xlsx_post_drain, scn.doc_id)
+        post_drain_row = next((r for r in post_drain_rows if r.action_id == action.action_id), None)
+        if post_drain_row is None:
+            return "[0n3] row not found in sheet after drain"
+        if getattr(post_drain_row, "status", None) != new_status:
+            return (
+                f"[0n3] expected sheet status={new_status!r} after queue drain, "
+                f"got {getattr(post_drain_row, 'status', None)!r}"
+            )
+        return None
+
+    scn.expect_callable(
+        _drain_converged, on=SHEET, tag="[0n3 queue-drain]",
+        entry_point="_processPendingSheetUpdates",
     )
+    scn.checkpoint(INTEGRITY)
