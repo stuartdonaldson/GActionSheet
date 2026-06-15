@@ -335,9 +335,6 @@ function _buildCreationCard() {
         .setFieldName('assignee')
         .setTitle('Assignee (optional)')
         .setHint('name or email')
-        .setSuggestionsAction(
-          CardService.newAction().setFunctionName('_suggestAssignees')
-        )
     )
     .addWidget(
       CardService.newSelectionInput()
@@ -364,102 +361,6 @@ function _buildCreationCard() {
     )
     .addSection(section)
     .build();
-}
-
-/**
- * SuggestionsAction for the Assignee field on the Create Action card.
- * Queries the Google People API directory for matching users as the field changes.
- * Returns suggestions in "Display Name <email>" format; submit handler parses this.
- *
- * Requires scope: https://www.googleapis.com/auth/directory.readonly
- *
- * @param {GoogleAppsScript.Addons.EventObject} e
- * @returns {GoogleAppsScript.Card_Service.SuggestionsResponse}
- */
-function _suggestAssignees(e) { // eslint-disable-line no-unused-vars
-  try {
-    var query = (e && e.formInput && e.formInput.assignee) || '';
-    GasLogger.log('poc.suggestAssignees', { query: query });
-    GasLogger.flush();
-
-    var suggestions = CardService.newSuggestions();
-
-    if (query.length >= 4) {
-      var token = ScriptApp.getOAuthToken();
-      var url   = 'https://people.googleapis.com/v1/people:searchDirectoryPeople'
-        + '?query='    + encodeURIComponent(query)
-        + '&readMask=' + encodeURIComponent('emailAddresses,names')
-        + '&sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE';
-
-      var resp = UrlFetchApp.fetch(url, {
-        headers:            { Authorization: 'Bearer ' + token },
-        muteHttpExceptions: true
-      });
-
-      var code = resp.getResponseCode();
-      GasLogger.log('poc.suggestAssignees.resp', { code: code });
-      GasLogger.flush();
-
-      if (code === 200) {
-        _addPeopleSuggestions(suggestions, JSON.parse(resp.getContentText()).people || [], query);
-      } else {
-        // Directory search failed (likely 403 — scope not granted or domain policy).
-        // Fall back to personal contacts search which requires only contacts.readonly.
-        GasLogger.log('poc.suggestAssignees.dir_fail', { code: code });
-        var contactsUrl = 'https://people.googleapis.com/v1/people:searchContacts'
-          + '?query='    + encodeURIComponent(query)
-          + '&readMask=' + encodeURIComponent('emailAddresses,names');
-        var cresp = UrlFetchApp.fetch(contactsUrl, {
-          headers:            { Authorization: 'Bearer ' + token },
-          muteHttpExceptions: true
-        });
-        var ccode = cresp.getResponseCode();
-        GasLogger.log('poc.suggestAssignees.contacts', { code: ccode });
-        GasLogger.flush();
-        if (ccode === 200) {
-          var cdata    = JSON.parse(cresp.getContentText());
-          var cresults = (cdata.results || []).map(function(r) { return r.person; });
-          _addPeopleSuggestions(suggestions, cresults, query);
-        } else {
-          GasLogger.log('poc.suggestAssignees.contacts_fail', { code: ccode });
-        }
-      }
-    }
-
-    var built = CardService.newSuggestionsResponseBuilder()
-      .setSuggestions(suggestions)
-      .build();
-    GasLogger.log('poc.suggestAssignees.built', { query: query });
-    GasLogger.flush();
-    return built;
-  } catch (err) {
-    GasLogger.log('poc.suggestAssignees.fatal', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
-    GasLogger.flush();
-    return CardService.newSuggestionsResponseBuilder()
-      .setSuggestions(CardService.newSuggestions())
-      .build();
-  }
-}
-
-/** Adds up to 4 People API person objects to a Suggestions instance. */
-function _addPeopleSuggestions(suggestions, people, query) {
-  var added = 0;
-  for (var i = 0; i < people.length && added < 4; i++) {
-    var emails = (people[i] && people[i].emailAddresses) || [];
-    var names  = (people[i] && people[i].names)          || [];
-    var email  = emails.length ? emails[0].value      : '';
-    var name   = names.length  ? names[0].displayName : '';
-    if (!email) continue;
-    // Avoid angle brackets — addSuggestion may reject them on some runtimes
-    var label = name ? name + ' (' + email + ')' : email;
-    try {
-      suggestions.addSuggestion(label);
-      added++;
-    } catch (e) {
-      GasLogger.log('poc.suggestAssignees.addSuggestion.err', { label: label, msg: String(e) });
-    }
-  }
-  GasLogger.log('poc.suggestAssignees.results', { query: query, peopleCount: people.length, added: added });
 }
 
 /**

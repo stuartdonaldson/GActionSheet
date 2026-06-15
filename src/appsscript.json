@@ -12,8 +12,6 @@
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/workspace.linkpreview",
     "https://www.googleapis.com/auth/workspace.linkcreate",
-    "https://www.googleapis.com/auth/directory.readonly",
-    "https://www.googleapis.com/auth/contacts.readonly",
     "openid"
   ],
   "urlFetchWhitelist": [
@@ -21,7 +19,6 @@
     "https://script.google.com/a/northlakeuu.org/macros/s/",
     "https://script.google.com/macros/s/",
     "https://docs.googleapis.com/",
-    "https://people.googleapis.com/",
     "https://www.googleapis.com/drive/"
   ],
   "webapp": {
