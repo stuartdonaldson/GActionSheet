@@ -2742,3 +2742,39 @@ Closed EPIC **GTaskSheet-rz4k** (ENTRY_POINT_REGISTRY deferred→covered) and EP
   regression. Full-suite green is the merge-gate concern, per rz4k.1/.2/.3 precedent.
 - q37d (P4) remains the open footgun: `new_doc()` without `request=request` silently
   drops `ep.*` props. Sidestepped here by using `request=request` in the scn fixture.
+
+## 2026-06-15 19:40:00
+
+### Summary:
+- Implemented ADR-0017 Phase 1 (anonymous chip-preview notice page), closing
+  GTaskSheet-krz5 (epic), mus0 ([IMP]), and zb3l ([TST]).
+- `src/WebApp.js`: `doGet` now dispatches `?cmd=preview&docId=<docId>&ain=AI-N` to
+  `_handlePreviewNotice`, which joins the Actions row (`_loadExistingRowsByGlobalId`)
+  with DocData (`_readDocDataRow`) and renders via `_renderPreviewNotice`/`_escapeHtml`
+  — an `HtmlService` page showing only doc name, team, AI-N, and status, plus a
+  Drive-ACL-gated `docs.google.com/.../edit` link. Action text is never read into the
+  render model. Unknown/missing globalId renders a non-leaking "Action not found" page.
+  Logs `webapp.preview.notice {docId, ain, found}`.
+- `tests/test_chip_preview.py` (new): two scenarios —
+  (1) seeds an action with a distinctive secret action text, syncs, fetches the
+  preview page and asserts the secret text is ABSENT (T-negative, core security
+  invariant) while AI-N, status, doc name, and doc-edit link ARE present;
+  (2) unknown `ain` -> non-leaking not-found page, doesn't echo docId.
+- `scn/session.py`: added `_http_get`, `extract_html_output`, and
+  `ScenarioSession.fetch_preview_html(ain, doc_id=None)`.
+- Updated `docs/CONTEXT.md` (§Core Capabilities), `docs/DESIGN.md` (module map +
+  Web App context diagram), and ADR-0017's tracking table to mark Phase 1 done.
+- Deployed to TEST (@222); both new tests pass live; `test_scn_session.py` (36) green.
+- Committed (6a6d8ad), pushed to `inf/scn-observability-failfast`, `bd dolt push` done.
+
+### Key Learnings:
+- GAS `doGet` returning `HtmlService.createHtmlOutput(...)` is served wrapped in a
+  sandboxed-iframe bootstrap page where the real markup is **triple-escaped**: JS
+  `\xHH` hex-escapes around two layers of JSON-string-escaping inside a
+  `goog.script.init("...")` call. `extract_html_output` (scn/session.py) decodes this
+  via `\xHH`->`\u00HH` regex substitution + two `json.loads` passes to recover the
+  `userHtml` field. Any future doGet HTML route should reuse this helper rather than
+  re-deriving the unescape logic.
+- TeamData has no separate "team name" field — `teamId` itself is used as the
+  display label for "team name (if resolvable)" per ADR-0017 Phase 1; acceptable
+  for the interim notice.
