@@ -78,6 +78,14 @@ def test_b7_write_routes(scn):
     # Pin IDs now so we can address rows by globalId in the write acts below
     _pin_ids(scn, [target_edit, target_status, target_delete])
 
+    # entry_point: sync_action_rows -- the bidirectional-reconcile route POSTed by
+    # scn.sync() above (Scenario C), distinct from the syncDocument-tagged checks in
+    # test_team_scope.py (GTaskSheet-rz4k.2). Durable result: the doc-seeded action
+    # now exists as a sheet row (already confirmed by _pin_ids above; tag it here
+    # for entry-point coverage).
+    scn.verify(target_edit, on=SHEET, tag="[rz4k.2 sync_action_rows]", entry_point="sync_action_rows")
+    scn.checkpoint(STEP)
+
     # AC2 (sjj): verify the auto-assigned globalIds match the expected format {docId}/AI-{N}
     # action_id holds only the AI-N suffix; the session assembles the full globalId as
     # "{doc_id}/{action_id}" when addressing write routes (§16.11 #3).
@@ -173,6 +181,21 @@ def test_b7_write_routes(scn):
         f"got {getattr(del_row, 'sync_status', None)!r}"
     )
 
+    # entry_point: delete_action_row (GTaskSheet-rz4k.2) -- tag the Deleted-stamp
+    # durable-state result already confirmed by the raw asserts above.
+    def _delete_stamped() -> str | None:
+        row = _find_row(scn.find_sheet_actions(), target_delete)
+        if row is None:
+            return f"[B7 AC3] delete: row not found (action_id={target_delete.action_id!r})"
+        if getattr(row, "sync_status", None) != "Deleted":
+            return f"[B7 AC3] delete: expected Sync Status='Deleted', got {row.sync_status!r}"
+        return None
+
+    scn.expect_callable(
+        _delete_stamped, on=SHEET, tag="[b7 delete]", entry_point="delete_action_row",
+    )
+    scn.checkpoint(STEP)
+
     # ── Final guard — all three actions addressable by globalId throughout ────────
     #   Each write act above used scn._gid(target) internally; if any target.action_id
     #   was unset the _gid() call would have raised ValueError before the route fired.
@@ -228,9 +251,9 @@ def test_onActionSheetEdit_sync_status_column_noop(scn):
 # [45k] upsert_action_rows UPDATE path — cols 3+4 written
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="module")
-def scn_45k(settings):
-    s = ScenarioSession.new_doc(settings)
+@pytest.fixture
+def scn_45k(settings, request):
+    s = ScenarioSession.new_doc(settings, request=request)
     yield s
     s.close()
 
@@ -296,6 +319,24 @@ def test_45k_upsert_update_writes_email_and_name(scn_45k, settings):
     assert getattr(updated_row, "sync_status", None) not in ("Dirty",), (
         f"[45k] upsert UPDATE must not stamp Dirty; got {getattr(updated_row, 'sync_status', None)!r}"
     )
+
+    # entry_point: upsert_action_rows (GTaskSheet-rz4k.2) -- tag the col3/col4
+    # durable-write result already confirmed by the raw asserts above.
+    def _upsert_applied() -> str | None:
+        row = next((r for r in scn_45k.find_sheet_actions() if r.action == target.action), None)
+        if row is None:
+            return "[45k] row not found after upsert UPDATE"
+        if getattr(row, "assignee", None) != new_email or getattr(row, "assignee_name", None) != new_name:
+            return (
+                f"[45k] expected assignee={new_email!r}/name={new_name!r}, "
+                f"got assignee={getattr(row, 'assignee', None)!r}/name={getattr(row, 'assignee_name', None)!r}"
+            )
+        return None
+
+    scn_45k.expect_callable(
+        _upsert_applied, on=SHEET, tag="[45k upsert]", entry_point="upsert_action_rows",
+    )
+    scn_45k.checkpoint(STEP)
 
 
 # ---------------------------------------------------------------------------

@@ -162,12 +162,6 @@ ENTRY_POINT_REGISTRY: dict[str, str] = {
 # epic converts each to a real durable-state call-site assertion. "Warn-only" == enumerated but not
 # yet asserted at its own call-site — documented debt, not coverage. Empty this dict as coverage lands.
 ENTRY_POINT_DEFERRED: dict[str, str] = {
-    # rz4k.2 — production HTTP write routes
-    "upsert_action_rows": "exercised by test_45k via raw asserts, not tagged at the route call-site — GTaskSheet-rz4k.2",
-    "sync_action_rows": "exercised as the sync mechanism, not asserted distinctly from syncDocument — GTaskSheet-rz4k.2",
-    "mark_doc_not_found": "no tagged durable-state call-site assertion yet — GTaskSheet-rz4k.2",
-    "delete_action_row": "Deleted-stamp asserted via raw asserts in test_b7 ACT C, not tagged — GTaskSheet-rz4k.2",
-    "forward_action_rows": "forward logic covered via importSelectedForTest, route call-site not tagged — GTaskSheet-rz4k.2",
     # rz4k.3 — workspace/editor card mutations
     "importSelectedSubmit": "real Import-tab submit; CHECK_BOX SelectionInput not Playwright-drivable — covered via importSelectedForTest surrogate, EPIC GTaskSheet-pw5x — GTaskSheet-rz4k.3",
     # rz4k.4 — menu entry points

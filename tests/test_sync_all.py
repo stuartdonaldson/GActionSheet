@@ -174,6 +174,24 @@ def test_sync_all(sync_ctx):
             f"[grxl] trashed-doc row: expected 'Doc Not Found', got {row.sync_status!r}"
         )
 
+    # entry_point: mark_doc_not_found (GTaskSheet-rz4k.2) -- syncDocument's catch
+    # path POSTs this route when the doc is inaccessible/trashed; tag the [grxl]
+    # durable-stamp condition above (distinct from the [r3d]/syncAll tag, since
+    # both invalid- and trashed-doc rows are stamped via the same route).
+    def _trashed_doc_not_found() -> str | None:
+        rows = _sheet_rows_for(settings, trashed_id)
+        if not rows:
+            return "[grxl] trashed-doc row disappeared from Actions after Sweep 1"
+        for row in rows:
+            if getattr(row, "sync_status", None) != "Doc Not Found":
+                return f"[grxl] trashed-doc row: expected 'Doc Not Found', got {row.sync_status!r}"
+        return None
+
+    scn_mod.expect_callable(
+        _trashed_doc_not_found, on=SHEET, tag="[grxl mark_doc_not_found]", entry_point="mark_doc_not_found",
+    )
+    scn_mod.checkpoint(STEP)
+
     # [zc21] DocData mirrors 'Doc Not Found' and keeps Team Id consistent with
     # the document's actual teamScope appProperty.
     trashed_docdata = (scn_mod._post_fixture("get_docdata_row", {"fileId": trashed_id})

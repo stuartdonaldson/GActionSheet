@@ -369,6 +369,12 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
         scn_src1.expect_callable(
             check_src1, on=Surface.SHEET, tag="import ac3-forward", entry_point="importSelectedForTest",
         )
+        # entry_point: forward_action_rows (GTaskSheet-rz4k.2) -- _importSelectedRows
+        # calls this production route directly (_callWebApp('forward_action_rows', ...),
+        # EditorAddonCard.js); tag the same durable Forwarded/suffix/Dirty check.
+        scn_src1.expect_callable(
+            check_src1, on=Surface.SHEET, tag="[rz4k.2 forward_action_rows]", entry_point="forward_action_rows",
+        )
         scn_src1.checkpoint(STEP)
 
         check_src2 = _forward_check(scn_src2, src2_action)
