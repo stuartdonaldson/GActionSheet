@@ -7,6 +7,9 @@
 # Test infrastructure
 .auth/*
 !.auth/README.md
+# Groups fetcher (separate project) — scraped private content & session cookies
+groups-fetcher/recon_out/
+groups-fetcher/.auth/
 local.settings.json
 bdreport.md
 # allure-results: ignore generated files; keep categories.json and history/

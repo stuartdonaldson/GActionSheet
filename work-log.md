@@ -2651,3 +2651,41 @@ research + probes, GTaskSheet-p8w0 probe.config.js fix) as a separate commit.
 - Chip-URL format renames (0v61/8ca9f0a) need a repo-wide grep for
   `globalId=`/`%2FAI-` in test assertions — test_link_preview was the only
   other reference besides the production code that had already been updated.
+
+## 2026-06-15 09:05:00
+
+### Summary:
+Closed EPIC **GTaskSheet-rz4k** (ENTRY_POINT_REGISTRY deferred→covered) and EPIC-D
+(**GTaskSheet-yb2w**, Import tab) in one session.
+
+- **rz4k.4** (last child, 5/5): converted the 3 drivable Sheets-menu entry points
+  to tagged, durable-state call-site coverage. Added 3 menu-wrapper fixtures in
+  `src/TestFixtures.js` (`menu_sync` / `menu_ensure_sheet_structure` /
+  `menu_run_archive`) — each invokes the `MenuHandler.js` wrapper itself (the
+  call-site the entry-point invariant scopes to), not the delegated core fn. New
+  `tests/test_menu_entry_points.py` asserts: menuSync→syncAll re-sweeps a
+  registered doc; menuEnsureSheetStructure→canonical `SHEET_HEADERS`;
+  menuRunArchive→eligible row moves to Archive. All 3 PASS (189s).
+- **menuBootstrap / menuInitializeTriggers**: formal permanent exemptions (epic AC
+  alt (b)) in `scn/contract.ENTRY_POINT_DEFERRED` — driving them mid-suite mutates
+  shared deployment state (script properties / installable triggers).
+  `check_coverage.py -v` confirms the 3 covered show PASS, the 2 show warn-only with
+  rationale, no menu key uncovered. `ENTRY_POINT_DEFERRED` now holds only justified
+  permanent exemptions → epic closed.
+- **fnvq** (EPIC-D final sign-off gate): re-ran the DocStatus regression smoke
+  `test_sidebar.py::test_tab_navigation_docstatus_regression` — green (196s). Closed
+  fnvq; EPIC-D was then 7/7 → closed **yb2w**, which unblocks EPIC-E (`gc43`, Notify tab).
+
+### Key Learnings:
+- The menuSync assertion first false-failed because the action text contained a
+  trailing parenthetical — the status parser strips a trailing `(...)` (the known
+  GTaskSheet-28q corner case). Sheet showed both actions correctly; only the Python
+  comparison string carried the stripped suffix. Keep `(...)` out of seeded action text.
+- `syncAll()` discovers docs solely from the Actions document-formula column, so a
+  menuSync coverage test must sync once to register the doc, then add a second action
+  and re-drive — the propagation of the second action is the durable proof.
+- `check_coverage.py` run against a single-module JUnit always shows every
+  other-module entry point as "uncovered" (exit 1); that is isolation noise, not a
+  regression. Full-suite green is the merge-gate concern, per rz4k.1/.2/.3 precedent.
+- q37d (P4) remains the open footgun: `new_doc()` without `request=request` silently
+  drops `ep.*` props. Sidestepped here by using `request=request` in the scn fixture.
