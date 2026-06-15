@@ -2652,6 +2652,59 @@ research + probes, GTaskSheet-p8w0 probe.config.js fix) as a separate commit.
   `globalId=`/`%2FAI-` in test assertions — test_link_preview was the only
   other reference besides the production code that had already been updated.
 
+## 2026-06-14 23:25:00
+
+### Summary:
+Same session as the rz4k.3 entry above, continued on: closed 3 more children of
+EPIC rz4k (rz4k.1, rz4k.2, rz4k.5 — now 4/5).
+
+- **rz4k.1** (installable triggers): `_processPendingSheetUpdates`
+  (`tests/test_poc_features.py`) — scn fixture moved to function scope +
+  `request=request`, queue-drain durable-status assert converted to
+  `expect_callable(entry_point=...)`. `syncAll` (`tests/test_sync_all.py`) —
+  tagged the existing [r3d] invalid-doc 'Doc Not Found' Sweep-1 assertion at its
+  own call-site (`sync_ctx` -> function scope + `request=`). `onActionSheetEdit`
+  — new test driving the previously-unused `sync_status_on_edit` GAS fixture
+  (the real onEdit trigger, distinct from the `edit_action_row` HTTP surrogate);
+  asserts editing the Sync Status column does not mark the row Dirty. All 3
+  PASS; full `test_b7_write_routes.py` (4 tests) still green. Removed from
+  `ENTRY_POINT_DEFERRED`, closed, committed, pushed.
+- **rz4k.2** (HTTP write routes): `sync_action_rows`/`delete_action_row`/
+  `upsert_action_rows` tagged at existing call-sites in
+  `test_b7_write_routes.py` (Scenario C reconcile / ACT C delete-stamp /
+  `scn_45k` col3-4 write, the latter moved to function scope + `request=`).
+  `mark_doc_not_found` tagged on the existing [grxl] trashed-doc Sweep-1
+  condition in `test_sync_all.py`. `forward_action_rows` — second
+  `expect_callable` added in `test_import.py::test_import_flow_forward_sync`
+  tagging `_importSelectedRows`'s direct call, distinct from the
+  `importSelectedForTest` tag. All 5 PASS via live runs, including the
+  Playwright import test. Removed from `ENTRY_POINT_DEFERRED`, closed,
+  committed, pushed.
+- **rz4k.5** (test-support routes): `run_fixture`/`begin_journey_session`/
+  `end_journey_session`/`set_test_token`/`bootstrap` marked as permanent
+  `ENTRY_POINT_DEFERRED` exemptions per the epic's AC alternative (b) — pure
+  harness plumbing exercised by hundreds of call-sites; a regression fails the
+  suite immediately and visibly, making a dedicated `entry_point=` tag
+  redundant. Closed, committed, pushed.
+
+**rz4k.4** (menu entry points — last child) was scoped but not started: an
+`AskUserQuestion` proposing to stop here for the session (vs. exempt menuSync
+now / proceed with full Playwright menu-navigation infra) was interrupted by
+the user before a choice was recorded, and the session ended via `/exit` +
+`/compact` without resuming. (rz4k.4 and the EPIC close were completed in the
+following session — see 2026-06-15 09:05:00 below.)
+
+### Key Learnings:
+- Noted another session was concurrently active in the same checkout (new
+  `groups-fetcher/` subproject + `.gitignore` edit) — pushed directly since
+  origin was still at this session's parent commit, without touching the
+  unrelated files.
+- rz4k.4's menu items (`menuInitializeTriggers`, `menuBootstrap`,
+  `menuEnsureSheetStructure`) mutate shared script-level state (triggers,
+  script properties, sheet structure) rather than a per-scenario isolated doc —
+  the reason given to defer it to its own session rather than risk colliding
+  with the concurrent session's GAS deployment state.
+
 ## 2026-06-15 09:05:00
 
 ### Summary:
