@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<!--
+  ADR-0017 quick-test: GIS stable-origin landing page.
+
+  Purpose: prove end-to-end that, served from a STABLE registrable origin (NOT
+  the GAS *.googleusercontent.com iframe), a non-domain user can:
+    1. sign in with Google (account chooser, no consent screen for openid email profile),
+    2. get an ID token,
+    3. POST {id_token, globalId, newStatus} to the GAS doPost,
+    4. have GAS verify it server-side (tokeninfo) and save the row.
+
+  Two operator prerequisites before this can run (see 0017-validation.md):
+    A. Host this file on a fixed origin you control (GitHub Pages / Firebase Hosting /
+       any static host). Note the exact origin, e.g. https://<you>.github.io
+    B. Create an OAuth 2.0 Client ID (type "Web application") in the SAME GCP project
+       as the Apps Script project. Add the origin from (A) as an Authorized JavaScript
+       Origin. Paste the client_id below.
+
+  Then open:  https://<host>/0017-gis-landing-probe.html?docId=<DOC>&ain=AI-1
+-->
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Action status — confirm</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; }
+    .card { border: 1px solid #ccd; border-radius: 8px; padding: 1.25rem; }
+    select, button { font: inherit; padding: .4rem .6rem; }
+    pre { background: #f4f4f8; padding: .75rem; border-radius: 6px; overflow:auto; }
+    .muted { color: #667; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2 id="title">Action <span id="ain"></span></h2>
+    <p class="muted" id="ctx"></p>
+
+    <!-- Step 1: identity. GIS renders this button on THIS (stable) origin. -->
+    <div id="g_id_onload"
+         data-client_id="REPLACE_WITH_OAUTH_WEB_CLIENT_ID"
+         data-callback="onCredential"
+         data-auto_select="true"
+         data-itp_support="true"></div>
+    <div class="g_id_signin" data-type="standard" data-text="signin_with"></div>
+
+    <!-- Step 2: edit + save (enabled once we have a verified token). -->
+    <p style="margin-top:1rem">
+      <label>Status:
+        <select id="status" disabled>
+          <option>Open</option><option>In Progress</option>
+          <option>Blocked</option><option>Done</option>
+        </select>
+      </label>
+      <button id="save" disabled>Save</button>
+    </p>
+    <p class="muted" id="who">Not signed in.</p>
+    <pre id="out" hidden></pre>
+  </div>
+
+  <script>
+    // ---- config ----
+    var GAS_EXEC_URL = "REPLACE_WITH_GAS_WEBAPP_EXEC_URL"; // .../macros/s/<id>/exec
+
+    // ---- parse chip params (current scheme: docId + ain; legacy: globalId) ----
+    var q = new URLSearchParams(location.search);
+    var globalId = q.get("globalId") ||
+      ((q.get("docId") && q.get("ain")) ? q.get("docId") + "/" + q.get("ain") : "");
+    document.getElementById("ain").textContent = q.get("ain") || globalId || "(none)";
+    document.getElementById("ctx").textContent = "globalId: " + (globalId || "(missing)");
+
+    var idToken = null;
+
+    // GIS credential callback — fires with a JWT ID token after the user picks an account.
+    window.onCredential = function (resp) {
+      idToken = resp.credential;
+      // The email is inside the JWT; GAS will RE-VERIFY server-side. This is display-only.
+      var claims = JSON.parse(atob(idToken.split(".")[1]));
+      document.getElementById("who").textContent =
+        "Signed in as " + claims.email + " (will be re-verified by the server).";
+      document.getElementById("status").disabled = false;
+      document.getElementById("save").disabled = false;
+    };
+
+    document.getElementById("save").addEventListener("click", function () {
+      if (!idToken) { return; }
+      var body = JSON.stringify({
+        action: "confirm_identity_and_act",
+        id_token: idToken,
+        globalId: globalId,
+        newStatus: document.getElementById("status").value
+      });
+      // text/plain => "simple request" => no CORS preflight; GAS /exec accepts anonymous POST.
+      fetch(GAS_EXEC_URL, { method: "POST", body: body, headers: { "Content-Type": "text/plain;charset=utf-8" } })
+        .then(function (r) { return r.text(); })
+        .then(function (t) {
+          var out = document.getElementById("out");
+          out.hidden = false; out.textContent = t;
+        })
+        .catch(function (e) {
+          var out = document.getElementById("out");
+          out.hidden = false; out.textContent = "POST failed: " + e;
+        });
+    });
+  </script>
+</body>
+</html>

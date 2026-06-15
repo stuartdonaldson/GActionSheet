@@ -2550,3 +2550,60 @@ working tree clean.
 - Before bulk-deleting files matching a glob in a tracked directory, check `git status` for any
   that are tracked (D) vs untracked (??) — a broad glob can catch committed reference files
   (test-results/probe-*.png) alongside throwaway debug output.
+
+## 2026-06-14 16:24:32
+
+### Summary:
+Researched and validated ADR-0017 (chip-link landing page) before any implementation, then
+restructured the plan into two epics.
+
+- **Validation (no code shipped):**
+  - Confirmed server-side ID-token verification is viable — live `curl` of
+    `oauth2.googleapis.com/tokeninfo` (400 + clean JSON on bad token); same `UrlFetchApp`
+    pattern already at `WebApp.js:627`.
+  - Established the GIS Sign-In **JS widget cannot run inside the GAS HtmlService iframe**
+    (rotating `*.googleusercontent.com` origin can't be a registered JS origin —
+    issuetracker 170740549; no new Google session in a cross-origin iframe).
+  - Identified the viable path: **OAuth 2.0 auth-code redirect** anchored on the stable GAS
+    `/exec` URL (no external host needed) — corrected the earlier "needs external hosting"
+    conclusion.
+  - Captured evidence + sources in `knowledge-base/adr/probes/0017-validation.md` and a
+    deployable probe page `probes/0017-gis-landing-probe.html`.
+- **ADR-0017 rewritten** from the refuted GIS-in-iframe draft to: Phase 1 anonymous notice
+  (non-confidential metadata only) + Phase 2 verified-AND-authorized OAuth-redirect editing;
+  rejected alternatives, blocking deps, security concern. Passed all five `adr-quality-check`
+  steps.
+- **Requirements clarified with operator:** verified identity is the real requirement
+  (anonymous = interim only); confidential action text must not be exposed without it; and a
+  verified identity must additionally be **authorized** against the doc's Drive ACL (else any
+  Google account could read it).
+- **Beads + epics created:**
+  - `GTaskSheet-krz5` [EPIC] Anonymous chip-preview notice → `mus0` [IMP], `zb3l` [TST]
+  - `GTaskSheet-79dw` [EPIC] Authorized web app AI editing → `hc6v` [INF provisioning],
+    `1hyh` [IMP authz vs Drive ACL], `6dlp` [IMP edit] (blocked by hc6v + 1hyh)
+
+### Key Learnings:
+- A GAS web app's `/exec` URL is stable, but HtmlService content executes in a nested,
+  rotating `*.googleusercontent.com` iframe — so the stable URL helps the OAuth **redirect**
+  flow (as `redirect_uri`) but NOT the GIS JS widget (which validates the executing origin).
+- Authentication ≠ authorization: a verified Google identity can be any account; confidential
+  content must be gated on the identity actually holding Drive access to the referenced file,
+  default-deny otherwise.
+- bd best practice for grouping: epic-type issues + `--parent` children (`bd epic status` /
+  `bd epic close-eligible`), which keeps internal `blocks` deps intact inside the epic.
+
+## 2026-06-14 16:53:21
+
+### Summary:
+Answered a status query on three bd issues, then fixed and closed two of them.
+- **pw5x** (epic, interactive non-UI test entry point): explained scope; confirmed all 3 children (15e8/8qe5/mxmh) complete; **closed**.
+- **rz4k** (epic, ENTRY_POINT_REGISTRY deferred→covered): clarified it is a *separate* epic from pw5x (coverage-debt campaign vs. test-mechanism infra); they intersect only where rz4k.3 add-on-card children may consume the pw5x route pattern. Left open (0/5).
+- **p8w0** (`npm run probe` → "No tests found"): **fixed & closed**. Root cause = base playwright.config.js `testIgnore: ['**/probe.test.js']` also excludes the file when passed as an explicit positional path (Playwright 1.59.1). Fix option (a): added `tests/playwright/probe.config.js` re-exporting base config minus `testIgnore`, with `testMatch: ['**/probe.test.js']`; repointed `probe`/`probe:test.u2` scripts at it (dropped positional path).
+
+### Verification:
+- `probe.config.js --list` → 12 probe tests incl. `chipHover`.
+- default `playwright.config.js --list | grep probe` → empty (test:smoke/test:full still exclude probe).
+
+### Key Learnings:
+- Playwright `testIgnore` is not just a discovery-sweep filter — it also vetoes explicitly-passed positional paths. A dedicated config that overrides it is cleaner than removing it from the shared config (keeps default suite filtering intact).
+- The "progress on p8w0" the operator recalled was actually 39jk work (chipHover verified via a throwaway standalone script, commit 1261131) — p8w0 itself, spun off as the harness bug, had never been touched until now.
