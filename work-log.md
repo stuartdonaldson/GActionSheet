@@ -2607,3 +2607,47 @@ Answered a status query on three bd issues, then fixed and closed two of them.
 ### Key Learnings:
 - Playwright `testIgnore` is not just a discovery-sweep filter — it also vetoes explicitly-passed positional paths. A dedicated config that overrides it is cleaner than removing it from the shared config (keeps default suite filtering intact).
 - The "progress on p8w0" the operator recalled was actually 39jk work (chipHover verified via a throwaway standalone script, commit 1261131) — p8w0 itself, spun off as the harness bug, had never been touched until now.
+
+## 2026-06-14 18:20:00
+
+### Summary:
+Resolved GTaskSheet-rz4k.3 (1/5 children of EPIC rz4k — ENTRY_POINT_REGISTRY
+deferred→covered campaign), converting all 5 of its deferred entry points to
+tagged, durable-state call-site coverage:
+
+- `onSetActionStatus` / `onDeleteAction`: `tests/test_sidebar.py`
+  `test_tab_navigation_docstatus_regression` was missing `request=request` on
+  `ScenarioSession.new_doc`, so its existing `entry_point=` tags never reached
+  JUnit. Added the `request` fixture param — now `ep.onSetActionStatus.TRACKER`
+  and `ep.onDeleteAction.DOC` both PASS (live run, 137s).
+- `onInsertTrackerTable` / `_submitCreateAction`: both already had real call-sites
+  in `tests/test_journey.py` (Act3 tracker-insert, Act4 @-menu create-action) —
+  just added `entry_point=` to the existing `verify()` calls. Full journey
+  passes (246s) and emits both properties.
+- `_setStatusFromPreview`: `tests/test_link_preview.py` converted its raw
+  post-status-change assert into `scn.expect_callable(..., entry_point=
+  "_setStatusFromPreview")` + `checkpoint(INTEGRITY)`. While verifying, found
+  AC2 (native `#docs-link-bubble` URL check) consistently failing — it checked
+  the superseded `globalId=<docId>%2FAI-N` chip-URL format from before
+  GTaskSheet-0v61/8ca9f0a's `cmd=preview&docId=&ain=` split. Fixed the
+  assertion to check `docId=`/`ain=` and added an 8s render-timing poll (the
+  native bubble can lag the card iframe on the second cursor placement). Now
+  passes (82s).
+
+Removed all 5 from `scn/contract.ENTRY_POINT_DEFERRED`. `importSelectedSubmit`
+remains formally exempted (pw5x CHECK_BOX limitation) — out of this child's AC.
+rz4k.3 closed; rz4k epic now 1/5.
+
+Also committed leftover uncommitted work from the prior session (ADR-0017
+research + probes, GTaskSheet-p8w0 probe.config.js fix) as a separate commit.
+
+### Key Learnings:
+- `ScenarioSession.new_doc(settings)` without `request=request` is a silent
+  no-op for JUnit `ac.*`/`ep.*` emission — this is now the second time
+  (test_b7, now test_sidebar) this exact gap caused a "tagged but not covered"
+  deferral. Worth a lint/check in `scn/session.py` or `check_coverage.py` to
+  flag `entry_point=` tags whose session has no `request` (tracked informally;
+  not filed as a bead this session).
+- Chip-URL format renames (0v61/8ca9f0a) need a repo-wide grep for
+  `globalId=`/`%2FAI-` in test assertions — test_link_preview was the only
+  other reference besides the production code that had already been updated.
