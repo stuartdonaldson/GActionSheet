@@ -179,7 +179,9 @@ def test_journey(scn, expected_version, gas_log_dir):
     scn.sync()
     scn.mark("act3.post-sync")
     for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
-        scn.verify(a, on=TRACKER, tag="[journey tracker-present]")          # column form; assignee as chip
+        # entry_point: card call-site for the sidebar "Insert tracker" button
+        # (onInsertTrackerTable -> insertTrackerTable) — GTaskSheet-rz4k.3
+        scn.verify(a, on=TRACKER, tag="[journey tracker-present]", entry_point="onInsertTrackerTable")  # column form; assignee as chip
     scn.checkpoint(STEP)
 
     # rwz AC4: tracker ID cells are hyperlinked to chip URLs
@@ -245,7 +247,10 @@ def test_journey(scn, expected_version, gas_log_dir):
     )
 
     # action_id left UNSET — next id is ambiguous after AI-1,2,5,9; resolved at D3 below
-    scn.verify(created, on=DOC, status="Open", tag="[journey ui-create]")               # cheap doc probe, now
+    # entry_point: editor add-on @-menu create-action submit (_submitCreateAction) —
+    # this DOC-surface check is the durable result of the chip insertion it performs
+    # (GTaskSheet-rz4k.3)
+    scn.verify(created, on=DOC, status="Open", tag="[journey ui-create]", entry_point="_submitCreateAction")  # cheap doc probe, now
     scn.verify(created, on=SHEET, status="Open", at=INTEGRITY, tag="[journey ui-create]")  # async sheet write → defer
 
     # D1: drain the Open SHEET expectation before set_status changes it (Coordination Log)

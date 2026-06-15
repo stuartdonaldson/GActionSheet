@@ -17,12 +17,17 @@ a control whose URL carries the chip's globalId; then drives the in-card
 status control (_setStatusFromPreview) and asserts the durable result.
 """
 import pathlib
+import time
 
 import pytest
 
 from scn.ai import ai
+from scn.engine import CheckpointKind, Surface
 from scn.session import ScenarioSession
 from scn.ui import UiDriver
+
+SHEET = Surface.SHEET
+INTEGRITY = CheckpointKind.INTEGRITY
 
 
 @pytest.fixture(scope="module")
@@ -72,27 +77,48 @@ def test_link_preview_card_status_change(scn):
     assert f"{action_id}:" in body_text, f"card header missing {action_id!r}: {body_text!r}"
 
     # rwz AC2: the native #docs-link-bubble (GTaskSheet-39jk) carries the
-    # chip's globalId URL — the CardService card body itself binds its status
+    # chip's preview URL — the CardService card body itself binds its status
     # buttons via onClick actions, not a plain href/data-url.
-    global_id_enc = f"{scn.doc_id}%2F{action_id}"
-    bubble = scn.ui._page.evaluate("""() => {
-        const b = document.querySelector('#docs-link-bubble.appsElementsLinkPreview');
-        if (!b) return null;
-        const a = b.querySelector('a[href*="globalId"], [data-url*="globalId"]');
-        return { href: a ? (a.href || null) : null, dataUrl: a ? a.getAttribute('data-url') : null };
-    }""")
-    bubble_url = (bubble or {}).get("href") or (bubble or {}).get("dataUrl") or ""
-    assert global_id_enc in bubble_url, (
-        f"native link-preview bubble missing globalId {global_id_enc!r}: {bubble!r}"
+    # By the time the card iframe renders (the SECOND cursor placement, per
+    # open_link_preview), the native bubble from the FIRST placement may have
+    # already dismissed and its replacement may not have re-rendered yet --
+    # poll briefly rather than checking once.
+    # GTaskSheet-0v61/8ca9f0a: chip URLs encode docId+ain as separate query
+    # params (?cmd=preview&docId=...&ain=AI-N), not a combined globalId=.
+    deadline = time.monotonic() + 8.0
+    bubble, bubble_url = None, ""
+    while time.monotonic() < deadline:
+        bubble = scn.ui._page.evaluate("""() => {
+            const b = document.querySelector('#docs-link-bubble.appsElementsLinkPreview');
+            if (!b) return null;
+            const a = b.querySelector('a[href*="cmd=preview"], [data-url*="cmd=preview"]');
+            return { href: a ? (a.href || null) : null, dataUrl: a ? a.getAttribute('data-url') : null };
+        }""")
+        bubble_url = (bubble or {}).get("href") or (bubble or {}).get("dataUrl") or ""
+        if f"docId={scn.doc_id}" in bubble_url and f"ain={action_id}" in bubble_url:
+            break
+        scn.ui._page.wait_for_timeout(500)
+    assert f"docId={scn.doc_id}" in bubble_url and f"ain={action_id}" in bubble_url, (
+        f"native link-preview bubble missing docId/ain for {scn.doc_id}/{action_id}: {bubble!r}"
     )
 
     scn.ui.set_status(card, "In Progress")
 
+    # entry_point: in-card status control (_setStatusFromPreview -> _scheduleSheetUpdate)
+    # — durable-state assertion that the sheet row's status converged (GTaskSheet-rz4k.3)
+    def _status_converged() -> str | None:
+        row = next((r for r in scn.find_sheet_actions() if r.action_id == action_id), None)
+        status_now = (row.status or "").lower() if row else None
+        if status_now != "in progress":
+            return (
+                f"expected {action_id} status 'In Progress' after in-card status change, "
+                f"got {status_now!r}"
+            )
+        return None
+
     scn.sync()
-    after = scn.find_sheet_actions()
-    row = next((r for r in after if r.action_id == action_id), None)
-    status_now = (row.status or "").lower() if row else None
-    assert status_now == "in progress", (
-        f"expected {action_id} status 'In Progress' after in-card status change, "
-        f"got {status_now!r}"
+    scn.expect_callable(
+        _status_converged, on=SHEET, tag="[cug8 link-preview status]",
+        entry_point="_setStatusFromPreview",
     )
+    scn.checkpoint(INTEGRITY)

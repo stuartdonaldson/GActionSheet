@@ -258,7 +258,7 @@ def test_sidebar_blank_doc_no_error(settings, browser_page):
 # test_tab_navigation_docstatus_regression — GTaskSheet-gdll (ADR-0015 slice smoke)
 # ---------------------------------------------------------------------------
 
-def test_tab_navigation_docstatus_regression(settings, browser_page):
+def test_tab_navigation_docstatus_regression(settings, browser_page, request):
     """ADR-0015 tab-navigation shell: DocStatus entry points + nav round trip.
 
     Part A (cw5 regression): sidebar_sync / sidebar_set_status / sidebar_delete
@@ -272,7 +272,7 @@ def test_tab_navigation_docstatus_regression(settings, browser_page):
     Re-run at the EPIC-D (fnvq) and EPIC-E (s3ga) final-sign-off gates per
     GTaskSheet-gdll AC.
     """
-    s = ScenarioSession.new_doc(settings)
+    s = ScenarioSession.new_doc(settings, request=request)
     s.ui = UiDriver(browser_page, doc_id=s.doc_id)
     s.tracker_present = True
     try:
