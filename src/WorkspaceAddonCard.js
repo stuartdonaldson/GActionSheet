@@ -90,9 +90,9 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
     return CardService.newCardBuilder()
       .setHeader(
         CardService.newCardHeader()
-          .setTitle('Action Sync')
-          .setImageUrl('https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-128.png')
-          .setImageAltText('Action Sync logo')
+          .setTitle('Northlake UU Tool Suite')
+          .setImageUrl(_ICON_BASE + 'northlake-uu-emblem.png')
+          .setImageAltText('Northlake UU emblem')
       )
       .addSection(
         CardService.newCardSection().addWidget(
@@ -424,18 +424,28 @@ function _buildVerificationSection(verificationResult) {
 
 function _buildHomepageHeader(doc) {
   var header = CardService.newCardHeader()
-    .setTitle('Action Sync')
-    .setImageUrl('https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-128.png')
-    .setImageAltText('Action Sync logo');
+    .setTitle('Northlake UU Tool Suite')
+    .setImageUrl(_ICON_BASE + 'northlake-uu-emblem.png')
+    .setImageAltText('Northlake UU emblem');
 
   if (doc) {
-    var docTitle = _safeGetDocTitle(doc);
-    if (docTitle) {
-      header.setSubtitle(docTitle);
+    var team = _safeGetDocTeam(doc);
+    var subtitle = team || _safeGetDocTitle(doc);
+    if (subtitle) {
+      header.setSubtitle(subtitle);
     }
   }
 
   return header;
+}
+
+function _safeGetDocTeam(doc) {
+  try {
+    var token = ScriptApp.getOAuthToken();
+    return _getDocAppProperty(doc.getId(), 'teamScope', token) || '';
+  } catch (e) {
+    return '';
+  }
 }
 
 function _safeGetDocTitle(doc) {

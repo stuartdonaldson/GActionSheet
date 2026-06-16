@@ -27,8 +27,8 @@
   },
   "addOns": {
     "common": {
-      "name": "Northlake Doc Tools",
-      "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-128.png",
+      "name": "Northlake UU Tool Suite",
+      "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/brand-NUTS/northlake-uu-emblem.png",
       "homepageTrigger": {
         "runFunction": "buildHomepageCard"
       }
