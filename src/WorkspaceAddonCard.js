@@ -47,8 +47,7 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
     // [PROBE]
     PROBE_log('sidebar.' + PROBE_docState(doc), { docId: doc ? doc.getId() : '' });
     var teamInfo = _safeGetDocTeamInfo(doc);
-    var card = CardService.newCardBuilder()
-      .setHeader(_buildHomepageHeader(teamInfo));
+    var card = CardService.newCardBuilder();
 
     var teamSection = _buildTeamSection(teamInfo);
     if (teamSection) card.addSection(teamSection);
@@ -92,12 +91,6 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
     GasLogger.flush();
 
     return CardService.newCardBuilder()
-      .setHeader(
-        CardService.newCardHeader()
-          .setTitle('Northlake UU Tool Suite')
-          .setImageUrl(_ICON_BASE + 'northlake-uu-emblem.png')
-          .setImageAltText('Northlake UU emblem')
-      )
       .addSection(
         CardService.newCardSection().addWidget(
           CardService.newTextParagraph().setText('Unable to load the document state right now.')
@@ -426,19 +419,6 @@ function _buildVerificationSection(verificationResult) {
   return section;
 }
 
-/** @param {{team: string, link: string}} teamInfo */
-function _buildHomepageHeader(teamInfo) {
-  var header = CardService.newCardHeader()
-    .setTitle('Northlake UU Tool Suite')
-    .setImageUrl(_ICON_BASE + 'northlake-uu-emblem.png')
-    .setImageAltText('Northlake UU emblem');
-
-  // Subtitle only when there is no link (subtitle cannot be a hyperlink).
-  // When a link is present the team appears exclusively in the section widget.
-  if (teamInfo && teamInfo.team && !teamInfo.link) header.setSubtitle(teamInfo.team);
-
-  return header;
-}
 
 /**
  * Returns a linked team section widget above the tab bar, or null.
