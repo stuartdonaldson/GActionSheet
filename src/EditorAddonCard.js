@@ -749,11 +749,20 @@ function _resolveCursorIndex(doc, cursor, token) {
   }
   var paraText = cursorPara.getText();
 
-  // Detect table-cell context so _findCursorIndex searches only cell paragraphs,
-  // preventing a false match against a body paragraph with the same text.
-  var inTableCell = !!(cursorPara.getParent &&
-                       cursorPara.getParent() &&
-                       cursorPara.getParent().getType() === DocumentApp.ElementType.TABLE_CELL);
+  // Detect table-cell context; capture row/col so we target the exact cell
+  // rather than the first cell with matching text.
+  var cellRowIdx = -1;
+  var cellColIdx = -1;
+  if (cursorPara.getParent &&
+      cursorPara.getParent() &&
+      cursorPara.getParent().getType() === DocumentApp.ElementType.TABLE_CELL) {
+    var tableCell_ = cursorPara.getParent();
+    var tableRow_  = tableCell_.getParent();
+    var table_     = tableRow_.getParent();
+    cellRowIdx = table_.getChildIndex(tableRow_);
+    cellColIdx = tableRow_.getChildIndex(tableCell_);
+  }
+  var inTableCell = cellRowIdx >= 0;
 
   var docId   = doc.getId();
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
@@ -774,7 +783,9 @@ function _resolveCursorIndex(doc, cursor, token) {
   }
 
   var content     = (JSON.parse(getResp.getContentText()).body || {}).content || [];
-  var cursorIndex = _findCursorIndex(content, paraText, paraOffset, inTableCell);
+  var cursorIndex = inTableCell
+    ? _findCursorInCell(content, paraText, paraOffset, cellRowIdx, cellColIdx)
+    : _findCursorIndex(content, paraText, paraOffset, false);
 
   if (cursorIndex === null) {
     return { index: null, error: 'cursor position not found in document', paraText: paraText, paraOffset: paraOffset };
@@ -1032,33 +1043,44 @@ function _matchParaIndex(para, paraText, offset) {
 }
 
 /**
- * Searches a REST body.content array for the paragraph matching paraText and
- * returns the REST character index at `offset`.  Returns null if not found.
- *
- * @param {Array}   content           body.content or tableCells[c].content
- * @param {string}  paraText          plain text of the target paragraph (no trailing \n)
- * @param {number}  offset            character offset within that paragraph
- * @param {boolean} searchOnlyInCells When true, skip body-level paragraphs and
- *   search only inside table cells — prevents a false match against a body
- *   paragraph that happens to have the same text as the table-cell cursor.
+ * Searches body-level paragraphs in a REST body.content array for the
+ * paragraph matching paraText and returns the REST character index at `offset`.
+ * Does not descend into tables — use _findCursorInCell for table-cell cursors.
  */
-function _findCursorIndex(content, paraText, offset, searchOnlyInCells) {
+function _findCursorIndex(content, paraText, offset) {
   for (var i = 0; i < content.length; i++) {
-    var elem = content[i];
-    if (!searchOnlyInCells && elem.paragraph) {
-      var idx = _matchParaIndex(elem.paragraph, paraText, offset);
+    if (content[i].paragraph) {
+      var idx = _matchParaIndex(content[i].paragraph, paraText, offset);
       if (idx !== null) return idx;
     }
-    if (elem.table) {
-      var tableRows = elem.table.tableRows || [];
-      for (var r = 0; r < tableRows.length; r++) {
-        var cells = tableRows[r].tableCells || [];
-        for (var c = 0; c < cells.length; c++) {
-          // Recurse with searchOnlyInCells=false: inside a cell, all paragraphs
-          // are cell paragraphs and should be matched unconditionally.
-          var idx2 = _findCursorIndex(cells[c].content || [], paraText, offset, false);
-          if (idx2 !== null) return idx2;
-        }
+  }
+  return null;
+}
+
+/**
+ * Finds the cursor index when the caret is inside a specific table cell,
+ * identified by (rowIdx, colIdx) captured from DocumentApp.  Iterates tables
+ * in body order; within each table checks only the named cell, preventing
+ * false matches against other cells that happen to contain the same text.
+ *
+ * @param {Array}  content   body.content from REST GET
+ * @param {string} paraText  plain text of the cursor paragraph
+ * @param {number} offset    character offset within that paragraph
+ * @param {number} rowIdx    0-based row index from DocumentApp
+ * @param {number} colIdx    0-based column index from DocumentApp
+ */
+function _findCursorInCell(content, paraText, offset, rowIdx, colIdx) {
+  for (var i = 0; i < content.length; i++) {
+    if (!content[i].table) continue;
+    var tableRows = content[i].table.tableRows || [];
+    if (rowIdx >= tableRows.length) continue;
+    var cells = tableRows[rowIdx].tableCells || [];
+    if (colIdx >= cells.length) continue;
+    var cellContent = cells[colIdx].content || [];
+    for (var k = 0; k < cellContent.length; k++) {
+      if (cellContent[k].paragraph) {
+        var idx = _matchParaIndex(cellContent[k].paragraph, paraText, offset);
+        if (idx !== null) return idx;
       }
     }
   }

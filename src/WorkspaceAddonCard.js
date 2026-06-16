@@ -49,8 +49,7 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
     var teamInfo = _safeGetDocTeamInfo(doc);
     var card = CardService.newCardBuilder();
 
-    var teamSection = _buildTeamSection(teamInfo);
-    if (teamSection) card.addSection(teamSection);
+    card.addSection(_buildTeamSection(teamInfo));
 
     card.addSection(_buildTabBarSection(tab.id));
 
@@ -421,15 +420,19 @@ function _buildVerificationSection(verificationResult) {
 
 
 /**
- * Returns a linked team section widget above the tab bar, or null.
- * Only rendered when a team link URL is present — subtitle is used instead
- * when there is no link, so the team name never appears in two places.
+ * Renders the team name above the tab bar. Always shown:
+ *   - Team + link → "Team: <a href=url>name</a>"
+ *   - Team, no link → "Team: name"
+ *   - No team → "Team: undefined"
  *
  * @param {{team: string, link: string}} teamInfo
  */
 function _buildTeamSection(teamInfo) {
-  if (!teamInfo || !teamInfo.team || !teamInfo.link) return null;
-  var label = '<a href="' + teamInfo.link + '">' + teamInfo.team + '</a>';
+  var team  = teamInfo && teamInfo.team;
+  var link  = teamInfo && teamInfo.link;
+  var label = team
+    ? ('Team: ' + (link ? '<a href="' + link + '">' + team + '</a>' : team))
+    : 'Team: undefined';
   return CardService.newCardSection()
     .addWidget(CardService.newTextParagraph().setText(label));
 }
