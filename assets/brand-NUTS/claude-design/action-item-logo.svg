@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="fg" x1="0.34" y1="0.02" x2="0.6" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0" stop-color="#E22D24"></stop>
+      <stop offset="0.30" stop-color="#EB4A22"></stop>
+      <stop offset="0.56" stop-color="#F47C1B"></stop>
+      <stop offset="0.80" stop-color="#F9AC18"></stop>
+      <stop offset="1" stop-color="#FBD015"></stop>
+    </linearGradient>
+  </defs>
+  
+  <rect x="33" y="34" width="50" height="60" rx="8" fill="#ffffff" stroke="#212121" stroke-width="4"></rect>
+  
+  <rect x="46" y="26" width="24" height="14" rx="4.5" fill="#ffffff" stroke="#212121" stroke-width="4"></rect>
+  
+  <rect x="42" y="52" width="6" height="6" rx="1.6" fill="none" stroke="#7CB342" stroke-width="2.6"></rect>
+  <line x1="53" y1="55" x2="74" y2="55" stroke="#212121" stroke-width="3" stroke-linecap="round" opacity="0.22"></line>
+  <rect x="42" y="64" width="6" height="6" rx="1.6" fill="none" stroke="#7CB342" stroke-width="2.6"></rect>
+  <line x1="53" y1="67" x2="74" y2="67" stroke="#212121" stroke-width="3" stroke-linecap="round" opacity="0.22"></line>
+  <rect x="42" y="76" width="6" height="6" rx="1.6" fill="none" stroke="#212121" stroke-width="2.6" opacity="0.32"></rect>
+  <line x1="53" y1="79" x2="70" y2="79" stroke="#212121" stroke-width="3" stroke-linecap="round" opacity="0.22"></line>
+  
+  <path transform="translate(63,9) scale(0.35,0.45)" d="M54 5 C56 31 77 43 77 61 C77 80 60 92 44 89 C32 87 26 77 31 68 C35 61 44 60 47 67 C43 56 46 28 54 5 Z" fill="#ffffff"></path>
+  
+  <path transform="translate(66,12) scale(0.29,0.39)" d="M54 5 C56 31 77 43 77 61 C77 80 60 92 44 89 C32 87 26 77 31 68 C35 61 44 60 47 67 C43 56 46 28 54 5 Z" fill="url(#fg)"></path>
+</svg>
