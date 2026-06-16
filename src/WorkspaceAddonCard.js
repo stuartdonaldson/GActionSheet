@@ -48,7 +48,7 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
     PROBE_log('sidebar.' + PROBE_docState(doc), { docId: doc ? doc.getId() : '' });
     var teamInfo = _safeGetDocTeamInfo(doc);
     var card = CardService.newCardBuilder()
-      .setHeader(_buildHomepageHeader(doc, teamInfo));
+      .setHeader(_buildHomepageHeader(teamInfo));
 
     var teamSection = _buildTeamSection(teamInfo);
     if (teamSection) card.addSection(teamSection);
@@ -426,20 +426,14 @@ function _buildVerificationSection(verificationResult) {
   return section;
 }
 
-/**
- * @param {GoogleAppsScript.Document.Document|null} doc
- * @param {{team: string, link: string}} teamInfo  pre-fetched team info
- */
-function _buildHomepageHeader(doc, teamInfo) {
+/** @param {{team: string, link: string}} teamInfo */
+function _buildHomepageHeader(teamInfo) {
   var header = CardService.newCardHeader()
     .setTitle('Northlake UU Tool Suite')
     .setImageUrl(_ICON_BASE + 'northlake-uu-emblem.png')
     .setImageAltText('Northlake UU emblem');
 
-  if (doc) {
-    var subtitle = (teamInfo && teamInfo.team) || _safeGetDocTitle(doc);
-    if (subtitle) header.setSubtitle(subtitle);
-  }
+  if (teamInfo && teamInfo.team) header.setSubtitle(teamInfo.team);
 
   return header;
 }
@@ -458,31 +452,26 @@ function _buildTeamSection(teamInfo) {
     .addWidget(CardService.newTextParagraph().setText(label));
 }
 
-/** Fetches teamScope and teamLink appProperties in one Drive API call. */
+/**
+ * Reads team name and link for the active doc directly from DocData/TeamData
+ * (the authoritative source). Does not rely on the teamScope appProperty cache
+ * which is only stamped during sync.
+ */
 function _safeGetDocTeamInfo(doc) {
   if (!doc) return { team: '', link: '' };
   try {
-    var token = ScriptApp.getOAuthToken();
-    var props = _getAllDocAppProperties(doc.getId(), token);
-    return { team: props.teamScope || '', link: props.teamLink || '' };
+    var ss     = _openActionSheetSpreadsheet();
+    var docRow = _readDocDataRow(ss, doc.getId());
+    if (!docRow || !docRow.teamId) return { team: '', link: '' };
+    var teamRows = _readTeamDataRows(ss);
+    for (var i = 0; i < teamRows.length; i++) {
+      if (teamRows[i].teamId === docRow.teamId) {
+        return { team: docRow.teamId, link: teamRows[i].teamLink || '' };
+      }
+    }
+    return { team: docRow.teamId, link: '' };
   } catch (e) {
     return { team: '', link: '' };
-  }
-}
-
-/** Fetches all Drive appProperties for a file in one API call. */
-function _getAllDocAppProperties(docId, token) {
-  var url = 'https://www.googleapis.com/drive/v3/files/' + docId + '?fields=appProperties';
-  try {
-    var resp = UrlFetchApp.fetch(url, {
-      method: 'get',
-      headers: { Authorization: 'Bearer ' + token },
-      muteHttpExceptions: true
-    });
-    if (resp.getResponseCode() !== 200) return {};
-    return JSON.parse(resp.getContentText()).appProperties || {};
-  } catch (e) {
-    return {};
   }
 }
 
