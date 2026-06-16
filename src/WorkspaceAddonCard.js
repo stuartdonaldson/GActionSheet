@@ -362,7 +362,7 @@ function onSyncNow() {
  * Renders the team name above the tab bar. Always shown:
  *   - Team + link → "Team: <a href=url>name</a>"
  *   - Team, no link → "Team: name"
- *   - No team → "Team: undefined"
+ *   - No team → "Team: (none)"
  *
  * @param {{team: string, link: string}} teamInfo
  */
@@ -371,7 +371,7 @@ function _buildTeamSection(teamInfo) {
   var link  = teamInfo && teamInfo.link;
   var label = team
     ? ('Team: ' + (link ? '<a href="' + link + '">' + team + '</a>' : team))
-    : 'Team: undefined';
+    : 'Team: (none)';
   return CardService.newCardSection()
     .addWidget(CardService.newTextParagraph().setText(label));
 }

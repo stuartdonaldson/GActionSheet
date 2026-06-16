@@ -2135,7 +2135,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'team_data_slice': {
         // Slice-BUILD for EPIC-A (GTaskSheet-5r4l.2, ADR-0013).
-        // Creates sample TeamData + DocData tabs and performs the two durable-invariant
+        // Creates a sample DocData tab and performs the two durable-invariant
         // smoke checks in-process, returning results for Python assertion:
         //   (a) round-trip: rows written then read back are identical (non-date cols)
         //   (b) resolved authority: Resolved Count computed exclusively via isResolved()

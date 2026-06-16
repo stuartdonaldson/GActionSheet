@@ -473,16 +473,6 @@ function _syncSheetRowToDoc(sheet, row) {
 // ---------------------------------------------------------------------------
 
 /**
- * Walks the doc body and returns one entry per floating-action paragraph or
- * list item that contains an AI-N: token.
- *
- * Detection: paragraph full text starts with "AI-N:" (optionally preceded by
- * an inline image, which does not appear in DocumentApp getText()).
- *
- * @param {GoogleAppsScript.Document.Document} doc
- * @returns {Array<{bodyChildIndex, paragraph, globalId, N, assigneeEmail, assigneeName, actionText, status, hasExplicitStatus}>}
- */
-/**
  * Parses a single paragraph/list-item for an AI-N: floating action token.
  * Returns a populated action object or null if the paragraph is not an action.
  *
@@ -584,6 +574,14 @@ function _collectTableCellActions(table, tableBodyIdx, docId, actions, seenN) {
 }
 
 /**
+ * Walks the doc body and returns one entry per floating-action paragraph or
+ * list item that contains an AI-N: token, including those inside non-tracker
+ * table cells (see _collectTableCellActions).
+ *
+ * Detection: paragraph full text starts with "AI-N:" (optionally preceded by
+ * an inline image, which does not appear in DocumentApp getText()).
+ *
+ * @param {GoogleAppsScript.Document.Document} doc
  * @returns {Array<{bodyChildIndex, paragraph, globalId, N, assigneeEmail, assigneeName, actionText, status, hasExplicitStatus, isDuplicate}>}
  */
 function _scanFloatingActions(doc) {
@@ -895,7 +893,7 @@ function _setDocAppProperty(docId, key, value, token) {
  * Reads all TeamData rows from the 'TeamData' tab.
  *
  * @param {Spreadsheet} ss
- * @return {Array<{teamId: string, folderId: string, contact: string}>}
+ * @return {Array<{teamId: string, folderId: string, contact: string, teamLink: string}>}
  *   Empty array if the tab is missing or has no data rows. Blank rows
  *   (both Team Id and Folder Id empty) are skipped.
  */
@@ -923,9 +921,9 @@ function _readTeamDataRows(ss) {
  * TeamData row's Folder Id.
  *
  * @param {string} docId
- * @param {Array<{teamId: string, folderId: string}>} teamDataRows
- * @return {?{teamId: string}} the matched team, or null if no ancestor matches
- *   (or on Drive error).
+ * @param {Array<{teamId: string, folderId: string, teamLink: string}>} teamDataRows
+ * @return {?{teamId: string, teamLink: string}} the matched team, or null if no
+ *   ancestor matches (or on Drive error).
  */
 function _walkFolderForTeam(docId, teamDataRows) {
   try {

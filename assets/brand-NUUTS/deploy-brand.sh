@@ -152,12 +152,16 @@ else
       "$APPSSCRIPT_JSON" > "${APPSSCRIPT_JSON}.tmp" && mv "${APPSSCRIPT_JSON}.tmp" "$APPSSCRIPT_JSON"
     echo "  ✓ appsscript.json (via jq)"
   else
-    # jq not available — sed fallback (fragile; install jq for reliability)
+    # jq not available — sed fallback (fragile; install jq for reliability).
+    # Match by filename suffix (not a fixed old base URL) so this stays
+    # idempotent whether appsscript.json currently points at the legacy
+    # raw.githubusercontent.com/brand-NUTS URLs or the current
+    # product-details/ GitHub Pages URLs.
     sed -i \
-      "s|https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png|${ADDON_LOGO_URL}|g" \
+      "s|https://[^\"]*/action-item-logo\.png|${ADDON_LOGO_URL}|g" \
       "$APPSSCRIPT_JSON"
     sed -i \
-      "s|https://stuartdonaldson.github.io/GActionSheet/assets/brand-NUTS/northlake-uu-emblem.png|${EMBLEM_URL}|g" \
+      "s|https://[^\"]*/northlake-uu-emblem\.png|${EMBLEM_URL}|g" \
       "$APPSSCRIPT_JSON"
     echo "  ✓ appsscript.json (via sed fallback)"
   fi
