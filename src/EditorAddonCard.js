@@ -16,18 +16,8 @@
  * (_flushActionParagraph); the chip URL base is ACTION_CHIP_URL_BASE (SyncManager.js).
  */
 
-/** Status values matching the ActionSheet dropdown. */
-var _ACTION_STATUSES = ['Open', 'In Progress', 'In Review', 'Done', 'Closed'];
-
-var _BRAND_NUTS_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/brand-NUTS/';
-var _ACTION_DEFAULT_IMAGE = _BRAND_NUTS_BASE + 'status-other.png';
-var _ACTION_STATUS_IMAGES = {
-  'Open':        _BRAND_NUTS_BASE + 'status-open.png',
-  'In Progress': _BRAND_NUTS_BASE + 'status-inprogress.png',
-  'In Review':   _BRAND_NUTS_BASE + 'status-inreview.png',
-  'Done':        _BRAND_NUTS_BASE + 'status-done.png',
-  'Closed':      _BRAND_NUTS_BASE + 'status-closed.png'
-};
+// Icon and status constants are defined in Constants.js (generated — see assets/brand-NUUTS/deploy-brand.sh)
+// _ACTION_STATUSES, _ACTION_STATUS_IMAGES, _ACTION_DEFAULT_IMAGE, _ADDON_LOGO_URL available as GAS globals.
 
 // ---------------------------------------------------------------------------
 // Entry points
@@ -116,10 +106,10 @@ function _submitCreateAction(e) {
     var doc      = DocumentApp.getActiveDocument();
     var N        = _getNextActionN(doc);
     var globalId = doc.getId() + '/AI-' + N;
-    var docUrl   = doc.getUrl();
-    var docTitle = doc.getName();
 
-    // Insert chip at cursor first — doc is source of truth; sheet is downstream.
+    // Insert chip at cursor — doc is source of truth; the sheet row will be
+    // created by the next sync (no separate upsert call here to stay within
+    // the 30s execution limit).
     // NOTE: CardService.newSmartChipConfig / newRenderAction do NOT exist in the
     // current GAS runtime (confirmed 2026-05-27 — TypeError). The REST approach
     // is the correct insertion method.
@@ -135,31 +125,9 @@ function _submitCreateAction(e) {
         .build();
     }
 
-    // Write row to ActionSheet only after doc insertion succeeds.
-    var result = _callWebApp('upsert_action_rows', {
-      docUrl:   docUrl,
-      docTitle: docTitle,
-      rows: [{
-        globalId:      globalId,
-        actionText:    actionText,
-        assigneeEmail: assigneeEmail,
-        assigneeName:  assigneeName || assigneeEmail,
-        status:        status
-      }]
-    });
-
-    if (!result || result.error) {
-      GasLogger.log('CREATE_ACTION_TRIGGER.error', { err: result && result.error });
-      GasLogger.flush();
-      return CardService.newActionResponseBuilder()
-        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Failed to create action: ' + ((result && result.error) || 'unknown error'))))
-        .build();
-    }
-
     GasLogger.log('CREATE_ACTION_TRIGGER.done', { globalId: globalId });
-    GasLogger.flush();
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText)))
+      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText + '\n\nSync now to record it in the ActionSheet.')))
       .build();
   } catch (err) {
     GasLogger.log('CREATE_ACTION_TRIGGER.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
@@ -257,7 +225,7 @@ function _submitImport(e) {
         .build();
     }
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(_buildTabbedHomepageCard('import')))
+      .setNavigation(CardService.newNavigation().updateCard(_buildImportCard(doc.getId(), false)))
       .build();
   } catch (err) {
     GasLogger.log('IMPORT_SELECTED.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
@@ -357,7 +325,7 @@ function _buildCreationCard() {
     .setHeader(
       CardService.newCardHeader()
         .setTitle('New Action')
-        .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png')
+        .setImageUrl(_ADDON_LOGO_URL)
     )
     .addSection(section)
     .build();
@@ -421,7 +389,7 @@ function _buildPreviewCard(url, statusOverride, docOverride) {
   // matched URL — AI-N as the title is the clickable identifier at the top.
   var header = CardService.newCardHeader()
     .setTitle( (actionId || 'Action') + ': ' + actionText )
-    .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png')
+    .setImageUrl(_ADDON_LOGO_URL)
     .setImageStyle(CardService.ImageStyle.SQUARE);
 
   var section = CardService.newCardSection();
@@ -655,7 +623,7 @@ function _processPendingSheetUpdates(e) { // eslint-disable-line no-unused-vars
 function _buildMessageCard(title, message) {
   return CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle(title)
-      .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png'))
+      .setImageUrl(_ADDON_LOGO_URL))
     .addSection(CardService.newCardSection()
       .addWidget(CardService.newTextParagraph().setText(message)))
     .build();
@@ -673,18 +641,9 @@ function _buildMessageCard(title, message) {
  * @returns {number}
  */
 function _getNextActionN(doc) {
-  var body = doc.getBody();
-  var n    = body.getNumChildren();
-  var maxN = 0;
-  for (var i = 0; i < n; i++) {
-    var child = body.getChild(i);
-    var type  = child.getType();
-    if (type !== DocumentApp.ElementType.PARAGRAPH &&
-        type !== DocumentApp.ElementType.LIST_ITEM) continue;
-    var text = child.getText().replace(/\n$/, '');
-    var m = text.match(/^AI-(\d+):/);
-    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
-  }
+  var found = _collectTokenParagraphs(doc.getBody());
+  var maxN  = 0;
+  for (var i = 0; i < found.numbered.length; i++) maxN = Math.max(maxN, found.numbered[i]);
   return maxN + 1;
 }
 
@@ -780,12 +739,35 @@ function _resolveCursorIndex(doc, cursor, token) {
   }
   var paraText = cursorPara.getText();
 
+  // Detect table-cell context; capture row/col/para indices so _findCursorInCell
+  // targets the exact paragraph without any text-based search ambiguity.
+  var cellRowIdx  = -1;
+  var cellColIdx  = -1;
+  var cellParaIdx = -1;
+  if (cursorPara.getParent &&
+      cursorPara.getParent() &&
+      cursorPara.getParent().getType() === DocumentApp.ElementType.TABLE_CELL) {
+    var tableCell_ = cursorPara.getParent();
+    var tableRow_  = tableCell_.getParent();
+    var table_     = tableRow_.getParent();
+    cellRowIdx  = table_.getChildIndex(tableRow_);
+    cellColIdx  = tableRow_.getChildIndex(tableCell_);
+    cellParaIdx = tableCell_.getChildIndex(cursorPara);
+  }
+  var inTableCell = cellRowIdx >= 0;
+
   var docId   = doc.getId();
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
 
   // Step 2 — GET doc before any mutation (DocumentApp changes are deferred).
+  // Field mask: only the text run content + indices needed by _findCursorIndex.
+  // Includes table cell paragraphs so table-cell cursor resolution works.
+  var _CURSOR_FIELDS = [
+    'paragraph/elements(startIndex,endIndex,textRun/content)',
+    'table/tableRows/tableCells/content/paragraph/elements(startIndex,endIndex,textRun/content)'
+  ].join(',');
   var getResp = UrlFetchApp.fetch(
-    baseUrl + docId + '?fields=body.content',
+    baseUrl + docId + '?fields=body.content(' + _CURSOR_FIELDS + ')',
     { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
   );
   if (getResp.getResponseCode() !== 200) {
@@ -793,7 +775,9 @@ function _resolveCursorIndex(doc, cursor, token) {
   }
 
   var content     = (JSON.parse(getResp.getContentText()).body || {}).content || [];
-  var cursorIndex = _findCursorIndex(content, paraText, paraOffset);
+  var cursorIndex = inTableCell
+    ? _findCursorInCell(content, paraText, paraOffset, cellRowIdx, cellColIdx, cellParaIdx)
+    : _findCursorIndex(content, paraText, paraOffset);
 
   if (cursorIndex === null) {
     return { index: null, error: 'cursor position not found in document', paraText: paraText, paraOffset: paraOffset };
@@ -1024,38 +1008,73 @@ function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
  * @param {number} offset     character offset within that paragraph
  * @returns {number|null}
  */
+/**
+ * Matches a REST paragraph against paraText and returns the REST character
+ * index at `offset`, or null if the paragraph text doesn't match.
+ */
+function _matchParaIndex(para, paraText, offset) {
+  var runs      = para.elements || [];
+  var builtText = '';
+  for (var j = 0; j < runs.length; j++) {
+    var tr = runs[j].textRun;
+    if (tr && tr.content) builtText += tr.content;
+  }
+  builtText = builtText.replace(/\n$/, '');
+  if (builtText !== paraText) return null;
+
+  var runPos = 0;
+  for (var k = 0; k < runs.length; k++) {
+    var tr2 = runs[k].textRun;
+    if (!tr2 || !tr2.content) continue;
+    var runLen = tr2.content.replace(/\n$/, '').length;
+    if (offset <= runPos + runLen) return runs[k].startIndex + (offset - runPos);
+    runPos += runLen;
+  }
+  if (runs.length > 0) return runs[runs.length - 1].endIndex - 1;
+  return null;
+}
+
+/**
+ * Searches body-level paragraphs in a REST body.content array for the
+ * paragraph matching paraText and returns the REST character index at `offset`.
+ * Does not descend into tables — use _findCursorInCell for table-cell cursors.
+ */
 function _findCursorIndex(content, paraText, offset) {
   for (var i = 0; i < content.length; i++) {
-    var para = content[i].paragraph;
-    if (!para) continue;
-
-    // Reconstruct paragraph plain text from text runs (strip trailing \n)
-    var runs = para.elements || [];
-    var builtText = '';
-    for (var j = 0; j < runs.length; j++) {
-      var tr = runs[j].textRun;
-      if (tr && tr.content) builtText += tr.content;
+    if (content[i].paragraph) {
+      var idx = _matchParaIndex(content[i].paragraph, paraText, offset);
+      if (idx !== null) return idx;
     }
-    builtText = builtText.replace(/\n$/, '');
+  }
+  return null;
+}
 
-    if (builtText !== paraText) continue;
-
-    // Found the paragraph — locate the character at `offset` across its runs
-    var runPos = 0;
-    for (var k = 0; k < runs.length; k++) {
-      var tr = runs[k].textRun;
-      if (!tr || !tr.content) continue;
-      var runLen = tr.content.replace(/\n$/, '').length;
-      if (offset <= runPos + runLen) {
-        return runs[k].startIndex + (offset - runPos);
-      }
-      runPos += runLen;
-    }
-    // Offset past all runs — return end of paragraph (before \n)
-    if (runs.length > 0) {
-      var last = runs[runs.length - 1];
-      return last.endIndex - 1;
-    }
+/**
+ * Finds the cursor REST character index when the caret is inside a specific
+ * table cell, identified by exact (rowIdx, colIdx, paraIdx) captured from
+ * DocumentApp via getChildIndex.  Goes directly to the named paragraph — no
+ * text-based search within the cell — so multiple empty or identical paragraphs
+ * in the same cell cannot cause a false match.
+ *
+ * @param {Array}  content   body.content from REST GET
+ * @param {string} paraText  plain text of the cursor paragraph (for _matchParaIndex)
+ * @param {number} offset    character offset within that paragraph
+ * @param {number} rowIdx    0-based row index from DocumentApp
+ * @param {number} colIdx    0-based column index from DocumentApp
+ * @param {number} paraIdx   0-based paragraph index within the cell from DocumentApp
+ */
+function _findCursorInCell(content, paraText, offset, rowIdx, colIdx, paraIdx) {
+  for (var i = 0; i < content.length; i++) {
+    if (!content[i].table) continue;
+    var tableRows = content[i].table.tableRows || [];
+    if (rowIdx >= tableRows.length) continue;
+    var cells = tableRows[rowIdx].tableCells || [];
+    if (colIdx >= cells.length) continue;
+    var cellContent = cells[colIdx].content || [];
+    if (paraIdx >= cellContent.length) continue;
+    var item = cellContent[paraIdx];
+    if (!item || !item.paragraph) continue;
+    return _matchParaIndex(item.paragraph, paraText, offset);
   }
   return null;
 }

@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# Default values (empty means "use SVG's natural size")
+WIDTH=""
+HEIGHT=""
+
+# Parse arguments
+for arg in "$@"; do
+  case $arg in
+    --width=*)
+      WIDTH="${arg#*=}"
+      shift
+      ;;
+    --height=*)
+      HEIGHT="${arg#*=}"
+      shift
+      ;;
+    *.svg)
+      INPUT="$arg"
+      shift
+      ;;
+    *)
+      echo "Unknown argument: $arg"
+      exit 1
+      ;;
+  esac
+done
+
+# Validate input
+if [ -z "$INPUT" ]; then
+  echo "Usage: svg2png [--width=120] [--height=120] file.svg"
+  exit 1
+fi
+
+# Output filename
+OUTPUT="${INPUT%.svg}.png"
+
+# Build Inkscape command
+CMD=(inkscape "$INPUT" --export-type=png --export-filename="$OUTPUT" --export-background-opacity=0)
+
+# Add width/height only if provided
+if [ -n "$WIDTH" ]; then
+  CMD+=(--export-width="$WIDTH")
+fi
+
+if [ -n "$HEIGHT" ]; then
+  CMD+=(--export-height="$HEIGHT")
+fi
+
+# Run it
+"${CMD[@]}"

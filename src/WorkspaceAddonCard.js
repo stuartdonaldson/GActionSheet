@@ -7,38 +7,15 @@
  * via the shared REST flush in SyncManager.js (_flushActionParagraph).
  */
 
-var _ICON_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/brand-NUTS/';
+// Icon constants are defined in Constants.js (generated — see assets/brand-NUUTS/deploy-brand.sh)
 
 /**
- * @param {object=} eventOrVerificationResult
  * @param {object=} opts
  * @param {boolean=} opts.skipSheetFetch  When true, omit the verify_action_rows HTTP call.
  *   Used after sidebar mutations where the sheet was just patched and is known correct —
  *   avoids a second ~3s WebApp round-trip just to rebuild the card.
  */
-function buildHomepageCard(eventOrVerificationResult, opts) {
-  return _buildTabbedHomepageCard('docStatus', eventOrVerificationResult, opts);
-}
-
-/**
- * Builds the homepage card for the given active tab (ADR-0015). Renders, in
- * order: shared header, tab-bar section, the active tab's body only, and the
- * version footer. DocStatus is the only tab with a non-placeholder body and
- * is reused verbatim from the pre-tab implementation, including the
- * skipSheetFetch fast path.
- *
- * @param {string=} activeTab  One of _TABS[].id. Defaults to 'docStatus'.
- * @param {object=} eventOrVerificationResult
- * @param {object=} opts
- * @param {boolean=} opts.skipSheetFetch  DocStatus tab only — see buildHomepageCard.
- * @param {boolean=} opts.selectAllImports  Import tab only — pre-selects every
- *   checklist item across all source-doc groups (AC-2, onImportSelectAll).
- */
-function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
-  var tab = _resolveTab(activeTab);
-  var verificationResult = _isVerificationResult(eventOrVerificationResult)
-    ? eventOrVerificationResult
-    : null;
+function buildHomepageCard(opts) {
   var skipSheetFetch = !!(opts && opts.skipSheetFetch);
 
   try {
@@ -46,34 +23,23 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
 
     // [PROBE]
     PROBE_log('sidebar.' + PROBE_docState(doc), { docId: doc ? doc.getId() : '' });
-    var card = CardService.newCardBuilder()
-      .setHeader(_buildHomepageHeader(doc));
+    var teamInfo = _safeGetDocTeamInfo(doc);
+    var card = CardService.newCardBuilder();
 
-    card.addSection(_buildTabBarSection(tab.id));
+    card.addSection(_buildTeamSection(teamInfo));
+    card.addSection(_buildTopButtonsSection());
 
-    if (tab.id === 'docStatus') {
-      if (!doc) {
-        card.addSection(
-          CardService.newCardSection().addWidget(
-            CardService.newTextParagraph().setText('Open a Google Doc to use Action Sync.')
-          )
-        );
-      } else {
-        var homepageState = _buildHomepageState(doc, verificationResult, skipSheetFetch);
-        card
-          .addSection(_buildOverviewSection(homepageState))
-          .addSection(_buildActionButtonsSection(homepageState))
-          .addSection(_buildActionListSection(homepageState));
-      }
-
-      if (verificationResult) {
-        card.addSection(_buildVerificationSection(verificationResult));
-      }
+    if (!doc) {
+      card.addSection(
+        CardService.newCardSection().addWidget(
+          CardService.newTextParagraph().setText('Open a Google Doc to use Action Sync.')
+        )
+      );
     } else {
-      var tabSections = tab.bodyBuilder(doc ? doc.getId() : '', opts && opts.selectAllImports);
-      (Array.isArray(tabSections) ? tabSections : [tabSections]).forEach(function (section) {
-        card.addSection(section);
-      });
+      var homepageState = _buildHomepageState(doc, skipSheetFetch);
+      card
+        .addSection(_buildOverviewSection(homepageState))
+        .addSection(_buildActionListSection(homepageState));
     }
 
     card.addSection(
@@ -88,12 +54,6 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
     GasLogger.flush();
 
     return CardService.newCardBuilder()
-      .setHeader(
-        CardService.newCardHeader()
-          .setTitle('Action Sync')
-          .setImageUrl('https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-128.png')
-          .setImageAltText('Action Sync logo')
-      )
       .addSection(
         CardService.newCardSection().addWidget(
           CardService.newTextParagraph().setText('Unable to load the document state right now.')
@@ -109,76 +69,106 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Tab navigation (ADR-0015) — registry-driven tab bar + dispatch. DocStatus is
-// special-cased in _buildTabbedHomepageCard (its body depends on doc state /
-// verificationResult / skipSheetFetch), so its bodyBuilder is null and is
-// never invoked through tab.bodyBuilder().
+// Top-level navigation — 4 action buttons always visible on the homepage.
+// Import and Notify navigate to sub-cards (updateCard); back returns home.
 // ---------------------------------------------------------------------------
 
-var _TABS = [
-  { id: 'docStatus', label: 'Doc status', bodyBuilder: null },
-  { id: 'import',    label: 'Import',     bodyBuilder: _buildImportTabSection },
-  { id: 'notify',    label: 'Notify',     bodyBuilder: _buildNotifyTabSection }
-];
-
-/**
- * Resolves activeTab to a _TABS entry, defaulting to 'docStatus' for
- * unknown/missing values.
- */
-function _resolveTab(activeTab) {
-  for (var i = 0; i < _TABS.length; i++) {
-    if (_TABS[i].id === activeTab) {
-      return _TABS[i];
-    }
-  }
-  return _TABS[0];
+function _buildTopButtonsSection() {
+  return CardService.newCardSection().addWidget(
+    CardService.newButtonSet()
+      .addButton(
+        CardService.newTextButton()
+          .setText('Sync')
+          .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+          .setOnClickAction(_buildCardAction('onSyncNow'))
+      )
+      .addButton(
+        CardService.newTextButton()
+          .setText('Import')
+          .setOnClickAction(_buildCardAction('onShowImport'))
+      )
+      .addButton(
+        CardService.newTextButton()
+          .setText('Notify')
+          .setOnClickAction(_buildCardAction('onShowNotify'))
+      )
+      .addButton(
+        CardService.newTextButton()
+          .setText('Insert Tracker')
+          .setOnClickAction(_buildCardAction('onInsertTrackerTable'))
+      )
+  );
 }
 
-/**
- * Builds the tab-bar section: one TextButton per _TABS entry. The active tab
- * renders FILLED; all tabs (including the active one) carry an onShowTab
- * action — CardService requires every TextButton to have an onClick action,
- * and re-selecting the active tab is a harmless no-op re-render.
- */
-function _buildTabBarSection(activeTab) {
-  var buttonSet = CardService.newButtonSet();
-
-  for (var i = 0; i < _TABS.length; i++) {
-    var tab = _TABS[i];
-    var button = CardService.newTextButton()
-      .setText(tab.label)
-      .setOnClickAction(_buildCardAction('onShowTab').setParameters({ tab: tab.id }));
-
-    if (tab.id === activeTab) {
-      button.setTextButtonStyle(CardService.TextButtonStyle.FILLED);
-    }
-
-    buttonSet.addButton(button);
-  }
-
-  return CardService.newCardSection().addWidget(buttonSet);
-}
-
-/**
- * Card action handler: switches the homepage card to the tab named in
- * e.parameters.tab (set by _buildTabBarSection's inactive-tab buttons).
- */
-function onShowTab(e) {
-  var tab = (e && e.parameters && e.parameters.tab) || 'docStatus';
+function onShowImport(e) { // eslint-disable-line no-unused-vars
+  var doc = DocumentApp.getActiveDocument();
+  var docId = doc ? doc.getId() : '';
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(_buildTabbedHomepageCard(tab)))
+    .setNavigation(CardService.newNavigation().updateCard(_buildImportCard(docId, false)))
+    .build();
+}
+
+function onShowNotify(e) { // eslint-disable-line no-unused-vars
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(_buildNotifyCard()))
+    .build();
+}
+
+function onImportBack(e) { // eslint-disable-line no-unused-vars
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+    .build();
+}
+
+function onNotifyBack(e) { // eslint-disable-line no-unused-vars
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+    .build();
+}
+
+function _buildImportCard(docId, selectAll) {
+  var sections = _buildImportTabSection(docId, selectAll);
+  var card = CardService.newCardBuilder();
+  card.addSection(
+    CardService.newCardSection().addWidget(
+      CardService.newTextButton()
+        .setText('Back')
+        .setOnClickAction(_buildCardAction('onImportBack'))
+    )
+  );
+  (Array.isArray(sections) ? sections : [sections]).forEach(function (s) {
+    card.addSection(s);
+  });
+  return card.build();
+}
+
+function _buildNotifyCard() {
+  return CardService.newCardBuilder()
+    .addSection(
+      CardService.newCardSection()
+        .addWidget(
+          CardService.newTextButton()
+            .setText('Back')
+            .setOnClickAction(_buildCardAction('onNotifyBack'))
+        )
+        .addWidget(
+          CardService.newTextParagraph().setText('Notify — coming soon')
+        )
+    )
     .build();
 }
 
 /**
- * Card action handler for the Import tab's "Select all" button (AC-2,
- * GTaskSheet-fgh4). Re-renders the Import tab with every checklist item
+ * Card action handler for the Import card's "Select all" button (AC-2,
+ * GTaskSheet-fgh4). Re-renders the Import card with every checklist item
  * across ALL source-doc groups pre-selected — server-side, so the client
  * never needs to be trusted with the full selection set.
  */
 function onImportSelectAll(e) { // eslint-disable-line no-unused-vars
+  var doc = DocumentApp.getActiveDocument();
+  var docId = doc ? doc.getId() : '';
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(_buildTabbedHomepageCard('import', null, { selectAllImports: true })))
+    .setNavigation(CardService.newNavigation().updateCard(_buildImportCard(docId, true)))
     .build();
 }
 
@@ -367,75 +357,46 @@ function onSyncNow() {
   }
 }
 
-function onVerifySync() {
-  var doc = DocumentApp.getActiveDocument();
-  if (!doc) {
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('No active document'))
-      .build();
-  }
 
+/**
+ * Renders the team name above the tab bar. Always shown:
+ *   - Team + link → "Team: <a href=url>name</a>"
+ *   - Team, no link → "Team: name"
+ *   - No team → "Team: (none)"
+ *
+ * @param {{team: string, link: string}} teamInfo
+ */
+function _buildTeamSection(teamInfo) {
+  var team  = teamInfo && teamInfo.team;
+  var link  = teamInfo && teamInfo.link;
+  var label = team
+    ? ('Team: ' + (link ? '<a href="' + link + '">' + team + '</a>' : team))
+    : 'Team: (none)';
+  return CardService.newCardSection()
+    .addWidget(CardService.newTextParagraph().setText(label));
+}
+
+/**
+ * Reads team name and link for the active doc directly from DocData/TeamData
+ * (the authoritative source). Does not rely on the teamScope appProperty cache
+ * which is only stamped during sync.
+ */
+function _safeGetDocTeamInfo(doc) {
+  if (!doc) return { team: '', link: '' };
   try {
-    var verificationResult = verifyDocumentSync(doc.getId());
-    var message = verificationResult.ok
-      ? 'VerifySync complete: no issues found'
-      : 'VerifySync complete: ' + verificationResult.issues.length + ' issue(s) found';
-
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText(message))
-      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard(verificationResult)))
-      .build();
-  } catch (e) {
-    GasLogger.log('addon.verify.error', { msg: e.message });
-    GasLogger.flush();
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('VerifySync failed: ' + e.message))
-      .build();
-  }
-}
-
-function _buildVerificationSection(verificationResult) {
-  var section = CardService.newCardSection().setHeader('VerifySync Results');
-  var summary = [
-    verificationResult.ok ? 'Status: OK' : 'Status: issues found',
-    'Floating actions: ' + verificationResult.counts.floating,
-    'Tracker rows: ' + verificationResult.counts.tracker,
-    'ActionSheet rows: ' + verificationResult.counts.sheet,
-    'Matched actions: ' + verificationResult.counts.matched
-  ];
-  section.addWidget(
-    CardService.newTextParagraph().setText('<b>Summary</b><br>' + _htmlLines(summary))
-  );
-
-  if (verificationResult.progress && verificationResult.progress.length) {
-    section.addWidget(
-      CardService.newTextParagraph().setText('<b>Progress</b><br>' + _htmlLines(verificationResult.progress))
-    );
-  }
-
-  if (verificationResult.issues && verificationResult.issues.length) {
-    section.addWidget(
-      CardService.newTextParagraph().setText('<b>Findings</b><br>' + _htmlLines(_limitVerificationLines(verificationResult.issues, 20)))
-    );
-  }
-
-  return section;
-}
-
-function _buildHomepageHeader(doc) {
-  var header = CardService.newCardHeader()
-    .setTitle('Action Sync')
-    .setImageUrl('https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-128.png')
-    .setImageAltText('Action Sync logo');
-
-  if (doc) {
-    var docTitle = _safeGetDocTitle(doc);
-    if (docTitle) {
-      header.setSubtitle(docTitle);
+    var ss     = _openActionSheetSpreadsheet();
+    var docRow = _readDocDataRow(ss, doc.getId());
+    if (!docRow || !docRow.teamId) return { team: '', link: '' };
+    var teamRows = _readTeamDataRows(ss);
+    for (var i = 0; i < teamRows.length; i++) {
+      if (teamRows[i].teamId === docRow.teamId) {
+        return { team: docRow.teamId, link: teamRows[i].teamLink || '' };
+      }
     }
+    return { team: docRow.teamId, link: '' };
+  } catch (e) {
+    return { team: '', link: '' };
   }
-
-  return header;
 }
 
 function _safeGetDocTitle(doc) {
@@ -448,28 +409,23 @@ function _safeGetDocTitle(doc) {
   }
 }
 
-function _buildHomepageState(doc, verificationResult, skipSheetFetch) {
+function _buildHomepageState(doc, skipSheetFetch) {
   var floatingActions = _collectFloatingActionState(doc);
   var tracker = _readTrackerTableState(doc);
   var sheetRows = [];
   var syncState = 'No actions found';
-  var syncMeta = 'Add a floating action and click Sync now.';
+  var syncMeta = 'Add a floating action and click Sync.';
 
   if (!skipSheetFetch) {
     try {
       sheetRows = _fetchSheetRowsForVerification(doc.getUrl());
     } catch (e) {
       syncState = 'Status unavailable';
-      syncMeta = 'VerifySync can confirm the current state.';
+      syncMeta = 'Status check failed.';
     }
   }
 
-  if (verificationResult) {
-    syncState = verificationResult.ok ? 'In sync' : 'Needs review';
-    syncMeta = verificationResult.ok
-      ? 'VerifySync found no mismatches across doc, tracker, and ActionSheet.'
-      : verificationResult.issues.length + ' VerifySync issue(s) found.';
-  } else if (floatingActions.length > 0 && syncState !== 'Status unavailable') {
+  if (floatingActions.length > 0 && syncState !== 'Status unavailable') {
     var missingAnchors = _countMissingAnchors(floatingActions);
     if (missingAnchors > 0) {
       syncState = 'Needs sync';
@@ -510,37 +466,6 @@ function _buildOverviewSection(homepageState) {
   return section;
 }
 
-function _buildActionButtonsSection(homepageState) {
-  var buttonSet = CardService.newButtonSet()
-    .addButton(
-      CardService.newTextButton()
-        .setText('Sync now')
-        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-        .setOnClickAction(_buildCardAction('onSyncNow'))
-    )
-    .addButton(
-      CardService.newTextButton()
-        .setText('VerifySync')
-        .setOnClickAction(_buildCardAction('onVerifySync'))
-    );
-
-  if (!homepageState.trackerFound) {
-    buttonSet.addButton(
-      CardService.newTextButton()
-        .setText('Insert tracker')
-        .setOnClickAction(_buildCardAction('onInsertTrackerTable'))
-    );
-  }
-
-  var section = CardService.newCardSection().addWidget(buttonSet);
-  if (homepageState.trackerFound) {
-    section.addWidget(
-      CardService.newTextParagraph().setText('Tracker already present in this document.')
-    );
-  }
-
-  return section;
-}
 
 function _buildActionListSection(homepageState) {
   var header = 'Actions for this document (' + homepageState.floatingActions.length + ')';
@@ -598,7 +523,7 @@ function _buildActionListSection(homepageState) {
       }
       mutationRow.addButton(
         CardService.newImageButton()
-          .setIconUrl(_ICON_BASE + 'action-delete.svg')
+          .setIconUrl(_ACTION_DELETE_IMAGE)
           .setAltText('Delete action')
           .setOnClickAction(
             CardService.newAction()
@@ -705,11 +630,35 @@ function _findParaByGlobalId(doc, globalId) {
   if (isNaN(parsed.N)) return null;
   var tokenPrefix = parsed.actionId + ':';
   var body = doc.getBody();
+  var trackerHeadingSeen = false;
+  var trackerTableSkipped = false;
   for (var i = 0; i < body.getNumChildren(); i++) {
     var child = body.getChild(i);
     var t = child.getType();
-    if (t !== DocumentApp.ElementType.PARAGRAPH && t !== DocumentApp.ElementType.LIST_ITEM) continue;
-    if (child.getText().replace(/\n$/, '').indexOf(tokenPrefix) === 0) return child;
+    if (t === DocumentApp.ElementType.PARAGRAPH || t === DocumentApp.ElementType.LIST_ITEM) {
+      var txt = child.getText().trim();
+      if (!trackerHeadingSeen && (txt === _TRACKER_HEADING || txt === _TRACKER_HEADING_OLD)) {
+        trackerHeadingSeen = true;
+      }
+      if (child.getText().replace(/\n$/, '').indexOf(tokenPrefix) === 0) return child;
+    } else if (t === DocumentApp.ElementType.TABLE) {
+      if (trackerHeadingSeen && !trackerTableSkipped) { trackerTableSkipped = true; continue; }
+      var table = child.asTable();
+      for (var r = 0; r < table.getNumRows(); r++) {
+        var row = table.getRow(r);
+        for (var c = 0; c < row.getNumCells(); c++) {
+          var cell = row.getCell(c);
+          for (var p = 0; p < cell.getNumChildren(); p++) {
+            var cp  = cell.getChild(p);
+            var cpt = cp.getType();
+            var elem = cpt === DocumentApp.ElementType.PARAGRAPH ? cp.asParagraph()
+                     : cpt === DocumentApp.ElementType.LIST_ITEM  ? cp.asListItem()
+                     : null;
+            if (elem && elem.getText().replace(/\n$/, '').indexOf(tokenPrefix) === 0) return elem;
+          }
+        }
+      }
+    }
   }
   return null;
 }
@@ -907,7 +856,7 @@ function onSetActionStatus(e) {
     var tA = Date.now();
     sidebarSetStatus(globalId, newStatus);
     var tB = Date.now();
-    var card = buildHomepageCard(null, { skipSheetFetch: true });
+    var card = buildHomepageCard({ skipSheetFetch: true });
     var tC = Date.now();
     GasLogger.log('sidebar.status-set.handler', {
       ms: { sidebarSetStatus: tB - tA, buildHomepageCard: tC - tB, total: tC - tA }
@@ -936,7 +885,7 @@ function onDeleteAction(e) {
   return CardService.newActionResponseBuilder()
     .setNotification(CardService.newNotification().setText('Action deleted'))
     .setNavigation(CardService.newNavigation().updateCard(
-      buildHomepageCard(null, { skipSheetFetch: true })
+      buildHomepageCard({ skipSheetFetch: true })
     ))
     .build();
 }

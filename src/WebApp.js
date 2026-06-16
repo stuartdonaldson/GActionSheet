@@ -693,7 +693,7 @@ function _handleVerifyActionRows(payload) {
 /**
  * Walks every paragraph in the Docs REST JSON for the given doc.
  * For each AI-N: paragraph checks:
- *   1. Leading inlineObjectElement sourceUri matches a brand-NUTS status image.
+ *   1. Leading inlineObjectElement sourceUri matches a brand-NUUTS status image.
  *   2. AI-N: textRun link.url contains the expected globalId.
  *   3. Trailing (Status) token is consistent with the icon status.
  *
@@ -725,7 +725,7 @@ function _handleVerifyChipIntegrity(payload) {
   for (var si = 0; si < statusKeys.length; si++) {
     urlToStatus[_ACTION_STATUS_IMAGES[statusKeys[si]]] = statusKeys[si].toLowerCase();
   }
-  urlToStatus[_ACTION_DEFAULT_IMAGE] = 'other'; // status-other.png = any non-standard status
+  urlToStatus[_ACTION_DEFAULT_IMAGE] = 'unknown'; // status-unknown.png = any non-standard status
 
   var violations = [];
   var checkedCount = 0;
@@ -748,7 +748,7 @@ function _handleVerifyChipIntegrity(payload) {
     checkedCount++;
     var expectedGlobalId = docId + '/AI-' + N;
 
-    // Check 1: leading element must be inlineObjectElement with brand-NUTS sourceUri
+    // Check 1: leading element must be inlineObjectElement with brand-NUUTS sourceUri
     var firstEl = elements[0] || {};
     if (!firstEl.inlineObjectElement) {
       violations.push({ paragraph: 'AI-' + N, issue: 'no leading inlineObjectElement' });
@@ -759,7 +759,7 @@ function _handleVerifyChipIntegrity(payload) {
     var sourceUri = (((inlineObj.inlineObjectProperties || {}).embeddedObject || {}).imageProperties || {}).sourceUri || '';
     var iconStatus = Object.prototype.hasOwnProperty.call(urlToStatus, sourceUri) ? urlToStatus[sourceUri] : null;
     if (iconStatus === null) {
-      violations.push({ paragraph: 'AI-' + N, issue: 'sourceUri not a brand-NUTS image: ' + sourceUri });
+      violations.push({ paragraph: 'AI-' + N, issue: 'sourceUri not a brand-NUUTS image: ' + sourceUri });
     }
 
     // Check 2: AI-N: textRun (element[1]) link.url must resolve to the

@@ -98,9 +98,10 @@ AC_REGISTRY: dict[str, str] = {
 # names — menu items, time-based triggers, sidebar/add-on card actions, HTTP routes — plus the
 # state-modifying test-support routes. Each description is prefixed with a [category] tag;
 # [test-support ...] flags entries that exist only for the test harness (not product surface).
-# Read-only / diagnostic entry points (e.g. onVerifySync, menuVerifyConsistency, find_sheet_actions,
-# verify_action_rows, get_test_config, onShowTab, onImportSelectAll) are intentionally NOT
-# registered — the invariant scopes to state-modifying call-sites only.
+# Read-only / navigation entry points (e.g. menuVerifyConsistency, find_sheet_actions,
+# verify_action_rows, get_test_config, onShowImport, onShowNotify, onImportBack, onNotifyBack,
+# onImportSelectAll) are intentionally NOT registered — the invariant scopes to
+# state-modifying call-sites only.
 #
 # Entry points with no current scenario call-site are listed in ENTRY_POINT_DEFERRED below;
 # check_coverage.py treats those as explicitly warn-only (enumerated but not yet asserted),
@@ -111,7 +112,7 @@ ENTRY_POINT_REGISTRY: dict[str, str] = {
     "syncDocument": "[core] syncDocument(docId) — auto-assign / UpdateDoc-override / idempotent re-sync",
     "assertTeamAccess": "[core] assertTeamAccess(teamId, ss) — team-scoped security gate on filtered reads",
     # ── Workspace add-on card actions (WorkspaceAddonCard.js) ────────────────────────
-    "syncDocument.onSyncNow": "[workspace-card] syncDocument(docId) via onSyncNow ('Sync now' button, "
+    "syncDocument.onSyncNow": "[workspace-card] syncDocument(docId) via onSyncNow ('Sync' button, "
         "doc-context) — distinct call-site from the run_fixture/Web-App path; getActiveSpreadsheet() "
         "is null here (GTaskSheet-yuvq)",
     "onSetActionStatus": "[workspace-card] onSetActionStatus(e) — per-row status control -> sidebarSetStatus",
@@ -141,8 +142,10 @@ ENTRY_POINT_REGISTRY: dict[str, str] = {
     "mark_doc_not_found": "[route] mark_doc_not_found — stamps DocData SyncStatus='Doc Not Found'",
     "delete_action_row": "[route] delete_action_row — stamps Sync Status='Deleted' (ADR-0009 §B terminal)",
     "forward_action_rows": "[route] forward_action_rows — AC-3 mark source rows Forwarded + suffix + dirty",
-    "importList": "[route] list_importable_actions via Import tab render (show_tab('Import') -> "
-        "_buildImportTabSection) — AC-1/EPIC-D team-scoped read; retained as the established import entry point",
+    "importList": "[route] list_importable_actions via Import card render (show_tab('Import') -> "
+        "_buildImportCard/_buildImportTabSection) — AC-1/EPIC-D team-scoped read; retained as the established import entry point",
+    "menuSyncActiveDoc": "[menu] menuSyncActiveDoc -> syncDocument(docId) (Docs 'Action Sync > Sync')",
+    "menuInsertTrackerActiveDoc": "[menu] menuInsertTrackerActiveDoc -> insertTrackerTable(docId) (Docs 'Action Sync > Insert Tracker')",
     # ── Test-support entry points (harness only; flagged [test-support]) ─────────────
     "importSelectedForTest": "[test-support route] import_selected_for_test testToken route — interactive "
         "test entry point (GTaskSheet-8qe5/EPIC GTaskSheet-pw5x) standing in for the Import tab "
@@ -166,7 +169,13 @@ ENTRY_POINT_REGISTRY: dict[str, str] = {
 # already cause. "Warn-only" == enumerated but not asserted at its own call-site.
 ENTRY_POINT_DEFERRED: dict[str, str] = {
     # rz4k.3 — workspace/editor card mutations
-    "importSelectedSubmit": "real Import-tab submit; CHECK_BOX SelectionInput not Playwright-drivable — covered via importSelectedForTest surrogate, EPIC GTaskSheet-pw5x — GTaskSheet-rz4k.3",
+    "importSelectedSubmit": "real Import card submit; CHECK_BOX SelectionInput not Playwright-drivable — covered via importSelectedForTest surrogate, EPIC GTaskSheet-pw5x — GTaskSheet-rz4k.3",
+    # Docs add-on menu entry points (GTaskSheet-lmsd) — no Playwright test coverage yet; test harness
+    # runs in Sheets context so Docs menu items are not reachable without a separate Docs browser session.
+    "menuSyncActiveDoc": "Docs menu 'Action Sync > Sync' — drives syncDocument(docId) in Docs context; "
+        "covered at the equivalent onSyncNow sidebar call-site. Docs menu harness deferred — GTaskSheet-lmsd.",
+    "menuInsertTrackerActiveDoc": "Docs menu 'Action Sync > Insert Tracker' — drives insertTrackerTable(docId); "
+        "covered at the equivalent onInsertTrackerTable sidebar call-site. Docs menu harness deferred — GTaskSheet-lmsd.",
     # rz4k.4 — menu entry points. menuSync / menuEnsureSheetStructure / menuRunArchive
     # are now covered at their own menu-wrapper call-sites (tests/test_menu_entry_points.py
     # via the menu_sync / menu_ensure_sheet_structure / menu_run_archive fixtures) and have

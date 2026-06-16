@@ -27,8 +27,8 @@
   },
   "addOns": {
     "common": {
-      "name": "Northlake Doc Tools",
-      "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/action-logo-t-128.png",
+      "name": "Northlake UU Tool Suite",
+      "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/northlake-uu-emblem.png",
       "homepageTrigger": {
         "runFunction": "buildHomepageCard"
       }
@@ -42,13 +42,13 @@
           "id": "createAction",
           "runFunction": "createActionTrigger",
           "labelText": "Create action",
-          "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png"
+          "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/action-item-logo.png"
         }
       ],
       "linkPreviewTriggers": [
         {
           "labelText": "GActionSheet Action",
-          "logoUrl": "https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png",
+          "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/action-item-logo.png",
           "patterns": [
             {
               "hostPattern": "northlakeuu.org",
