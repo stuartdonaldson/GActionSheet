@@ -18,11 +18,12 @@ var CONTRACT_SCHEMA = Object.freeze({
   }),
 
   sheetTeamData: Object.freeze({
-    headers: Object.freeze(['Team Id', 'Folder Id', 'Contact']),
+    headers: Object.freeze(['Team Id', 'Folder Id', 'Contact', 'Team Link']),
     columnsByField: Object.freeze({
       team_id: 1,
       folder_id: 2,
-      contact: 3
+      contact: 3,
+      team_link: 4
     })
   }),
 

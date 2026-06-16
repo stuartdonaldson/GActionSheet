@@ -49,6 +49,9 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
     var card = CardService.newCardBuilder()
       .setHeader(_buildHomepageHeader(doc));
 
+    var teamSection = _buildTeamSection(doc);
+    if (teamSection) card.addSection(teamSection);
+
     card.addSection(_buildTabBarSection(tab.id));
 
     if (tab.id === 'docStatus') {
@@ -429,22 +432,49 @@ function _buildHomepageHeader(doc) {
     .setImageAltText('Northlake UU emblem');
 
   if (doc) {
-    var team = _safeGetDocTeam(doc);
-    var subtitle = team || _safeGetDocTitle(doc);
-    if (subtitle) {
-      header.setSubtitle(subtitle);
-    }
+    var docTitle = _safeGetDocTitle(doc);
+    if (docTitle) header.setSubtitle(docTitle);
   }
 
   return header;
 }
 
-function _safeGetDocTeam(doc) {
+/**
+ * Returns a single-widget section showing "Team: <name>" above the tab bar,
+ * or null if no team is set. If the team has a link it renders as an HTML
+ * anchor; TextParagraph in Workspace add-ons supports basic anchor tags.
+ */
+function _buildTeamSection(doc) {
+  if (!doc) return null;
   try {
     var token = ScriptApp.getOAuthToken();
-    return _getDocAppProperty(doc.getId(), 'teamScope', token) || '';
+    var props = _getAllDocAppProperties(doc.getId(), token);
+    var team  = props.teamScope || '';
+    var link  = props.teamLink  || '';
+    if (!team) return null;
+    var label = link
+      ? 'Team: <a href="' + link + '">' + team + '</a>'
+      : 'Team: ' + team;
+    return CardService.newCardSection()
+      .addWidget(CardService.newTextParagraph().setText(label));
   } catch (e) {
-    return '';
+    return null;
+  }
+}
+
+/** Fetches all Drive appProperties for a file in one API call. */
+function _getAllDocAppProperties(docId, token) {
+  var url = 'https://www.googleapis.com/drive/v3/files/' + docId + '?fields=appProperties';
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      method: 'get',
+      headers: { Authorization: 'Bearer ' + token },
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) return {};
+    return JSON.parse(resp.getContentText()).appProperties || {};
+  } catch (e) {
+    return {};
   }
 }
 
