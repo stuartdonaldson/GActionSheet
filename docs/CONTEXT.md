@@ -104,6 +104,7 @@ The tracker table is located by a sentinel heading paragraph so refresh can repl
 - Archive ActionSheet rows with `Status = Closed` and `Last Modified > 30 days` to the archive sheet
 - Team Scope: on first sync, auto-assign a document to a team by walking its Drive folder ancestry for a `TeamData` match; the assignment is sticky (stored as the `teamScope` Drive file property) and survives the document being moved to another team's folder, unless explicitly overridden via `DocData.SyncStatus = UpdateDoc`
 - Anonymous chip-preview notice (ADR-0017 Phase 1): any recipient who clicks an `AI-N` chip's link lands on `doGet ?cmd=preview&docId&ain`, a branded page showing only non-confidential metadata (document name, team, `AI-N`, status) and a Drive-ACL-gated link to open the document — never the action text. Unknown/missing actions render a non-leaking not-found page
+- Import tab: the active doc's author can pull an open action from any other doc on the same team into the active doc as a new floating action with a new `globalId`; the source row is left in place and marked `Forwarded` so it drops out of future import lists
 
 ---
 
@@ -210,6 +211,33 @@ Acceptance Criteria:
 
 ---
 
+### UC-E: Import an open action from a teammate's doc
+
+Actor: Document author
+
+Preconditions:
+- The active doc has a `Team Id` assigned (Team Scope) and the requesting user has access to that team.
+- At least one other doc sharing the same `Team Id` has an open (unresolved) action.
+
+Primary Flow:
+1. Author opens the **Import** tab in the sidebar; it lists open actions from other docs on the same team, grouped by document name.
+2. Author selects one or more actions and clicks **Import selected**.
+3. The add-on inserts a new floating action in the active doc for each selection, with a new `AI-N` token and `globalId`, carrying over the source action's text, assignee, and status.
+4. The source row's `Action` text is appended with a `[Forward:<active doc name> AI-<new N>]` note, its `Status` is set to `Forwarded`, and it is marked dirty so the source doc reflects the new status on its next Sync.
+
+Postconditions:
+- The active doc and its ActionSheet gain one new row per imported action, with its own `globalId` (the import is a copy, not a move — the new row has no recorded link back to the source's `globalId`).
+- The imported row's `Assigned Date` (`created_date`) is copied from the source action, not set to the import time — so the ActionSheet continues to reflect when the action was originally raised, not when it was last forwarded.
+- The source row's `Status` becomes `Forwarded` (a free-form status recognized as resolved, per the Status invariant) and its `Action` text carries a `[Forward:...]` note pointing at the new doc/`AI-N`. Once forwarded, the source row no longer appears in any doc's Import tab.
+
+Acceptance Criteria:
+- AC1: The Import tab lists only open actions from other same-team docs; actions already `Forwarded`, `Closed`, or otherwise resolved are excluded, as are rows whose source doc or row is `Deleted`/`Doc Not Found`.
+- AC2: After **Import selected**, each chosen action appears as a new floating action in the active doc and a new ActionSheet row, with a fresh sequential `AI-N`/`globalId`, the source's action text/assignee/status carried over, and `Assigned Date` equal to the source row's `Assigned Date` (not the import timestamp).
+- AC3: Each source row's `Status` becomes `Forwarded`, its `Action` text gains a `[Forward:<target doc name> AI-<new N>]` suffix, and it is marked dirty so the source doc's own floating action reflects `Forwarded` on its next Sync.
+- AC4: Re-running Import against an already-`Forwarded` source row is a no-op — no duplicate `[Forward:...]` suffix is appended and no second clone is created. (Guarded in code by `_handleForwardActionRows`; not yet reachable from a regression test — see `GTaskSheet-apcu`.)
+
+---
+
 ## Error Handling
 
 Errors are surfaced in the sidebar (for add-on operations) or logged to the automation script's execution transcript (for sweep/archive). The full sync run is never aborted by a single-doc failure; other docs continue.
@@ -240,7 +268,8 @@ Errors are surfaced in the sidebar (for add-on operations) or logged to the auto
 | Automation script | The container-bound Apps Script on the ActionSheet that owns the `onEdit` timestamp stamper, the timed sweep trigger, and the archive job. |
 | Last Modified | A timestamp column on each ActionSheet row and (implicitly) each anchored action. Records the most recent reconcile or user edit time. Empty means never synced. |
 | Sidebar | The card-based UI shown by the add-on in the active doc, built with CardService (not HtmlService). Surfaces sync state, action buttons (Sync now, VerifySync, Insert tracker), and a per-action list with status dropdown and delete. |
-| Status | The recognized values are `Open`, `In Progress`, `In Review`, `Done`, and `Closed` (eligible for archive). The sidebar status dropdown exposes all five values; any other parenthesized token found in the doc is preserved as a free-form custom status. |
+| Status | The recognized values are `Open`, `In Progress`, `In Review`, `Done`, and `Closed` (eligible for archive). The sidebar status dropdown exposes all five values; any other parenthesized token found in the doc is preserved as a free-form custom status. `Forwarded` is one such free-form status, set by Import (UC-E) on a source row; it is treated as resolved (drops out of Import lists and archive-eligibility checks the same way `Closed` does). |
+| Import tab | A sidebar tab (UC-E) listing open actions from other same-team docs that the active doc's author can pull in as new floating actions. Importing clones the action with a new `globalId` and `Assigned Date` copied from the source; the source row is left in place, marked `Forwarded`. |
 | Sweep | The time-based reconcile run on the ActionSheet that iterates rows grouped by document and pulls updates from docs no one opened recently. |
 | Sync | One on-demand round in the sidebar that scans the active doc and reconciles ActionSheet rows for that doc in one shot. |
 | Team Scope (`teamScope`) | The Drive file `appProperty` holding a document's assigned `Team Id`. Set once via folder-walk auto-assignment (sticky thereafter) or overridden via `DocData.SyncStatus = UpdateDoc`. |

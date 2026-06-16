@@ -389,7 +389,7 @@ function _buildPreviewCard(url, statusOverride, docOverride) {
   // matched URL — AI-N as the title is the clickable identifier at the top.
   var header = CardService.newCardHeader()
     .setTitle( (actionId || 'Action') + ': ' + actionText )
-    .setImageUrl(_ADDON_LOGO_URL)
+    .setImageUrl(getStatusIconUrl(status))
     .setImageStyle(CardService.ImageStyle.SQUARE);
 
   var section = CardService.newCardSection();
@@ -412,13 +412,7 @@ function _buildPreviewCard(url, statusOverride, docOverride) {
 
   // Status icon buttons — one per status, fire directly without an intermediate card
   if (globalId) {
-    var _STATUS_ICONS = [
-      { status: 'Open',        icon: _ACTION_STATUS_IMAGES['Open'],        alt: 'Set Open' },
-      { status: 'In Progress', icon: _ACTION_STATUS_IMAGES['In Progress'], alt: 'Set In Progress' },
-      { status: 'In Review',   icon: _ACTION_STATUS_IMAGES['In Review'],   alt: 'Set In Review' },
-      { status: 'Done',        icon: _ACTION_STATUS_IMAGES['Done'],        alt: 'Set Done' },
-      { status: 'Closed',      icon: _ACTION_STATUS_IMAGES['Closed'],      alt: 'Set Closed' }
-    ];
+    var _STATUS_ICONS = getStatusIconButtons();
     var statusRow = CardService.newButtonSet();
     for (var si = 0; si < _STATUS_ICONS.length; si++) {
       var sIcon = _STATUS_ICONS[si];
@@ -864,7 +858,8 @@ function _importSelectedRows(doc, docId, token, index, importRows) {
       actionText:    src.action_text,
       assigneeEmail: src.assignee_email,
       assigneeName:  src.assignee_name || src.assignee_email,
-      status:        src.status
+      status:        src.status,
+      createdDate:   src.created_date
     });
     forwards.push({ sourceGlobalId: src.global_id, newGlobalId: newGlobalId });
   }

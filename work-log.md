@@ -2851,3 +2851,32 @@ Simplified sidebar from convoluted tab architecture to 4 flat action buttons (Sy
 - **GTaskSheet-lmsd**: Created and closed.
 
 ### Deployed: v0.2.1 (Rev. Jun 16, 2026 12:25) (TEST)
+
+## 2026-06-16 16:06:00
+
+### Summary:
+Centralized status→icon resolution logic that was duplicated across EditorAddonCard.js and WorkspaceAddonCard.js. Added `getStatusIconUrl(status)` and `getStatusIconButtons()` to SyncManager.js (alongside the existing `isResolved()` status authority). `_buildPreviewCard()`'s header icon now reflects the action's actual status (falling back to the Closed icon for resolved-but-non-canonical statuses, and the unknown icon otherwise) instead of always showing the generic add-on logo. `_flushActionParagraph()` and the sidebar status-button row now use the same shared helpers instead of their own copies. Deployed to TEST (v0.2.1 Rev. Jun 16 2026 16:06) and verified the WebApp responds 200 OK.
+
+### Key Learnings:
+SyncManager.js's status predicates (isOpen/isInProgress/isWaiting/isDelegated/isClosed/isResolved) use lowercase synonym word-lists, not the 5 canonical `_ACTION_STATUSES` labels directly — "In Review" matches none of them, so it relies on the exact-match-first precedence in `getStatusIconUrl` rather than the resolved-fallback.
+
+## 2026-06-16 16:34:58
+
+### Summary:
+Fixed status PNG icons appearing visually small (SVG canvas had a built-in margin beyond the glyph); preserved original created_date when an action is imported/forwarded across docs instead of stamping import time; backfilled CONTEXT.md/OPERATIONS.md with the previously-undocumented Import/Forward use case (UC-E) and reconciled it against actual code/test coverage.
+
+### Changes:
+- **assets/brand-NUUTS/deploy-brand.sh**: confirmed via `inkscape --query-all` that all 6 status SVGs render on a shared 56x56 canvas with the glyph occupying only ~44x44 at most (status-open is the tightest, spanning 6.5-49.5). Added `ink_status()` helper using `--export-area=6:6:50:50` (uniform crop derived from the largest glyph's bbox) so every status PNG fills more of its canvas without changing relative sizing between icons. `action-delete.png` and brand logos untouched (already near-full-canvas). Re-ran the script; all 6 status PNGs regenerated at 44x44 (down from 56x56).
+- **src/WebApp.js**: `_handleUpsertActionRows` now accepts an optional `row.createdDate` on insert — used for the `created_date` column instead of always stamping `now`; falls back to `now` when absent (the normal chip-create/sync-queue path has no source date to preserve, so behavior there is unchanged).
+- **src/EditorAddonCard.js**: `_importSelectedRows` threads `src.created_date` (already returned by `_listImportableActionsData`) through to the upsert payload as `createdDate`, so an imported/forwarded row's clone keeps the original action's creation timestamp.
+- **scn/session.py**: `_row_dict_to_ai` now also exposes `created_date` on the `ai` test object.
+- **tests/test_import.py**: `_seed_open_action` captures `created_date` from the seeded row; `test_import_flow_forward_sync`'s `check_ac2` now asserts the imported row's `created_date` matches the source's.
+- **docs/CONTEXT.md**: added Core Capabilities bullet + new **UC-E: Import an open action from a teammate's doc** (preconditions/flow/postconditions/AC1-AC4, including the created_date-preservation behavior); extended the `Status` glossary entry to cover `Forwarded`; added an `Import tab` glossary entry.
+- **docs/OPERATIONS.md**: UC Test Coverage table updated from "four use cases" to five, added a UC-E row mapping to `tests/test_import.py`; noted UC-E postdates the `mol-06g` 8-scenario sign-off baseline.
+- **GTaskSheet-apcu**: filed [TST] — UC-E AC4 (re-forwarding an already-`Forwarded` row is a no-op) is real shipped behavior (`_handleForwardActionRows`'s `seen[]`/`isResolved` guard) but currently unreachable from any test entry point, since `import_selected_for_test` re-derives its row set from the same filter that excludes resolved rows before `forward_action_rows` is ever called. Annotated in CONTEXT.md rather than silently claimed as tested.
+- Deployed to TEST (v0.2.1 Rev. Jun 16 2026 16:09) and verified the WebApp responds 200 OK.
+
+### Key Learnings:
+- For Inkscape PNG export, the default crop is the SVG's page/canvas (`viewBox`), not the drawn content's bounding box — `inkscape --query-all` reports the actual ink bbox per file, which is the right way to size a uniform `--export-area` crop across a icon set without distorting relative scale between icons.
+- When a capability has shipped code + tests but was never added to CONTEXT.md, treat it as a real documentation gap regardless of whose change exposed it — and check downstream docs (OPERATIONS.md's UC test-coverage table) that enumerate use cases by count/letter, since adding a UC silently breaks "the four use cases" prose elsewhere.
+- Before writing an AC into a use-case doc based on reading code, verify it's actually reachable by an existing test entry point — a guard clause being present in the handler doesn't mean any test can drive an input that exercises it.

@@ -79,6 +79,7 @@ def _seed_open_action(scn, action_text, assignee=None):
         if row.action == action_text:
             seed.action_id = row.action_id
             seed.global_id = row.global_id
+            seed.created_date = row.created_date
             return seed
     raise AssertionError(f"seeded action {action_text!r} not found in sheet after sync")
 
@@ -214,6 +215,102 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
 
 
 # ---------------------------------------------------------------------------
+# GTaskSheet-2p21 — Team view page (doGet ?cmd=teamview), twin of GTaskSheet-cu55
+# ---------------------------------------------------------------------------
+
+def test_team_view_page(settings, gas_log_dir, request):
+    """Team-view page lists only open-action docs in the target team, with
+    correct open/resolved counts and branded, new-tab doc links — and the
+    testTeamA fixture row has no Team Link, exercising the sidebar's fallback
+    case (GTaskSheet-cu55) end-to-end via the same page the fallback links to.
+    """
+    sessions = []
+
+    def new_doc():
+        s = ScenarioSession.new_doc(settings, request=request)
+        sessions.append(s)
+        return s
+
+    try:
+        scn_setup = new_doc()
+        setup_resp = scn_setup._post_fixture("setup_team_scope_fixture")
+        teams = setup_resp.get("data") or {}
+        team_a = teams["testTeamA"]
+        team_a_child = teams["testTeamAChild"]
+
+        team_rows = {r.get("teamId"): r for r in scn_setup._post_fixture("get_team_data_rows").get("data", {}).get("rows", [])}
+        assert not (team_rows.get("TestTeamA") or {}).get("teamLink"), (
+            "testTeamA fixture row unexpectedly has a Team Link — this test exercises "
+            "the no-link fallback case"
+        )
+
+        # ── Doc with 1 open + 1 resolved action, in TestTeamA ────────────────
+        scn_open = new_doc()
+        _move_to_folder(scn_open, team_a)
+        scn_open.sync()
+        open_doc_name = _docdata_row(scn_open).get("docName")
+        _seed_open_action(scn_open, "Team-view open action")
+        resolved = _seed_open_action(scn_open, "Team-view resolved action")
+        scn_open.edit_sheet(resolved, status="Done")
+        scn_open.sync()
+
+        # ── Doc with zero open actions (all resolved) — must be excluded ────
+        scn_all_resolved = new_doc()
+        _move_to_folder(scn_all_resolved, team_a)
+        scn_all_resolved.sync()
+        all_resolved_action = _seed_open_action(scn_all_resolved, "Team-view all-resolved action")
+        scn_all_resolved.edit_sheet(all_resolved_action, status="Done")
+        scn_all_resolved.sync()
+
+        # ── Doc in a different team — must be excluded ───────────────────────
+        scn_other_team = new_doc()
+        _move_to_folder(scn_other_team, team_a_child)
+        scn_other_team.sync()
+        _seed_open_action(scn_other_team, "Team-view other-team action")
+
+        def check_team_view():
+            html = scn_setup.fetch_team_view_html("TestTeamA")
+            if open_doc_name not in html:
+                return f"team view missing open-action doc {open_doc_name!r}: {html!r}"
+            if "Team-view open action" in html or "Team-view resolved action" in html:
+                return f"team view leaked action text: {html!r}"
+            if f"/document/d/{scn_open.doc_id}/edit" not in html:
+                return f"team view missing doc link for {scn_open.doc_id}: {html!r}"
+            if 'target="_blank"' not in html:
+                return f"team view doc link missing target=_blank: {html!r}"
+            if "Northlake UU Tool Suite" not in html:
+                return f"team view missing suite branding: {html!r}"
+            all_resolved_name = _docdata_row(scn_all_resolved).get("docName")
+            if all_resolved_name and all_resolved_name in html:
+                return f"team view should exclude zero-open-action doc {all_resolved_name!r}: {html!r}"
+            other_team_name = _docdata_row(scn_other_team).get("docName")
+            if other_team_name and other_team_name in html:
+                return f"team view should exclude other-team doc {other_team_name!r}: {html!r}"
+            return None
+
+        err = check_team_view()
+        assert err is None, err
+        scn_setup.expect_callable(
+            check_team_view, on=Surface.UI, tag="teamview open-docs-only", entry_point="doGet",
+        )
+        scn_setup.checkpoint(STEP, on=frozenset({Surface.UI}))
+
+        # ── Unknown teamId: non-leaking not-found page ───────────────────────
+        html_unknown = scn_setup.fetch_team_view_html("TestTeamNonexistent")
+        assert "not found" in html_unknown.lower(), f"expected not-found page: {html_unknown!r}"
+        assert "TestTeamNonexistent" not in html_unknown, (
+            f"unknown teamId should not be echoed back: {html_unknown!r}"
+        )
+    finally:
+        for scn in sessions:
+            try:
+                scn._post_route("end_journey_session", {"docId": scn.doc_id})
+            except Exception:
+                pass
+            scn.engine.close()
+
+
+# ---------------------------------------------------------------------------
 # GTaskSheet-4gsx — AC-1 -> AC-2 -> AC-3 functional journey
 # ---------------------------------------------------------------------------
 
@@ -331,6 +428,13 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
             carried = {r.action for r in new_rows}
             if src1_action.action not in carried or src2_action.action not in carried:
                 return f"source action text not carried over: {carried}"
+            carried_created = {r.action: r.created_date for r in new_rows}
+            if carried_created.get(src1_action.action) != src1_action.created_date:
+                return (f"created_date not carried over for src1: "
+                        f"{carried_created.get(src1_action.action)!r} != {src1_action.created_date!r}")
+            if carried_created.get(src2_action.action) != src2_action.created_date:
+                return (f"created_date not carried over for src2: "
+                        f"{carried_created.get(src2_action.action)!r} != {src2_action.created_date!r}")
             return None
 
         err = check_ac2()

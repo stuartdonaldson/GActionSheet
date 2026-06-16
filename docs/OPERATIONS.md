@@ -380,9 +380,9 @@ per-invocation grouping and the README/INDEX audit trail.
 
 ### UC Test Coverage & Sign-off
 
-The four use cases in `CONTEXT.md` (UC-A capture/track, UC-B update from
-either side, UC-C insert/refresh tracker table, UC-D archive closed actions)
-are covered by the following test files:
+The five use cases in `CONTEXT.md` (UC-A capture/track, UC-B update from
+either side, UC-C insert/refresh tracker table, UC-D archive closed actions,
+UC-E import/forward across docs) are covered by the following test files:
 
 | Use case | Covered by |
 |----------|------------|
@@ -390,13 +390,15 @@ are covered by the following test files:
 | UC-B — update an action from either side and converge | `tests/test_team_scope.py`, later acts of `tests/test_journey.py` |
 | UC-C — insert/refresh the in-doc tracker table | `tests/test_tracker_view_only.py`, `tests/test_journey.py` |
 | UC-D — archive closed actions | `tests/test_archive.py` |
+| UC-E — import an open action from a teammate's doc (forward) | `tests/test_import.py` (`test_import_access_filter` AC1; `test_import_flow_forward_sync` AC2–AC4, incl. `created_date` carry-over) |
 | Timed sweep (`syncAll`) | `tests/test_sync_all.py` |
 
 **Sign-off (GTaskSheet-mol-06g, 2026-05-21):** all 8 UC scenarios pass — 14
 passed, 2 xfailed (pipe-delimited assignee, tracked under `GTaskSheet-tis`).
 This is the last full-suite run across the UC matrix; later regression runs
 (e.g. `GTaskSheet-gdll`) are targeted spot-checks against specific surfaces,
-not a re-run of the full UC matrix.
+not a re-run of the full UC matrix. UC-E (EPIC-D import/forward) was added
+later and is not part of the mol-06g 8-scenario sign-off baseline above.
 
 ---
 

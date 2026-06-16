@@ -517,6 +517,19 @@ class ScenarioSession:
         with self._reporter.step("QUERY", "fetch_preview_html"):
             return extract_html_output(_http_get(f"{url}?{qs}"))
 
+    def fetch_team_view_html(self, team_id: str) -> str:
+        """GET the branded team-view page: doGet ?cmd=teamview&team=<team_id>.
+
+        Anonymous, unauthenticated route — same disclosure model as
+        fetch_preview_html. Returns the decoded HtmlOutput markup.
+        """
+        url = self.settings.get("webappTestUrl") or ""
+        if not url:
+            raise RuntimeError("webappTestUrl not set in local.settings.json")
+        qs = urllib.parse.urlencode({"cmd": "teamview", "team": team_id})
+        with self._reporter.step("QUERY", "fetch_team_view_html"):
+            return extract_html_output(_http_get(f"{url}?{qs}"))
+
     def tracker_id_urls(self) -> dict:
         """Return {action_id: id_url} for tracker rows that have an ID-column hyperlink."""
         from tests.helpers.download import download_docx
@@ -884,4 +897,5 @@ def _row_dict_to_ai(row: dict) -> ai:
     item.sync_status = row.get("sync_status") or ""
     item.doc_id = row.get("doc_id") or ""
     item.doc_name = row.get("doc_name") or ""
+    item.created_date = row.get("created_date") or ""
     return item

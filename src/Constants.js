@@ -29,3 +29,6 @@ var _ADDON_LOGO_URL = _PRODUCT_DETAILS_BASE + 'action-item-logo.png';
 /** Northlake UU emblem used as the add-on homepage logo. */
 var _NORTHLAKE_UU_EMBLEM_URL = _PRODUCT_DETAILS_BASE + 'northlake-uu-emblem.png';
 
+/** Suite display name. Must match appsscript.json addOns.common.name. */
+var _NORTHLAKE_UU_SUITE_NAME = 'Northlake UU Tool Suite';
+

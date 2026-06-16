@@ -360,9 +360,12 @@ function onSyncNow() {
 
 /**
  * Renders the team name above the tab bar. Always shown:
- *   - Team + link → "Team: <a href=url>name</a>"
- *   - Team, no link → "Team: name"
+ *   - Team + link → "Team: <a href=url target=_blank>name</a>"
  *   - No team → "Team: (none)"
+ *
+ * `link` is always populated once a team is resolved — TeamData's own Team
+ * Link when set, otherwise the branded team-view page (_buildTeamViewUrl,
+ * SyncManager.js) — see _safeGetDocTeamInfo.
  *
  * @param {{team: string, link: string}} teamInfo
  */
@@ -370,7 +373,7 @@ function _buildTeamSection(teamInfo) {
   var team  = teamInfo && teamInfo.team;
   var link  = teamInfo && teamInfo.link;
   var label = team
-    ? ('Team: ' + (link ? '<a href="' + link + '">' + team + '</a>' : team))
+    ? ('Team: ' + (link ? '<a href="' + link + '" target="_blank">' + team + '</a>' : team))
     : 'Team: (none)';
   return CardService.newCardSection()
     .addWidget(CardService.newTextParagraph().setText(label));
@@ -379,7 +382,9 @@ function _buildTeamSection(teamInfo) {
 /**
  * Reads team name and link for the active doc directly from DocData/TeamData
  * (the authoritative source). Does not rely on the teamScope appProperty cache
- * which is only stamped during sync.
+ * which is only stamped during sync. When TeamData has no Team Link for the
+ * resolved team, falls back to the branded team-view WebApp page
+ * (_buildTeamViewUrl, SyncManager.js) so the sidebar link is never dead.
  */
 function _safeGetDocTeamInfo(doc) {
   if (!doc) return { team: '', link: '' };
@@ -390,10 +395,10 @@ function _safeGetDocTeamInfo(doc) {
     var teamRows = _readTeamDataRows(ss);
     for (var i = 0; i < teamRows.length; i++) {
       if (teamRows[i].teamId === docRow.teamId) {
-        return { team: docRow.teamId, link: teamRows[i].teamLink || '' };
+        return { team: docRow.teamId, link: teamRows[i].teamLink || _buildTeamViewUrl(docRow.teamId) };
       }
     }
-    return { team: docRow.teamId, link: '' };
+    return { team: docRow.teamId, link: _buildTeamViewUrl(docRow.teamId) };
   } catch (e) {
     return { team: '', link: '' };
   }
@@ -500,13 +505,7 @@ function _buildActionListSection(homepageState) {
     // Per-action mutations — only shown when the action is anchored.
     if (action.globalId) {
       // One ImageButton per status + one delete button, all in a single row.
-      var _STATUS_ICONS = [
-        { status: 'Open',        icon: _ACTION_STATUS_IMAGES['Open'],        alt: 'Set Open' },
-        { status: 'In Progress', icon: _ACTION_STATUS_IMAGES['In Progress'], alt: 'Set In Progress' },
-        { status: 'In Review',   icon: _ACTION_STATUS_IMAGES['In Review'],   alt: 'Set In Review' },
-        { status: 'Done',        icon: _ACTION_STATUS_IMAGES['Done'],        alt: 'Set Done' },
-        { status: 'Closed',      icon: _ACTION_STATUS_IMAGES['Closed'],      alt: 'Set Closed' }
-      ];
+      var _STATUS_ICONS = getStatusIconButtons();
       var mutationRow = CardService.newButtonSet();
       for (var si = 0; si < _STATUS_ICONS.length; si++) {
         var sIcon = _STATUS_ICONS[si];

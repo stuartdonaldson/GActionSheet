@@ -43,6 +43,24 @@ ink() {
   fi
 }
 
+# Status glyphs are drawn on a shared 56x56 canvas with a built-in margin
+# (largest glyph, status-open, occupies x/y 6.5-49.5). Cropping every status
+# icon to the same 6:6:50:50 box trims that dead canvas border uniformly so
+# the glyphs fill more of the rendered PNG without changing their size
+# relative to each other.
+STATUS_CROP="6:6:50:50"
+
+ink_status() {
+  local src="$1" dst="$2"
+  local cmd=(inkscape "$src" --export-type=png --export-filename="$dst" --export-background-opacity=0 --export-area="$STATUS_CROP")
+  if $DRY_RUN; then
+    echo "  [dry-run] ${cmd[*]}"
+  else
+    "${cmd[@]}" 2>/dev/null
+    echo "  ✓ $(basename "$dst")"
+  fi
+}
+
 echo "=== Brand deploy — GActionSheet ==="
 $DRY_RUN && echo "    (dry run — no files written)"
 echo
@@ -53,13 +71,14 @@ echo
 echo "--- Runtime icons (product-details/) ---"
 mkdir -p "$PRODUCT_DETAILS"
 
-# Status icons at natural SVG size (56px); rendered by CardService + Docs API
-ink "$SOURCE_DIR/status-open.svg"        "$PRODUCT_DETAILS/status-open.png"
-ink "$SOURCE_DIR/status-in-progress.svg" "$PRODUCT_DETAILS/status-in-progress.png"
-ink "$SOURCE_DIR/status-review.svg"      "$PRODUCT_DETAILS/status-review.png"
-ink "$SOURCE_DIR/status-done.svg"        "$PRODUCT_DETAILS/status-done.png"
-ink "$SOURCE_DIR/status-closed.svg"      "$PRODUCT_DETAILS/status-closed.png"
-ink "$SOURCE_DIR/status-unknown.svg"     "$PRODUCT_DETAILS/status-unknown.png"
+# Status icons, cropped to STATUS_CROP (see ink_status above) so the glyph
+# fills more of the canvas; rendered by CardService + Docs API
+ink_status "$SOURCE_DIR/status-open.svg"        "$PRODUCT_DETAILS/status-open.png"
+ink_status "$SOURCE_DIR/status-in-progress.svg" "$PRODUCT_DETAILS/status-in-progress.png"
+ink_status "$SOURCE_DIR/status-review.svg"      "$PRODUCT_DETAILS/status-review.png"
+ink_status "$SOURCE_DIR/status-done.svg"        "$PRODUCT_DETAILS/status-done.png"
+ink_status "$SOURCE_DIR/status-closed.svg"      "$PRODUCT_DETAILS/status-closed.png"
+ink_status "$SOURCE_DIR/status-unknown.svg"     "$PRODUCT_DETAILS/status-unknown.png"
 ink "$SOURCE_DIR/action-delete.svg"      "$PRODUCT_DETAILS/action-delete.png"
 
 # Brand logos
@@ -118,6 +137,9 @@ var _ADDON_LOGO_URL = _PRODUCT_DETAILS_BASE + 'action-item-logo.png';
 
 /** Northlake UU emblem used as the add-on homepage logo. */
 var _NORTHLAKE_UU_EMBLEM_URL = _PRODUCT_DETAILS_BASE + 'northlake-uu-emblem.png';
+
+/** Suite display name. Must match appsscript.json addOns.common.name. */
+var _NORTHLAKE_UU_SUITE_NAME = 'Northlake UU Tool Suite';
 "
 
 if $DRY_RUN; then

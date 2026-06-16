@@ -51,6 +51,17 @@ function _buildChipUrl(globalId) {
     '&ain=' + encodeURIComponent(parsed.actionId);
 }
 
+/**
+ * Builds the branded team-view URL for a TeamData teamId — the sidebar Team
+ * link's fallback target when TeamData has no Team Link of its own.
+ *
+ * @param {string} teamId
+ * @return {string} URL of the form `ACTION_CHIP_URL_BASE + '?cmd=teamview&team=<teamId>'`
+ */
+function _buildTeamViewUrl(teamId) {
+  return ACTION_CHIP_URL_BASE + '?cmd=teamview&team=' + encodeURIComponent(teamId);
+}
+
 // 1-based column numbers from the authoritative schema.
 var _SCOL = CONTRACT_SCHEMA.sheetAction.columnsByField;
 
@@ -1322,7 +1333,7 @@ function _chipBadgeStyleRequest(startIndex, endIndex) {
 function _flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail, assigneeName) {
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
   var chipUrl = _buildChipUrl(globalId);
-  var imgUrl = _ACTION_STATUS_IMAGES[status] || _ACTION_DEFAULT_IMAGE;
+  var imgUrl = getStatusIconUrl(status);
 
   var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);
   var tokenLen   = ('AI-' + N + ': ').length;
@@ -1482,4 +1493,29 @@ function isClosed(status) {
  */
 function isResolved(status) {
   return isDelegated(status) || isClosed(status);
+}
+
+/**
+ * Resolves a status string to its icon URL.
+ * Exact canonical matches win; otherwise resolved statuses fall back to the
+ * Closed icon, and anything else falls back to the unknown/default icon.
+ *
+ * @param {string} status
+ * @returns {string} Icon URL
+ */
+function getStatusIconUrl(status) {
+  if (_ACTION_STATUS_IMAGES.hasOwnProperty(status)) return _ACTION_STATUS_IMAGES[status];
+  if (isResolved(status)) return _ACTION_STATUS_IMAGES['Closed'];
+  return _ACTION_DEFAULT_IMAGE;
+}
+
+/**
+ * Canonical {status, icon, alt} list for status-picker button rows.
+ *
+ * @returns {Array<{status: string, icon: string, alt: string}>}
+ */
+function getStatusIconButtons() {
+  return _ACTION_STATUSES.map(function(status) {
+    return { status: status, icon: _ACTION_STATUS_IMAGES[status], alt: 'Set ' + status };
+  });
 }
