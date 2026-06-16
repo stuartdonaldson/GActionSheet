@@ -16,18 +16,8 @@
  * (_flushActionParagraph); the chip URL base is ACTION_CHIP_URL_BASE (SyncManager.js).
  */
 
-/** Status values matching the ActionSheet dropdown. */
-var _ACTION_STATUSES = ['Open', 'In Progress', 'In Review', 'Done', 'Closed'];
-
-var _BRAND_NUTS_BASE = 'https://stuartdonaldson.github.io/GActionSheet/assets/brand-NUTS/';
-var _ACTION_DEFAULT_IMAGE = _BRAND_NUTS_BASE + 'status-other.png';
-var _ACTION_STATUS_IMAGES = {
-  'Open':        _BRAND_NUTS_BASE + 'status-open.png',
-  'In Progress': _BRAND_NUTS_BASE + 'status-inprogress.png',
-  'In Review':   _BRAND_NUTS_BASE + 'status-inreview.png',
-  'Done':        _BRAND_NUTS_BASE + 'status-done.png',
-  'Closed':      _BRAND_NUTS_BASE + 'status-closed.png'
-};
+// Icon and status constants are defined in Constants.js (generated — see assets/brand-NUUTS/deploy-brand.sh)
+// _ACTION_STATUSES, _ACTION_STATUS_IMAGES, _ACTION_DEFAULT_IMAGE, _ADDON_LOGO_URL available as GAS globals.
 
 // ---------------------------------------------------------------------------
 // Entry points
@@ -235,7 +225,7 @@ function _submitImport(e) {
         .build();
     }
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(_buildTabbedHomepageCard('import')))
+      .setNavigation(CardService.newNavigation().updateCard(_buildImportCard(doc.getId(), false)))
       .build();
   } catch (err) {
     GasLogger.log('IMPORT_SELECTED.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
@@ -335,7 +325,7 @@ function _buildCreationCard() {
     .setHeader(
       CardService.newCardHeader()
         .setTitle('New Action')
-        .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png')
+        .setImageUrl(_ADDON_LOGO_URL)
     )
     .addSection(section)
     .build();
@@ -399,7 +389,7 @@ function _buildPreviewCard(url, statusOverride, docOverride) {
   // matched URL — AI-N as the title is the clickable identifier at the top.
   var header = CardService.newCardHeader()
     .setTitle( (actionId || 'Action') + ': ' + actionText )
-    .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png')
+    .setImageUrl(_ADDON_LOGO_URL)
     .setImageStyle(CardService.ImageStyle.SQUARE);
 
   var section = CardService.newCardSection();
@@ -633,7 +623,7 @@ function _processPendingSheetUpdates(e) { // eslint-disable-line no-unused-vars
 function _buildMessageCard(title, message) {
   return CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle(title)
-      .setImageUrl('https://raw.githubusercontent.com/stuartdonaldson/GActionSheet/master/assets/action-logo-t-32.png'))
+      .setImageUrl(_ADDON_LOGO_URL))
     .addSection(CardService.newCardSection()
       .addWidget(CardService.newTextParagraph().setText(message)))
     .build();

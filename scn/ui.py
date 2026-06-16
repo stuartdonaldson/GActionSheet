@@ -133,16 +133,18 @@ _FORM_SUBMIT = (
     'button:has-text("Insert"), '
     'button[type="submit"]'
 )
-# Sidebar homepage card — Sync Now button
+# Sidebar homepage card — Sync button
 _SIDEBAR_SYNC = (
-    '[aria-label="Sync now"], '
-    '[aria-label="sync now"], '
-    'button:has-text("Sync now")'
+    'button:text-is("Sync"), '
+    '[aria-label="Sync"], '
+    'button:text-is("Sync now"), '
+    '[aria-label="Sync now"]'
 )
-# Sidebar homepage card — Insert tracker button
+# Sidebar homepage card — Insert Tracker button
 _SIDEBAR_INSERT_TRACKER = (
-    'button:has-text("Insert tracker"), '
-    'button:has-text("tracker"), '
+    'button:text-is("Insert Tracker"), '
+    'button:text-is("Insert tracker"), '
+    '[aria-label*="Insert Tracker"], '
     '[aria-label*="Insert tracker"], '
     '[aria-label*="tracker"]'
 )
@@ -915,12 +917,11 @@ class UiDriver:
         self._post_act_check()
 
     def show_tab(self, label: str, *, timeout: str = "15s") -> None:
-        """Click a homepage card tab-bar button (ADR-0015 onShowTab); wait out busy.
+        """Click a sidebar card button by exact label and wait for busy to clear.
 
-        label is one of the _TABS[].label values in src/WorkspaceAddonCard.js
-        ("Doc status", "Import", "Notify"). onShowTab responds with
-        updateCard(_buildTabbedHomepageCard(tab)) — same re-render shape as
-        sidebar_set_status/sidebar_delete, so the busy-wait pattern matches.
+        Used to navigate between the homepage and sub-cards (Import, Notify) or
+        to click Back. label must exactly match the button text rendered by
+        CardService (e.g. "Import", "Notify", "Back").
         """
         with self.reporter.step("UIACT", "show_tab", label):
             ms = _parse_timeout(timeout)
@@ -960,10 +961,10 @@ class UiDriver:
             return []
         frame = self._current_card.frame
 
-        # The Import tab re-render (onShowTab/onImportSelectAll) is a server
+        # The Import card render (onShowImport/onImportSelectAll) is a server
         # round trip; poll briefly for the rendered result (link, checklist
         # item, or one of the placeholder texts) rather than assume the
-        # show_tab busy-spinner wait already covered it.
+        # button-click busy-spinner wait already covered it.
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
             if (
@@ -1019,7 +1020,7 @@ class UiDriver:
         below clicks the `<input>`'s parent wrapper div.
 
         action_ids="all" clicks 'Select all' (onImportSelectAll) — a server
-        round trip that re-renders the tab with every item pre-checked — then
+        round trip that re-renders the import card with every item pre-checked — then
         clicks the wrapper for any item whose <input> didn't end up checked
         (the server-side selected=true on addItem does not reliably translate
         into a submittable checked state). Otherwise clicks the wrapper(s) for
@@ -1094,7 +1095,7 @@ class UiDriver:
 
         Returns [] if no card context or no 'AI-N:' header found.
         Reads action_id from the 'AI-N:' card header text and status from the rendered
-        brand-NUTS status icon (img[alt] preferred over non-button [aria-label], per G1).
+        brand-NUUTS status icon (img[alt] preferred over non-button [aria-label], per G1).
         """
         if self._current_card is None:
             return []
