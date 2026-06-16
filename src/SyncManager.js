@@ -1323,9 +1323,13 @@ function _flushActionParagraph(docId, token, N, globalId, actionText, status, as
   var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);
   var tokenLen   = ('AI-' + N + ': ').length;
 
-  // GET to find paragraph indices.
-  // builtText is text-run content only — inline images appear as inlineObjectElement.
-  var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=body.content(startIndex,endIndex,paragraph/elements(textRun/content))',
+  // GET to find paragraph indices — include table cell content so AI-N tokens
+  // inside table cells are found. builtText is text-run content only.
+  var _FLUSH_FIELDS = [
+    'startIndex,endIndex,paragraph/elements(textRun/content)',
+    'table/tableRows/tableCells/content(startIndex,endIndex,paragraph/elements(textRun/content))'
+  ].join(',');
+  var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=body.content(' + _FLUSH_FIELDS + ')',
     { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
   if (getResp.getResponseCode() !== 200) {
     GasLogger.log('flush.error', { msg: 'GET failed: HTTP ' + getResp.getResponseCode(), globalId: globalId });
@@ -1335,28 +1339,45 @@ function _flushActionParagraph(docId, token, N, globalId, actionText, status, as
   var getBody = JSON.parse(getResp.getContentText());
   var content = (getBody.body || {}).content || [];
 
-  // Collect ALL occurrences of this AI-N: token (handles copy-pasted paragraphs).
-    // Process descending so lower-index paragraphs are unaffected by higher-index changes.
-    var occurrences = [];
-    for (var i = 0; i < content.length; i++) {
-      var para = content[i].paragraph;
-      if (!para) continue;
-      var runs = para.elements || [];
-      var builtText = '';
-      for (var j = 0; j < runs.length; j++) {
-        if (runs[j].textRun) builtText += runs[j].textRun.content || '';
+  // Collect ALL occurrences of this AI-N: token from top-level paragraphs and
+  // table cells. Process descending so lower-index paragraphs are unaffected
+  // by higher-index changes.
+  function _collectOccurrences(items) {
+    var found = [];
+    for (var ii = 0; ii < items.length; ii++) {
+      var item = items[ii];
+      if (item.paragraph) {
+        var runs = item.paragraph.elements || [];
+        var builtText = '';
+        for (var jj = 0; jj < runs.length; jj++) {
+          if (runs[jj].textRun) builtText += runs[jj].textRun.content || '';
+        }
+        var m = builtText.replace(/\n$/, '').match(/^AI-(\d+):/);
+        if (m && parseInt(m[1], 10) === N) {
+          found.push({ pStart: item.startIndex, pEnd: item.endIndex });
+        }
       }
-      var plainText = builtText.replace(/\n$/, '');
-      var m = plainText.match(/^AI-(\d+):/);
-      if (m && parseInt(m[1], 10) === N) {
-        occurrences.push({ pStart: content[i].startIndex, pEnd: content[i].endIndex });
+      if (item.table) {
+        var tableRows = item.table.tableRows || [];
+        for (var r = 0; r < tableRows.length; r++) {
+          var cells = tableRows[r].tableCells || [];
+          for (var c = 0; c < cells.length; c++) {
+            var cellItems = (cells[c].content || []);
+            var nested = _collectOccurrences(cellItems);
+            for (var n = 0; n < nested.length; n++) found.push(nested[n]);
+          }
+        }
       }
     }
+    return found;
+  }
 
-    if (occurrences.length === 0) {
-      GasLogger.log('flush.warn', { msg: 'Paragraph not found', globalId: globalId });
-      return false;
-    }
+  var occurrences = _collectOccurrences(content);
+
+  if (occurrences.length === 0) {
+    GasLogger.log('flush.warn', { msg: 'Paragraph not found', globalId: globalId });
+    return false;
+  }
 
     occurrences.sort(function(a, b) { return b.pStart - a.pStart; });
 

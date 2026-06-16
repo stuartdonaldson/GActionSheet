@@ -116,10 +116,10 @@ function _submitCreateAction(e) {
     var doc      = DocumentApp.getActiveDocument();
     var N        = _getNextActionN(doc);
     var globalId = doc.getId() + '/AI-' + N;
-    var docUrl   = doc.getUrl();
-    var docTitle = doc.getName();
 
-    // Insert chip at cursor first — doc is source of truth; sheet is downstream.
+    // Insert chip at cursor — doc is source of truth; the sheet row will be
+    // created by the next sync (no separate upsert call here to stay within
+    // the 30s execution limit).
     // NOTE: CardService.newSmartChipConfig / newRenderAction do NOT exist in the
     // current GAS runtime (confirmed 2026-05-27 — TypeError). The REST approach
     // is the correct insertion method.
@@ -135,31 +135,9 @@ function _submitCreateAction(e) {
         .build();
     }
 
-    // Write row to ActionSheet only after doc insertion succeeds.
-    var result = _callWebApp('upsert_action_rows', {
-      docUrl:   docUrl,
-      docTitle: docTitle,
-      rows: [{
-        globalId:      globalId,
-        actionText:    actionText,
-        assigneeEmail: assigneeEmail,
-        assigneeName:  assigneeName || assigneeEmail,
-        status:        status
-      }]
-    });
-
-    if (!result || result.error) {
-      GasLogger.log('CREATE_ACTION_TRIGGER.error', { err: result && result.error });
-      GasLogger.flush();
-      return CardService.newActionResponseBuilder()
-        .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Failed to create action: ' + ((result && result.error) || 'unknown error'))))
-        .build();
-    }
-
     GasLogger.log('CREATE_ACTION_TRIGGER.done', { globalId: globalId });
-    GasLogger.flush();
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText)))
+      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText + '\n\nSync now to record it in the ActionSheet.')))
       .build();
   } catch (err) {
     GasLogger.log('CREATE_ACTION_TRIGGER.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
@@ -775,8 +753,14 @@ function _resolveCursorIndex(doc, cursor, token) {
   var baseUrl = 'https://docs.googleapis.com/v1/documents/';
 
   // Step 2 — GET doc before any mutation (DocumentApp changes are deferred).
+  // Field mask: only the text run content + indices needed by _findCursorIndex.
+  // Includes table cell paragraphs so table-cell cursor resolution works.
+  var _CURSOR_FIELDS = [
+    'paragraph/elements(startIndex,endIndex,textRun/content)',
+    'table/tableRows/tableCells/content/paragraph/elements(startIndex,endIndex,textRun/content)'
+  ].join(',');
   var getResp = UrlFetchApp.fetch(
-    baseUrl + docId + '?fields=body.content',
+    baseUrl + docId + '?fields=body.content(' + _CURSOR_FIELDS + ')',
     { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
   );
   if (getResp.getResponseCode() !== 200) {
