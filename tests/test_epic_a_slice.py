@@ -37,8 +37,7 @@ class TestEpicASliceRoundTrip:
 
     def test_expected_row_counts(self, slice_result):
         data = slice_result["data"]
-        assert data["teamDataRows"] == 3, "Expected 3 TeamData sample rows"
-        assert data["docDataRows"]  == 3, "Expected 3 DocData sample rows"
+        assert data["docDataRows"] == 3, "Expected 3 DocData sample rows"
 
 
 class TestEpicASliceResolvedAuthority:

@@ -2140,18 +2140,6 @@ function setupTestFixtures(scenario, data) {
         //   (a) round-trip: rows written then read back are identical (non-date cols)
         //   (b) resolved authority: Resolved Count computed exclusively via isResolved()
 
-        // --- TeamData tab --------------------------------------------------
-        var tdsTeamSheet = _getOrCreateSheet(ss, 'TeamData');
-        tdsTeamSheet.clearContents();
-        var tdsTeamHeaders = [['Team Id', 'Folder Id', 'Contact']];
-        var tdsTeamRows = [
-          ['Board',      'board-folder-001', 'board@northlakeuu.org'],
-          ['Board',      'board-folder-002', 'board@northlakeuu.org'],
-          ['Membership', 'mem-folder-001',   'membership@northlakeuu.org']
-        ];
-        tdsTeamSheet.getRange(1, 1, 1, 3).setValues(tdsTeamHeaders).setFontWeight('bold');
-        tdsTeamSheet.getRange(2, 1, tdsTeamRows.length, 3).setValues(tdsTeamRows);
-
         // --- DocData rows (action-status sets drive Resolved Count via isResolved()) ---
         // Row 1: matched-team doc — 2 actions (Done + Open) → 1 resolved
         // Row 2: no-team doc     — 1 action  (Open)         → 0 resolved
@@ -2198,7 +2186,6 @@ function setupTestFixtures(scenario, data) {
         _TF_RESULT = {
           tag: 'fixture.team_data_slice',
           data: {
-            teamDataRows: tdsTeamRows.length,
             docDataRows:  tdsDocDataRows.length,
             resolvedCounts: [
               _tdsCountResolved(tdsActionSets[0]),
