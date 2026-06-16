@@ -763,11 +763,12 @@ function _findParaByGlobalId(doc, globalId) {
         for (var c = 0; c < row.getNumCells(); c++) {
           var cell = row.getCell(c);
           for (var p = 0; p < cell.getNumChildren(); p++) {
-            var cp = cell.getChild(p);
-            if (cp.getType() === DocumentApp.ElementType.PARAGRAPH &&
-                cp.asParagraph().getText().replace(/\n$/, '').indexOf(tokenPrefix) === 0) {
-              return cp.asParagraph();
-            }
+            var cp  = cell.getChild(p);
+            var cpt = cp.getType();
+            var elem = cpt === DocumentApp.ElementType.PARAGRAPH ? cp.asParagraph()
+                     : cpt === DocumentApp.ElementType.LIST_ITEM  ? cp.asListItem()
+                     : null;
+            if (elem && elem.getText().replace(/\n$/, '').indexOf(tokenPrefix) === 0) return elem;
           }
         }
       }

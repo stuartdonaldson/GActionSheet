@@ -570,9 +570,13 @@ function _collectTableCellActions(table, tableBodyIdx, docId, actions, seenN) {
     for (var c = 0; c < row.getNumCells(); c++) {
       var cell = row.getCell(c);
       for (var p = 0; p < cell.getNumChildren(); p++) {
-        var cp = cell.getChild(p);
-        if (cp.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
-        var action = _parseParagraphAsFloatingAction(cp.asParagraph(), tableBodyIdx, docId, seenN);
+        var cp   = cell.getChild(p);
+        var cpt  = cp.getType();
+        var para = cpt === DocumentApp.ElementType.PARAGRAPH ? cp.asParagraph()
+                 : cpt === DocumentApp.ElementType.LIST_ITEM  ? cp.asListItem()
+                 : null;
+        if (!para) continue;
+        var action = _parseParagraphAsFloatingAction(para, tableBodyIdx, docId, seenN);
         if (action) actions.push(action);
       }
     }
@@ -664,8 +668,10 @@ function _collectTokenParagraphs(body) {
         for (var c = 0; c < row.getNumCells(); c++) {
           var cell = row.getCell(c);
           for (var p = 0; p < cell.getNumChildren(); p++) {
-            var cp = cell.getChild(p);
-            if (cp.getType() === DocumentApp.ElementType.PARAGRAPH) scanPara(cp.asParagraph());
+            var cp  = cell.getChild(p);
+            var cpt = cp.getType();
+            if (cpt === DocumentApp.ElementType.PARAGRAPH) scanPara(cp.asParagraph());
+            else if (cpt === DocumentApp.ElementType.LIST_ITEM) scanPara(cp.asListItem());
           }
         }
       }
