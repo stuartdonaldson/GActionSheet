@@ -15,10 +15,7 @@ function onOpen() {
     }));
   }
 
-  // onOpen is a Sheets simple trigger. When this script also runs as a Docs/
-  // Slides/Forms add-on, SpreadsheetApp.getUi() is not available in that
-  // context. getActiveSpreadsheet() returns null rather than throwing, so
-  // checking it is insufficient — wrap the entire body in try/catch instead.
+  // Sheets context: ActionSheet management menu.
   try {
     SpreadsheetApp.getUi()
       .createMenu('Action Sync')
@@ -30,20 +27,33 @@ function onOpen() {
           .addItem('Initialize Triggers', 'menuInitializeTriggers')
           .addItem('Bootstrap Test Properties', 'menuBootstrap')
       )
-      .addSeparator()
-      .addItem('Test: Begin Session', 'menuBeginTestSession')
-      .addItem('Test: End Session', 'menuEndTestSession')
-      .addItem('Test: Setup Fixture', 'menuSetupFixture')
-      .addItem('Test: Sync Document', 'menuSyncDocument')
-      .addItem('Test: Setup And Sync', 'menuSetupAndSync')
-      .addItem('Test: Verify Consistency', 'menuVerifyConsistency')
-      .addItem('Test: Insert Tracker Table', 'menuInsertTrackerTable')
-      .addItem('Test: Run Archive', 'menuRunArchive')
-      .addItem('Test: Debug Doc Body', 'menuDebugDocBody')
-      .addItem('Test: Probe Identity', 'menuProbeIdentity') // [PROBE]
+      .addSubMenu(
+        SpreadsheetApp.getUi().createMenu('Test')
+          .addItem('Begin Session', 'menuBeginTestSession')
+          .addItem('End Session', 'menuEndTestSession')
+          .addItem('Setup Fixture', 'menuSetupFixture')
+          .addItem('Sync Document', 'menuSyncDocument')
+          .addItem('Setup And Sync', 'menuSetupAndSync')
+          .addItem('Verify Consistency', 'menuVerifyConsistency')
+          .addItem('Insert Tracker Table', 'menuInsertTrackerTable')
+          .addItem('Run Archive', 'menuRunArchive')
+          .addItem('Debug Doc Body', 'menuDebugDocBody')
+          .addItem('Probe Identity', 'menuProbeIdentity') // [PROBE]
+      )
       .addToUi();
   } catch (e) {
-    // Not a Sheets context (e.g. running as a Docs add-on) — exit silently.
+    // Not a Sheets context — try Docs context below.
+  }
+
+  // Docs context: per-document actions available from the menu bar.
+  try {
+    DocumentApp.getUi()
+      .createMenu('Action Sync')
+      .addItem('Sync', 'menuSyncActiveDoc')
+      .addItem('Insert Tracker', 'menuInsertTrackerActiveDoc')
+      .addToUi();
+  } catch (e) {
+    // Not a Docs context — exit silently.
   }
 }
 
@@ -62,6 +72,16 @@ function menuBootstrap() {
 function menuSync() {
   PROBE_log('menu', { menuItem: 'menuSync' }); // [PROBE]
   syncAll();
+}
+
+function menuSyncActiveDoc() {
+  var doc = DocumentApp.getActiveDocument();
+  if (doc) syncDocument(doc.getId());
+}
+
+function menuInsertTrackerActiveDoc() {
+  var doc = DocumentApp.getActiveDocument();
+  if (doc) insertTrackerTable(doc.getId());
 }
 
 // [PROBE] — dedicated identity probe callable from the sheet menu and Playwright.
