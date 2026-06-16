@@ -1,4 +1,7 @@
 
+# Design source files — large binaries, not needed in repo
+*.pptx
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
