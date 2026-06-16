@@ -2778,3 +2778,76 @@ Closed EPIC **GTaskSheet-rz4k** (ENTRY_POINT_REGISTRY deferred→covered) and EP
 - TeamData has no separate "team name" field — `teamId` itself is used as the
   display label for "team name (if resolvable)" per ADR-0017 Phase 1; acceptable
   for the interim notice.
+
+## 2026-06-16 09:05:19
+
+### Summary
+Removed broken directory-API assignee autocomplete from Create Action card; filed replacement design bead; updated sidebar branding and team display; added Team Link column to TeamData; fixed a live-data-destroying test fixture.
+
+### Details
+
+**Assignee autocomplete removed (GTaskSheet-6rv6)**
+- `_suggestAssignees`/`_addPeopleSuggestions` deleted; `setSuggestionsAction` wiring removed from the Assignee TextInput.
+- Root cause: `searchDirectoryPeople` returned 0 results for this domain on every call while taking 1.5–4.5 s per keystroke (overlapping GAS card-action executions queue up; `UrlFetchApp.fetch` can't be cancelled or bounded). CardService renders an uncancellable "Server failed to fetch suggestions" toast that covered the Create button.
+- Removed `directory.readonly`, `contacts.readonly` OAuth scopes and `people.googleapis.com` URL whitelist entry.
+- Replacement design (static `setSuggestions()` roster fed by MRU list + background display-name backfill) tracked in GTaskSheet-6rv6. Deployed to TEST + PROD.
+
+**Sidebar rebranding (GTaskSheet-ht19)**
+- Header title → "Northlake UU Tool Suite"; icon → `northlake-uu-emblem.png` from brand-NUTS.
+- Team display moved from card header subtitle (plain text only, no links) to a `TextParagraph` widget section above the tab bar, which supports HTML `<a href>` anchors.
+- `ContractSchema.sheetTeamData`: added `Team Link` column (col 4).
+- `_readTeamDataRows` / `_walkFolderForTeam`: propagate `teamLink` field.
+- `_syncTeamScope`: stamps `teamLink` Drive appProperty on the doc alongside `teamScope` (single Drive PATCH per sync, same pattern).
+- `_getAllDocAppProperties`: reads both `teamScope` + `teamLink` in one Drive GET call on sidebar load.
+- `appsscript.json` `common.name` + `logoUrl` updated to match. Error fallback card header updated.
+- Tests: GTaskSheet-u0bb (twin test ticket created).
+
+**brand-NUTS images published to GitHub Pages**
+- Updated `northlake-uu-emblem.png` and `northlake-uu-lockup.png` committed; merged to `master` (GitHub Pages serves from master root, no build step). `.pptx` added to `.gitignore` and untracked.
+
+**TeamData fixture data-safety fix**
+- `team_data_slice` fixture was calling `clearContents()` on the live TeamData sheet and replacing it with hardcoded `Board`/`Membership` rows on every test run — silently destroying production team-folder mappings.
+- The `teamDataRows == 3` assertion it backed was asserting a local array's `.length`, not actual sheet state — meaningless.
+- Removed the TeamData clear/write block and the corresponding Python assertion. Fixture's two real invariants (DocData round-trip, `isResolved()` authority) are unaffected.
+
+### Key Learnings
+- CardService `SuggestionsAction` round-trip latency is dominated by GAS per-session execution serialisation: fast typing queues overlapping invocations; each waits for the previous before its own `UrlFetchApp.fetch` even starts. No server-side bounded-return trick can fix this — the only robust solution is `setSuggestions()` (static, zero round-trip).
+- CardService card header `setSubtitle()` is plain text only — HTML anchor tags require a `TextParagraph` widget in a card section.
+- Drive `appProperties` are all returned in a single `?fields=appProperties` GET; no need for separate calls per key.
+
+## 2026-06-16 07:45:00
+
+### Summary
+Implemented two changes to syncAll/ArchiveManager and closed GTaskSheet-cduk (TST issue for DocData integrity pass):
+
+**GTaskSheet-71mm [FIX] — Doc Not Found archive threshold: 30 days → 24 hours**
+- `ArchiveManager.js`: split single `ARCHIVE_THRESHOLD_DAYS = 30` into two constants — `ARCHIVE_THRESHOLD_DAYS = 30` (Closed rows, unchanged) and `DOC_NOT_FOUND_THRESHOLD_HOURS = 24` (Doc Not Found rows); `_isEligible()` applies each per status type
+- `WebApp.js` (`_handleMarkDocNotFound`): stamps `modified_date = now` on each row it marks, resetting the grace-period timer to detection time; without this, the 24h threshold would be measured from the action's last user-edit, not when the doc went missing — making archival nearly immediate for any row >24h old
+
+**GTaskSheet-6ipb [IMP] — syncAll DocData integrity pass**
+- `SyncManager.js` (`syncAll`): post-loop integrity pass reads in-memory `actionData` and `formulasCol7` (already loaded) to compute per-doc `action_count`, `resolved_count`, and `doc_name` (from HYPERLINK title arg); updates DocData rows that differ, logs `sync.integrity.complete {updated: N}`; covers docs skipped by the `lastModified ≤ lastSynced` optimization
+
+**GTaskSheet-cduk [TST] — integrity pass test coverage**
+- `TestFixtures.js`: extended `seed_row` to accept explicit `globalId`; extended `set_docdata_row` to accept `docName`, `actionCount`, `resolvedCount` (all backward-compatible via `hasOwnProperty` pattern)
+- `tests/test_sync_all.py`: updated `sync_ctx` fixture — seeds invalid-doc row with explicit `globalId` (enables `backdate_action_row` to find it); removed stale 35-day `dateModified` seed (overwritten by `_handleMarkDocNotFound` anyway); adds backdate step between Sweep 1 and Sweep 2 to make the row eligible under the new 24h threshold; updates grace-period comment from "30 days" to "24 hours"
+- Added `test_docdata_integrity_pass` (TST-AC1–AC4): corrupts DocData via `set_docdata_row`, seeds orphan DocData row, runs syncAll, asserts counts/docName corrected and orphan unchanged; AC4 checks `sync.integrity.complete` log event when `gas_log_dir` configured
+
+### Key Learnings
+- When changing a threshold that depends on `modified_date`, verify that the timestamp is being set at the right lifecycle point — not just that the threshold constant is correct. The 35-day seed was irrelevant without a corresponding stamp at detection time.
+- `set_docdata_row` fixture design: the `hasOwnProperty` override pattern keeps the fixture safe for partial updates — callers supply only the fields they want to change, preserving the rest from the existing row.
+
+## 2026-06-16 12:30:00
+
+### Summary:
+Simplified sidebar from convoluted tab architecture to 4 flat action buttons (Sync, Import, Notify, Insert Tracker); added Sync and Insert Tracker to the Docs add-on menu bar; cleaned up Sheets test items into a submenu.
+
+### Changes:
+- **WorkspaceAddonCard.js**: Removed `_TABS`, `_resolveTab`, `_buildTabBarSection`, `onShowTab`, `_buildTabbedHomepageCard`, `_buildActionButtonsSection`, `onVerifySync`, `_buildVerificationSection`. Replaced with `_buildTopButtonsSection` (4 buttons always visible), `onShowImport`/`onShowNotify` (navigate via `updateCard`), `_buildImportCard`/`_buildNotifyCard` (sub-cards with Back button), and simplified `buildHomepageCard(opts)` signature.
+- **EditorAddonCard.js**: Updated `_submitImport` success to re-render import card instead of calling removed `_buildTabbedHomepageCard`.
+- **MenuHandler.js**: Sheets menu now has Sync + Setup submenu + Test submenu (test items moved from top-level). Added Docs context `DocumentApp.getUi()` block with Sync and Insert Tracker. Added `menuSyncActiveDoc` and `menuInsertTrackerActiveDoc` handlers.
+- **scn/ui.py**: Updated `_SIDEBAR_SYNC` locator (button text changed from "Sync now" to "Sync"), updated `_SIDEBAR_INSERT_TRACKER` to add "Insert Tracker" form, updated `show_tab` docstring.
+- **tests/test_sidebar.py**: Updated shell controls test (removed VerifySync check, added all 4 button visibility checks, removed conditional tracker text); updated tab nav regression test docstring and Part B (now tests Import→Back→Notify→Back round trip).
+- **scn/contract.py**: Updated comment to remove `onVerifySync`/`onShowTab` from read-only list; added `menuSyncActiveDoc`/`menuInsertTrackerActiveDoc` to registry and deferred list.
+- **GTaskSheet-lmsd**: Created and closed.
+
+### Deployed: v0.2.1 (Rev. Jun 16, 2026 12:25) (TEST)

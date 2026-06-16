@@ -55,9 +55,9 @@ def browser_page():
 # ---------------------------------------------------------------------------
 
 def test_sidebar_bootstrap_sync(settings, browser_page):
-    """Sync Now bootstraps action rows: sidebar goes from (0) to (N) anchored actions.
+    """Sync bootstraps action rows: sidebar goes from (0) to (N) anchored actions.
 
-    Entry point under test: sidebar_sync() — the homepage Sync Now button.
+    Entry point under test: sidebar_sync() — the homepage Sync button.
     Unique behavior: (0)→(N) refresh on first open of a pre-seeded doc.
     Row correctness verified on SHEET (no tracker present post-sync; G1 binding:
     per-row TEXT is NOT UI state — sidebar row text migrates to a non-UI surface).
@@ -198,13 +198,23 @@ def test_sidebar_shell_controls(settings, browser_page):
         s._post_fixture("uc_c_first_insert")
         card = s.ui.open_sidebar(timeout="45s")
 
-        # Present: Sync Now + VerifySync visible
-        card.frame.get_by_role("button", name=re.compile(r"sync now", re.I)).wait_for(
+        # Present: all 4 top-level action buttons visible
+        card.frame.get_by_role("button", name=re.compile(r"^sync$", re.I)).wait_for(
             state="visible", timeout=30000
         )
-        card.frame.get_by_role("button", name=re.compile(r"verifysync", re.I)).wait_for(
+        card.frame.get_by_role("button", name=re.compile(r"^import$", re.I)).wait_for(
             state="visible", timeout=30000
         )
+        card.frame.get_by_role("button", name=re.compile(r"^notify$", re.I)).wait_for(
+            state="visible", timeout=30000
+        )
+        card.frame.get_by_role("button", name=re.compile(r"^insert tracker$", re.I)).wait_for(
+            state="visible", timeout=30000
+        )
+        # Absent: removed controls (VerifySync no longer in sidebar)
+        assert card.frame.get_by_role(
+            "button", name=re.compile(r"verifysync", re.I)
+        ).count() == 0
         # Absent: navigation/other-surface controls
         assert card.frame.get_by_role(
             "button", name=re.compile(r"open sidebar", re.I)
@@ -214,14 +224,7 @@ def test_sidebar_shell_controls(settings, browser_page):
         ).count() == 0
         assert card.frame.get_by_text("Sort", exact=True).count() == 0
         assert card.frame.get_by_text("Filter", exact=True).count() == 0
-        assert card.frame.get_by_text("Tracker", exact=True).count() == 0
-        assert card.frame.get_by_role(
-            "button", name=re.compile(r"^Insert tracker$", re.I)
-        ).count() == 0
-        # Tracker already present notice + version label
-        card.frame.get_by_text(
-            "tracker already present in this document", exact=False
-        ).wait_for(state="visible", timeout=10000)
+        # Version label present
         card.frame.get_by_text(
             re.compile(r"v\d+\.\d+\.\d+"), exact=False
         ).wait_for(state="visible", timeout=10000)
@@ -246,8 +249,8 @@ def test_sidebar_blank_doc_no_error(settings, browser_page):
         # Absence of error text
         assert card.frame.get_by_text("error with the add-on", exact=False).count() == 0
         assert card.frame.get_by_text("run time error", exact=False).count() == 0
-        # Sync Now present (add-on loaded successfully)
-        card.frame.get_by_role("button", name=re.compile(r"sync now", re.I)).wait_for(
+        # Sync button present (add-on loaded successfully)
+        card.frame.get_by_role("button", name=re.compile(r"^sync$", re.I)).wait_for(
             state="visible", timeout=15000
         )
     finally:
@@ -259,15 +262,15 @@ def test_sidebar_blank_doc_no_error(settings, browser_page):
 # ---------------------------------------------------------------------------
 
 def test_tab_navigation_docstatus_regression(settings, browser_page, request):
-    """ADR-0015 tab-navigation shell: DocStatus entry points + nav round trip.
+    """Sidebar navigation regression: homepage entry points + Import/Notify nav round trip.
 
     Part A (cw5 regression): sidebar_sync / sidebar_set_status / sidebar_delete
-    -- the DocStatus mutation entry points -- still work end-to-end through
-    _buildTabbedHomepageCard, with observable state verification on TRACKER/SHEET.
+    -- the homepage mutation entry points -- still work end-to-end through
+    buildHomepageCard, with observable state verification on TRACKER/SHEET.
 
-    Part B (ADR-0015): navigate DocStatus -> Import -> Notify -> DocStatus via
-    the new tab bar (onShowTab). Placeholder bodies render; DocStatus state
-    survives the round trip (raw shell assertions only, G1 -- not ai expectations).
+    Part B: navigate homepage -> Import -> Back -> Notify -> Back via the top
+    action buttons. Sub-cards render; homepage state survives the round trip
+    (raw shell assertions only, G1 -- not ai expectations).
 
     Re-run at the EPIC-D (fnvq) and EPIC-E (s3ga) final-sign-off gates per
     GTaskSheet-gdll AC.
@@ -278,9 +281,9 @@ def test_tab_navigation_docstatus_regression(settings, browser_page, request):
     try:
         s._post_fixture("uc_c_pending_sync_refresh")
 
-        # --- Part A: DocStatus entry points through the new shell ----------
-        card = s.ui.open_sidebar(timeout="45s")  # buildHomepageCard -> docStatus tab (default)
-        s.ui.sidebar_sync(timeout="60s")  # ENTRY POINT: Sync Now (onSyncNow)
+        # --- Part A: homepage entry points -----------------------------------
+        card = s.ui.open_sidebar(timeout="45s")  # buildHomepageCard
+        s.ui.sidebar_sync(timeout="60s")  # ENTRY POINT: Sync button (onSyncNow)
         s.sync()  # durable convergence to ActionSheet (§16.11 #4)
 
         rows = s.find_sheet_actions()
@@ -327,34 +330,35 @@ def test_tab_navigation_docstatus_regression(settings, browser_page, request):
             f"still present: {remaining_ids}"
         )
 
-        # --- Part B: tab navigation round trip (ADR-0015 onShowTab) ---------
-        # The Import tab is no longer a placeholder (EPIC-D / GTaskSheet-eore): it
-        # renders the importable-actions list or the "No open team actions to import."
-        # empty-state, both doc-state-dependent. Assert we navigated AWAY from
-        # DocStatus (its Sync now control is gone) rather than matching volatile
-        # Import-tab content — that is the regression this test guards.
+        # --- Part B: Import/Notify navigation round trip ---------------------
+        # Click Import → import card renders (no homepage Sync button visible).
         s.ui.show_tab("Import")
         card.frame.get_by_role(
-            "button", name=re.compile(r"sync now", re.I)
+            "button", name=re.compile(r"^sync$", re.I)
         ).wait_for(state="detached", timeout=10000)
         assert card.frame.get_by_role(
-            "button", name=re.compile(r"sync now", re.I)
-        ).count() == 0, "DocStatus controls must not render on the Import tab"
+            "button", name=re.compile(r"^sync$", re.I)
+        ).count() == 0, "Homepage Sync button must not render on the Import card"
         assert card.frame.get_by_text("Actions for this document", exact=False).count() == 0
+        # Back → homepage restored.
+        s.ui.show_tab("Back")
+        card.frame.get_by_role("button", name=re.compile(r"^sync$", re.I)).wait_for(
+            state="visible", timeout=10000
+        )
 
+        # Click Notify → notify card renders.
         s.ui.show_tab("Notify")
         card.frame.get_by_text("Notify — coming soon", exact=False).wait_for(
             state="visible", timeout=10000
         )
         assert card.frame.get_by_role(
-            "button", name=re.compile(r"sync now", re.I)
-        ).count() == 0, "DocStatus controls must not render on the Notify tab"
-
-        s.ui.show_tab("Doc status")
-        card.frame.get_by_role("button", name=re.compile(r"sync now", re.I)).wait_for(
+            "button", name=re.compile(r"^sync$", re.I)
+        ).count() == 0, "Homepage Sync button must not render on the Notify card"
+        # Back → homepage; 3 anchored - 1 deleted = 2 floating actions remain.
+        s.ui.show_tab("Back")
+        card.frame.get_by_role("button", name=re.compile(r"^sync$", re.I)).wait_for(
             state="visible", timeout=10000
         )
-        # 3 anchored - 1 deleted = 2 floating actions remain in the doc
         card.frame.get_by_text("Actions for this document (2)", exact=False).wait_for(
             state="visible", timeout=10000
         )

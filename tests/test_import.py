@@ -10,11 +10,11 @@ is not producible today):
   - TeamNotFound-absent (P4)
 
 GTaskSheet-4gsx is one end-to-end functional journey AC-1 (list) -> AC-2 (select +
-import) -> AC-3 (forward), entry-point call-site = the Import tab's
+import) -> AC-3 (forward), entry-point call-site = the Import card's
 'Import selected' button (_submitImport).
 
 All testing is UI-driven (show_tab('Import') + scn/ui.py driver methods), which
-exercises list_importable_actions server-side via _buildImportTabSection ->
+exercises list_importable_actions server-side via _buildImportCard/_buildImportTabSection ->
 _callWebApp.
 """
 import pathlib

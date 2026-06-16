@@ -1,5 +1,5 @@
 """
-test_sync_all.py — GTaskSheet-r3d/grxl/5u2v/nv6g
+test_sync_all.py — GTaskSheet-r3d/grxl/5u2v/nv6g/cduk
 
 One scenario: seed a mixed ActionSheet (invalid-doc, trashed-doc, unmodified-valid,
 modified-valid rows), run syncAll ONCE (Sweep 1), drain per-condition expectations,
@@ -7,13 +7,17 @@ then run syncAll a SECOND time (Sweep 2) to verify Doc Not Found rows are archiv
 
 All four beads map to expectations on the same two sweeps (§6 permutation batching).
 
-Archive eligibility (ArchiveManager): (Status='Closed' OR Sync Status='Doc Not Found')
-AND Date Modified > 30 days old. The invalid-doc row is seeded with a 35-day-old
-dateModified so it is immediately eligible for archiving on Sweep 2. The trashed-doc
-row is created today via sync, so it remains in Actions under the 30-day grace period —
-this is correct behaviour (a recently trashed doc should not be immediately archived).
+Archive eligibility (ArchiveManager):
+  - Status='Closed': Date Modified > 30 days old
+  - sync_status='Doc Not Found': Date Modified > 24 hours old
+    (_handleMarkDocNotFound stamps modified_date at detection time, so the timer
+    starts when the doc is first detected missing — not when the action was last edited)
+
+The invalid-doc row is backdated 2 days after Sweep 1 stamps its modified_date,
+making it immediately eligible for archiving on Sweep 2.  The trashed-doc row is
+stamped now during Sweep 1 and is not backdated, so it remains in Actions under
+the 24-hour grace period.
 """
-import datetime
 import secrets
 import pytest
 
@@ -24,10 +28,6 @@ from tests.helpers.download import download_xlsx
 
 SHEET = Surface.SHEET
 STEP = CheckpointKind.STEP
-
-_35_DAYS_AGO = (
-    datetime.datetime.utcnow() - datetime.timedelta(days=35)
-).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _sheet_rows_for(settings: dict, doc_id: str) -> list:
@@ -77,17 +77,20 @@ def sync_ctx(settings, request):
     trashed_id = scn_trash.doc_id
     scn_trash._post_fixture("trash_doc")   # trashes scn_trash.doc_id (= testDocId for this call)
 
-    # invalid-doc: seed a raw row with an unreachable docId and 35-day-old dateModified
-    # so it is immediately eligible for archiving on Sweep 2 (ArchiveManager threshold = 30 days).
+    # invalid-doc: seed a raw row with an unreachable docId.
+    # modified_date is left as now — _handleMarkDocNotFound will overwrite it anyway.
+    # The globalId is set explicitly so backdate_action_row can address this row
+    # after Sweep 1 stamps it with a fresh modified_date.
     invalid_formula = (
         f'=HYPERLINK("https://docs.google.com/document/d/{invalid_doc_id}/edit","Invalid Doc")'
     )
+    invalid_global_id = f"{invalid_doc_id}/AI-1"
     scn_mod._post_fixture("seed_row", {
+        "globalId": invalid_global_id,
         "actionId": "INVALID-1",
         "actionText": "syncall invalid doc seeded action",
         "status": "Open",
         "documentFormula": invalid_formula,
-        "dateModified": _35_DAYS_AGO,
     })
 
     yield {
@@ -98,6 +101,7 @@ def sync_ctx(settings, request):
         "unmodified_id": scn_unmod.doc_id,
         "trashed_id": trashed_id,
         "invalid_id": invalid_doc_id,
+        "invalid_global_id": invalid_global_id,
     }
 
     # Teardown: end journey sessions (trashes the docs)
@@ -117,6 +121,7 @@ def test_sync_all(sync_ctx):
     unmodified_id = sync_ctx["unmodified_id"]
     trashed_id = sync_ctx["trashed_id"]
     invalid_id = sync_ctx["invalid_id"]
+    invalid_global_id = sync_ctx["invalid_global_id"]
 
     # ── Pre-sweep baseline ───────────────────────────────────────────────────
     # unmodified doc: 1 row in Actions, no sync_status
@@ -239,16 +244,25 @@ def test_sync_all(sync_ctx):
             f"[5u2v] modified-valid doc marked Doc Not Found unexpectedly: {row.sync_status!r}"
         )
 
+    # ── Backdate invalid-doc for Sweep 2 ─────────────────────────────────────
+    # Sweep 1 stamped modified_date = now on the invalid-doc row.  The 24-hour
+    # Doc Not Found threshold means it won't archive until that date is > 24h ago.
+    # Backdate to 2 days ago so Sweep 2 can archive it immediately.
+    scn_mod._post_fixture("backdate_action_row", {
+        "globalId": invalid_global_id,
+        "daysAgo": 2,
+    })
+
     # ── Sweep 2 (nv6g) ───────────────────────────────────────────────────────
     # Second sweep: Doc Not Found rows from Sweep 1 are now in alreadyDocNotFound set
     # → ArchiveManager.archive() moves them from Actions to Archive sheet.
     scn_mod._post_fixture("sync_all")
 
-    # [nv6g] invalid-doc row → archived (dateModified 35 days ago, eligible immediately)
+    # [nv6g] invalid-doc row → archived (backdated 2 days, > 24h threshold)
     invalid_archived = _archive_rows_for(settings, invalid_id)
     assert len(invalid_archived) >= 1, (
         "[nv6g] invalid-doc row not found in Archive after Sweep 2 "
-        "(expected: Doc Not Found + dateModified > 30 days → archived)"
+        "(expected: Doc Not Found + dateModified > 24h → archived)"
     )
     invalid_actions_s2 = _sheet_rows_for(settings, invalid_id)
     assert len(invalid_actions_s2) == 0, (
@@ -256,11 +270,11 @@ def test_sync_all(sync_ctx):
         f"(expected 0, got {len(invalid_actions_s2)})"
     )
 
-    # [nv6g §grace] trashed-doc row → still in Actions (dateModified = today, < 30 days)
-    # The 30-day grace period prevents immediate archiving of a recently trashed doc.
+    # [nv6g §grace] trashed-doc row → still in Actions (modified_date stamped now by Sweep 1,
+    # < 24 hours old; not backdated, so the 24-hour grace period applies).
     trashed_actions_s2 = _sheet_rows_for(settings, trashed_id)
     assert len(trashed_actions_s2) >= 1, (
-        "[nv6g §grace] trashed-doc row should still be in Actions under 30-day grace period"
+        "[nv6g §grace] trashed-doc row should still be in Actions under 24-hour grace period"
     )
     for row in trashed_actions_s2:
         assert getattr(row, "sync_status", None) == "Doc Not Found", (
@@ -279,3 +293,100 @@ def test_sync_all(sync_ctx):
         assert getattr(row, "sync_status", None) != "Doc Not Found", (
             f"[nv6g §7] unmodified-valid doc incorrectly archived or marked: {row.sync_status!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Integrity pass — GTaskSheet-cduk
+# ---------------------------------------------------------------------------
+
+def _docdata(scn, file_id: str | None = None) -> dict | None:
+    """Read the DocData row for scn's doc (or an explicit file_id) as a plain dict."""
+    extra = {"fileId": file_id} if file_id else {}
+    resp = scn._post_fixture("get_docdata_row", extra)
+    return (resp.get("data") or {}).get("row")
+
+
+def test_docdata_integrity_pass(settings, gas_log_dir, request):
+    """GTaskSheet-cduk: syncAll() integrity pass reconciles stale DocData.
+
+    TST-AC1: stale action_count / resolved_count corrected for a doc skipped by main loop.
+    TST-AC2: stale doc_name corrected from the HYPERLINK formula title.
+    TST-AC3: DocData rows with no corresponding Actions rows are not modified.
+    TST-AC4: sync.integrity.complete log event emitted with updated count.
+    """
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        # Setup: 2 open actions → sync → DocData has actionCount=2, resolvedCount=0
+        scn.append_paragraph("AI-1: cduk integrity pass action one")
+        scn.append_paragraph("AI-2: cduk integrity pass action two")
+        scn.sync()
+
+        initial = _docdata(scn)
+        assert initial is not None, "[cduk] DocData row not created by initial sync"
+        assert initial.get("actionCount") == 2, (
+            f"[cduk] initial actionCount: expected 2, got {initial.get('actionCount')!r}"
+        )
+        initial_name = initial.get("docName") or ""
+
+        # Corrupt DocData: wrong counts + wrong doc_name
+        scn._post_fixture("set_docdata_row", {
+            "actionCount": 99, "resolvedCount": 7, "docName": "Stale Name cduk",
+        })
+        stale = _docdata(scn)
+        assert stale is not None and stale.get("actionCount") == 99, (
+            "[cduk] set_docdata_row did not write stale actionCount=99"
+        )
+
+        # AC3: seed an orphan DocData row (fake fileId, no Actions rows)
+        orphan_id = secrets.token_urlsafe(33)[:44]
+        scn._post_fixture("set_docdata_row", {
+            "fileId": orphan_id, "actionCount": 55, "resolvedCount": 3, "docName": "Orphan",
+        })
+
+        # Run syncAll — real doc is unmodified since its last sync so it should be
+        # skipped by the main loop; the integrity pass then corrects DocData for it.
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs
+            fence = clear_logs(gas_log_dir)
+        else:
+            fence = 0.0
+
+        scn._post_fixture("sync_all")
+
+        # AC1: counts corrected
+        after = _docdata(scn)
+        assert after is not None, "[cduk AC1] DocData row missing after syncAll"
+        assert after.get("actionCount") == 2, (
+            f"[cduk AC1] actionCount: expected 2, got {after.get('actionCount')!r}"
+        )
+        assert after.get("resolvedCount") == 0, (
+            f"[cduk AC1] resolvedCount: expected 0, got {after.get('resolvedCount')!r}"
+        )
+
+        # AC2: doc_name corrected from HYPERLINK formula title
+        assert after.get("docName") != "Stale Name cduk", (
+            "[cduk AC2] docName still shows stale value after integrity pass"
+        )
+        if initial_name:
+            assert after.get("docName") == initial_name, (
+                f"[cduk AC2] docName: expected {initial_name!r}, got {after.get('docName')!r}"
+            )
+
+        # AC3: orphan DocData row untouched (no Actions rows → not in perDocCounts)
+        orphan_after = _docdata(scn, file_id=orphan_id)
+        assert orphan_after is not None, "[cduk AC3] orphan DocData row was deleted"
+        assert orphan_after.get("actionCount") == 55, (
+            f"[cduk AC3] orphan actionCount modified: expected 55, got {orphan_after.get('actionCount')!r}"
+        )
+
+        # AC4: log event emitted (no-op when gas_log_dir not configured)
+        if gas_log_dir:
+            from tests.helpers.gas_log import wait_for_log
+            wait_for_log(
+                gas_log_dir,
+                lambda e: e.get("tag") == "sync.integrity.complete",
+                timeout_s=60,
+                after=fence,
+            )
+    finally:
+        scn.close()
