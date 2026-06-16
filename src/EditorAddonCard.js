@@ -673,18 +673,9 @@ function _buildMessageCard(title, message) {
  * @returns {number}
  */
 function _getNextActionN(doc) {
-  var body = doc.getBody();
-  var n    = body.getNumChildren();
-  var maxN = 0;
-  for (var i = 0; i < n; i++) {
-    var child = body.getChild(i);
-    var type  = child.getType();
-    if (type !== DocumentApp.ElementType.PARAGRAPH &&
-        type !== DocumentApp.ElementType.LIST_ITEM) continue;
-    var text = child.getText().replace(/\n$/, '');
-    var m = text.match(/^AI-(\d+):/);
-    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
-  }
+  var found = _collectTokenParagraphs(doc.getBody());
+  var maxN  = 0;
+  for (var i = 0; i < found.numbered.length; i++) maxN = Math.max(maxN, found.numbered[i]);
   return maxN + 1;
 }
 
@@ -1024,37 +1015,53 @@ function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
  * @param {number} offset     character offset within that paragraph
  * @returns {number|null}
  */
+/**
+ * Matches a REST paragraph against paraText and returns the REST character
+ * index at `offset`, or null if the paragraph text doesn't match.
+ */
+function _matchParaIndex(para, paraText, offset) {
+  var runs      = para.elements || [];
+  var builtText = '';
+  for (var j = 0; j < runs.length; j++) {
+    var tr = runs[j].textRun;
+    if (tr && tr.content) builtText += tr.content;
+  }
+  builtText = builtText.replace(/\n$/, '');
+  if (builtText !== paraText) return null;
+
+  var runPos = 0;
+  for (var k = 0; k < runs.length; k++) {
+    var tr2 = runs[k].textRun;
+    if (!tr2 || !tr2.content) continue;
+    var runLen = tr2.content.replace(/\n$/, '').length;
+    if (offset <= runPos + runLen) return runs[k].startIndex + (offset - runPos);
+    runPos += runLen;
+  }
+  if (runs.length > 0) return runs[runs.length - 1].endIndex - 1;
+  return null;
+}
+
+/**
+ * Searches a REST body.content array (including table cells) for the paragraph
+ * matching paraText and returns the REST character index at `offset`.
+ * Returns null if not found.
+ */
 function _findCursorIndex(content, paraText, offset) {
   for (var i = 0; i < content.length; i++) {
-    var para = content[i].paragraph;
-    if (!para) continue;
-
-    // Reconstruct paragraph plain text from text runs (strip trailing \n)
-    var runs = para.elements || [];
-    var builtText = '';
-    for (var j = 0; j < runs.length; j++) {
-      var tr = runs[j].textRun;
-      if (tr && tr.content) builtText += tr.content;
+    var elem = content[i];
+    if (elem.paragraph) {
+      var idx = _matchParaIndex(elem.paragraph, paraText, offset);
+      if (idx !== null) return idx;
     }
-    builtText = builtText.replace(/\n$/, '');
-
-    if (builtText !== paraText) continue;
-
-    // Found the paragraph — locate the character at `offset` across its runs
-    var runPos = 0;
-    for (var k = 0; k < runs.length; k++) {
-      var tr = runs[k].textRun;
-      if (!tr || !tr.content) continue;
-      var runLen = tr.content.replace(/\n$/, '').length;
-      if (offset <= runPos + runLen) {
-        return runs[k].startIndex + (offset - runPos);
+    if (elem.table) {
+      var tableRows = elem.table.tableRows || [];
+      for (var r = 0; r < tableRows.length; r++) {
+        var cells = tableRows[r].tableCells || [];
+        for (var c = 0; c < cells.length; c++) {
+          var idx2 = _findCursorIndex(cells[c].content || [], paraText, offset);
+          if (idx2 !== null) return idx2;
+        }
       }
-      runPos += runLen;
-    }
-    // Offset past all runs — return end of paragraph (before \n)
-    if (runs.length > 0) {
-      var last = runs[runs.length - 1];
-      return last.endIndex - 1;
     }
   }
   return null;

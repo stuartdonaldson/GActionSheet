@@ -433,21 +433,23 @@ function _buildHomepageHeader(teamInfo) {
     .setImageUrl(_ICON_BASE + 'northlake-uu-emblem.png')
     .setImageAltText('Northlake UU emblem');
 
-  if (teamInfo && teamInfo.team) header.setSubtitle(teamInfo.team);
+  // Subtitle only when there is no link (subtitle cannot be a hyperlink).
+  // When a link is present the team appears exclusively in the section widget.
+  if (teamInfo && teamInfo.team && !teamInfo.link) header.setSubtitle(teamInfo.team);
 
   return header;
 }
 
 /**
- * Returns a section with a clickable team link above the tab bar, or null.
- * Only rendered when a team link URL is present — the team name is already
- * shown as the header subtitle.
+ * Returns a linked team section widget above the tab bar, or null.
+ * Only rendered when a team link URL is present — subtitle is used instead
+ * when there is no link, so the team name never appears in two places.
  *
  * @param {{team: string, link: string}} teamInfo
  */
 function _buildTeamSection(teamInfo) {
   if (!teamInfo || !teamInfo.team || !teamInfo.link) return null;
-  var label = 'Team: <a href="' + teamInfo.link + '">' + teamInfo.team + '</a>';
+  var label = '<a href="' + teamInfo.link + '">' + teamInfo.team + '</a>';
   return CardService.newCardSection()
     .addWidget(CardService.newTextParagraph().setText(label));
 }
