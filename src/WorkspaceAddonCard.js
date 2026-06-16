@@ -46,10 +46,11 @@ function _buildTabbedHomepageCard(activeTab, eventOrVerificationResult, opts) {
 
     // [PROBE]
     PROBE_log('sidebar.' + PROBE_docState(doc), { docId: doc ? doc.getId() : '' });
+    var teamInfo = _safeGetDocTeamInfo(doc);
     var card = CardService.newCardBuilder()
-      .setHeader(_buildHomepageHeader(doc));
+      .setHeader(_buildHomepageHeader(doc, teamInfo));
 
-    var teamSection = _buildTeamSection(doc);
+    var teamSection = _buildTeamSection(teamInfo);
     if (teamSection) card.addSection(teamSection);
 
     card.addSection(_buildTabBarSection(tab.id));
@@ -425,40 +426,47 @@ function _buildVerificationSection(verificationResult) {
   return section;
 }
 
-function _buildHomepageHeader(doc) {
+/**
+ * @param {GoogleAppsScript.Document.Document|null} doc
+ * @param {{team: string, link: string}} teamInfo  pre-fetched team info
+ */
+function _buildHomepageHeader(doc, teamInfo) {
   var header = CardService.newCardHeader()
     .setTitle('Northlake UU Tool Suite')
     .setImageUrl(_ICON_BASE + 'northlake-uu-emblem.png')
     .setImageAltText('Northlake UU emblem');
 
   if (doc) {
-    var docTitle = _safeGetDocTitle(doc);
-    if (docTitle) header.setSubtitle(docTitle);
+    var subtitle = (teamInfo && teamInfo.team) || _safeGetDocTitle(doc);
+    if (subtitle) header.setSubtitle(subtitle);
   }
 
   return header;
 }
 
 /**
- * Returns a single-widget section showing "Team: <name>" above the tab bar,
- * or null if no team is set. If the team has a link it renders as an HTML
- * anchor; TextParagraph in Workspace add-ons supports basic anchor tags.
+ * Returns a section with a clickable team link above the tab bar, or null.
+ * Only rendered when a team link URL is present — the team name is already
+ * shown as the header subtitle.
+ *
+ * @param {{team: string, link: string}} teamInfo
  */
-function _buildTeamSection(doc) {
-  if (!doc) return null;
+function _buildTeamSection(teamInfo) {
+  if (!teamInfo || !teamInfo.team || !teamInfo.link) return null;
+  var label = 'Team: <a href="' + teamInfo.link + '">' + teamInfo.team + '</a>';
+  return CardService.newCardSection()
+    .addWidget(CardService.newTextParagraph().setText(label));
+}
+
+/** Fetches teamScope and teamLink appProperties in one Drive API call. */
+function _safeGetDocTeamInfo(doc) {
+  if (!doc) return { team: '', link: '' };
   try {
     var token = ScriptApp.getOAuthToken();
     var props = _getAllDocAppProperties(doc.getId(), token);
-    var team  = props.teamScope || '';
-    var link  = props.teamLink  || '';
-    if (!team) return null;
-    var label = link
-      ? 'Team: <a href="' + link + '">' + team + '</a>'
-      : 'Team: ' + team;
-    return CardService.newCardSection()
-      .addWidget(CardService.newTextParagraph().setText(label));
+    return { team: props.teamScope || '', link: props.teamLink || '' };
   } catch (e) {
-    return null;
+    return { team: '', link: '' };
   }
 }
 
@@ -745,11 +753,34 @@ function _findParaByGlobalId(doc, globalId) {
   if (isNaN(parsed.N)) return null;
   var tokenPrefix = parsed.actionId + ':';
   var body = doc.getBody();
+  var trackerHeadingSeen = false;
+  var trackerTableSkipped = false;
   for (var i = 0; i < body.getNumChildren(); i++) {
     var child = body.getChild(i);
     var t = child.getType();
-    if (t !== DocumentApp.ElementType.PARAGRAPH && t !== DocumentApp.ElementType.LIST_ITEM) continue;
-    if (child.getText().replace(/\n$/, '').indexOf(tokenPrefix) === 0) return child;
+    if (t === DocumentApp.ElementType.PARAGRAPH || t === DocumentApp.ElementType.LIST_ITEM) {
+      var txt = child.getText().trim();
+      if (!trackerHeadingSeen && (txt === _TRACKER_HEADING || txt === _TRACKER_HEADING_OLD)) {
+        trackerHeadingSeen = true;
+      }
+      if (child.getText().replace(/\n$/, '').indexOf(tokenPrefix) === 0) return child;
+    } else if (t === DocumentApp.ElementType.TABLE) {
+      if (trackerHeadingSeen && !trackerTableSkipped) { trackerTableSkipped = true; continue; }
+      var table = child.asTable();
+      for (var r = 0; r < table.getNumRows(); r++) {
+        var row = table.getRow(r);
+        for (var c = 0; c < row.getNumCells(); c++) {
+          var cell = row.getCell(c);
+          for (var p = 0; p < cell.getNumChildren(); p++) {
+            var cp = cell.getChild(p);
+            if (cp.getType() === DocumentApp.ElementType.PARAGRAPH &&
+                cp.asParagraph().getText().replace(/\n$/, '').indexOf(tokenPrefix) === 0) {
+              return cp.asParagraph();
+            }
+          }
+        }
+      }
+    }
   }
   return null;
 }

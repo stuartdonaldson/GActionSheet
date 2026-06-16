@@ -1,6 +1,6 @@
 var BUILD_INFO = {
-  version: "v0.2.1 (Rev. Jun 16, 2026 08:58) (TEST)",
-  buildDate: "2026-06-16T15:58:14.272Z",
+  version: "v0.2.1 (Rev. Jun 16, 2026 09:17) (TEST)",
+  buildDate: "2026-06-16T16:17:59.418Z",
   webappUrl: "https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec"
 };
 

@@ -482,93 +482,142 @@ function _syncSheetRowToDoc(sheet, row) {
  * @param {GoogleAppsScript.Document.Document} doc
  * @returns {Array<{bodyChildIndex, paragraph, globalId, N, assigneeEmail, assigneeName, actionText, status, hasExplicitStatus}>}
  */
+/**
+ * Parses a single paragraph/list-item for an AI-N: floating action token.
+ * Returns a populated action object or null if the paragraph is not an action.
+ *
+ * @param {GoogleAppsScript.Document.Paragraph|GoogleAppsScript.Document.ListItem} para
+ * @param {number} bodyIdx  body-child index of this paragraph (or its containing table)
+ * @param {string} docId
+ * @param {Object} seenN   mutable duplicate-tracking map
+ */
+function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
+  var fullText   = para.getText().replace(/\n$/, '');
+  var tokenMatch = fullText.match(/^AI-(\d+):\s*/);
+  if (!tokenMatch) return null;
+
+  var N          = parseInt(tokenMatch[1], 10);
+  var globalId   = docId + '/AI-' + N;
+  var afterToken = fullText.slice(tokenMatch[0].length);
+
+  // Walk children: skip leading INLINE_IMAGE, find the AI-N: TEXT, then look
+  // for an optional assignee chip or email-text after it.
+  var numChildren         = para.getNumChildren();
+  var assigneeEmail       = '';
+  var assigneeName        = '';
+  var assigneeSearchStart = 0;
+  for (var ci = 0; ci < numChildren; ci++) {
+    var ch = para.getChild(ci);
+    if (ch.getType() === DocumentApp.ElementType.INLINE_IMAGE) continue;
+    if (ch.getType() === DocumentApp.ElementType.TEXT) { assigneeSearchStart = ci + 1; break; }
+  }
+  for (var ai = assigneeSearchStart; ai < numChildren; ai++) {
+    var ac = para.getChild(ai);
+    if (ac.getType() === DocumentApp.ElementType.PERSON) {
+      assigneeEmail = ac.asPerson().getEmail() || '';
+      assigneeName  = ac.asPerson().getName()  || '';
+      break;
+    }
+    if (ac.getType() === DocumentApp.ElementType.TEXT) {
+      var t  = ac.asText().getText();
+      var em = t.match(/^[\s]*([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
+      if (em) { assigneeEmail = em[1]; assigneeName = _nameFromEmail(assigneeEmail); }
+      break;
+    }
+  }
+
+  var actionText    = afterToken;
+  var assigneeStrip = afterToken.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
+  if (assigneeStrip) {
+    actionText = afterToken.slice(assigneeStrip[0].length);
+    if (!assigneeEmail) {
+      assigneeEmail = assigneeStrip[1];
+      assigneeName  = _nameFromEmail(assigneeEmail);
+    }
+  }
+
+  var status            = 'Open';
+  var statusMatch       = actionText.match(/\(([^)]*)\)\s*$/);
+  var hasExplicitStatus = !!statusMatch;
+  if (statusMatch) {
+    status     = statusMatch[1].trim() || 'Open';
+    actionText = actionText.slice(0, actionText.length - statusMatch[0].length).trim();
+  }
+
+  var action = {
+    bodyChildIndex:    bodyIdx,
+    paragraph:         para,
+    globalId:          globalId,
+    N:                 N,
+    assigneeEmail:     assigneeEmail,
+    assigneeName:      assigneeName,
+    actionText:        actionText,
+    status:            status,
+    hasExplicitStatus: hasExplicitStatus,
+    isDuplicate:       seenN[N] === true
+  };
+  seenN[N] = true;
+  return action;
+}
+
+/**
+ * Scans all paragraphs in a table's cells for AI-N: tokens, appending any
+ * found to `actions`.  Only call this for non-tracker tables.
+ */
+function _collectTableCellActions(table, tableBodyIdx, docId, actions, seenN) {
+  for (var r = 0; r < table.getNumRows(); r++) {
+    var row = table.getRow(r);
+    for (var c = 0; c < row.getNumCells(); c++) {
+      var cell = row.getCell(c);
+      for (var p = 0; p < cell.getNumChildren(); p++) {
+        var cp = cell.getChild(p);
+        if (cp.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
+        var action = _parseParagraphAsFloatingAction(cp.asParagraph(), tableBodyIdx, docId, seenN);
+        if (action) actions.push(action);
+      }
+    }
+  }
+}
+
+/**
+ * @returns {Array<{bodyChildIndex, paragraph, globalId, N, assigneeEmail, assigneeName, actionText, status, hasExplicitStatus, isDuplicate}>}
+ */
 function _scanFloatingActions(doc) {
   var body    = doc.getBody();
   var docId   = doc.getId();
   var n       = body.getNumChildren();
   var actions = [];
   var seenN   = {};
+  var trackerHeadingSeen  = false;
+  var trackerTableSkipped = false;
 
   for (var i = 0; i < n; i++) {
-    var child      = body.getChild(i);
-    var childType  = child.getType();
+    var child     = body.getChild(i);
+    var childType = child.getType();
+
+    if (childType === DocumentApp.ElementType.TABLE) {
+      // Skip the tracker table (first TABLE after the tracker heading).
+      if (trackerHeadingSeen && !trackerTableSkipped) { trackerTableSkipped = true; continue; }
+      _collectTableCellActions(child.asTable(), i, docId, actions, seenN);
+      continue;
+    }
+
     var isPara     = childType === DocumentApp.ElementType.PARAGRAPH;
     var isListItem = childType === DocumentApp.ElementType.LIST_ITEM;
     if (!isPara && !isListItem) continue;
 
-    var para = isPara ? child.asParagraph() : child.asListItem();
-    // getText() strips inline images; AI-N: token must be at start of text content
-    var fullText   = para.getText().replace(/\n$/, '');
-    var tokenMatch = fullText.match(/^AI-(\d+):\s*/);
-    if (!tokenMatch) continue;
-
-    var N        = parseInt(tokenMatch[1], 10);
-    var globalId = docId + '/AI-' + N;
-    var afterToken = fullText.slice(tokenMatch[0].length);
-
-    // Walk children: skip leading INLINE_IMAGE, then find the AI-N: TEXT element,
-    // then look for an optional assignee chip or email-text after it.
-    var numChildren        = para.getNumChildren();
-    var assigneeEmail      = '';
-    var assigneeName       = '';
-    var assigneeSearchStart = 0;
-    for (var ci = 0; ci < numChildren; ci++) {
-      var ch = para.getChild(ci);
-      if (ch.getType() === DocumentApp.ElementType.INLINE_IMAGE) continue;
-      if (ch.getType() === DocumentApp.ElementType.TEXT) {
-        assigneeSearchStart = ci + 1;
-        break;
-      }
-    }
-    for (var ai = assigneeSearchStart; ai < numChildren; ai++) {
-      var ac = para.getChild(ai);
-      if (ac.getType() === DocumentApp.ElementType.PERSON) {
-        assigneeEmail = ac.asPerson().getEmail() || '';
-        assigneeName  = ac.asPerson().getName()  || '';
-        break;
-      }
-      if (ac.getType() === DocumentApp.ElementType.TEXT) {
-        var t  = ac.asText().getText();
-        var em = t.match(/^[\s]*([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
-        if (em) { assigneeEmail = em[1]; assigneeName = _nameFromEmail(assigneeEmail); }
-        break;
+    // Track the tracker heading so we know which TABLE to skip.
+    if (!trackerHeadingSeen) {
+      var txt = child.getText().trim();
+      if (txt === _TRACKER_HEADING || txt === _TRACKER_HEADING_OLD) {
+        trackerHeadingSeen = true;
+        continue;
       }
     }
 
-    // Strip leading assignee email from afterToken if present; also covers the plain-text
-    // case where the email shares child 0 with the AI-N: token (append_doc_paragraph path).
-    var actionText = afterToken;
-    var assigneeStrip = afterToken.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
-    if (assigneeStrip) {
-      actionText = afterToken.slice(assigneeStrip[0].length);
-      if (!assigneeEmail) {
-        assigneeEmail = assigneeStrip[1];
-        assigneeName  = _nameFromEmail(assigneeEmail);
-      }
-    }
-
-    // Parse trailing (status) token
-    var status     = 'Open';
-    var statusMatch = actionText.match(/\(([^)]*)\)\s*$/);
-    var hasExplicitStatus = !!statusMatch;
-    if (statusMatch) {
-      status     = statusMatch[1].trim() || 'Open';
-      actionText = actionText.slice(0, actionText.length - statusMatch[0].length).trim();
-    }
-
-    actions.push({
-      bodyChildIndex:    i,
-      paragraph:         para,
-      globalId:          globalId,
-      N:                 N,
-      assigneeEmail:     assigneeEmail,
-      assigneeName:      assigneeName,
-      actionText:        actionText,
-      status:            status,
-      hasExplicitStatus: hasExplicitStatus,
-      isDuplicate:       seenN[N] === true
-    });
-    seenN[N] = true;
+    var para   = isPara ? child.asParagraph() : child.asListItem();
+    var action = _parseParagraphAsFloatingAction(para, i, docId, seenN);
+    if (action) actions.push(action);
   }
   return actions;
 }
@@ -582,34 +631,72 @@ function _scanFloatingActions(doc) {
  * @param {GoogleAppsScript.Document.Document} doc
  * @returns {{ count: number, newGlobalIds: string[] }}
  */
-function _assignPlaceholderTokens(doc) {
-  var docId = doc.getId();
-  var body  = doc.getBody();
-  var n     = body.getNumChildren();
+/**
+ * Collects all paragraph elements (including those in table cells, excluding
+ * the tracker table) that have AI-N: or AI: tokens, for use in
+ * _assignPlaceholderTokens.
+ *
+ * @returns {{ numbered: number[], placeholders: GoogleAppsScript.Document.Paragraph[] }}
+ */
+function _collectTokenParagraphs(body) {
+  var n = body.getNumChildren();
+  var numbered     = [];
+  var placeholders = [];
+  var trackerHeadingSeen  = false;
+  var trackerTableSkipped = false;
 
-  // First pass: find current max N
-  var maxN = 0;
-  for (var i = 0; i < n; i++) {
-    var child = body.getChild(i);
-    var t = child.getType();
-    if (t !== DocumentApp.ElementType.PARAGRAPH && t !== DocumentApp.ElementType.LIST_ITEM) continue;
-    var m = child.getText().replace(/\n$/, '').match(/^AI-(\d+):/);
-    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  function scanPara(para) {
+    var text = para.getText().replace(/\n$/, '');
+    var m = text.match(/^AI-(\d+):/);
+    if (m) { numbered.push(parseInt(m[1], 10)); return; }
+    if (/^AI:/.test(text)) placeholders.push(para);
   }
 
-  // Second pass: assign next N to each bare "AI:" placeholder
+  for (var i = 0; i < n; i++) {
+    var child = body.getChild(i);
+    var ct    = child.getType();
+
+    if (ct === DocumentApp.ElementType.TABLE) {
+      if (trackerHeadingSeen && !trackerTableSkipped) { trackerTableSkipped = true; continue; }
+      var table = child.asTable();
+      for (var r = 0; r < table.getNumRows(); r++) {
+        var row = table.getRow(r);
+        for (var c = 0; c < row.getNumCells(); c++) {
+          var cell = row.getCell(c);
+          for (var p = 0; p < cell.getNumChildren(); p++) {
+            var cp = cell.getChild(p);
+            if (cp.getType() === DocumentApp.ElementType.PARAGRAPH) scanPara(cp.asParagraph());
+          }
+        }
+      }
+      continue;
+    }
+
+    if (ct !== DocumentApp.ElementType.PARAGRAPH && ct !== DocumentApp.ElementType.LIST_ITEM) continue;
+    if (!trackerHeadingSeen) {
+      var txt = child.getText().trim();
+      if (txt === _TRACKER_HEADING || txt === _TRACKER_HEADING_OLD) { trackerHeadingSeen = true; continue; }
+    }
+    scanPara(ct === DocumentApp.ElementType.PARAGRAPH ? child.asParagraph() : child.asListItem());
+  }
+
+  return { numbered: numbered, placeholders: placeholders };
+}
+
+function _assignPlaceholderTokens(doc) {
+  var docId   = doc.getId();
+  var body    = doc.getBody();
+  var found   = _collectTokenParagraphs(body);
+
+  var maxN = 0;
+  for (var i = 0; i < found.numbered.length; i++) maxN = Math.max(maxN, found.numbered[i]);
+
   var assigned     = 0;
   var newGlobalIds = [];
-  for (var j = 0; j < n; j++) {
-    var child2 = body.getChild(j);
-    var t2 = child2.getType();
-    if (t2 !== DocumentApp.ElementType.PARAGRAPH && t2 !== DocumentApp.ElementType.LIST_ITEM) continue;
-    var text = child2.getText().replace(/\n$/, '');
-    if (!/^AI:/.test(text)) continue;
-
+  for (var j = 0; j < found.placeholders.length; j++) {
     maxN++;
     // Insert '-N' at position 2 (between 'AI' and ':') → 'AI:' becomes 'AI-N:'
-    child2.editAsText().insertText(2, '-' + maxN);
+    found.placeholders[j].editAsText().insertText(2, '-' + maxN);
     newGlobalIds.push(docId + '/AI-' + maxN);
     assigned++;
   }
