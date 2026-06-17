@@ -258,6 +258,54 @@ def test_sidebar_blank_doc_no_error(settings, browser_page):
 
 
 # ---------------------------------------------------------------------------
+# test_sidebar_team_header — GTaskSheet-u0bb
+# ---------------------------------------------------------------------------
+
+def test_sidebar_team_header(settings, browser_page):
+    """Team section above the tab bar: team set (anchor link) vs team absent.
+
+    Entry point under test: buildHomepageCard -> _buildTeamSection /
+    _safeGetDocTeamInfo (WorkspaceAddonCard.js). Raw shell assertions only
+    (G1 binding) — the team widget is UI-only render state, not a durable ai
+    expectation.
+
+    _safeGetDocTeamInfo always populates a link once DocData.team_id is set
+    (TeamData's own Team Link when present, otherwise the branded team-view
+    URL) — so "team renders as plain text, no anchor" is not a reachable
+    state; this test covers the two states the implementation actually
+    produces. A custom TeamData 'Team Link' (col 4) value has no fixture to
+    set programmatically yet, so the anchor case below exercises the
+    branded-fallback URL rather than a custom link.
+    """
+    s_no_team = ScenarioSession.new_doc(settings)
+    s_no_team.ui = UiDriver(browser_page, doc_id=s_no_team.doc_id)
+    try:
+        card = s_no_team.ui.open_sidebar(timeout="45s")
+        card.frame.get_by_text("Team: (none)", exact=False).wait_for(
+            state="visible", timeout=15000
+        )
+        assert card.frame.get_by_role("link", name="(none)").count() == 0
+    finally:
+        s_no_team.close()
+
+    s_team = ScenarioSession.new_doc(settings)
+    s_team.ui = UiDriver(browser_page, doc_id=s_team.doc_id)
+    try:
+        s_team.sync()  # creates the DocData row
+        s_team._post_fixture("set_docdata_row", {"teamId": "TestTeamA"})
+
+        card = s_team.ui.open_sidebar(timeout="45s")
+        link = card.frame.get_by_role("link", name="TestTeamA")
+        link.wait_for(state="visible", timeout=15000)
+        # CardService TextParagraph anchors are sanitized/redirect-wrapped by
+        # Google's card renderer, so assert by substring rather than exact URL.
+        href = link.get_attribute("href") or ""
+        assert "TestTeamA" in href, f"Expected teamview link for TestTeamA, got {href!r}"
+    finally:
+        s_team.close()
+
+
+# ---------------------------------------------------------------------------
 # test_tab_navigation_docstatus_regression — GTaskSheet-gdll (ADR-0015 slice smoke)
 # ---------------------------------------------------------------------------
 
