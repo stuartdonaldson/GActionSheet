@@ -9,6 +9,9 @@
 
 // Icon constants are defined in Constants.js (generated — see assets/brand-NUUTS/deploy-brand.sh)
 
+/** Published end-user guide (docs/USER_GUIDE.md, rendered via GitHub Pages). */
+var _USER_GUIDE_URL = 'https://stuartdonaldson.github.io/GActionSheet/docs/USER_GUIDE.html';
+
 /**
  * @param {object=} opts
  * @param {boolean=} opts.skipSheetFetch  When true, omit the verify_action_rows HTTP call.
@@ -43,9 +46,13 @@ function buildHomepageCard(opts) {
     }
 
     card.addSection(
-      CardService.newCardSection().addWidget(
-        CardService.newTextParagraph().setText(BUILD_INFO.version)
-      )
+      CardService.newCardSection()
+        .addWidget(
+          CardService.newTextButton()
+            .setText('User Guide')
+            .setOpenLink(CardService.newOpenLink().setUrl(_USER_GUIDE_URL))
+        )
+        .addWidget(CardService.newTextParagraph().setText(BUILD_INFO.version))
     );
 
     return card.build();
