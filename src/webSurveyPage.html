@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Northlake Topic and Ideas Survey</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 480px;
+      margin: 24px auto;
+      padding: 0 16px;
+      color: #202124;
+    }
+    h1 { font-size: 1.2rem; margin-bottom: 4px; }
+    p.sub { color: #5f6368; margin-top: 0; }
+    label { display: block; font-weight: bold; margin-bottom: 6px; }
+    input[type="text"], textarea {
+      width: 100%;
+      font-size: 1rem;
+      padding: 10px;
+      box-sizing: border-box;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-family: inherit;
+    }
+    textarea { margin-top: 16px; resize: vertical; }
+    button {
+      font-size: 1rem;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      background: #1a73e8;
+      color: white;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    button:disabled { background: #c7c7c7; cursor: default; }
+    button.secondary { background: #f1f3f4; color: #202124; margin-left: 8px; }
+    #step-name, #step-rank, #step-done { display: none; }
+    .visible { display: block !important; }
+    #addRow { display: flex; gap: 8px; margin-top: 16px; }
+    #addRow input { flex: 1; }
+    #addRow button { margin-top: 0; }
+    ul#topicList {
+      list-style: none;
+      padding: 0;
+      margin: 16px 0;
+      touch-action: none;
+    }
+    ul#topicList li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #f8f9fa;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 8px;
+      user-select: none;
+    }
+    ul#topicList li.dragging {
+      position: relative;
+      z-index: 10;
+      background: #e8f0fe;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    }
+    .handle {
+      cursor: grab;
+      font-size: 1.1rem;
+      color: #5f6368;
+      touch-action: none;
+      padding: 4px;
+    }
+    .topic-text { flex: 1; }
+    #status { color: #5f6368; min-height: 1.2em; margin-top: 8px; }
+    #status.error { color: #d93025; }
+  </style>
+</head>
+<body>
+  <h1>Northlake Topic and Ideas Survey</h1>
+
+  <div id="step-name" class="visible">
+    <p class="sub">Enter your name to start or resume ranking.</p>
+    <label for="nameInput">Your name</label>
+    <input type="text" id="nameInput" autocomplete="name">
+    <button id="startBtn">Continue</button>
+    <div id="status"></div>
+  </div>
+
+  <div id="step-rank">
+    <p class="sub">Drag items to order them, most preferred on top.</p>
+    <ul id="topicList"></ul>
+
+    <div id="addRow">
+      <input type="text" id="newItemInput" placeholder="Add a new topic">
+      <button id="addBtn">Add</button>
+    </div>
+
+    <label for="commentInput">Comments (optional)</label>
+    <textarea id="commentInput" rows="4" placeholder="Anything else you'd like to add?"></textarea>
+
+    <button id="submitBtn">Submit</button>
+    <button id="backBtn" class="secondary">Back</button>
+    <div id="status2"></div>
+  </div>
+
+  <div id="step-done">
+    <p>Thanks, <span id="doneName"></span>! Your ranking has been saved.</p>
+    <button id="editAgainBtn" class="secondary">Re-rank</button>
+  </div>
+
+  <script>
+    var currentName = '';
+    var _SURVEY_NAME_STORAGE_KEY = 'northlakeSurveyName';
+
+    function loadSavedName() {
+      try { return localStorage.getItem(_SURVEY_NAME_STORAGE_KEY) || ''; } catch (err) { return ''; }
+    }
+
+    function saveName(name) {
+      try { localStorage.setItem(_SURVEY_NAME_STORAGE_KEY, name); } catch (err) {}
+    }
+
+    var stepName = document.getElementById('step-name');
+    var stepRank = document.getElementById('step-rank');
+    var stepDone = document.getElementById('step-done');
+    var nameInput = document.getElementById('nameInput');
+    var startBtn = document.getElementById('startBtn');
+    var status = document.getElementById('status');
+    var status2 = document.getElementById('status2');
+    var topicList = document.getElementById('topicList');
+    var newItemInput = document.getElementById('newItemInput');
+    var commentInput = document.getElementById('commentInput');
+    var addBtn = document.getElementById('addBtn');
+    var submitBtn = document.getElementById('submitBtn');
+    var backBtn = document.getElementById('backBtn');
+    var editAgainBtn = document.getElementById('editAgainBtn');
+    var doneName = document.getElementById('doneName');
+
+    function showStep(el) {
+      [stepName, stepRank, stepDone].forEach(function (s) { s.classList.remove('visible'); });
+      el.classList.add('visible');
+    }
+
+    function setStatus(el, msg, isError) {
+      el.textContent = msg || '';
+      el.className = isError ? 'error' : '';
+    }
+
+    function renderTopics(topics) {
+      topicList.innerHTML = '';
+      topics.forEach(function (topic) {
+        topicList.appendChild(buildItem(topic));
+      });
+    }
+
+    function buildItem(topic) {
+      var li = document.createElement('li');
+      li.dataset.topic = topic;
+
+      var handle = document.createElement('span');
+      handle.className = 'handle';
+      handle.textContent = '☰';
+
+      var text = document.createElement('span');
+      text.className = 'topic-text';
+      text.textContent = topic;
+
+      li.appendChild(handle);
+      li.appendChild(text);
+      attachDrag(li, handle);
+      return li;
+    }
+
+    function attachDrag(li, handle) {
+      var startY = 0;
+
+      function onMove(e) {
+        var clientY = e.clientY;
+        var dy = clientY - startY;
+        li.style.transform = 'translateY(' + dy + 'px)';
+
+        var items = Array.prototype.slice.call(topicList.children);
+        var draggedIndex = items.indexOf(li);
+
+        for (var i = 0; i < items.length; i++) {
+          var sib = items[i];
+          if (sib === li) continue;
+          var rect = sib.getBoundingClientRect();
+          var sibCenter = rect.top + rect.height / 2;
+          var sibIndex = items.indexOf(sib);
+
+          if (clientY < sibCenter && sibIndex < draggedIndex) {
+            topicList.insertBefore(li, sib);
+            startY = clientY;
+            li.style.transform = 'translateY(0px)';
+            return;
+          }
+          if (clientY > sibCenter && sibIndex > draggedIndex) {
+            topicList.insertBefore(li, sib.nextSibling);
+            startY = clientY;
+            li.style.transform = 'translateY(0px)';
+            return;
+          }
+        }
+      }
+
+      function onUp(e) {
+        li.style.transform = '';
+        li.classList.remove('dragging');
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+        autosaveRanking();
+      }
+
+      handle.addEventListener('pointerdown', function (e) {
+        startY = e.clientY;
+        li.classList.add('dragging');
+        try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+        e.preventDefault();
+      });
+    }
+
+    function loadSurvey(name) {
+      setStatus(status, 'Loading…', false);
+      startBtn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function (result) {
+          startBtn.disabled = false;
+          setStatus(status, '', false);
+          currentName = name;
+          saveName(name);
+          renderTopics(result.topics);
+          commentInput.value = result.comment || '';
+          showStep(stepRank);
+        })
+        .withFailureHandler(function (err) {
+          startBtn.disabled = false;
+          setStatus(status, 'Could not load survey: ' + (err && err.message ? err.message : err), true);
+        })
+        .getSurveyForName(name);
+    }
+
+    startBtn.addEventListener('click', function () {
+      var name = nameInput.value.trim();
+      if (!name) {
+        setStatus(status, 'Please enter your name.', true);
+        return;
+      }
+      loadSurvey(name);
+    });
+
+    nameInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') startBtn.click();
+    });
+
+    function addTopic() {
+      var phrase = newItemInput.value.trim();
+      if (!phrase) return;
+      addBtn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function (result) {
+          addBtn.disabled = false;
+          newItemInput.value = '';
+          topicList.appendChild(buildItem(result.topic));
+        })
+        .withFailureHandler(function (err) {
+          addBtn.disabled = false;
+          setStatus(status2, 'Could not add item: ' + (err && err.message ? err.message : err), true);
+        })
+        .addSurveyTopic(phrase);
+    }
+
+    addBtn.addEventListener('click', addTopic);
+    newItemInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addTopic();
+      }
+    });
+
+    function getOrderedTopics() {
+      return Array.prototype.map.call(topicList.children, function (li) {
+        return li.dataset.topic;
+      });
+    }
+
+    function autosaveRanking() {
+      if (!currentName) return;
+      setStatus(status2, 'Saving…', false);
+      google.script.run
+        .withSuccessHandler(function () {
+          setStatus(status2, 'Saved', false);
+        })
+        .withFailureHandler(function (err) {
+          setStatus(status2, 'Could not save: ' + (err && err.message ? err.message : err), true);
+        })
+        .submitSurveyRanking(currentName, getOrderedTopics(), commentInput.value.trim());
+    }
+
+    submitBtn.addEventListener('click', function () {
+      submitBtn.disabled = true;
+      setStatus(status2, 'Saving…', false);
+      google.script.run
+        .withSuccessHandler(function () {
+          submitBtn.disabled = false;
+          setStatus(status2, '', false);
+          doneName.textContent = currentName;
+          showStep(stepDone);
+        })
+        .withFailureHandler(function (err) {
+          submitBtn.disabled = false;
+          setStatus(status2, 'Could not save: ' + (err && err.message ? err.message : err), true);
+        })
+        .submitSurveyRanking(currentName, getOrderedTopics(), commentInput.value.trim());
+    });
+
+    backBtn.addEventListener('click', function () {
+      showStep(stepName);
+    });
+
+    editAgainBtn.addEventListener('click', function () {
+      loadSurvey(currentName);
+    });
+
+    nameInput.value = loadSavedName();
+  </script>
+</body>
+</html>

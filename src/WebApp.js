@@ -72,6 +72,10 @@ function doGet(e) {
     return _handleTeamView(e);
   }
 
+  if (e && e.parameter && e.parameter.cmd === 'survey') {
+    return _handleSurvey(e);
+  }
+
   var params = (e && e.parameter) ? JSON.stringify(e.parameter) : '{}';
   return ContentService.createTextOutput(
     'GActionSheet ' + BUILD_INFO.version + '\n' +
