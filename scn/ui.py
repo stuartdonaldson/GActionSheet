@@ -511,7 +511,7 @@ class UiDriver:
         in the same journey), returns the existing card without re-clicking
         the icon — clicking it again toggles the panel closed.
 
-        Polls all page frames for one that contains the 'Sync now' button —
+        Polls all page frames for one that contains the 'Sync' button —
         the same detection strategy as JS findAddonFrame in _helpers.js.
         Handles the cold-start 'Refresh' button that can appear before the card
         loads (clicks it and waits 4 s before resuming the poll).
@@ -521,7 +521,7 @@ class UiDriver:
 
         for frame in self._page.frames:
             try:
-                if frame.get_by_role("button", name=re.compile(r"sync now", re.I)).count():
+                if frame.get_by_role("button", name=re.compile(r"^sync( now)?$", re.I)).count():
                     card = Card(frame)
                     self._current_card = card
                     return card
@@ -546,7 +546,7 @@ class UiDriver:
             for frame in self._page.frames:
                 try:
                     if frame.get_by_role(
-                        "button", name=re.compile(r"sync now", re.I)
+                        "button", name=re.compile(r"^sync( now)?$", re.I)
                     ).count():
                         card = Card(frame)
                         self._current_card = card

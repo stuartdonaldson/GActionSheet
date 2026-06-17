@@ -323,6 +323,32 @@ def test_expect_absent_kind():
     assert exp.surfaces == frozenset({Surface.SHEET})
 
 
+def test_entry_point_without_request_raises(monkeypatch):
+    """GTaskSheet-q37d: entry_point= on a request=None session would silently
+    drop coverage (NullReporter.junit is a no-op) — must fail loudly instead."""
+    scn = _make_session()
+    a = ai(action="go", action_id="AI-1")
+    with pytest.raises(ValueError, match="entry_point.*request="):
+        scn.verify(a, on=Surface.SHEET, tag="[t]", entry_point="menuSyncActiveDoc")
+
+
+def test_entry_point_with_request_does_not_raise():
+    """entry_point= is fine when the session has a live (non-Null) reporter."""
+    scn = _make_session()
+    scn._reporter = type("FakeReporter", (), {"junit": lambda *a, **k: None})()
+    a = ai(action="go", action_id="AI-1")
+    scn.verify(a, on=Surface.SHEET, tag="[t]", entry_point="menuSyncActiveDoc")
+    assert scn.engine.queue[0].entry_point == "menuSyncActiveDoc"
+
+
+def test_no_entry_point_without_request_does_not_raise():
+    """Expectations that don't tag entry_point= are unaffected by the guard."""
+    scn = _make_session()
+    a = ai(action="go", action_id="AI-1")
+    scn.verify(a, on=Surface.SHEET, tag="[t]")
+    assert scn.engine.queue[0].entry_point == ""
+
+
 def test_snapshot_immutability():
     """Mutating the ai after enqueue must NOT affect the queued snapshot (§4.2)."""
     scn = _make_session()

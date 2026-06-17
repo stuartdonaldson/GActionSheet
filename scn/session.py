@@ -592,6 +592,12 @@ class ScenarioSession:
     # ------------------------------------------------------------------
 
     def _enqueue(self, exp: Expectation) -> None:
+        if exp.entry_point and isinstance(self._reporter, NullReporter):
+            raise ValueError(
+                f"entry_point={exp.entry_point!r} set on a session with no "
+                f"request= (ScenarioSession.new_doc(settings, request=request)); "
+                f"coverage would be silently dropped."
+            )
         self.engine.enqueue(exp)
         self._seq += 1
 
