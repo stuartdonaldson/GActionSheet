@@ -159,3 +159,67 @@ def test_menuRunArchive_moves_eligible_row_to_archive(scn):
         tag="[rz4k.4 menuRunArchive]", entry_point="menuRunArchive",
     )
     scn.checkpoint(STEP)
+
+
+# ---------------------------------------------------------------------------
+# menuSyncActiveDoc -> syncDocument(docId) — Docs menu "Sync" (GTaskSheet-ez2e)
+# ---------------------------------------------------------------------------
+
+def test_menuSyncActiveDoc_syncs_active_doc(scn):
+    """menuSyncActiveDoc() runs syncDocument(docId) for the active document
+    (MenuHandler.js), distinct from the already-covered syncDocument() core and
+    from the Sheets-side menuSync (-> syncAll()). DocumentApp.getActiveDocument()
+    only resolves inside a real Docs UI session; outside one (this fixture's
+    stateless webapp execution) it falls back to TEST_DOC_ID."""
+    seed = ai(action="menuSyncActiveDoc unsynced floating action")
+    scn.append_paragraph(seed.as_text())        # doc-side change, no Actions row yet
+
+    scn._post_fixture("menu_sync_active_doc")   # menuSyncActiveDoc() -> syncDocument(docId)
+
+    def _action_synced() -> str | None:
+        rows = scn.find_sheet_actions()
+        if not any(r.action == seed.action for r in rows):
+            present = [r.action for r in rows]
+            return (
+                "[ez2e menuSyncActiveDoc] action not propagated to the sheet after "
+                f"menuSyncActiveDoc; sheet actions for this doc: {present!r}"
+            )
+        return None
+
+    scn.expect_callable(
+        _action_synced, on=SHEET, tag="[ez2e menuSyncActiveDoc]", entry_point="menuSyncActiveDoc",
+    )
+    scn.checkpoint(STEP)
+
+
+# ---------------------------------------------------------------------------
+# menuInsertTrackerActiveDoc -> insertTrackerTable(docId) — Docs menu
+# "Insert Tracker" (GTaskSheet-ez2e)
+# ---------------------------------------------------------------------------
+
+def test_menuInsertTrackerActiveDoc_inserts_tracker(scn):
+    """menuInsertTrackerActiveDoc() runs insertTrackerTable(docId) for the active
+    document, distinct from the already-covered insertTrackerTable() core."""
+    seed = ai(action="menuInsertTrackerActiveDoc pre-tracker floating action")
+    scn.append_paragraph(seed.as_text())
+    scn.sync()  # anchor the action first
+
+    scn._post_fixture("menu_insert_tracker_active_doc")  # menuInsertTrackerActiveDoc()
+
+    rows = scn.find_sheet_actions()
+    assert any(r.action_id is not None for r in rows), (
+        "[ez2e menuInsertTrackerActiveDoc] expected an anchored action before tracker insert"
+    )
+
+    def _tracker_consistency_ok() -> str | None:
+        try:
+            scn.verify_consistency(scope=Surface.DOC)
+        except AssertionError as exc:
+            return f"[ez2e menuInsertTrackerActiveDoc] verify_consistency failed: {exc}"
+        return None
+
+    scn.expect_callable(
+        _tracker_consistency_ok, on=SHEET,
+        tag="[ez2e menuInsertTrackerActiveDoc]", entry_point="menuInsertTrackerActiveDoc",
+    )
+    scn.checkpoint(STEP)

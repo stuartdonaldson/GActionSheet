@@ -177,6 +177,45 @@ could ride along in this same deploy if time allows.
 *Why Low-Medium:* it upgrades test fidelity to catch a real bug class
 (deployer-privilege leaks), but bd's own filing says "no current rz4k child's
 AC requires this" — it's opportunistic hardening, not closing a known gap.
+Not done in this execution pass — deferred.
+
+### Batch 3 execution notes (2026-06-18, one `deploy:test` cycle, rev 254)
+
+All four — `apcu`, `cduk`, `ez2e`, `dq6t` — closed; tests pass against the
+deployed build (`tests/test_import.py::test_forward_duplicate_guard`,
+`tests/test_sync_all.py::test_docdata_integrity_pass`,
+`tests/test_menu_entry_points.py`'s two new ez2e tests,
+`tests/test_floating_action_scanner.py`).
+
+- **`cduk` blocker:** its twin IMP `GTaskSheet-6ipb` was marked Closed in bd
+  with *no actual implementation* anywhere in the codebase (no
+  `sync.integrity.complete` log tag, no related commit). Implemented it now
+  in `syncAll()` (SyncManager.js) per 6ipb's frozen AC1-AC5, then verified
+  against the pre-existing `test_docdata_integrity_pass` (which was already
+  written to that contract, just waiting on the code).
+- **`apcu`:** added a new testToken-gated `forward_action_rows_test` route
+  (ContractSchema.js + WebApp.js) mirroring `_handleForwardActionRows`'s
+  guard loop — the production route is `secret`-gated, not reachable from
+  the test harness directly.
+- **`ez2e`:** `menuSyncActiveDoc()`/`menuInsertTrackerActiveDoc()`
+  (MenuHandler.js) depend on `DocumentApp.getActiveDocument()`, which never
+  resolves from the stateless `run_fixture` webapp execution — added a
+  `TEST_DOC_ID`-script-property fallback (same property `_handleRunFixture`
+  already stages) plus two new TestFixtures.js cases.
+- **`dq6t`:** scoped to AC-1 through AC-6 (scanner detection: lists, table
+  cells, tracker exclusion) via three new TestFixtures.js doc-seeding cases
+  (`append_doc_table`, `append_doc_list_item`, `append_tracker_cell_text`).
+  AC-4's "prefix" sub-case doesn't match shipped behavior (token must be
+  paragraph-anchored; documented instead of "fixed"). AC-7/AC-8 (`@create`
+  caret placement inside a table cell) need a new UiDriver capability — split
+  into `GTaskSheet-4hqn`.
+- **Bonus fix:** `seed_row` (TestFixtures.js) never forwarded `data.globalId`
+  into the row it built — found while debugging an unrelated regression
+  check (`test_sync_all`), fixed (one line).
+- **New finding, not fixed (out of scope):** `test_sync_all`'s `[nv6g]`
+  archive assertion assumes a 24h Doc-Not-Found eviction threshold;
+  `ArchiveManager.js` actually uses a flat 30-day threshold for everything.
+  Filed as `GTaskSheet-0f0s` for a product decision.
 
 ---
 

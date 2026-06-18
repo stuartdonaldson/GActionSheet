@@ -337,6 +337,9 @@ function doPost(e) {
   if (payload.action === 'import_selected_for_test') {
     return _handleImportSelectedForTest(payload);
   }
+  if (payload.action === 'forward_action_rows_test') {
+    return _handleForwardActionRowsAtdd(payload);
+  }
   // patch_action_status and delete_action_row are production routes (WEBAPP_SECRET-gated
   // when called by the add-on). When called by the ATDD harness they arrive with a
   // testToken and snake_case field names per ContractSchema.js messages (§16.11 #3).
@@ -1529,6 +1532,67 @@ function _handlePatchActionStatusAtdd(payload) {
   GasLogger.log('test.patch_action_status', { global_id: globalId, status: newStatus });
   GasLogger.flush();
   return _jsonResponse({ ok: true, global_id: globalId });
+}
+
+/**
+ * ATDD-path forward_action_rows_test: same seen[]/isResolved(entry.status)
+ * guard loop as the production _handleForwardActionRows, testToken-gated
+ * instead of secret-gated (GTaskSheet-apcu, UC-E AC4). Lets a test pass an
+ * explicit forwards[] entry whose sourceGlobalId is already Forwarded/
+ * resolved — a state the production import flow's own
+ * _listImportableActionsData filter would never let through, so the guard
+ * is otherwise unreachable from any test entry point.
+ *
+ * Payload shape: { action, testToken, forwards: [{sourceGlobalId, newGlobalId}], targetDocName }
+ * Response shape: { ok: true, forwarded: [sourceGlobalId, ...] } — entries
+ * skipped by the duplicate/already-resolved guard are simply absent.
+ */
+function _handleForwardActionRowsAtdd(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var ss           = SpreadsheetApp.getActiveSpreadsheet();
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) {
+    return _jsonResponse({ error: 'Actions sheet not found', forwarded: [] });
+  }
+
+  var forwards      = payload.forwards      || [];
+  var targetDocName = payload.targetDocName || '';
+  if (forwards.length === 0) {
+    return _jsonResponse({ ok: true, forwarded: [] });
+  }
+
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var now         = new Date();
+  var forwarded   = [];
+  var seen        = {};
+
+  WriteGuard.wrapPersistent(function () {
+    for (var i = 0; i < forwards.length; i++) {
+      var f      = forwards[i];
+      var entry  = existingMap[f.sourceGlobalId];
+      if (!entry) continue;
+      if (seen[f.sourceGlobalId]) continue;       // duplicate within this payload
+      if (isResolved(entry.status)) continue;     // already forwarded/resolved — no re-forward
+      seen[f.sourceGlobalId] = true;
+
+      var newAiToken = parseGlobalId(f.newGlobalId).actionId; // 'AI-N'
+      var newText    = entry.action + ' [Forward:' + targetDocName + ' ' + newAiToken + ']';
+
+      actionsSheet.getRange(entry.rowIndex, _ACOL.action_text).setValue(newText);
+      actionsSheet.getRange(entry.rowIndex, _ACOL.status).setValue('Forwarded');
+      actionsSheet.getRange(entry.rowIndex, _ACOL.modified_date).setValue(now);
+      actionsSheet.getRange(entry.rowIndex, _ACOL.sync_status).setValue('Dirty');
+      forwarded.push(f.sourceGlobalId);
+    }
+  });
+
+  SpreadsheetApp.flush();
+
+  GasLogger.log('FORWARD_ROWS_TEST.done', { count: forwarded.length });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, forwarded: forwarded });
 }
 
 /**

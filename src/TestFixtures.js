@@ -1690,6 +1690,86 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'append_doc_table': {
+        // Builds a table from data.rows = [[{text, listItem?}, ...], ...] —
+        // one paragraph (or list item) per cell. The only doc-seeding fixture
+        // able to place AI: tokens inside table cells; append_doc_paragraph
+        // (WebApp.js) only supports body-level plain paragraphs
+        // (GTaskSheet-dq6t AC-3/AC-4/AC-5).
+        var adtRows    = data.rows || [];
+        var adtNumRows = adtRows.length;
+        var adtNumCols = adtNumRows > 0 ? adtRows[0].length : 0;
+        if (adtNumRows === 0 || adtNumCols === 0) {
+          _TF_RESULT = { tag: 'fixture.append_doc_table', data: { error: 'rows required' } };
+          break;
+        }
+        var adtBlankGrid = [];
+        for (var adtR = 0; adtR < adtNumRows; adtR++) {
+          var adtBlankRow = [];
+          for (var adtC = 0; adtC < adtNumCols; adtC++) adtBlankRow.push('');
+          adtBlankGrid.push(adtBlankRow);
+        }
+        var adtTable = body.appendTable(adtBlankGrid);
+        for (var adtR2 = 0; adtR2 < adtNumRows; adtR2++) {
+          var adtRow = adtTable.getRow(adtR2);
+          for (var adtC2 = 0; adtC2 < adtNumCols; adtC2++) {
+            var adtSpec = adtRows[adtR2][adtC2] || {};
+            var adtCell = adtRow.getCell(adtC2);
+            if (adtSpec.listItem) {
+              adtCell.appendListItem(adtSpec.text || '');
+              adtCell.getChild(0).asParagraph().removeFromParent(); // drop appendTable's default empty paragraph
+            } else {
+              adtCell.setText(adtSpec.text || '');
+            }
+          }
+        }
+        _TF_RESULT = { tag: 'fixture.append_doc_table', data: { ok: true } };
+        break;
+      }
+
+      case 'append_doc_list_item': {
+        // Body-level bulleted list item containing an AI: token
+        // (GTaskSheet-dq6t AC-1/AC-2) — append_doc_paragraph only appends a
+        // plain (non-list) paragraph.
+        body.appendListItem(data.text || '');
+        _TF_RESULT = { tag: 'fixture.append_doc_list_item', data: { ok: true } };
+        break;
+      }
+
+      case 'append_tracker_cell_text': {
+        // Appends an AI: token into the LAST data row's first cell of the
+        // existing Action Item Tracker table (must already exist via
+        // 'insert_tracker_table') to verify the scanner's tracker-table
+        // exclusion (GTaskSheet-dq6t AC-6). Locates the table the same way
+        // _scanFloatingActions does: the first TABLE body-child after the
+        // 'Action Item Summary' heading paragraph.
+        var atctN           = body.getNumChildren();
+        var atctHeadingSeen  = false;
+        var atctTable        = null;
+        for (var atctI = 0; atctI < atctN; atctI++) {
+          var atctChild = body.getChild(atctI);
+          if (!atctHeadingSeen) {
+            if (atctChild.getType() === DocumentApp.ElementType.PARAGRAPH &&
+                atctChild.asParagraph().getText().trim() === _TRACKER_HEADING) {
+              atctHeadingSeen = true;
+            }
+            continue;
+          }
+          if (atctChild.getType() === DocumentApp.ElementType.TABLE) {
+            atctTable = atctChild.asTable();
+            break;
+          }
+        }
+        if (!atctTable) {
+          _TF_RESULT = { tag: 'fixture.append_tracker_cell_text', data: { error: 'tracker table not found' } };
+          break;
+        }
+        var atctLastRow = atctTable.getRow(atctTable.getNumRows() - 1);
+        atctLastRow.getCell(0).appendParagraph(data.text || '');
+        _TF_RESULT = { tag: 'fixture.append_tracker_cell_text', data: { ok: true } };
+        break;
+      }
+
       case 'scenario_delete_unassigned': {
         // Find the §14 unassigned action by its exact seeded text and delete it.
         var sduTarget  = 'This tag and text confirms creation of an unassigned action item';
@@ -1907,21 +1987,26 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'set_docdata_row': {
-        // Upserts a DocData row, overriding only the fields supplied (GTaskSheet-me6w.6).
-        // Used to set up the UpdateDoc-override scenarios (S3/S7) on a row already
-        // created by a prior sync.
+        // Upserts a DocData row, overriding only the fields supplied
+        // (GTaskSheet-me6w.6: teamId/syncStatus, for the UpdateDoc-override
+        // scenarios S3/S7; GTaskSheet-cduk: actionCount/resolvedCount/docName,
+        // to corrupt a row so the syncAll() integrity pass has something to
+        // reconcile). Acts on a row already created by a prior sync.
         var sdrFileId = data.fileId || testDocId;
         var sdrExisting = _readDocDataRow(ss, sdrFileId) || {
           docName: '', docModified: new Date(), syncStatus: '', teamId: '',
           actionCount: 0, resolvedCount: 0
         };
-        var sdrTeamId     = data.hasOwnProperty('teamId')     ? data.teamId     : sdrExisting.teamId;
-        var sdrSyncStatus = data.hasOwnProperty('syncStatus') ? data.syncStatus : sdrExisting.syncStatus;
+        var sdrTeamId       = data.hasOwnProperty('teamId')       ? data.teamId       : sdrExisting.teamId;
+        var sdrSyncStatus   = data.hasOwnProperty('syncStatus')   ? data.syncStatus   : sdrExisting.syncStatus;
+        var sdrDocName      = data.hasOwnProperty('docName')      ? data.docName      : sdrExisting.docName;
+        var sdrActionCount  = data.hasOwnProperty('actionCount')  ? data.actionCount  : sdrExisting.actionCount;
+        var sdrResolvedCount = data.hasOwnProperty('resolvedCount') ? data.resolvedCount : sdrExisting.resolvedCount;
         var sdrUpdated = _getOrUpsertDocDataRow(
           ss, sdrFileId,
-          sdrExisting.docName, sdrExisting.docModified,
+          sdrDocName, sdrExisting.docModified,
           sdrTeamId, sdrSyncStatus,
-          sdrExisting.actionCount, sdrExisting.resolvedCount
+          sdrActionCount, sdrResolvedCount
         );
         _TF_RESULT = { tag: 'fixture.set_docdata_row', data: { row: sdrUpdated } };
         docAlreadyClosed = true;
@@ -2070,6 +2155,30 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'menu_sync_active_doc': {
+        // menuSyncActiveDoc() -> syncDocument(docId) — Docs-menu wrapper
+        // call-site (GTaskSheet-ez2e), distinct from the already-covered
+        // syncDocument() core. doc.saveAndClose() first so syncDocument's own
+        // open of testDocId doesn't lock against this dispatcher's handle.
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        menuSyncActiveDoc();
+        SpreadsheetApp.flush();
+        _TF_RESULT = { tag: 'fixture.menu_sync_active_doc', data: { docId: testDocId } };
+        break;
+      }
+
+      case 'menu_insert_tracker_active_doc': {
+        // menuInsertTrackerActiveDoc() -> insertTrackerTable(docId) — Docs-menu
+        // wrapper call-site (GTaskSheet-ez2e), distinct from the already-covered
+        // insertTrackerTable() core (see the 'insert_tracker_table' case above).
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        menuInsertTrackerActiveDoc();
+        _TF_RESULT = { tag: 'fixture.menu_insert_tracker_active_doc', data: { docId: testDocId } };
+        break;
+      }
+
       case 'trash_doc': {
         var trashDocId = data.docId || testDocId;
         DriveApp.getFileById(trashDocId).setTrashed(true);
@@ -2104,6 +2213,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'seed_row': {
         _tfAppendSheetRow(ss, _tfSheetRow({
+          globalId:      data.globalId        || '',
           id:            data.actionId        || 1,
           assigneeEmail: data.assigneeEmail   || '',
           assigneeName:  data.assigneeName    || '',

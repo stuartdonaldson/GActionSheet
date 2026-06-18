@@ -11,12 +11,14 @@
     "headers": [
       "Team Id",
       "Folder Id",
-      "Contact"
+      "Contact",
+      "Team Link"
     ],
     "columnsByField": {
       "team_id": 1,
       "folder_id": 2,
-      "contact": 3
+      "contact": 3,
+      "team_link": 4
     }
   },
   "sheetDocData": {
@@ -101,7 +103,8 @@
       "edit_action_row",
       "find_sheet_actions",
       "verify_chip_integrity",
-      "import_selected_for_test"
+      "import_selected_for_test",
+      "forward_action_rows_test"
     ],
     "messages": {
       "sync_action_rows": {
@@ -213,6 +216,19 @@
           "baseN"
         ],
         "completionSignal": "synchronous response; same as _submitImport's IMPORT_SELECTED.done"
+      },
+      "forward_action_rows_test": {
+        "request": [
+          "action",
+          "testToken",
+          "forwards",
+          "targetDocName"
+        ],
+        "response": [
+          "ok",
+          "forwarded"
+        ],
+        "completionSignal": "synchronous response; same stamping behavior as forward_action_rows"
       }
     }
   },

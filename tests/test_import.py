@@ -499,3 +499,83 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
             except Exception:
                 pass
             scn.engine.close()
+
+
+# ---------------------------------------------------------------------------
+# GTaskSheet-apcu — UC-E AC4 duplicate-forward guard
+# ---------------------------------------------------------------------------
+
+def test_forward_duplicate_guard(settings, request):
+    """Re-forwarding an already-Forwarded source row is a no-op (UC-E AC4).
+
+    Entry point under test: forward_action_rows — specifically the
+    seen[]/isResolved(entry.status) guard in _handleForwardActionRows. The
+    production import flow can never reach this guard with a stale/duplicate
+    globalId: import_selected_for_test re-derives its row set from
+    _listImportableActionsData, which already excludes resolved/Forwarded
+    rows before forward_action_rows is ever called. Driven here via
+    forward_action_rows_test (testToken-gated mirror of the same guard loop,
+    GTaskSheet-apcu) with an explicit forwards[] payload that bypasses that
+    filter — the only way to actually reach the guard from a test.
+    """
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        src = _seed_open_action(scn, "apcu duplicate-forward guard source action")
+        target_doc_name = "apcu-target-doc"
+        new_ai = "AI-99"
+        forward_payload = {
+            "forwards": [{"sourceGlobalId": src.global_id, "newGlobalId": f"{scn.doc_id}/{new_ai}"}],
+            "targetDocName": target_doc_name,
+        }
+
+        result1 = scn._post_route("forward_action_rows_test", forward_payload)
+        assert result1.get("ok") and result1.get("forwarded") == [src.global_id], result1
+
+        def check_forwarded():
+            rows = scn.find_sheet_actions()
+            row = next((r for r in rows if r.global_id == src.global_id), None)
+            if row is None:
+                return f"source row {src.global_id} not found"
+            if row.status != "Forwarded":
+                return f"status={row.status!r}, expected 'Forwarded'"
+            if f"[Forward:{target_doc_name} {new_ai}]" not in row.action:
+                return f"action missing forward suffix: {row.action!r}"
+            return None
+
+        err = check_forwarded()
+        assert err is None, err
+        scn.expect_callable(
+            check_forwarded, on=Surface.SHEET, tag="[apcu forward-once]",
+            entry_point="forward_action_rows",
+        )
+        scn.checkpoint(STEP)
+
+        first_action_text = next(
+            r.action for r in scn.find_sheet_actions() if r.global_id == src.global_id
+        )
+
+        # Re-forward the SAME already-Forwarded sourceGlobalId: no-op — no
+        # second [Forward:...] suffix, no change to status/action text.
+        result2 = scn._post_route("forward_action_rows_test", forward_payload)
+        assert result2.get("ok") and result2.get("forwarded") == [], result2
+
+        def check_no_duplicate():
+            rows = scn.find_sheet_actions()
+            row = next((r for r in rows if r.global_id == src.global_id), None)
+            if row is None:
+                return f"source row {src.global_id} not found"
+            if row.action != first_action_text:
+                return f"duplicate forward changed action text: {first_action_text!r} -> {row.action!r}"
+            if row.status != "Forwarded":
+                return f"status drifted: {row.status!r}"
+            return None
+
+        err = check_no_duplicate()
+        assert err is None, err
+        scn.expect_callable(
+            check_no_duplicate, on=Surface.SHEET, tag="[apcu duplicate-forward-guard]",
+            entry_point="forward_action_rows",
+        )
+        scn.checkpoint(STEP)
+    finally:
+        scn.close()

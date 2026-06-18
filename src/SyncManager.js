@@ -383,6 +383,66 @@ function syncAll() {
     }
 
     GasLogger.log('sync.all.complete', { docCount: docIds.length, synced: synced, skipped: skipped });
+
+    // ── DocData integrity pass (GTaskSheet-6ipb) ──────────────────────────
+    // Docs skipped above by the lastModified<=lastSynced optimization never
+    // refresh their DocData row even if Actions rows changed state since the
+    // last sync (e.g. closed via sheet edit). Recompute action_count/
+    // resolved_count/doc_name for every docId seen in Actions from the
+    // in-memory actionData/formulasCol7 already loaded above — no extra
+    // sheet reads. Mirrors the per-doc reconciliation in WebApp.js's
+    // sync_action_rows handler, but applied across all docs in one pass.
+    var docTitleByDocId  = {};
+    for (var ti = 0; ti < formulasCol7.length; ti++) {
+      var tFormula = formulasCol7[ti][0] || '';
+      var tIdMatch = tFormula.match(/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]+)/);
+      if (!tIdMatch) continue;
+      var tTitleMatch = tFormula.match(/,\s*"([^"]*)"\s*\)\s*$/);
+      if (tTitleMatch && !docTitleByDocId[tIdMatch[1]]) {
+        docTitleByDocId[tIdMatch[1]] = tTitleMatch[1];
+      }
+    }
+
+    var docIdsWithAnyRows = {}; // any docId appearing in Actions, any status
+    var integrityCounts   = {}; // docId -> { actionCount, resolvedCount }, Deleted/Doc Not Found excluded
+    for (var ii = 0; ii < actionData.length; ii++) {
+      var iGlobalId = String(actionData[ii][_SCOL.global_id - 1] || '');
+      var iSlash    = iGlobalId.indexOf('/');
+      if (iSlash <= 0) continue;
+      var iDocId = iGlobalId.substring(0, iSlash);
+      docIdsWithAnyRows[iDocId] = true;
+      var iSyncStatus = actionData[ii][_SCOL.sync_status - 1];
+      if (iSyncStatus === 'Deleted' || iSyncStatus === 'Doc Not Found') continue;
+      if (!integrityCounts[iDocId]) integrityCounts[iDocId] = { actionCount: 0, resolvedCount: 0 };
+      integrityCounts[iDocId].actionCount++;
+      if (isResolved(actionData[ii][_SCOL.status - 1])) integrityCounts[iDocId].resolvedCount++;
+    }
+
+    var integrityUpdated = 0;
+    for (var docIdKey in docIdsWithAnyRows) {
+      if (!docIdsWithAnyRows.hasOwnProperty(docIdKey)) continue;
+      var existingRow = _readDocDataRow(ss, docIdKey);
+      if (!existingRow) continue; // no DocData row to reconcile yet — first-pass write happens elsewhere
+      var computed = integrityCounts[docIdKey] || { actionCount: 0, resolvedCount: 0 };
+      var computedName = docTitleByDocId[docIdKey] || existingRow.docName;
+      var changed = (
+        existingRow.actionCount !== computed.actionCount ||
+        existingRow.resolvedCount !== computed.resolvedCount ||
+        existingRow.docName !== computedName
+      );
+      if (!changed) continue;
+      _getOrUpsertDocDataRow(
+        ss, docIdKey,
+        computedName,
+        existingRow.docModified,
+        existingRow.teamId,
+        existingRow.syncStatus,
+        computed.actionCount,
+        computed.resolvedCount
+      );
+      integrityUpdated++;
+    }
+    GasLogger.log('sync.integrity.complete', { updated: integrityUpdated });
   } catch (e) {
     GasLogger.log('sync.all.error', { msg: e.message });
   } finally {

@@ -74,14 +74,29 @@ function menuSync() {
   syncAll();
 }
 
-function menuSyncActiveDoc() {
+/**
+ * getActiveDocument() only resolves when actually invoked from that doc's own
+ * UI session (real menu click). run_fixture (TestFixtures.js) executes
+ * statelessly via the Sheet-bound web app, so it has no active document —
+ * fall back to TEST_DOC_ID, the same script property _handleRunFixture
+ * (TestWebApp.js) stages for the duration of a fixture call, to make these
+ * wrappers reachable from a test (GTaskSheet-ez2e) without changing
+ * production behavior (the real menu click always has an active document).
+ */
+function _activeOrTestDocId() {
   var doc = DocumentApp.getActiveDocument();
-  if (doc) syncDocument(doc.getId());
+  if (doc) return doc.getId();
+  return PropertiesService.getScriptProperties().getProperty('TEST_DOC_ID') || '';
+}
+
+function menuSyncActiveDoc() {
+  var docId = _activeOrTestDocId();
+  if (docId) syncDocument(docId);
 }
 
 function menuInsertTrackerActiveDoc() {
-  var doc = DocumentApp.getActiveDocument();
-  if (doc) insertTrackerTable(doc.getId());
+  var docId = _activeOrTestDocId();
+  if (docId) insertTrackerTable(docId);
 }
 
 // [PROBE] — dedicated identity probe callable from the sheet menu and Playwright.

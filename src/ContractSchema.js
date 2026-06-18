@@ -109,9 +109,15 @@ var CONTRACT_SCHEMA = Object.freeze({
       'edit_action_row',          // the §16.9 `edit_sheet` act
       'find_sheet_actions',       // the §16.9 `find_sheet_actions` read query
       'verify_chip_integrity',    // post-sync doc chip assertion (6ov.8)
-      'import_selected_for_test'  // GTaskSheet-8qe5: interactive-test-entry-point for
+      'import_selected_for_test', // GTaskSheet-8qe5: interactive-test-entry-point for
                                    // AC-2/AC-3 (Import tab CHECK_BOX selection cannot be
                                    // driven via Playwright — EPIC GTaskSheet-pw5x)
+      'forward_action_rows_test'  // GTaskSheet-apcu: drives _handleForwardActionRows'
+                                   // core loop directly with an explicit forwards[]
+                                   // payload, bypassing _listImportableActionsData's
+                                   // resolved/Forwarded filter — the only way to reach
+                                   // the seen[]/isResolved(entry.status) duplicate-
+                                   // forward guard (UC-E AC4) from a test
     ]),
 
     // Per-route request/response shapes + completion signals. Field names that
@@ -213,6 +219,20 @@ var CONTRACT_SCHEMA = Object.freeze({
         request:  Object.freeze(['action', 'testToken', 'testDocId', 'globalIds']),
         response: Object.freeze(['ok', 'inserted', 'baseN']),
         completionSignal: "synchronous response; same as _submitImport's IMPORT_SELECTED.done"
+      }),
+
+      // forward_action_rows_test — GTaskSheet-apcu test-only route. Same
+      // forwards[]/targetDocName shape and seen[]/isResolved guard as the
+      // production forward_action_rows, testToken-gated instead of
+      // secret-gated so a test can pass an explicit duplicate/already-
+      // resolved sourceGlobalId that _listImportableActionsData would
+      // otherwise have filtered out before forward_action_rows is ever
+      // called in the production flow.
+      //   Completion signal: synchronous response; GasLogger 'FORWARD_ROWS_TEST.done'.
+      forward_action_rows_test: Object.freeze({
+        request:  Object.freeze(['action', 'testToken', 'forwards', 'targetDocName']),
+        response: Object.freeze(['ok', 'forwarded']),
+        completionSignal: "synchronous response; same stamping behavior as forward_action_rows"
       })
     })
   }),
