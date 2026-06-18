@@ -5,7 +5,11 @@
  *
  * Eligibility (DESIGN.md §Archive Manager):
  *   - Status column == "Closed"  (exact, case-sensitive match)
- *   - Date Modified is more than 30 days before the current sync execution time
+ *     Date Modified is more than 30 days before the current sync execution time
+ *   - Sync Status column == "Doc Not Found"
+ *     Date Modified is more than 24 hours before the current sync execution time
+ *     (a doc the user deleted/lost access to has nothing further to converge on;
+ *     it doesn't need the 30-day grace period a normal Closed row gets)
  *
  * Rows are processed bottom-to-top so that deleting a row does not shift
  * the indices of rows yet to be processed.
@@ -16,6 +20,7 @@
 var ArchiveManager = (function () {
 
   var ARCHIVE_THRESHOLD_DAYS = 30;
+  var DOC_NOT_FOUND_THRESHOLD_HOURS = 24;
 
   // Column refs resolved lazily inside archive() — ArchiveManager.js loads before
   // ContractSchema.js alphabetically, so CONTRACT_SCHEMA is not yet defined at IIFE time.
@@ -48,8 +53,10 @@ var ArchiveManager = (function () {
     var dateModified = _toDate(rowValues[colModified - 1]);
     if (!dateModified) return false;
 
-    var ageDays = (now.getTime() - dateModified.getTime()) / (1000 * 60 * 60 * 24);
-    return ageDays > ARCHIVE_THRESHOLD_DAYS;
+    var ageHours = (now.getTime() - dateModified.getTime()) / (1000 * 60 * 60);
+
+    if (syncStatus === 'Doc Not Found') return ageHours > DOC_NOT_FOUND_THRESHOLD_HOURS;
+    return ageHours > ARCHIVE_THRESHOLD_DAYS * 24;
   }
 
   // ---------------------------------------------------------------------------

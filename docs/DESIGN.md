@@ -271,7 +271,7 @@ Grouped by execution context (see §Runtime Architecture).
 |-----------|---------------|
 | onActionSheetEdit | Installable `onEdit`; on a user edit to cols 3–6 it stamps `Date Modified` (col 9) and `Sync Status = 'Dirty'` (col 10), then flushes the row to the doc and re-syncs. Returns immediately if `WriteGuard.isActive()` (a programmatic write is in progress) |
 | Sweep (`syncAll`) | Time-based (30 min); enumerates unique doc IDs from the column-7 hyperlink formulas and calls the **same** `syncDocument` the sidebar uses — no separate reconcile code |
-| Archive Manager | Moves rows with `Status = Closed` and `Date Modified > 30 days` to the Archive sheet without altering timestamps; bottom-to-top deletion; writes wrapped by `WriteGuard` |
+| Archive Manager | Moves rows with `Status = Closed` and `Date Modified > 30 days`, or `Sync Status = Doc Not Found` and `Date Modified > 24 hours`, to the Archive sheet without altering timestamps; bottom-to-top deletion; writes wrapped by `WriteGuard` (GTaskSheet-0f0s) |
 | Write Guard | In-process flag (`WriteGuard._active`) set around every programmatic sheet write and read by `onActionSheetEdit` to skip re-stamping. The cross-execution variant is disabled — see §Programmatic Write Suppression |
 
 ---
