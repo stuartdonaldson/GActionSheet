@@ -12,12 +12,12 @@ description: >-
   documentation-only, config-only, or test-only changes with no new logic.
 metadata:
   category: process
-  version: "2.0"
+  version: "2.1"
   status: documented
   validation: untested
   priority: high
   created: "2026-03-26"
-  last_updated: "2026-06-08"
+  last_updated: "2026-06-18"
   depends_on: []
   conflicts_with: []
   related_skills: [test-functional, lessons-learned]
@@ -60,12 +60,17 @@ Each step enforces a named principle and adds the gate-specific fail condition t
 2. **Issue gate** (enforces I1, I2) → confirm a tracked issue exists for this work; create one if absent. | **Fail:** if no issue can be identified and the user is unavailable, record the gap and stop.
 
 3. **AC / contract gate** (enforces I4, T4) → confirm AC and the pre-code contract are drafted and frozen → read them → state "done" in one sentence. | **Fail:** if AC are absent or ambiguous, draft candidate AC and review with the user before any code — do not implement on inference.
+   - **Proof-of-effectiveness sub-step:** if the AC introduces a new integrity/quality assertion (not a first-pass functional red-phase test), the contract must also state how the assertion will be proven to fail — i.e. that it actually catches the violation it claims to check, not only that it passes. | **Fail:** an assertion with no stated failure-demonstration is not contract-complete; add one before proceeding.
 
 4. **ATDD phase declaration** (enforces I7) → declare the current phase explicitly: red / green / refactor, and comply with that phase's read restriction. The internal unit loop within Green is implementation-track TDD (I8). | **Fail:** if no phase can be declared, the work is not ready — return to Step 3.
 
 5. **Test-before-commit** (enforces I5, T5) → before staging, run the narrowest test covering the current AC; in red, confirm the test exists and is listed failing; in green/refactor, it must pass. | **Fail:** if no test exists, write one first — staging is blocked until a test runs; if the runner is unavailable, record the block on the issue before staging.
 
-6. **Crash-fix rule** (enforces I10) — apply only when fixing a crash during in-progress feature work → identify the feature in flight → read its AC before applying any fix → apply the fix → run the feature's AC tests. | **Fail:** "no crash" is not done — "AC tests pass" is done; if AC tests are unavailable, create an issue for AC authoring before closing the fix.
+5.5. **Test-infrastructure compatibility check** — before committing to an implementation approach, confirm it is compatible with the existing test harness: detection/seed format the harness expects, route/contract shape the test fixtures call, sheet/doc structure assumptions, and log tags the harness waits on. | **Fail:** if the approach would change any of these without a corresponding harness update, surface the mismatch and resolve it before writing code — do not let it surface later as a harness false-negative or false-positive.
+
+6. **[IMP] close gate** (enforces I5, T5) → before closing any `[IMP]` issue or merging, run the full `pytest -x` regression suite, not only the narrowest test for the current AC. | **Fail:** if the suite has pre-existing failures unrelated to this change, do not close or merge autonomously — present the debt state and wait for an explicit decision (CLAUDE.md backstop rule).
+
+7. **Crash-fix rule** (enforces I10) — apply only when fixing a crash during in-progress feature work → identify the feature in flight → read its AC before applying any fix → apply the fix → run the feature's AC tests. | **Fail:** "no crash" is not done — "AC tests pass" is done; if AC tests are unavailable, create an issue for AC authoring before closing the fix.
 
 ## Success Criteria
 
@@ -73,9 +78,12 @@ Each step enforces a named principle and adds the gate-specific fail condition t
 - [ ] Implementation files confirmed necessary for this request type (not a ticket/spec/doc request)
 - [ ] Tracked issue exists before implementation begins
 - [ ] AC and contract read; "done" stated in one sentence before writing code
+- [ ] For new integrity/quality assertions: contract states how the assertion's effectiveness will be proven (failure demonstration), not just that it passes
 - [ ] ATDD phase declared explicitly (red/green/refactor)
 - [ ] In red phase: no implementation files read (verify: read calls target specs and test files only, per I7)
 - [ ] Test run completed before staging (verify: test output shown in session)
+- [ ] Test-infrastructure compatibility confirmed (detection format, route/contract, sheet structure, log tags) before committing to the approach
+- [ ] Full `pytest -x` regression suite run (not just narrowest test) before any `[IMP]` close or merge; pre-existing failures surfaced for explicit decision, not bypassed
 - [ ] For crash fixes: feature in flight identified; AC read before fix; AC tests pass after fix (verify: test run output shown)
 
 ## Examples
@@ -87,7 +95,7 @@ Each step enforces a named principle and adds the gate-specific fail condition t
 
 ### Failure — Crash fix accepted without AC validation
 **Input:** Fix an unpacking error in a content-generation function.
-**Expected (with skill):** Step 6 identifies the in-flight feature, reads its AC, runs the AC test after the fix — which fails, revealing a discarded value.
+**Expected (with skill):** Step 7 identifies the in-flight feature, reads its AC, runs the AC test after the fix — which fails, revealing a discarded value.
 **Actual (without skill):** Fix silenced the error; accepted as done; AC-test failure found later in review.
 
 ### Success — ATDD red phase enforced
@@ -113,7 +121,7 @@ Hooks are OPTIONAL — use them only after repeated gate-bypass incidents; skip 
 
 **Pattern:** Crash silenced and closed
 **Symptom:** Error suppressed; feature behavior left broken; closed before the in-flight AC test ran.
-**Prevented by:** Step 6 (I10) — done is "AC tests pass," not "no crash."
+**Prevented by:** Step 7 (I10) — done is "AC tests pass," not "no crash."
 
 ---
-_Document generated 2026-06-08._
+_Document generated 2026-06-08; updated 2026-06-18 (GTaskSheet-mpi9: proof-of-effectiveness sub-step, test-infra compatibility check, full-suite close gate)._

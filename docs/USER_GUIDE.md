@@ -63,7 +63,7 @@ There are two ways to create an action:
 
 The **Import** button in the sidebar shows the open actions from other meetings belonging to your team. From there you can optionally bring a selected item into the current document as a new action (it gets a fresh `AI-N:` number; the original is marked `Forwarded` on the ActionSheet).
 
-> **Note:** the current UI uses a single Import button for both *browsing* and *importing*. We're evaluating splitting this into a clearer "view old/forwardable actions" step plus a separate, explicit "import" step — tracked as [GTaskSheet-csbv.3](#) under the UX Improvements epic. Documented here as it currently behaves.
+> **Note:** the current UI uses a single Import button for both *browsing* and *importing*. We're evaluating splitting this into a clearer "view old/forwardable actions" step plus a separate, explicit "import" step — tracked as GTaskSheet-csbv.3 under the UX Improvements epic. Documented here as it currently behaves.
 
 ### 5. Updating an Action's Status
 

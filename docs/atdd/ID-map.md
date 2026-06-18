@@ -154,10 +154,16 @@ Tracked under GTaskSheet-k22t. Status as of 2026-06-11:
     (children rz4k.1 triggers, rz4k.2 routes, rz4k.3 cards, rz4k.4 menu, rz4k.5
     test-support). GTaskSheet-yuvq delivered the narrower onSyncNow doc-context
     slice first.
-- ~~Two `implementation-gate` skills exist~~ — **resolved**: this project's
-  `.claude/skills/implementation-gate/SKILL.md` is identical (byte-for-byte)
-  to DevStandard's `dot-claude/skills/implementation-gate/SKILL.md` (both
-  `v2.0`, `last_updated: 2026-06-08`) — already reconciled to one.
-- **Fill the two templates** into live project docs (`project-testing-guide.md`,
-  `harness-design.md`) — §15/§16 content is the source material, mostly
-  extraction. Tracked as GTaskSheet-ruoa.
+- ~~Two `implementation-gate` skills exist~~ — **resolved 2026-06-09**: at that
+  time this project's `.claude/skills/implementation-gate/SKILL.md` was
+  identical (byte-for-byte) to DevStandard's
+  `dot-claude/skills/implementation-gate/SKILL.md` (both `v2.0`,
+  `last_updated: 2026-06-08`). **Note (2026-06-18, GTaskSheet-mpi9):** the
+  project copy has since diverged intentionally — it is now `v2.1` with
+  three project-local additions (proof-of-effectiveness sub-step, test-infra
+  compatibility check, full-suite `[IMP]`-close gate). This is a deliberate
+  project-local override per the original 2026-05-27 LL's lever design, not
+  drift to reconcile.
+- ~~Fill the two templates~~ — **resolved 2026-06-18**: `docs/atdd/project-testing-guide.md`
+  and `docs/atdd/harness-design.md` filled from §15/§16 and the `scn/` module
+  map above. Tracked as GTaskSheet-ruoa.

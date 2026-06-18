@@ -28,6 +28,7 @@
 | Technical decisions | /knowledge-base/adr/ |
 | Protocol details | /docs/interfaces/ _(optional)_ |
 | External doc summaries | /knowledge-base/references/ _(optional)_ |
+| Security model | docs/security-architecture.md |
 
 ## Placement Rules
 - New capabilities → CONTEXT.md §Core Capabilities + use case if actor-driven
@@ -163,6 +164,19 @@ in ≥1 test scenario. This applies regardless of whether ATDD was followed at d
 point at least once with observable state verification. The entry point itself must be the
 call-site — testing only the mechanism it delegates to is not sufficient. Standalone or sequential
 test structure is not required; the entry point may be exercised as part of any scenario.
+
+**Backstop rules (LL resolve, GTaskSheet-mpi9):**
+- `pytest -x` (full suite, not just the touched files) is required before any `[IMP]` issue is
+  closed or merged.
+- Known test failures are not a basis for proceeding autonomously: present the debt state (which
+  tests fail, why) and wait for an explicit human decision rather than working around or ignoring
+  the failure.
+- Any scenario test that calls `verify_consistency()` must also call `verify_all_expectations(a)`
+  for at least one action. This prevents `verify_consistency()` from passing vacuously when the
+  preceding sync produced no detected items (`docs/lessons-learned/resolved/2026-06-02-new-assertion-vacuously-passes-on-empty-result-set.md`).
+- A new integrity/quality assertion must be proven to fail before acceptance: demonstrate that it
+  fails when the condition it checks is violated, not only that it passes on the current suite.
+  A new assertion that only shows green is unverified.
 
 ## GAS Deployment
 
