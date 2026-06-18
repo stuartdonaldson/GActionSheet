@@ -260,6 +260,47 @@ deployed build (`tests/test_import.py::test_forward_duplicate_guard`,
   or stakeholder review, and bd shows it's been sitting open since 2026-05-27
   with nothing else blocked on it.
 
+### Batch 4 execution notes (2026-06-18)
+
+All five closed/addressed:
+
+- **`mpi9`:** items 1–3 applied, item 4 deliberately left deferred (its stated
+  precondition — human approval of the UC-C/D reconciliation spec — is
+  unmet). CLAUDE.md gained 4 backstop rules; `.claude/skills/implementation-gate/SKILL.md`
+  went v2.0→v2.1 (Step 3 proof-of-effectiveness sub-step, new Step 5.5
+  test-infra compatibility check, Step 6 full-`pytest -x` `[IMP]`-close gate).
+  Item 3 (stub-entry-point LL) was already archived/resolved 2026-06-12 — no
+  action needed. Confirmed this project's implementation-gate skill is now
+  intentionally divergent from DevStandard's copy (noted in ID-map.md).
+- **`ruoa`:** `docs/atdd/project-testing-guide.md` and `docs/atdd/harness-design.md`
+  filled from `docs/atdd/archive/atdd-lifecycle.md` §15–§16 and the as-built
+  `scn/` package (read `scn/session.py`, `engine.py`, `surfaces.py`,
+  `contract.py`, `ui.py` directly rather than trusting the archive prose
+  alone). Entry-point coverage matrix (§7) points at `scn/contract.ENTRY_POINT_REGISTRY`
+  rather than duplicating its 32 entries, per the project's own I6
+  single-source discipline.
+- **`egl9`:** evaluated and recorded as `knowledge-base/adr/0018-test-cycle-stays-on-exec-not-dev.md`.
+  Decision: keep the automated test cycle on `/exec`. The deciding fact (not
+  visible from the bd description alone) is that GAS `/dev` URLs always
+  execute as the accessing user regardless of the manifest's `executeAs`
+  setting — and `src/appsscript.json` sets `executeAs: USER_DEPLOYING`,
+  which several tests (forwarding, team-scope, the planned `zai6`
+  non-deployer fixture) specifically depend on. The existing `npm run push`
+  (`/dev` HEAD) path already covers the fast-iteration use case this issue
+  was chasing.
+- **`csbv.3`** (doc-only slice): found already written (`docs/USER_GUIDE.md`
+  §4, added in the user guide's initial commit `de6f143`) — fixed a dead
+  `(#)` placeholder link to the tracking issue. The UX-redesign decision
+  itself remains open, per the plan's exclusion list.
+- **`6ov.9`:** restructured `DevStandard/knowledge-base/gas-addon-guide.md` —
+  generalized title/scope, corrected the "Editor Add-on (old)" row (the
+  `createActionTriggers`/`linkPreviewTriggers` in-document pattern is
+  distinct from, and not deprecated like, the legacy standalone `addon`
+  editor add-on), and added a new §Editor Add-on Triggers & Smart Chips /
+  Link Previews section folding in both 2026-06-02 LLs (the three
+  publish-gating constraints; WebApp-URL build-time stamping over
+  ScriptProperties self-registration).
+
 ---
 
 ## Sequencing summary
