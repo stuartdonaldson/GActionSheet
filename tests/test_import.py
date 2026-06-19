@@ -17,6 +17,7 @@ All testing is UI-driven (show_tab('Import') + scn/ui.py driver methods), which
 exercises list_importable_actions server-side via _buildImportCard/_buildImportTabSection ->
 _callWebApp.
 """
+import os
 import pathlib
 
 import pytest
@@ -42,7 +43,7 @@ def browser_page():
 
     auth = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
+        browser = pw.chromium.launch(headless=os.environ.get("PWHEADFUL") != "1")
         ctx = browser.new_context(
             storage_state=str(auth),
             viewport={"width": 1280, "height": 900},
@@ -161,6 +162,12 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         _seed_open_action(scn_trashed, "Import-filter trashed-doc action")
         _set_docdata(scn_trashed, syncStatus="Deleted")
 
+        # scn_target.ui is still showing the Import card from the P1-P3 check
+        # above -- its own buttons are Back/Select all/Import selected, not
+        # "Import", so show_tab("Import") must return to the tab bar first
+        # (same convention as tests/test_sidebar.py's Import/Back/Notify/Back
+        # sequence) or its button lookup never finds a match.
+        scn_target.ui.show_tab("Back")
         scn_target.ui.show_tab("Import")
 
         def check_trashed_absent():

@@ -161,6 +161,35 @@ _VERSION_FOOTER_RE = re.compile(r"v\d+\.\d+\.\d+\s*\(Rev\.[^)]*\)(?:\s*\([A-Za-z
 _TIMEOUT_RE = re.compile(r"^(\d+(?:\.\d+)?)(s|ms)$")
 
 
+def describe_visible_buttons(frames) -> str:
+    """Per-frame list of visible button accessible names, for failure diagnostics.
+
+    CardService (and the rest of this add-on's UI) renders real ARIA roles, so
+    reading them directly is strictly better than OCR-ing a screenshot: exact
+    text, no misreads on small/iconographic buttons, and it's the same
+    role/name signature bounded waits already query via get_by_role(). Shared
+    by UiDriver.capture_failure() and pytest's UI-failure report hook
+    (tests/conftest.py) so a failure log always shows what was actually
+    clickable at the moment of failure, not just a static image a human has
+    to squint at. Per-frame errors (cross-origin/detached frames are routine
+    in a live Docs UI) are swallowed so one bad frame doesn't blank the report.
+
+    @param frames  Iterable of Playwright Frame objects (e.g. page.frames).
+    @returns        Newline-joined "<frame url>: buttons=[...]" lines, or a
+                     placeholder if no frame yielded any visible button.
+    """
+    lines = []
+    for f in frames:
+        try:
+            names = f.get_by_role("button").all_inner_texts()
+        except Exception as e:
+            lines.append(f"  {getattr(f, 'url', '?')}: (probe error: {e!r})")
+            continue
+        if names:
+            lines.append(f"  {getattr(f, 'url', '?')}: buttons={names!r}")
+    return "\n".join(lines) if lines else "  (no visible buttons found in any frame)"
+
+
 def _parse_timeout(t: str) -> int:
     """Parse a timeout string ('5s', '500ms') into milliseconds.
 
@@ -234,7 +263,8 @@ class UiDriver:
         The single, reusable failure-capture mechanism for bounded UI waits: saves
         a full-page PNG under test-results/, attaches it to Allure, and returns a
         human-readable diagnostic block (screenshot path, every page.frames URL,
-        and — for each {name: selector} in `probes` — the per-frame match-count /
+        every frame's visible button names via describe_visible_buttons(), and
+        — for each {name: selector} in `probes` — the per-frame match-count /
         is_visible / bounding_box of that selector). The returned string is meant
         to be embedded in the TimeoutError/RuntimeError the caller raises, so a
         human can interpret the failure without re-running. Never raises —
@@ -271,6 +301,10 @@ class UiDriver:
                 )
         try:
             lines.append("Frames seen:\n  " + "\n  ".join(f.url for f in self._page.frames))
+        except Exception:
+            pass
+        try:
+            lines.append("Visible buttons:\n" + describe_visible_buttons(self._page.frames))
         except Exception:
             pass
         return "\n".join(lines)

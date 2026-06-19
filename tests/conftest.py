@@ -34,9 +34,14 @@ def pytest_runtest_makereport(item, call):
     """Universal UI-failure diagnostics (GTaskSheet-3tkf).
 
     On ANY failed UI test (timeout or assertion), save a full-page screenshot
-    under test-results/, echo its path + the page.frames URLs into the failure
-    report, and attach the PNG to Allure — so a human can review the failure
-    without a re-run. No-op when no active page is found (non-UI tests).
+    under test-results/, echo its path + the page.frames URLs + each frame's
+    visible button names into the failure report, and attach the PNG to
+    Allure — so a human can review the failure without a re-run. The button
+    list (via scn.ui.describe_visible_buttons — shared with UiDriver's own
+    capture_failure(); GTaskSheet-3sgr) reads the same ARIA roles
+    get_by_role() queries, so it tells you exactly what was clickable at the
+    moment of failure without re-running or eyeballing the screenshot.
+    No-op when no active page is found (non-UI tests).
     """
     outcome = yield
     report = outcome.get_result()
@@ -51,9 +56,11 @@ def pytest_runtest_makereport(item, call):
         shot = _TEST_RESULTS / f"FAIL-{slug}.png"
         page.screenshot(path=str(shot), full_page=True)
         frames = "\n  ".join(getattr(f, "url", "?") for f in page.frames)
+        from scn.ui import describe_visible_buttons
+        buttons = describe_visible_buttons(page.frames)
         report.sections.append(
             ("UI failure diagnostics (GTaskSheet-3tkf)",
-             f"Screenshot: {shot}\nFrames:\n  {frames}")
+             f"Screenshot: {shot}\nFrames:\n  {frames}\nVisible buttons:\n{buttons}")
         )
         try:
             import allure
