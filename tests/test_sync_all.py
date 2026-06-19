@@ -77,18 +77,29 @@ def sync_ctx(settings, request):
     trashed_id = scn_trash.doc_id
     scn_trash._post_fixture("trash_doc")   # trashes scn_trash.doc_id (= testDocId for this call)
 
-    # invalid-doc: seed a raw row with an unreachable docId.
+    # invalid-doc: seed two raw rows sharing the same unreachable docId, so
+    # Sweep 1's Doc Not Found mark and Sweep 2's archive sweep can be checked
+    # for GTaskSheet-4tnr's per-docId batching (both rows converge/evict
+    # together, not independently).
     # modified_date is left as now — _handleMarkDocNotFound will overwrite it anyway.
-    # The globalId is set explicitly so backdate_action_row can address this row
-    # after Sweep 1 stamps it with a fresh modified_date.
+    # The globalIds are set explicitly so backdate_action_row can address these
+    # rows after Sweep 1 stamps them with a fresh modified_date.
     invalid_formula = (
         f'=HYPERLINK("https://docs.google.com/document/d/{invalid_doc_id}/edit","Invalid Doc")'
     )
     invalid_global_id = f"{invalid_doc_id}/AI-1"
+    invalid_global_id_2 = f"{invalid_doc_id}/AI-2"
     scn_mod._post_fixture("seed_row", {
         "globalId": invalid_global_id,
         "actionId": "INVALID-1",
         "actionText": "syncall invalid doc seeded action",
+        "status": "Open",
+        "documentFormula": invalid_formula,
+    })
+    scn_mod._post_fixture("seed_row", {
+        "globalId": invalid_global_id_2,
+        "actionId": "INVALID-2",
+        "actionText": "syncall invalid doc seeded action (sibling row, same docId)",
         "status": "Open",
         "documentFormula": invalid_formula,
     })
@@ -102,6 +113,7 @@ def sync_ctx(settings, request):
         "trashed_id": trashed_id,
         "invalid_id": invalid_doc_id,
         "invalid_global_id": invalid_global_id,
+        "invalid_global_id_2": invalid_global_id_2,
     }
 
     # Teardown: end journey sessions (trashes the docs)
@@ -122,6 +134,7 @@ def test_sync_all(sync_ctx):
     trashed_id = sync_ctx["trashed_id"]
     invalid_id = sync_ctx["invalid_id"]
     invalid_global_id = sync_ctx["invalid_global_id"]
+    invalid_global_id_2 = sync_ctx["invalid_global_id_2"]
 
     # ── Pre-sweep baseline ───────────────────────────────────────────────────
     # unmodified doc: 1 row in Actions, no sync_status
@@ -199,8 +212,7 @@ def test_sync_all(sync_ctx):
 
     # [zc21] DocData mirrors 'Doc Not Found' and keeps Team Id consistent with
     # the document's actual teamScope appProperty.
-    trashed_docdata = (scn_mod._post_fixture("get_docdata_row", {"fileId": trashed_id})
-                        .get("data") or {}).get("row")
+    trashed_docdata = _docdata(scn_mod, trashed_id)
     assert trashed_docdata is not None, (
         "[zc21] trashed-doc DocData row missing after Sweep 1"
     )
@@ -217,8 +229,7 @@ def test_sync_all(sync_ctx):
 
     # [zc21] invalid doc never had a DocData row before sync_all — one is
     # created on first 'Doc Not Found' mark, with an empty Team Id.
-    invalid_docdata = (scn_mod._post_fixture("get_docdata_row", {"fileId": invalid_id})
-                        .get("data") or {}).get("row")
+    invalid_docdata = _docdata(scn_mod, invalid_id)
     assert invalid_docdata is not None, (
         "[zc21] invalid-doc DocData row not created after Sweep 1"
     )
@@ -245,11 +256,17 @@ def test_sync_all(sync_ctx):
         )
 
     # ── Backdate invalid-doc for Sweep 2 ─────────────────────────────────────
-    # Sweep 1 stamped modified_date = now on the invalid-doc row.  The 24-hour
-    # Doc Not Found threshold means it won't archive until that date is > 24h ago.
-    # Backdate to 2 days ago so Sweep 2 can archive it immediately.
+    # Sweep 1 stamped modified_date = now on both invalid-doc rows (same docId).
+    # The 24-hour Doc Not Found threshold means they won't archive until that
+    # date is > 24h ago. Backdate both rows to 2 days ago so Sweep 2 archives
+    # them together — GTaskSheet-4tnr's per-docId batching means a docId's
+    # sibling rows are not evicted independently of each other.
     scn_mod._post_fixture("backdate_action_row", {
         "globalId": invalid_global_id,
+        "daysAgo": 2,
+    })
+    scn_mod._post_fixture("backdate_action_row", {
+        "globalId": invalid_global_id_2,
         "daysAgo": 2,
     })
 
@@ -258,16 +275,33 @@ def test_sync_all(sync_ctx):
     # → ArchiveManager.archive() moves them from Actions to Archive sheet.
     scn_mod._post_fixture("sync_all")
 
-    # [nv6g] invalid-doc row → archived (backdated 2 days, > 24h threshold)
+    # [nv6g] both invalid-doc rows → archived together (backdated 2 days, > 24h threshold)
     invalid_archived = _archive_rows_for(settings, invalid_id)
-    assert len(invalid_archived) >= 1, (
-        "[nv6g] invalid-doc row not found in Archive after Sweep 2 "
-        "(expected: Doc Not Found + dateModified > 24h → archived)"
+    assert len(invalid_archived) == 2, (
+        f"[nv6g] expected both invalid-doc rows archived together as one docId batch, "
+        f"got {len(invalid_archived)}"
     )
     invalid_actions_s2 = _sheet_rows_for(settings, invalid_id)
     assert len(invalid_actions_s2) == 0, (
         f"[nv6g] invalid-doc row still in Actions after archive sweep "
         f"(expected 0, got {len(invalid_actions_s2)})"
+    )
+
+    # [GTaskSheet-4tnr] once every Actions row for a Doc Not Found docId has
+    # aged out and archived, the DocData row for that docId is evicted too —
+    # DocData must not keep referencing a docId whose Actions rows are gone.
+    invalid_docdata_s2 = _docdata(scn_mod, invalid_id)
+    assert invalid_docdata_s2 is None, (
+        f"[GTaskSheet-4tnr] invalid-doc DocData row should be evicted once its "
+        f"Doc Not Found Actions rows archive past the 24h threshold, got {invalid_docdata_s2!r}"
+    )
+
+    # [GTaskSheet-4tnr] trashed-doc is still within its 24h grace period (not
+    # backdated) — its DocData row must survive this sweep.
+    trashed_docdata_s2 = _docdata(scn_mod, trashed_id)
+    assert trashed_docdata_s2 is not None, (
+        "[GTaskSheet-4tnr] trashed-doc DocData row evicted prematurely, "
+        "before its 24h grace period elapsed"
     )
 
     # [nv6g §grace] trashed-doc row → still in Actions (modified_date stamped now by Sweep 1,

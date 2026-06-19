@@ -972,10 +972,16 @@ function _handleMarkDocNotFound(payload) {
   var marked       = 0;
 
   WriteGuard.wrapPersistent(function () {
+    // Stamp the same detection-time timestamp on every row for this docId so
+    // they age out of ArchiveManager's 24h Doc Not Found threshold together,
+    // not independently (GTaskSheet-4tnr) — a doc going missing is a per-doc
+    // event, not a per-row one.
+    var now = new Date();
     for (var i = 0; i < formulasCol7.length; i++) {
       var formula = formulasCol7[i][0] || '';
       if (formula.indexOf(docId) === -1) continue;
       actionsSheet.getRange(i + 2, _ACOL.sync_status).setValue('Doc Not Found');
+      actionsSheet.getRange(i + 2, _ACOL.modified_date).setValue(now);
       marked++;
     }
 
