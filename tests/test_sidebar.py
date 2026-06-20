@@ -318,6 +318,73 @@ def test_sidebar_team_header(settings, browser_page):
 
 
 # ---------------------------------------------------------------------------
+# test_sidebar_header_branding — GTaskSheet-rvwu
+# ---------------------------------------------------------------------------
+
+def test_sidebar_header_branding(settings, browser_page):
+    """Homepage card header: title/icon on the normal card, and on the
+    error-fallback card forced via the 'force_homepage_error' fixture.
+
+    Entry point under test: buildHomepageCard() (WorkspaceAddonCard.js),
+    both its happy-path CardHeader and its catch-block error CardHeader.
+    Raw shell assertions only (G1 binding) — header text/icon is UI-only
+    render state, not a durable expectation.
+    """
+    s = ScenarioSession.new_doc(settings)
+    s.ui = UiDriver(browser_page, doc_id=s.doc_id)
+    try:
+        card = s.ui.open_sidebar(timeout="45s")
+        # Text also appears in the platform chrome's add-on panel tooltip
+        # (same product name) — disambiguate with .first.
+        card.frame.get_by_text("Northlake UU Tool Suite", exact=False).first.wait_for(
+            state="visible", timeout=15000
+        )
+        # CardService proxies setImageUrl() through Google's image CDN
+        # (lh3.googleusercontent.com) — the original asset URL is not present
+        # in the rendered src, so assert presence rather than matching it.
+        # No actions exist yet in this fresh doc, so the header icon is the
+        # only <img> in the card.
+        assert card.frame.locator("img").count() >= 1, "homepage card header missing an icon"
+
+        s._post_fixture("force_homepage_error")
+        try:
+            s.ui.reload()
+            # open_sidebar()'s normal detection polls for a "Sync" button,
+            # which the error-fallback card never renders. Reuse it only to
+            # click the add-on icon and let the iframe start loading; ignore
+            # its TimeoutError and poll for the error text ourselves.
+            try:
+                s.ui.open_sidebar(timeout="5s")
+            except TimeoutError:
+                pass
+            error_text = "Unable to load the document state right now."
+            deadline = time.monotonic() + 45
+            error_frame = None
+            while time.monotonic() < deadline:
+                for frame in browser_page.frames:
+                    try:
+                        if frame.get_by_text(error_text, exact=False).count():
+                            error_frame = frame
+                            break
+                    except Exception:
+                        pass
+                if error_frame:
+                    break
+                time.sleep(1.0)
+            assert error_frame is not None, "error-fallback card never rendered"
+            error_frame.get_by_text(error_text, exact=False).wait_for(
+                state="visible", timeout=15000
+            )
+            error_frame.get_by_text(
+                "Northlake UU Tool Suite", exact=False
+            ).first.wait_for(state="visible", timeout=15000)
+        finally:
+            s._post_fixture("clear_homepage_error_force")
+    finally:
+        s.close()
+
+
+# ---------------------------------------------------------------------------
 # test_tab_navigation_docstatus_regression — GTaskSheet-gdll (ADR-0015 slice smoke)
 # ---------------------------------------------------------------------------
 

@@ -898,6 +898,16 @@ function setupTestFixtures(scenario, data) {
         }));
         break;
 
+      case 'force_homepage_error':
+        // GTaskSheet-rvwu AC-5: trip buildHomepageCard's catch branch on the
+        // next homepage render. Caller must clear via 'clear_homepage_error_force'.
+        PropertiesService.getScriptProperties().setProperty('_TEST_FORCE_HOMEPAGE_ERROR', 'true');
+        break;
+
+      case 'clear_homepage_error_force':
+        PropertiesService.getScriptProperties().deleteProperty('_TEST_FORCE_HOMEPAGE_ERROR');
+        break;
+
       case 'discovery':
         var discProps = PropertiesService.getScriptProperties();
         var recentId = discProps.getProperty('DISCOVERY_RECENT_DOC_ID');

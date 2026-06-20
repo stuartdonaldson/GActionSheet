@@ -22,12 +22,21 @@ function buildHomepageCard(opts) {
   var skipSheetFetch = !!(opts && opts.skipSheetFetch);
 
   try {
+    // Test-only error injection (GTaskSheet-rvwu AC-5 coverage) — never set
+    // outside the test harness; see TestFixtures.js 'force_homepage_error'.
+    if (PropertiesService.getScriptProperties().getProperty('_TEST_FORCE_HOMEPAGE_ERROR')) {
+      throw new Error('Forced error (test fixture)');
+    }
+
     var doc = _resolveActiveDocForRead(DocumentApp.getActiveDocument());
 
     // [PROBE]
     PROBE_log('sidebar.' + PROBE_docState(doc), { docId: doc ? doc.getId() : '' });
     var teamInfo = _safeGetDocTeamInfo(doc);
     var card = CardService.newCardBuilder();
+    var header = CardService.newCardHeader()
+      .setTitle(_NORTHLAKE_UU_SUITE_NAME)
+      .setImageUrl(_NORTHLAKE_UU_EMBLEM_URL);
 
     card.addSection(_buildTeamSection(teamInfo));
     card.addSection(_buildTopButtonsSection());
@@ -40,10 +49,13 @@ function buildHomepageCard(opts) {
       );
     } else {
       var homepageState = _buildHomepageState(doc, skipSheetFetch);
+      header.setSubtitle(homepageState.docName);
       card
         .addSection(_buildOverviewSection(homepageState))
         .addSection(_buildActionListSection(homepageState));
     }
+
+    card.setHeader(header);
 
     card.addSection(
       CardService.newCardSection()
@@ -61,6 +73,11 @@ function buildHomepageCard(opts) {
     GasLogger.flush();
 
     return CardService.newCardBuilder()
+      .setHeader(
+        CardService.newCardHeader()
+          .setTitle(_NORTHLAKE_UU_SUITE_NAME)
+          .setImageUrl(_NORTHLAKE_UU_EMBLEM_URL)
+      )
       .addSection(
         CardService.newCardSection().addWidget(
           CardService.newTextParagraph().setText('Unable to load the document state right now.')
