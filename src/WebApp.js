@@ -1786,7 +1786,7 @@ function _handleJourneySession(payload) {
       return _jsonResponse({ error: 'docId required for end_journey_session' });
     }
     DriveApp.getFileById(docId).setTrashed(true);
-    GasLogger.log('journey.end', { trashed: docId });
+    GasLogger.log('journey.end', { docId: docId });
     GasLogger.flush();
     return _jsonResponse({ ok: true, trashed: docId });
   }

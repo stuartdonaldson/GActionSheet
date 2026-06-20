@@ -125,7 +125,7 @@ function syncDocument(docId) {
       var emptySync = _syncActionRows([], docUrl, docTitle, docId, []);
       SpreadsheetApp.flush();
       GasLogger.log('sync.complete', {
-        docId: docId, anchored: 0,
+        docId: docId,
         upserted: emptySync.upserted || 0,
         updated:  emptySync.updated  || 0
       });
@@ -257,7 +257,6 @@ function syncDocument(docId) {
 
     GasLogger.log('sync.complete', {
       docId:    docId,
-      anchored: 0,
       upserted: syncResult.upserted || 0,
       updated:  syncResult.updated  || 0
     });
