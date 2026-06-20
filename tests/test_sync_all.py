@@ -330,6 +330,89 @@ def test_sync_all(sync_ctx):
 
 
 # ---------------------------------------------------------------------------
+# op-id correlation — GTaskSheet-65g1
+# ---------------------------------------------------------------------------
+
+def test_sync_all_op_correlation(settings, gas_log_dir, request):
+    """GTaskSheet-65g1: one syncAll() invocation's sub-events share one `op` id.
+
+    Two docs are synced individually first (their own ops, ignored), then a
+    single syncAll() sweep is fenced and its sync.all.start/.../sync.all.complete
+    plus both docs' sync.scanned/sync.complete must all carry the SAME op id —
+    and a second, separate sweep must produce a DIFFERENT op id, proving the
+    field is per-invocation, not a constant.
+    """
+    if not gas_log_dir:
+        pytest.skip("gas_log_dir not configured — op correlation requires GAS log access")
+
+    import time
+
+    from tests.helpers.gas_log import clear_logs, collect_logs, wait_for_log
+
+    scn_a = ScenarioSession.new_doc(settings, request=request)
+    scn_b = ScenarioSession.new_doc(settings)
+    try:
+        scn_a.append_paragraph("AI-1: 65g1 op-correlation doc A")
+        scn_a.sync()
+        scn_b.append_paragraph("AI-1: 65g1 op-correlation doc B")
+        scn_b.sync()
+
+        # clear_logs()'s fence has a 10s clock-skew grace window — without this
+        # pause, the individual sync() calls' own sync.complete entries (no op,
+        # not part of a syncAll sweep) land inside that grace window and falsely
+        # appear as "after the fence" once flushed.
+        time.sleep(12)
+
+        # ── Sweep 1 ──────────────────────────────────────────────────────────
+        fence1 = clear_logs(gas_log_dir)
+        scn_a._post_fixture("sync_all")
+        wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=60, after=fence1)
+
+        sweep1_entries = collect_logs(
+            gas_log_dir,
+            lambda e: e.get("tag") in (
+                "sync.all.start", "sync.all.complete", "sync.scanned", "sync.complete",
+            ),
+            after=fence1,
+        )
+        assert sweep1_entries, "[65g1] no sub-events captured for sweep 1"
+        ops1 = {e.get("op") for e in sweep1_entries}
+        assert len(ops1) == 1 and None not in ops1, (
+            f"[65g1] sweep 1 sub-events do not share a single op id: {ops1!r} "
+            f"(entries: {sweep1_entries})"
+        )
+        op1 = next(iter(ops1))
+
+        # ── Sweep 2 (separate invocation) ────────────────────────────────────
+        fence2 = clear_logs(gas_log_dir)
+        scn_a._post_fixture("sync_all")
+        wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=60, after=fence2)
+
+        sweep2_entries = collect_logs(
+            gas_log_dir,
+            lambda e: e.get("tag") in ("sync.all.start", "sync.all.complete"),
+            after=fence2,
+        )
+        assert sweep2_entries, "[65g1] no sub-events captured for sweep 2"
+        ops2 = {e.get("op") for e in sweep2_entries}
+        assert len(ops2) == 1 and None not in ops2, (
+            f"[65g1] sweep 2 sub-events do not share a single op id: {ops2!r}"
+        )
+        op2 = next(iter(ops2))
+
+        assert op1 != op2, (
+            f"[65g1] two separate syncAll() invocations produced the SAME op id "
+            f"({op1!r}) — correlation field is not per-invocation"
+        )
+    finally:
+        scn_a.close()
+        try:
+            scn_b._post_route("end_journey_session", {"docId": scn_b.doc_id})
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Integrity pass — GTaskSheet-cduk
 # ---------------------------------------------------------------------------
 

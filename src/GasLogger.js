@@ -1,18 +1,39 @@
 /**
  * Structured server-side logger. Buffers entries in memory and flushes to a
- * Drive folder as NDJSON on demand or when the buffer threshold is reached.
+ * Drive folder as NDJSON, and (best-effort) to Axiom, on demand or when the
+ * buffer threshold is reached.
  *
  * Setup: set script property GAS_LOGGER_FOLDER_ID to a Drive folder ID that is
  * mapped locally via Drive for Desktop (used by tests to poll log files).
+ * Axiom is optional: set AXIOM_TOKEN + AXIOM_DATASET script properties (via the
+ * set_axiom_config route, same pattern as set_test_token) to enable it. Missing
+ * config or a failed POST never blocks the Drive write (docs/atdd/journey-logging-
+ * design.md §4.3, GTaskSheet-ishz.1) -- Axiom is additive, not a dependency.
+ *
+ * Dependency: every entry is stamped with a `version` field read from the global
+ * BUILD_INFO.version (defined in Version.js) so Axiom queries can tell test/prod
+ * apart by which build is actually running. This makes GasLogger no longer
+ * standalone -- it expects BUILD_INFO to exist in the same Apps Script project
+ * (true for every deployment of this project, since clasp bundles all .js files
+ * into one global scope). Falls back to 'unknown' rather than throwing if
+ * BUILD_INFO is ever missing (e.g. GasLogger copied into a project without it).
  *
  * Usage:
  *   GasLogger.log('sync.complete', { docId, changes: 3 });
  *   GasLogger.flush();  // call in finally block of every entry-point function
+ *
+ * Correlation: startOp()/endOp() stamp an `op` field (a uuid) onto every log()
+ * entry made between the two calls, so a single top-level invocation's
+ * sub-events (e.g. syncAll()'s per-doc sync.scanned/sync.complete) share one
+ * queryable id instead of relying on time-proximity (GTaskSheet-65g1). Module-
+ * level state is safe here because each GAS execution gets its own isolated
+ * global scope -- concurrent invocations never share this variable.
  */
 var GasLogger = (function () {
   var _folder = null;
   var _entries = [];
   var _enabled = true;
+  var _currentOp = null;
   var FLUSH_THRESHOLD = 25;
 
   function _getFolder() {
@@ -28,12 +49,58 @@ var GasLogger = (function () {
     return _folder;
   }
 
+  function _postToAxiom(entries) {
+    var props = PropertiesService.getScriptProperties();
+    var token = props.getProperty('AXIOM_TOKEN');
+    var dataset = props.getProperty('AXIOM_DATASET');
+    if (!token || !dataset) return;
+    try {
+      var rows = entries.map(function (e) {
+        var row = Object.assign({ _time: e.ts, name: e.tag, side: 'gas', version: e.version }, e.data || {});
+        if (e.op) row.op = e.op;
+        return row;
+      });
+      var resp = UrlFetchApp.fetch(
+        'https://api.axiom.co/v1/datasets/' + dataset + '/ingest',
+        {
+          method: 'post',
+          contentType: 'application/json',
+          headers: { Authorization: 'Bearer ' + token },
+          payload: JSON.stringify(rows),
+          muteHttpExceptions: true,
+        }
+      );
+      if (resp.getResponseCode() >= 300) {
+        // Visible in `clasp logs` (Stackdriver) only -- never recurse through
+        // GasLogger.log() itself, and never block the Drive write either way.
+        Logger.log('GasLogger: Axiom ingest non-2xx ' + resp.getResponseCode() + ': ' + resp.getContentText());
+      }
+    } catch (err) {
+      // Best-effort only -- never let an Axiom outage block the Drive write.
+      Logger.log('GasLogger: Axiom POST threw: ' + err);
+    }
+  }
+
   return {
     enable: function () { _enabled = true; },
     disable: function () { _enabled = false; },
 
+    // Begin correlating every log() entry until endOp() is called. Returns
+    // the generated op id (callers don't need it, but it's handy for tests).
+    startOp: function () {
+      _currentOp = Utilities.getUuid();
+      return _currentOp;
+    },
+
+    endOp: function () { _currentOp = null; },
+
     log: function (tag, data) {
-      var entry = { ts: new Date().toISOString(), tag: tag, data: data || {} };
+      // version on every entry (not just call sites that remember to add it) so
+      // Axiom queries can tell test/prod apart by which BUILD_INFO.version is
+      // actually running, without touching the other ~190 call sites.
+      var version = (typeof BUILD_INFO !== 'undefined' && BUILD_INFO.version) || 'unknown';
+      var entry = { ts: new Date().toISOString(), tag: tag, version: version, data: data || {} };
+      if (_currentOp) entry.op = _currentOp;
       Logger.log(JSON.stringify(entry));
       if (!_enabled) return;
       _entries.push(entry);
@@ -48,6 +115,7 @@ var GasLogger = (function () {
         _entries.map(function (e) { return JSON.stringify(e); }).join('\n'),
         MimeType.PLAIN_TEXT
       );
+      _postToAxiom(_entries);
       _entries = [];
     },
   };

@@ -280,6 +280,9 @@ function syncDocument(docId) {
  *   - 30-minute time-based trigger
  */
 function syncAll() {
+  // opId correlates this invocation's sub-events (per-doc sync.scanned/
+  // sync.complete) in Axiom -- see GasLogger.startOp() (GTaskSheet-65g1).
+  GasLogger.startOp();
   var _syncId = _getIdentity();
   GasLogger.log('sync.all.start.identity', { eu: _syncId.eu, au: _syncId.au, version: BUILD_INFO.version });
   try {
@@ -434,7 +437,7 @@ function syncAll() {
       _getOrUpsertDocDataRow(
         ss, docIdKey,
         computedName,
-        existingRow.docModified,
+        existingRow.lastSyncTime,
         existingRow.teamId,
         existingRow.syncStatus,
         computed.actionCount,
@@ -447,6 +450,7 @@ function syncAll() {
     GasLogger.log('sync.all.error', { msg: e.message });
   } finally {
     GasLogger.flush();
+    GasLogger.endOp();
   }
 }
 
@@ -1076,11 +1080,30 @@ function assertTeamAccess(teamId, ss) {
 // ---------------------------------------------------------------------------
 
 /**
+ * DocData field contract (GTaskSheet-rename, was Doc Modified/Doc Updated):
+ *
+ * - lastSyncTime: timestamp of the last time a FULL document sync ran for
+ *   this doc (_syncTeamScope, below). Set unconditionally on every full sync
+ *   — NOT Drive's true last-modified time (that value is read transiently in
+ *   syncAll's skip-check and never persisted). Preserved as-is by any caller
+ *   that upserts this row without running a full sync (e.g. the integrity
+ *   pass, WebApp's sync_action_rows handler).
+ * - docUpdated: timestamp of the last write to THIS ROW, for any reason —
+ *   full sync, count-only reconciliation, or Doc Not Found marking. Set
+ *   unconditionally by _getOrUpsertDocDataRow on every call. ArchiveManager
+ *   relies on this freezing once a row is marked Doc Not Found (no other
+ *   upsert path touches such a row) to drive the 24h eviction timer.
+ *
+ * The two diverge only when action counts are reconciled (sheet-side edit)
+ * without the doc itself changing: docUpdated bumps, lastSyncTime does not.
+ */
+
+/**
  * Reads the single DocData row whose FileId matches docId. Read-only.
  *
  * @param {Spreadsheet} ss
  * @param {string} docId
- * @return {?{fileId: string, docName: string, docModified: Date, docUpdated: Date,
+ * @return {?{fileId: string, docName: string, lastSyncTime: Date, docUpdated: Date,
  *   syncStatus: string, teamId: string, actionCount: number, resolvedCount: number}}
  *   the matching row, or null if the DocData tab is missing or has no match.
  */
@@ -1097,7 +1120,7 @@ function _readDocDataRow(ss, docId) {
       return {
         fileId:        row[cols.file_id - 1],
         docName:       row[cols.doc_name - 1],
-        docModified:   row[cols.doc_modified - 1],
+        lastSyncTime:  row[cols.last_sync_time - 1],
         docUpdated:    row[cols.doc_updated - 1],
         syncStatus:    row[cols.sync_status - 1],
         teamId:        row[cols.team_id - 1],
@@ -1115,7 +1138,7 @@ function _readDocDataRow(ss, docId) {
  * _readDocDataRow once per ActionSheet row.
  *
  * @param {Spreadsheet} ss
- * @return {Array<{fileId: string, docName: string, docModified: Date, docUpdated: Date,
+ * @return {Array<{fileId: string, docName: string, lastSyncTime: Date, docUpdated: Date,
  *   syncStatus: string, teamId: string, actionCount: number, resolvedCount: number}>}
  *   Empty array if the DocData tab is missing or has no data rows. Rows with
  *   no FileId are skipped.
@@ -1134,7 +1157,7 @@ function _readDocDataRows(ss) {
     rows.push({
       fileId:        row[cols.file_id - 1],
       docName:       row[cols.doc_name - 1],
-      docModified:   row[cols.doc_modified - 1],
+      lastSyncTime:  row[cols.last_sync_time - 1],
       docUpdated:    row[cols.doc_updated - 1],
       syncStatus:    row[cols.sync_status - 1],
       teamId:        row[cols.team_id - 1],
@@ -1153,14 +1176,14 @@ function _readDocDataRows(ss) {
  * @param {Spreadsheet} ss
  * @param {string} fileId
  * @param {string} docName
- * @param {Date} docModified
+ * @param {Date} lastSyncTime
  * @param {string} teamId
  * @param {string} syncStatus
  * @param {number} actionCount
  * @param {number} resolvedCount
  * @return {?Object} the row data as written, or null if the DocData tab is missing.
  */
-function _getOrUpsertDocDataRow(ss, fileId, docName, docModified, teamId, syncStatus, actionCount, resolvedCount) {
+function _getOrUpsertDocDataRow(ss, fileId, docName, lastSyncTime, teamId, syncStatus, actionCount, resolvedCount) {
   var sheet = ss.getSheetByName('DocData');
   if (!sheet) return null;
   var cols       = CONTRACT_SCHEMA.sheetDocData.columnsByField;
@@ -1170,7 +1193,7 @@ function _getOrUpsertDocDataRow(ss, fileId, docName, docModified, teamId, syncSt
   var rowValues = [];
   rowValues[cols.file_id - 1]        = fileId;
   rowValues[cols.doc_name - 1]       = docName;
-  rowValues[cols.doc_modified - 1]   = docModified;
+  rowValues[cols.last_sync_time - 1]   = lastSyncTime;
   rowValues[cols.doc_updated - 1]    = docUpdated;
   rowValues[cols.sync_status - 1]    = syncStatus;
   rowValues[cols.team_id - 1]        = teamId;
@@ -1193,7 +1216,7 @@ function _getOrUpsertDocDataRow(ss, fileId, docName, docModified, teamId, syncSt
   sheet.getRange(targetRow, 1, 1, numCols).setValues([rowValues]);
 
   return {
-    fileId: fileId, docName: docName, docModified: docModified, docUpdated: docUpdated,
+    fileId: fileId, docName: docName, lastSyncTime: lastSyncTime, docUpdated: docUpdated,
     syncStatus: syncStatus, teamId: teamId, actionCount: actionCount, resolvedCount: resolvedCount
   };
 }

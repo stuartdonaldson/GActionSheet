@@ -105,6 +105,35 @@ def wait_for_log(
             raise TimeoutError(f"Aborted by user after {timeout_s}s")
 
 
+def collect_logs(log_dir: str, match_fn, after: float = 0.0) -> list:
+    """Return every NDJSON log entry matching match_fn, across all .log files.
+
+    Unlike _scan_logs (first match only), this collects all matches — used to
+    inspect a whole invocation's sub-events together (e.g. op-id correlation).
+    """
+    matches = []
+    for f in sorted(pathlib.Path(log_dir).glob("*.log")):
+        try:
+            for line in f.read_text().splitlines():
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                if after and entry.get("ts"):
+                    try:
+                        ts_s = datetime.fromisoformat(
+                            entry["ts"].replace("Z", "+00:00")
+                        ).timestamp()
+                        if ts_s < after:
+                            continue
+                    except (ValueError, OSError):
+                        pass
+                if match_fn(entry):
+                    matches.append(entry)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return matches
+
+
 def assert_log(log_dir: str | None, fence: float, match_fn, what: str) -> None:
     """Assert a matching log entry appears within 60s of `fence`. No-op if log_dir is unset."""
     if log_dir is None:
