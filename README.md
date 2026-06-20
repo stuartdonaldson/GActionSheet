@@ -25,16 +25,17 @@ A timed sweep on the ActionSheet (every 30 minutes) picks up changes in docs no 
 
 - Google account with edit access to the ActionSheet and the source Docs
 - [clasp](https://github.com/google/clasp) CLI (`npm install -g @google/clasp`)
-- A GCP project with the **Google Docs API** enabled (required for named ranges and tracker-table writes via REST `batchUpdate`)
+- A GCP project with the **Google Docs API** enabled (required for paragraph rewrites and tracker-table writes via REST `batchUpdate`)
 
 ### Setup
 
-Two Apps Script projects are deployed independently:
+**One** Apps Script project, container-bound to the ActionSheet spreadsheet, deployed simultaneously as a Workspace Add-on, a Docs editor add-on, and a Web App (see `docs/DESIGN.md` §Solution Strategy and ADR-0007):
 
-| Project | Type | Purpose |
-|---|---|---|
-| **GActionSheet Add-on** | Standalone script with Workspace Add-on manifest (Docs) | Sidebar UI, per-doc Sync, named ranges, tracker-table render |
-| **ActionSheet Automation** | Container-bound script on the ActionSheet spreadsheet | `onEdit` timestamp stamping, timed sweep, archiving |
+| Surface | Purpose |
+|---|---|
+| Workspace Add-on / Docs editor add-on (active user) | Sidebar UI, per-doc Sync, `@`-menu create-action, smart-chip preview, tracker-table render |
+| Web App (`doPost`, runs as deployer) | All ActionSheet writes — proxy for surfaces that lack direct sheet access |
+| Container-bound automation (sheet owner) | `onEdit` timestamp/Dirty stamping, 30-min sweep, archiving |
 
 Use the repo scripts instead of calling `clasp` directly:
 

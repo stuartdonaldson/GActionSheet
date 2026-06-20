@@ -7,7 +7,7 @@ Refines: ADR-0008 (chip-URL consequence only — identity decision unchanged)
 ## Context
 
 The project name `GActionSheet` is action-specific, but the project is becoming a multi-tool suite
-(see `staging/2026-05-29-workspace-addon-toolset-direction.md`). Action smart-chip links currently
+(see `staging/2026-05-29-workspace-addon-toolset-direction.md`, repo-root `staging/`, distinct from `knowledge-base/staging/`). Action smart-chip links currently
 use the action-named path `https://northlakeuu.org/GActionSheet/action/{globalId}` (the value noted
 in ADR-0008 §Consequences). As additional tools arrive — e.g. an `@`-menu LLM trigger — each needs
 its own `linkPreview` / URL pattern, and the action-specific path does not scale to a suite.

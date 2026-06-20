@@ -15,7 +15,7 @@ Stable action identity is an **in-text `AI-N:` token** at the start of each floa
 ## Contract Sources
 
 
-Human-readable contract semantics live in this document. The authoritative machine-readable contract source is [src/ContractSchema.js](/home/stuar/roots/c-dev/GActionSheet/src/ContractSchema.js).
+Human-readable contract semantics live in this document. The authoritative machine-readable contract source is [src/ContractSchema.js](../src/ContractSchema.js).
 
 **Workflow for contract changes:**
 - Update ContractSchema.js as the single source for any contract field or structure changes.
@@ -30,7 +30,7 @@ Current contract families owned by that schema file:
 - Web App `doPost()` route names.
 - Document-read model names used by verification and scenario-test helpers.
 
-Rule: when tests, fixtures, and app code need the exact same field list or column mapping, they should read or derive it from [src/ContractSchema.js](/home/stuar/roots/c-dev/GActionSheet/src/ContractSchema.js) rather than redefining it locally. If a semantic explanation is needed, this document is the place for it.
+Rule: when tests, fixtures, and app code need the exact same field list or column mapping, they should read or derive it from [src/ContractSchema.js](../src/ContractSchema.js) rather than redefining it locally. If a semantic explanation is needed, this document is the place for it.
 
 ---
 
@@ -94,7 +94,7 @@ Context column refers to the execution contexts defined in §Runtime Architectur
 | `src/appsscript.json` | Manifest — `addOns.docs` (homepage + createAction + linkPreview), webapp, oauthScopes, urlFetchWhitelist | — |
 | `src/TestWebApp.js` · `src/TestFixtures.js` | HTTP fixture dispatcher + GAS test fixtures (test-only) | ③ |
 
-**Add-on surface file naming.** Surface files use the convention `{Surface}Addon{UITech}.js`, where the suffix marks the rendering technology: `…Card.js` = CardService (Workspace Add-on), `…Html.js` = HtmlService (Editor add-on / menu-launched sidebar, reserved for future rich UIs such as an LLM side-chat). Host-agnostic logic (sync engine, Web App proxy, tracker, verify, logger) stays unsuffixed in the shared core. See the naming-conventions section of `staging/2026-05-29-workspace-addon-toolset-direction.md` for the rationale and the forward plan.
+**Add-on surface file naming.** Surface files use the convention `{Surface}Addon{UITech}.js`, where the suffix marks the rendering technology: `…Card.js` = CardService (Workspace Add-on), `…Html.js` = HtmlService (Editor add-on / menu-launched sidebar, reserved for future rich UIs such as an LLM side-chat). Host-agnostic logic (sync engine, Web App proxy, tracker, verify, logger) stays unsuffixed in the shared core. See the naming-conventions section of `staging/2026-05-29-workspace-addon-toolset-direction.md` (repo-root `staging/`, distinct from `knowledge-base/staging/`) for the rationale and the forward plan.
 
 ### Deployment Pipeline
 
@@ -261,8 +261,8 @@ Grouped by execution context (see §Runtime Architecture).
 | Component | Responsibility |
 |-----------|---------------|
 | Sync handler | `_handleSyncActionRows`: for each scanned action, inserts a new row, or (row exists) applies **Dirty-flag conflict resolution** — `Sync Status = 'Dirty'` → sheet wins (returned in `sheetWins` for the caller to flush doc-ward); otherwise doc wins (overwrite changed cells). Also removes stale duplicate rows and stamps orphans `Deleted` / `Doc Not Found`. All writes wrapped by the in-process `WriteGuard` |
-| Production routes | `sync_action_rows` (blocks until `ACTION_SHEET_QUEUE` drains), `upsert_action_rows` (editor create + async drain), `patch_action_status` / `delete_action_row` (sidebar fast paths) — auth: `WEBAPP_SECRET` |
-| Test-support routes | `edit_action_row` (replicates `onActionSheetEdit` Dirty+DateModified stamp), `find_sheet_actions` (read, docId-scoped), `append_doc_paragraph`, `patch_action_status` / `delete_action_row` ATDD wrappers (stamp Dirty so sheet-wins applies), `verify_action_rows`, `mark_doc_not_found`, `set_test_token`, `run_fixture` — auth: `testToken`; defined in `ContractSchema.js webApp.testRouteNames` |
+| Production routes | `sync_action_rows` (blocks until `ACTION_SHEET_QUEUE` drains), `upsert_action_rows` (editor create + async drain), `patch_action_status` / `delete_action_row` (sidebar fast paths), `list_importable_actions` (EPIC-D, read; team-scoped via DocData join + `assertTeamAccess`), `forward_action_rows` (EPIC-D; sets `Status='Forwarded'` + dirty-flags the source row) — auth: `WEBAPP_SECRET` |
+| Test-support routes | `edit_action_row` (replicates `onActionSheetEdit` Dirty+DateModified stamp), `find_sheet_actions` (read, docId-scoped), `append_doc_paragraph`, `patch_action_status` / `delete_action_row` ATDD wrappers (stamp Dirty so sheet-wins applies), `verify_action_rows`, `mark_doc_not_found`, `import_selected_for_test` (EPIC-D test seeding), `set_test_token`, `run_fixture` — auth: `testToken`; defined in `ContractSchema.js webApp.testRouteNames` |
 | ATDD session routes | `begin_journey_session` (empty-create doc named `GActionSheet-Test-journey-{YYYYMMDD}-{hex}` in test folder), `end_journey_session` (trash doc) — auth: `testToken`; defined in `src/AtddContracts.js` |
 
 ### ④ Container-bound automation (sheet owner)
@@ -356,16 +356,18 @@ Multiple rows may share a Team Id (a team may own several folders).
 
 ### DocData tab (per-document sync state)
 
-| Column | Purpose |
-|--------|---------|
-| FileId | Google Drive file ID (stable; FK → ActionSheet `File Id`) |
-| Doc Name | Current document name |
-| Doc Modified | Document modified timestamp (DocWins source-of-truth check) |
-| Doc Updated | Last time the DocData row was written by sync |
+| Column | Updated by | Used by |
+|--------|------------|---------|
+| FileId | Set once on first insert | FK → ActionSheet `File Id`; row lookup key |
+| Doc Name | Every full sync and reconciliation pass | Display only |
+| Last Sync Time | `_syncTeamScope` — stamped on every FULL document sync for this doc | Diagnostic only. **Not** Drive's true last-modified time — that value is read transiently during `syncAll`'s skip check and discarded, never persisted. Preserved unchanged by callers that upsert without running a full sync (integrity pass, `sync_action_rows` handler). |
+| Doc Updated | `_getOrUpsertDocDataRow` — stamped unconditionally on every write to this row, for any reason | `ArchiveManager` — the staleness clock for evicting Doc Not Found rows after 24h. Relies on no other upsert path touching a row once it is marked Doc Not Found, so this value freezes at the moment of marking. |
 | SyncStatus | `UpdateDoc` → push `DocData.Team Id` to document property on next sync |
 | Team Id | Team ID assigned to this document (matches a `TeamData.Folder Id`) |
 | Action Count | Total actions for the document |
 | Resolved Count | Total actions resolved per the shared `isResolved()` authority |
+
+`Last Sync Time` and `Doc Updated` normally move together (the same sync execution stamps both). They diverge only when the integrity-reconciliation pass updates action counts for a doc the Drive-mtime skip check decided not to re-sync: `Doc Updated` bumps, `Last Sync Time` does not.
 
 **DocWins:** when the document was modified since last sync, DocData is updated from
 document state. The one exception: if `SyncStatus == 'UpdateDoc'`, DocData wins — the team
@@ -384,6 +386,17 @@ would require rewriting N rows). Import/Notify workflows join Actions → DocDat
 to resolve Team Id.
 
 Rows written before this column existed carry blank; not backfilled automatically.
+
+### ActionSheet — `Date Created` / `Date Modified` contract
+
+| Column | Updated by | Used by |
+|--------|------------|---------|
+| Date Created | Set once on row insert (`_handleUpsertActionRows`, `WebApp.js`); never updated afterward. On import, the source action's original `Date Created` is carried over to the new row (`createdDate` payload field) rather than reset — see rationale below. | Reporting: how long an action item has been open, independent of which document currently hosts it. |
+| Date Modified | Stamped to `now` only when assignee/text/status actually changes (diff-guarded — see the `changed` check in `_handleUpsertActionRows`), by direct sheet edits (`onActionSheetEdit`), and by the various status/assignee update handlers in `WebApp.js`. | `ArchiveManager` — staleness clock for the Closed (30-day) and Doc Not Found (24h, Actions-row variant) eviction rules. Also intended to answer "how long since this action last changed," independent of which document hosts it. |
+
+**Why Date Created must survive a migration:** importing/forwarding an action into another document does not modify the action — it relocates it. The action text, assignee, and status are carried over unchanged; only the hosting document changes. Reports that measure "how long has this been open" or "how long since this last changed" would be wrong if migration reset either timestamp, so both must be treated as properties of the action, not of its current document.
+
+**Known gap:** `Date Created` is correctly preserved on import (`EditorAddonCard.js` passes `createdDate: src.created_date` into the `upsert_action_rows` payload). `Date Modified` is **not** — the insert path in `_handleUpsertActionRows` (`WebApp.js`) always stamps it to `now` on insert, including for an imported row whose content didn't change. This means an import currently looks like a "modification" to anything reading `Date Modified`, contradicting the contract above. Not fixed as part of this change — flagged for a follow-up decision.
 
 ### Auto-assignment algorithm
 
@@ -641,8 +654,8 @@ _Durable design record for the §16.10 canonical journey (GTaskSheet-5vwu). Auth
 
 | Tier | Auth | Source | Routes |
 |------|------|--------|--------|
-| Production | `WEBAPP_SECRET` | `ContractSchema.js webApp.routeNames` | `sync_action_rows`, `patch_action_status`, `delete_action_row`, `upsert_action_rows` |
-| Test-support | `testToken` | `ContractSchema.js webApp.testRouteNames` | `edit_action_row`, `find_sheet_actions`, `append_doc_paragraph`, `patch_action_status` (ATDD wrapper), `delete_action_row` (ATDD wrapper), `verify_action_rows`, `mark_doc_not_found`, `set_test_token`, `run_fixture` |
+| Production | `WEBAPP_SECRET` | `ContractSchema.js webApp.routeNames` | `sync_action_rows`, `patch_action_status`, `delete_action_row`, `upsert_action_rows`, `list_importable_actions`, `forward_action_rows` |
+| Test-support | `testToken` | `ContractSchema.js webApp.testRouteNames` | `edit_action_row`, `find_sheet_actions`, `append_doc_paragraph`, `patch_action_status` (ATDD wrapper), `delete_action_row` (ATDD wrapper), `verify_action_rows`, `mark_doc_not_found`, `import_selected_for_test`, `set_test_token`, `run_fixture` |
 | ATDD session | `testToken` | `src/AtddContracts.js` | `begin_journey_session`, `end_journey_session` |
 
 ### Completion-signal model (response-based — no log polling)

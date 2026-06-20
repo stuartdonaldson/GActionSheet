@@ -274,7 +274,7 @@ Errors are surfaced in the sidebar (for add-on operations) or logged to the auto
 | Sync | One on-demand round in the sidebar that scans the active doc and reconciles ActionSheet rows for that doc in one shot. |
 | Team Scope (`teamScope`) | The Drive file `appProperty` holding a document's assigned `Team Id`. Set once via folder-walk auto-assignment (sticky thereafter) or overridden via `DocData.SyncStatus = UpdateDoc`. |
 | TeamData | Admin-managed sheet tab mapping `Team Id` -> `Folder Id` (+ `Contact`), used for folder-walk auto-assignment and the `assertTeamAccess` security gate. |
-| DocData | Per-document sync-state sheet tab (`FileId`, `Doc Name`, `Doc Modified`, `Doc Updated`, `SyncStatus`, `Team Id`, `Action Count`, `Resolved Count`) used for DocWins reconciliation and Team Scope sync. |
+| DocData | Per-document sync-state sheet tab (`FileId`, `Doc Name`, `Last Sync Time`, `Doc Updated`, `SyncStatus`, `Team Id`, `Action Count`, `Resolved Count`) used for DocWins reconciliation and Team Scope sync. |
 | Tracker table | The in-doc summary table written by **Insert / refresh tracker**, preceded by an instructional paragraph summarizing the sync rules. |
 | Proxy-write | The pattern where the add-on calls the Web App to perform writes under the deployer identity, bridging the add-on's active-user identity to the deployer's sheet-write authority. |
 | BUILD_INFO | Version/timestamp object stamped into `src/Version.js` by `update-revision.js` before each deployment. |

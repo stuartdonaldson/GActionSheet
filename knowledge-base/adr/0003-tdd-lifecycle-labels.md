@@ -1,6 +1,6 @@
 # ADR-0003: TDD Lifecycle Labels for Issue Tracking
 
-Status: Proposed
+Status: Superseded by ADR-0006
 Date: 2026-05-20
 
 ## Context

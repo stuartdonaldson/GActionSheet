@@ -1,3 +1,6 @@
+> **Historical session review, 2026-05-25.** Point-in-time findings; not maintained. Not
+> indexed in CLAUDE.md's Document Map — kept for record only.
+
 An exhaustive analysis of your Claude Code execution streams (`*.jsonl`), active implementation files (`TestFixtures.js`, `SyncManager.js`, `WebApp.js`), and test suite configurations (`conftest.py`, `test_infrastructure.py`) reveals critical architectural and operational patterns.
 
 Below is the complete set of engineering findings and actionable recommendations to maximize development velocity, reduce repetitive token consumption, and optimize performance.

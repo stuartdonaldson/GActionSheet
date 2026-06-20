@@ -1,3 +1,7 @@
+> **Historical, POC-era.** Superseded by ADR-0008 (in-text `AI-N:` token identity, replacing
+> `namedRangeId`) and ADR-0011 (NUTS suite URL namespace, replacing the URL schemes described
+> below). Kept as a record of the POC's original design reasoning, not current guidance.
+
 Updated POC Plan
 
 Create the branch and isolate the experiment.

@@ -108,7 +108,14 @@ Beads (all created):
 - `[GATE] Freeze EPIC-D-PRE slice — accept nav design, register open seams` —
   `GTaskSheet-5fha`
 
-### EPIC-D — Add Import tab and action forwarding workflow — `GTaskSheet-yb2w`
+### EPIC-D — Add Import tab and action forwarding workflow — `GTaskSheet-yb2w` — DELIVERED
+
+Closed 2026-06-15. Import is shipped: production routes `list_importable_actions` and
+`forward_action_rows` (`src/WebApp.js`), Import tab in the homepage card
+(`src/WorkspaceAddonCard.js`), `isResolved()` extended to treat `Forwarded` as resolved.
+Covered by `tests/test_import.py`. See `docs/CONTEXT.md` UC-E and `docs/DESIGN.md`
+§③ Web App route tables for the as-built description; the plan below is retained as the
+historical decomposition record.
 
 Goal: add Import capability to pull open team-scoped actions into the current document and
 forward source actions safely.
@@ -466,25 +473,26 @@ as the authoritative source). Do not conflate with the action-identity ADR (ADR-
 
 ## Future design: sidebar tabs — Import and Notify
 
-> Updated 2026-06-04. Unimplemented proposal.
-> Depends on the team-scope + TeamData / DocData design above.
+> Updated 2026-06-17. The tabbed sidebar shell and the **Import** tab below are
+> **delivered** — see EPIC-D-PRE (`GTaskSheet-uz7h`) and EPIC-D (`GTaskSheet-yb2w`) above,
+> and `docs/CONTEXT.md` UC-E for the as-built description. Only the **Notify** tab
+> (EPIC-E, `GTaskSheet-gc43`, open) remains an unimplemented proposal.
 > Related funnel entry: Assignee reminder (§Funnel) covers similar email mechanics;
 > when both are promoted, align on a shared email-template approach.
 
-### Sidebar tab model
+### Sidebar tab model (delivered)
 
-The current sidebar (single-purpose DocStatus view) is refactored into a tabbed sidebar
-with three tabs:
+The sidebar is a tabbed CardService shell (ADR-0015) with three tabs:
 
-| Tab | Purpose |
-|-----|---------|
-| DocStatus | Existing sync-status functionality (unchanged) |
-| Import | Browse and import open team actions into the current document |
-| Notify | Email open-action reminders to assignees |
+| Tab | Purpose | Status |
+|-----|---------|--------|
+| DocStatus | Sync-status functionality | Delivered |
+| Import | Browse and import open team actions into the current document | Delivered (EPIC-D) |
+| Notify | Email open-action reminders to assignees | Proposed (EPIC-E, below) |
 
 ---
 
-### Import tab
+### Import tab — delivered, plan retained for historical record
 
 **Preconditions:** current document has a non-blank `teamScope`; sidebar is open.
 

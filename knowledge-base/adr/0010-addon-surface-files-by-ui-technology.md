@@ -8,7 +8,7 @@ Relates to: ADR-0007 (single-script dual-deployment)
 
 GActionSheet began as a single action-tracking tool and is being promoted from a POC into a
 multi-tool Google Workspace suite (Docs cleanup, AI/LLM document tooling, Sheets tools) — see
-`staging/2026-05-29-workspace-addon-toolset-direction.md`.
+`staging/2026-05-29-workspace-addon-toolset-direction.md` (repo-root `staging/`, distinct from `knowledge-base/staging/`).
 
 A concrete near-term surface, an LLM side-chat, needs **HtmlService** (a rich, client-interactive
 UI), whereas every current surface is **CardService**. The two are structurally different code,

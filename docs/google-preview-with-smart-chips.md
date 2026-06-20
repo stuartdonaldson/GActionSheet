@@ -1,3 +1,7 @@
+> **External reference notes**, captured while researching Google's smart-chip link-preview
+> API. Not maintained; superseded in practice by `docs/lessons-learned/2026-06-02-smart-chip-rendering-is-publish-gated.md`
+> and `docs/design-review-05-29.md` for current findings on this feature.
+
 [Video](https://www.youtube.com/watch?v=P69uyJYifMw)
 
 This page explains how to build a Google Workspace add-on that lets
