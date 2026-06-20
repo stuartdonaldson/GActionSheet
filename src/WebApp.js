@@ -48,7 +48,12 @@ function doGet(e) {
     urlStatus = 'unchanged';
   }
 
-  GasLogger.log('webapp.doGet', { url: url, urlStatus: urlStatus, version: BUILD_INFO.version });
+  GasLogger.log('webapp.doGet', { url: url, urlStatus: urlStatus });
+  if (e && e.parameter && e.parameter.deploy === '1') {
+    // Distinct from webapp.doGet so "a deployment just went live" is its own
+    // queryable Axiom event, not buried in every routine ping/visit.
+    GasLogger.log('webapp.deploy', { url: url });
+  }
   GasLogger.flush();
 
   // [PROBE] — note: hitting this URL also updates WEBAPP_URL (above) as a side effect.
@@ -363,6 +368,10 @@ function doPost(e) {
     return _handleSetTestToken(payload);
   }
 
+  if (payload.action === 'set_axiom_config') {
+    return _handleSetAxiomConfig(payload);
+  }
+
   // Deployment health-check routes — called by manage-deployments.js after deploy:test.
   if (payload.action === 'get_test_config') {
     var props = PropertiesService.getScriptProperties();
@@ -439,6 +448,36 @@ function _handleSetTestToken(payload) {
 }
 
 // ---------------------------------------------------------------------------
+// set_axiom_config handler  (deployment script only — requires WEBAPP_SECRET)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stores Axiom ingest config in Script Properties so GasLogger.flush() can POST
+ * server-side events there (docs/atdd/journey-logging-design.md §4.3).
+ * Called once by the deployment script after each `npm run deploy:test`, same
+ * pattern as set_test_token.
+ *
+ * Payload shape:
+ *   { secret, action: 'set_axiom_config', axiomToken: '<token>', axiomDataset: '<name>' }
+ *
+ * Response shape:
+ *   { ok: true }
+ */
+function _handleSetAxiomConfig(payload) {
+  var axiomToken = payload.axiomToken || '';
+  var axiomDataset = payload.axiomDataset || '';
+  if (!axiomToken || !axiomDataset) {
+    return _jsonResponse({ error: 'axiomToken and axiomDataset required' });
+  }
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('AXIOM_TOKEN', axiomToken);
+  props.setProperty('AXIOM_DATASET', axiomDataset);
+  GasLogger.log('axiom.config.set', { dataset: axiomDataset });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
 // upsert_action_rows handler
 // ---------------------------------------------------------------------------
 
@@ -453,6 +492,17 @@ function _handleSetTestToken(payload) {
  *   ] }
  * createdDate is optional — on insert, falls back to now if absent. Used by
  * import (AC-2) to preserve the original action's created_date on the clone.
+ *
+ * Date Created / Date Modified contract (see also DESIGN.md §ActionSheet —
+ * Date Created / Date Modified contract):
+ * - Date Created is a property of the ACTION, not of its current document.
+ *   Importing/forwarding relocates an action to another doc; it does not
+ *   modify it (text/assignee/status are unchanged), so Date Created must
+ *   survive the move — hence createdDate is threaded through on insert
+ *   instead of defaulting to now.
+ * - Date Modified should, by the same logic, also be preserved on import
+ *   (an import is not a content change). It currently is NOT — the insert
+ *   branch below always stamps `now`. Known gap, not fixed here.
  *
  * Response shape:
  *   { inserted: <count>, updated: <count> }
@@ -759,7 +809,7 @@ function _handleSyncActionRows(payload) {
     // Refresh DocData.action_count / resolved_count from the just-reconciled
     // Actions sheet (GTaskSheet-zc21) — counts exclude rows orphaned from this
     // doc (Deleted/Doc Not Found) so they track the document's live floating
-    // actions, preserving doc_name/doc_modified/team_id/sync_status.
+    // actions, preserving doc_name/last_sync_time/team_id/sync_status.
     if (docId) {
       var dcLastRow = actionsSheet.getLastRow();
       var dcActionCount   = 0;
@@ -780,7 +830,7 @@ function _handleSyncActionRows(payload) {
       _getOrUpsertDocDataRow(
         ss, docId,
         dcExisting ? dcExisting.docName : (docTitle || ''),
-        dcExisting ? dcExisting.docModified : now,
+        dcExisting ? dcExisting.lastSyncTime : now,
         dcExisting ? dcExisting.teamId : '',
         dcExisting ? dcExisting.syncStatus : '',
         dcActionCount, dcResolvedCount
@@ -993,7 +1043,7 @@ function _handleMarkDocNotFound(payload) {
       _getOrUpsertDocDataRow(
         ss, docId,
         existingDocDataRow ? existingDocDataRow.docName : '',
-        existingDocDataRow ? existingDocDataRow.docModified : new Date(),
+        existingDocDataRow ? existingDocDataRow.lastSyncTime : new Date(),
         existingDocDataRow ? existingDocDataRow.teamId : '',
         'Doc Not Found',
         existingDocDataRow ? existingDocDataRow.actionCount : 0,

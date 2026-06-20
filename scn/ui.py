@@ -950,7 +950,7 @@ class UiDriver:
                 pass
         self._post_act_check()
 
-    def show_tab(self, label: str, *, timeout: str = "15s") -> None:
+    def show_tab(self, label: str, *, timeout: str = "30s") -> None:
         """Click a sidebar card button by exact label and wait for busy to clear.
 
         Used to navigate between the homepage and sub-cards (Import, Notify) or

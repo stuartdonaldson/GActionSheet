@@ -120,6 +120,58 @@ def test_close_raises_drain_invariant_error_on_nonempty_queue(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# _post() event naming + new_doc() synthetic event (§4.1/§4.2, GTaskSheet-ishz.1)
+# ---------------------------------------------------------------------------
+
+def test_post_event_named_by_fixture_when_present(monkeypatch):
+    """_post_fixture's run_fixture envelope is named by the real fixture, not 'run_fixture'."""
+    _patch_http(monkeypatch, lambda url, payload, timeout=360: {"ok": True})
+    scn = _make_session()
+    events = []
+    scn._reporter.event = lambda phase, name, **k: events.append(name)
+
+    scn._post_fixture("move_doc_to_folder")
+
+    assert events == ["move_doc_to_folder"]
+
+
+def test_post_event_named_by_action_when_no_fixture(monkeypatch):
+    """_post_route callers (action only, no fixture key) keep their existing event name."""
+    _patch_http(monkeypatch, lambda url, payload, timeout=360: {"ok": True})
+    scn = _make_session()
+    events = []
+    scn._reporter.event = lambda phase, name, **k: events.append(name)
+
+    scn._post_route("end_journey_session", {"docId": scn.doc_id})
+
+    assert events == ["end_journey_session"]
+
+
+def test_new_doc_emits_synthetic_begin_journey_session_event(monkeypatch):
+    """new_doc()'s begin_journey_session POST happens before the Reporter exists;
+    it must still land as the session's first trace event with a real duration."""
+    # t0 in new_doc(), t1 after _http_post returns, then __init__'s own _start_time
+    times = iter([10.0, 10.25, 10.25])
+
+    class _FakeReporter:
+        def __init__(self, **kwargs):
+            self.events = []
+
+        def event(self, phase, name, **k):
+            self.events.append((phase, name, k))
+
+    monkeypatch.setattr(session_mod, "Reporter", _FakeReporter)
+    monkeypatch.setattr(session_mod.time, "monotonic", lambda: next(times))
+    _patch_http(monkeypatch, lambda url, payload, timeout=360: {"docId": "doc-created"})
+
+    scn = ScenarioSession.new_doc(SETTINGS, request=object())
+
+    assert scn._reporter.events == [
+        ("HTTP", "begin_journey_session", {"dur_s": pytest.approx(0.25), "_t_elapsed": 0.0})
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Acts
 # ---------------------------------------------------------------------------
 

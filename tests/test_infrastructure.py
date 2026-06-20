@@ -45,7 +45,7 @@ TEAMDATA_HEADERS = ["Team Id", "Folder Id", "Contact"]
 DOCDATA_HEADERS = [
     "FileId",
     "Doc Name",
-    "Doc Modified",
+    "Last Sync Time",
     "Doc Updated",
     "SyncStatus",
     "Team Id",

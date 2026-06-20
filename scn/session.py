@@ -209,7 +209,12 @@ class ScenarioSession:
         # Reporter = single owner of trace files + JUnit user_properties (R1, 80mo.16).
         # NullReporter when there is no run context (harness unit tests) — writes no files.
         self._reporter = (
-            Reporter(start_time=self._start_time, request=request)
+            Reporter(
+                start_time=self._start_time,
+                request=request,
+                axiom_dataset=settings.get("axiomDataset"),
+                axiom_token=settings.get("axiomToken"),
+            )
             if request is not None
             else NullReporter()
         )
@@ -245,7 +250,7 @@ class ScenarioSession:
         the bad response at the source (G2 fail-fast signal), then re-raise.
         """
         url = self.settings.get("webappTestUrl") or ""
-        action = payload.get("action") or payload.get("fixture") or "post"
+        action = payload.get("fixture") or payload.get("action") or "post"
         t0 = time.monotonic()
         try:
             result = _http_post(url, payload, timeout)
@@ -371,18 +376,25 @@ class ScenarioSession:
         """
         url = settings.get("webappTestUrl") or ""
         token = settings.get("testToken") or ""
+        t0 = time.monotonic()
         result = _http_post(url, {"action": "begin_journey_session", "testToken": token})
+        dur_s = time.monotonic() - t0
 
         doc_id = result.get("docId")
         if not doc_id:
             raise RuntimeError(f"begin_journey_session response missing docId: {result}")
 
-        return cls(
+        instance = cls(
             doc_id=doc_id,
             sheet_id=settings["testSheetId"],
             settings=settings,
             request=request,
         )
+        # The Reporter doesn't exist until after this POST returns (it's keyed on
+        # docId), so emit it as a synthetic first event now instead of leaving doc
+        # creation invisible (§4.2, GTaskSheet-ishz.1).
+        instance._reporter.event("HTTP", "begin_journey_session", dur_s=dur_s, _t_elapsed=0.0)
+        return instance
 
     def close(self) -> None:
         """Trash the journey doc and assert the expectation queue is empty (§4.6).

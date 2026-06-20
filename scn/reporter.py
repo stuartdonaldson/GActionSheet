@@ -16,7 +16,11 @@ Event schema (one JSONL object per line):
     phase ∈ ACT | QUERY | UIACT | CHECK | CHECKPOINT | MARK | MONITOR | HTTP
     result ∈ OK | PASS | WARN | FAIL
 
-Pure-Python; no GAS/network. Network-free so it is unit-testable in isolation.
+Optionally also POSTs the same events to Axiom (axiom_dataset/axiom_token), buffered
+and flushed in batches rather than per-event, so test runs aren't gated on a network
+round-trip per step (docs/atdd/journey-logging-design.md §4.3, GTaskSheet-ishz.1).
+This is additive only: a missing/unreachable Axiom sink never raises and never
+affects the local .jsonl/.log trace files, which remain the source of truth.
 """
 from __future__ import annotations
 
@@ -30,6 +34,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import allure
+import requests
+
+_AXIOM_FLUSH_THRESHOLD = 10
+_AXIOM_TIMEOUT_S = 5
 
 _UNSET = object()
 
@@ -60,6 +68,8 @@ class Reporter:
         node_name: str | None = None,
         console=_UNSET,
         clock=time.monotonic,
+        axiom_dataset: str | None = None,
+        axiom_token: str | None = None,
     ) -> None:
         self._start = start_time
         self._request = request
@@ -67,10 +77,14 @@ class Reporter:
         self._console = _console_from_env(console)
         self._seq = 0          # event sequence (every event())
         self._elapsed_seq = 0  # elapsed.* property sequence (mark()+checkpoint())
+        self._axiom_dataset = axiom_dataset
+        self._axiom_token = axiom_token
+        self._axiom_buffer: list[dict] = []
 
         name = node_name or (
             getattr(getattr(request, "node", None), "name", None) or "scn"
         )
+        self._run_id = name  # groups every session's events for one test in Axiom queries
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         # SCN_RUN_DIR (set by scripts/run_test_exec.py) redirects trace files into a
         # TestExec-NNN/ folder for that invocation; default unchanged otherwise (np7s).
@@ -107,7 +121,11 @@ class Reporter:
         t_elapsed = self._now_elapsed() if _t_elapsed is None else _t_elapsed
         rec = {
             "seq": self._seq,
-            "t_wall": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            # microseconds (not seconds) so Axiom's _time preserves true event
+            # order within a batch -- a flush posts up to 10 events in one POST,
+            # and second-precision timestamps would otherwise tie-break on
+            # ingestion order rather than actual occurrence order.
+            "t_wall": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
             "t_elapsed": t_elapsed,
             "phase": phase,
             "name": name,
@@ -126,6 +144,34 @@ class Reporter:
                 self._console.flush()
             except Exception:
                 pass
+        if self._axiom_dataset and self._axiom_token:
+            # Explicit "_time" (Axiom's reserved event-time field) -- without it
+            # Axiom defaults to ingestion time, which collapses every event in
+            # one flushed batch to ~the same timestamp (GTaskSheet-ishz.1 finding).
+            self._axiom_buffer.append(
+                {**rec, "_time": rec["t_wall"], "side": "python", "run_id": self._run_id}
+            )
+            if len(self._axiom_buffer) >= _AXIOM_FLUSH_THRESHOLD:
+                self.flush_axiom()
+
+    def flush_axiom(self) -> None:
+        """POST buffered events to Axiom. Best-effort: never raises, never blocks
+        the local trace files on network failure (design doc §4.3's resilience
+        requirement -- Axiom is additive, not a dependency)."""
+        if not self._axiom_buffer:
+            return
+        batch, self._axiom_buffer = self._axiom_buffer, []
+        if not (self._axiom_dataset and self._axiom_token):
+            return
+        try:
+            requests.post(
+                f"https://api.axiom.co/v1/datasets/{self._axiom_dataset}/ingest",
+                headers={"Authorization": f"Bearer {self._axiom_token}"},
+                json=batch,
+                timeout=_AXIOM_TIMEOUT_S,
+            )
+        except Exception:
+            pass
 
     @staticmethod
     def _format(rec: dict) -> str:
@@ -229,6 +275,7 @@ class Reporter:
 
     # ------------------------------------------------------------------
     def close(self) -> None:
+        self.flush_axiom()
         for fh in (self._jsonl, self._log):
             try:
                 fh.close()

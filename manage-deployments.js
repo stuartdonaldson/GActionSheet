@@ -167,6 +167,7 @@ async function deployToTarget(target, deployments, nonInteractive) {
 
   if (target === 'test') {
     await registerTestToken(match.deploymentId);
+    await registerAxiomConfig(match.deploymentId);
     await verifyConfig('test');
   }
 }
@@ -184,8 +185,12 @@ async function deployToTarget(target, deployments, nonInteractive) {
  */
 async function pingWebappUrl(url, label) {
   console.log(`\n🌐 Pinging ${label} to register WEBAPP_URL...`);
+  // ?deploy=1 tells doGet() this ping is the post-deploy ping (not a routine
+  // health check or browser visit) so it can log a distinct 'webapp.deploy'
+  // marker — gives Axiom a clean "this deployment happened" event per deploy.
+  const deployUrl = url + (url.includes('?') ? '&' : '?') + 'deploy=1';
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(deployUrl);
     const body = await resp.text();
     const firstLine = body.split('\n')[0].slice(0, 80);
     console.log(`✅ WEBAPP_URL registered. Response: ${firstLine}`);
@@ -252,6 +257,56 @@ async function registerTestToken(deploymentId) {
   settings.testTokenExpiresAt = expiresAt;
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
   console.log(`✅ Test token registered. Expires: ${expiresAt}`);
+}
+
+/**
+ * Pushes the Axiom ingest config (axiomToken/axiomDataset from local.settings.json)
+ * to the GAS WebApp via set_axiom_config — protected by WEBAPP_SECRET, same pattern
+ * as registerTestToken() — so GasLogger.flush() can POST server-side events there
+ * (docs/atdd/journey-logging-design.md §4.3, GTaskSheet-ishz.1).
+ *
+ * No-op (warns only) if axiomToken/axiomDataset aren't set in local.settings.json --
+ * Axiom is optional, not required for a deploy to succeed.
+ *
+ * @param {string} deploymentId  The TEST-WEB-APP deployment ID (for URL construction).
+ */
+async function registerAxiomConfig(deploymentId) {
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+  } catch {
+    console.warn('⚠️  Could not read local.settings.json — skipping Axiom config registration.');
+    return;
+  }
+
+  const url = webAppUrl(deploymentId);
+  const secret = settings.webappSecret;
+  const axiomToken = settings.axiomToken;
+  const axiomDataset = settings.axiomDataset;
+  if (!secret || !axiomToken || !axiomDataset) {
+    console.warn('⚠️  webappSecret/axiomToken/axiomDataset not all set in local.settings.json — skipping Axiom config registration.');
+    return;
+  }
+
+  console.log('\n📊 Registering Axiom config with GAS WebApp...');
+  try {
+    const resp = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ secret, action: 'set_axiom_config', axiomToken, axiomDataset }),
+    });
+    const body = await resp.text();
+    let parsed;
+    try { parsed = JSON.parse(body); } catch { parsed = {}; }
+    if (!parsed.ok) {
+      console.warn(`⚠️  set_axiom_config returned unexpected response: ${body}`);
+      return;
+    }
+  } catch (err) {
+    console.warn(`⚠️  Failed to register Axiom config: ${err.message}`);
+    return;
+  }
+  console.log(`✅ Axiom config registered (dataset: ${axiomDataset}).`);
 }
 
 /**

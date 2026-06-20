@@ -28,11 +28,11 @@ var CONTRACT_SCHEMA = Object.freeze({
   }),
 
   sheetDocData: Object.freeze({
-    headers: Object.freeze(['FileId', 'Doc Name', 'Doc Modified', 'Doc Updated', 'SyncStatus', 'Team Id', 'Action Count', 'Resolved Count']),
+    headers: Object.freeze(['FileId', 'Doc Name', 'Last Sync Time', 'Doc Updated', 'SyncStatus', 'Team Id', 'Action Count', 'Resolved Count']),
     columnsByField: Object.freeze({
       file_id: 1,
       doc_name: 2,
-      doc_modified: 3,
+      last_sync_time: 3,
       doc_updated: 4,
       sync_status: 5,
       team_id: 6,
@@ -90,6 +90,7 @@ var CONTRACT_SCHEMA = Object.freeze({
   webApp: Object.freeze({
     routeNames: Object.freeze([
       'set_test_token',
+      'set_axiom_config',
       'upsert_action_rows',
       'sync_action_rows',
       'verify_action_rows',

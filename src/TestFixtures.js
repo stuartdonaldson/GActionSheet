@@ -1994,7 +1994,7 @@ function setupTestFixtures(scenario, data) {
         // reconcile). Acts on a row already created by a prior sync.
         var sdrFileId = data.fileId || testDocId;
         var sdrExisting = _readDocDataRow(ss, sdrFileId) || {
-          docName: '', docModified: new Date(), syncStatus: '', teamId: '',
+          docName: '', lastSyncTime: new Date(), syncStatus: '', teamId: '',
           actionCount: 0, resolvedCount: 0
         };
         var sdrTeamId       = data.hasOwnProperty('teamId')       ? data.teamId       : sdrExisting.teamId;
@@ -2004,7 +2004,7 @@ function setupTestFixtures(scenario, data) {
         var sdrResolvedCount = data.hasOwnProperty('resolvedCount') ? data.resolvedCount : sdrExisting.resolvedCount;
         var sdrUpdated = _getOrUpsertDocDataRow(
           ss, sdrFileId,
-          sdrDocName, sdrExisting.docModified,
+          sdrDocName, sdrExisting.lastSyncTime,
           sdrTeamId, sdrSyncStatus,
           sdrActionCount, sdrResolvedCount
         );
@@ -2270,7 +2270,7 @@ function setupTestFixtures(scenario, data) {
           ['doc-id-slice-002', 'Membership Report',   tdsNow, tdsNow, '',          '',                 1, _tdsCountResolved(tdsActionSets[1])],
           ['doc-id-slice-003', 'Finance Review',      tdsNow, tdsNow, 'UpdateDoc', 'board-folder-001', 1, _tdsCountResolved(tdsActionSets[2])]
         ];
-        var tdsDocHeaders = [['FileId', 'Doc Name', 'Doc Modified', 'Doc Updated', 'SyncStatus', 'Team Id', 'Action Count', 'Resolved Count']];
+        var tdsDocHeaders = [['FileId', 'Doc Name', 'Last Sync Time', 'Doc Updated', 'SyncStatus', 'Team Id', 'Action Count', 'Resolved Count']];
 
         var tdsDocSheet = _getOrCreateSheet(ss, 'DocData');
         tdsDocSheet.clearContents();
@@ -2395,7 +2395,7 @@ function setupAndSync(scenario) {
  *   (GTaskSheet-me6w.6). When expected.teamId is set, additionally asserts:
  *     - the document's Drive appProperty 'teamScope' === expected.teamId
  *     - DocData[fileId].team_id === expected.teamId
- *     - DocData[fileId] exists with doc_name, doc_modified, action_count,
+ *     - DocData[fileId] exists with doc_name, last_sync_time, action_count,
  *       resolved_count populated and consistent with the current scan
  */
 function verifyConsistencyForTest(docId, expected) {
@@ -2550,8 +2550,8 @@ function verifyConsistencyForTest(docId, expected) {
         if (!vcfDocDataRow.docName) {
           result.issues.push('DocData.doc_name is empty for fileId=' + resolvedDocId);
         }
-        if (!vcfDocDataRow.docModified) {
-          result.issues.push('DocData.doc_modified is empty for fileId=' + resolvedDocId);
+        if (!vcfDocDataRow.lastSyncTime) {
+          result.issues.push('DocData.last_sync_time is empty for fileId=' + resolvedDocId);
         }
       }
     }

@@ -272,3 +272,69 @@ def test_elapsed_property_format_preserved(tmp_path):
     # zero-padded 2-digit seq, e.g. elapsed.01.MARK.act3
     k = [k for k in keys if k.endswith(".MARK.act3")][0]
     assert k.split(".")[1].isdigit() and len(k.split(".")[1]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Axiom sink — additive, never blocking, batched (GTaskSheet-ishz.1/§4.3)
+# ---------------------------------------------------------------------------
+
+def _make_axiom(tmp_path, *, post=None, clock=None):
+    times = iter(clock) if clock is not None else None
+    clk = (lambda: next(times)) if times is not None else (lambda: 0.0)
+    rep = Reporter(
+        start_time=0.0,
+        run_dir=str(tmp_path),
+        node_name="test_demo",
+        clock=clk,
+        axiom_dataset="nuuts",
+        axiom_token="tok-axiom",
+    )
+    return rep
+
+
+def test_no_axiom_post_attempted_without_config(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("scn.reporter.requests.post", lambda *a, **k: calls.append((a, k)))
+    rep = _make(tmp_path, clock=[0.0] * 20)  # no axiom_dataset/axiom_token
+    for _ in range(20):
+        rep.event("ACT", "a")
+    rep.close()
+    assert calls == []
+
+
+def test_axiom_buffer_flushes_at_threshold(tmp_path, monkeypatch):
+    from scn.reporter import _AXIOM_FLUSH_THRESHOLD
+
+    calls = []
+    monkeypatch.setattr("scn.reporter.requests.post", lambda *a, **k: calls.append((a, k)))
+    rep = _make_axiom(tmp_path, clock=[float(i) for i in range(_AXIOM_FLUSH_THRESHOLD + 1)])
+    for i in range(_AXIOM_FLUSH_THRESHOLD):
+        rep.event("ACT", f"step-{i}")
+    rep.close()
+    assert len(calls) == 1
+    (url,), kwargs = calls[0]
+    assert "nuuts" in url
+    assert kwargs["json"][0]["side"] == "python"
+    assert kwargs["json"][0]["run_id"] == "test_demo"
+    assert kwargs["headers"]["Authorization"] == "Bearer tok-axiom"
+
+
+def test_axiom_buffer_flushes_on_close_below_threshold(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("scn.reporter.requests.post", lambda *a, **k: calls.append((a, k)))
+    rep = _make_axiom(tmp_path, clock=[0.0, 0.1])
+    rep.event("ACT", "only-one")
+    rep.close()
+    assert len(calls) == 1
+
+
+def test_axiom_post_failure_does_not_raise_or_lose_local_trace(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr("scn.reporter.requests.post", boom)
+    rep = _make_axiom(tmp_path, clock=[0.0, 0.1])
+    rep.event("ACT", "still-local")
+    rep.close()  # must not raise
+    rows = _read_jsonl(rep)
+    assert len(rows) == 1 and rows[0]["name"] == "still-local"
