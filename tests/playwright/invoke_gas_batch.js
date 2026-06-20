@@ -31,11 +31,39 @@ const settings = JSON.parse(
 const storageState = path.join(__dirname, '..', '..', '.auth', 'user.json');
 const logDir = settings.gasLogDir || null;
 
+// Backend resolved once, mirrors tests/helpers/gas_log.py::_backend(). 'axiom' iff
+// axiomDataset+axiomQueryToken are both set in local.settings.json.
+const LOG_BACKEND = (settings.axiomDataset && settings.axiomQueryToken) ? 'axiom' : 'file';
+let logFence = 0; // axiom backend only -- set by clearLogs(), consumed by waitForLogTag()
+
 // ---------------------------------------------------------------------------
 // Log helpers (mirrors tests/helpers/gas_log.py)
 // ---------------------------------------------------------------------------
 
+async function axiomQuery(afterMs) {
+  const start = new Date(afterMs).toISOString();
+  const end = new Date().toISOString();
+  const apl = `['${settings.axiomDataset}'] | where side == 'gas' | order by _time asc | limit 500`;
+  const resp = await fetch('https://api.axiom.co/v1/datasets/_apl?format=legacy', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${settings.axiomQueryToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apl, startTime: start, endTime: end }),
+  });
+  if (!resp.ok) throw new Error(`Axiom query failed (${resp.status}): ${(await resp.text()).slice(0, 500)}`);
+  const result = await resp.json();
+  return (result.matches || []).map(m => {
+    const data = { ...m.data };
+    const tag = data.name;
+    delete data.name; delete data.version; delete data.op; delete data.parentOp; delete data.side;
+    return { ts: m._time, tag, data };
+  });
+}
+
 function clearLogs() {
+  if (LOG_BACKEND === 'axiom') {
+    logFence = Date.now() - 2000;
+    return;
+  }
   if (!logDir || !fs.existsSync(logDir)) return;
   for (const f of fs.readdirSync(logDir)) {
     if (f.endsWith('.log')) {
@@ -45,6 +73,16 @@ function clearLogs() {
 }
 
 async function waitForLogTag(tag, timeoutMs = 240000) {
+  if (LOG_BACKEND === 'axiom') {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const entries = await axiomQuery(logFence);
+      const found = entries.find(e => e.tag === tag);
+      if (found) return found;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    throw new Error(`Timeout (${timeoutMs}ms) waiting for log tag: ${tag} (axiom backend)`);
+  }
   if (!logDir || !fs.existsSync(logDir)) {
     process.stderr.write(`[batch] No logDir — skipping wait for tag: ${tag}\n`);
     return null;

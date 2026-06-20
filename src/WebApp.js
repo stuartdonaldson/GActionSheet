@@ -378,6 +378,10 @@ function doPost(e) {
     return _handleSetAxiomConfig(payload);
   }
 
+  if (payload.action === 'axiom_probe') {
+    return _handleAxiomProbe(payload);
+  }
+
   // Deployment health-check routes — called by manage-deployments.js after deploy:test.
   if (payload.action === 'get_test_config') {
     var props = PropertiesService.getScriptProperties();
@@ -479,6 +483,35 @@ function _handleSetAxiomConfig(payload) {
   props.setProperty('AXIOM_TOKEN', axiomToken);
   props.setProperty('AXIOM_DATASET', axiomDataset);
   GasLogger.log('axiom.config.set', { dataset: axiomDataset });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// axiom_probe handler  (test harness only — requires WEBAPP_SECRET)
+// ---------------------------------------------------------------------------
+
+/**
+ * Logs a 'test.axiom_probe' entry carrying a caller-supplied sentinel id, then
+ * flushes immediately. Exercises the real WebApp -> GAS -> GasLogger.flush() ->
+ * UrlFetchApp -> Axiom path -- not a Python-direct-to-Axiom shortcut, which
+ * would understate real latency by skipping the GAS/WebApp hop (GTaskSheet-ishz.5).
+ *
+ * The caller measures latency by polling Axiom for data.sentinel == sentinel
+ * after this responds; this route does not itself wait on Axiom.
+ *
+ * Payload shape:
+ *   { secret, action: 'axiom_probe', sentinel: '<uuid>' }
+ *
+ * Response shape:
+ *   { ok: true }
+ */
+function _handleAxiomProbe(payload) {
+  var sentinel = payload.sentinel || '';
+  if (!sentinel) {
+    return _jsonResponse({ error: 'sentinel required' });
+  }
+  GasLogger.log('test.axiom_probe', { sentinel: sentinel });
   GasLogger.flush();
   return _jsonResponse({ ok: true });
 }

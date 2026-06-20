@@ -6,9 +6,12 @@
  * Setup: set script property GAS_LOGGER_FOLDER_ID to a Drive folder ID that is
  * mapped locally via Drive for Desktop (used by tests to poll log files).
  * Axiom is optional: set AXIOM_TOKEN + AXIOM_DATASET script properties (via the
- * set_axiom_config route, same pattern as set_test_token) to enable it. Missing
- * config or a failed POST never blocks the Drive write (docs/atdd/journey-logging-
- * design.md §4.3, GTaskSheet-ishz.1) -- Axiom is additive, not a dependency.
+ * set_axiom_config route, same pattern as set_test_token) to enable it. Once
+ * configured, Axiom is the sole sink -- flush() does not also write the Drive
+ * file, even if the POST fails (GTaskSheet-ishz.2/ishz.3). A broken Axiom pipe
+ * is meant to surface as a test timeout (polling Axiom for an entry that never
+ * lands), not be silently absorbed by a Drive-file fallback. The Drive file
+ * remains the path used only when Axiom isn't configured at all.
  *
  * Dependency: every entry is stamped with a `version` field read from the global
  * BUILD_INFO.version (defined in Version.js) so Axiom queries can tell test/prod
@@ -69,6 +72,15 @@ var GasLogger = (function () {
     return _axiomConfig;
   }
 
+  function _writeToFile(entries) {
+    var name = new Date().getTime() + '-' + Utilities.getUuid() + '.log';
+    _getFolder().createFile(
+      name,
+      entries.map(function (e) { return JSON.stringify(e); }).join('\n'),
+      MimeType.PLAIN_TEXT
+    );
+  }
+
   function _postToAxiom(entries) {
     var config = _getAxiomConfig();
     var token = config.token;
@@ -93,11 +105,12 @@ var GasLogger = (function () {
       );
       if (resp.getResponseCode() >= 300) {
         // Visible in `clasp logs` (Stackdriver) only -- never recurse through
-        // GasLogger.log() itself, and never block the Drive write either way.
+        // GasLogger.log() itself. Intentionally NOT written to Drive either --
+        // a broken Axiom pipe is meant to surface as a test timeout, not be
+        // silently absorbed by a file fallback (GTaskSheet-ishz.2/ishz.3).
         Logger.log('GasLogger: Axiom ingest non-2xx ' + resp.getResponseCode() + ': ' + resp.getContentText());
       }
     } catch (err) {
-      // Best-effort only -- never let an Axiom outage block the Drive write.
       Logger.log('GasLogger: Axiom POST threw: ' + err);
     }
   }
@@ -138,13 +151,12 @@ var GasLogger = (function () {
 
     flush: function () {
       if (_entries.length === 0) return;
-      var name = new Date().getTime() + '-' + Utilities.getUuid() + '.log';
-      _getFolder().createFile(
-        name,
-        _entries.map(function (e) { return JSON.stringify(e); }).join('\n'),
-        MimeType.PLAIN_TEXT
-      );
-      _postToAxiom(_entries);
+      var axiom = _getAxiomConfig();
+      if (axiom.token && axiom.dataset) {
+        _postToAxiom(_entries);
+      } else {
+        _writeToFile(_entries);
+      }
       _entries = [];
     },
   };

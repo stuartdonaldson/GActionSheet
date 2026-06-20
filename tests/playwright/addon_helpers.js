@@ -27,6 +27,70 @@ const storageState = process.env.PROBE_AUTH_STATE
   : path.join(__dirname, '..', '..', '.auth', 'user.json');
 const gasLogDir = settings.gasLogDir;
 
+// Backend resolved once, mirrors tests/helpers/gas_log.py::_backend(). 'axiom' iff
+// axiomDataset+axiomQueryToken are both set in local.settings.json.
+const LOG_BACKEND = (settings.axiomDataset && settings.axiomQueryToken) ? 'axiom' : 'file';
+
+async function axiomQuery(afterMs) {
+  const start = new Date(afterMs).toISOString();
+  const end = new Date().toISOString();
+  const apl = `['${settings.axiomDataset}'] | where side == 'gas' | order by _time asc | limit 500`;
+  const resp = await fetch('https://api.axiom.co/v1/datasets/_apl?format=legacy', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${settings.axiomQueryToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apl, startTime: start, endTime: end }),
+  });
+  if (!resp.ok) throw new Error(`Axiom query failed (${resp.status}): ${(await resp.text()).slice(0, 500)}`);
+  const result = await resp.json();
+  return (result.matches || []).map(m => {
+    const data = { ...m.data };
+    const tag = data.name;
+    delete data.name; delete data.version; delete data.op; delete data.parentOp; delete data.side;
+    return { ts: m._time, tag, data };
+  });
+}
+
+// POST a sentinel through the real WebApp -> GAS -> GasLogger.flush() -> Axiom
+// path (GTaskSheet-ishz.5's axiom_probe route) -- not a JS-direct-to-Axiom
+// shortcut, which would skip the GAS/WebApp hop entirely.
+async function postAxiomProbe(sentinel) {
+  const resp = await fetch(settings.webappTestUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'axiom_probe', secret: settings.webappSecret, sentinel }),
+  });
+  if (!resp.ok) throw new Error(`axiom_probe POST failed (${resp.status})`);
+}
+
+async function waitForLogEntryAxiom(tagPredicate, timeoutMs, intervalMs, after) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const entries = await axiomQuery(after || 0);
+    const found = entries.find(tagPredicate);
+    if (found) return found;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms waiting for log entry (axiom backend)`);
+}
+
+// Sentinel-watermark absence check: a bare timeout is unsound against Axiom's
+// ingest-to-queryable latency. POST a fresh sentinel now, wait until IT lands
+// (proving ingest has caught up to "now"), then check the suspect tag is
+// absent from everything observed up to that point.
+async function assertNoLogAxiom(tagPredicate, after, what) {
+  const sentinel = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  await postAxiomProbe(sentinel);
+  const isSentinel = e => e.tag === 'test.axiom_probe' && e.data && e.data.sentinel === sentinel;
+  try {
+    await waitForLogEntryAxiom(isSentinel, 30000, 500, after);
+  } catch {
+    throw new Error(`sentinel-watermark probe never landed in Axiom within 30s -- cannot soundly assert absence (${what})`);
+  }
+  const entries = await axiomQuery(after || 0);
+  const bad = entries.find(tagPredicate);
+  if (bad) throw new Error(`unexpected log entry (${what}): ${JSON.stringify(bad)}`);
+}
+
 // Add-on display name — must match addOns.common.name in src/appsscript.json.
 // Google Docs uses this as the aria-label for the panel icon in the right column.
 const manifest = JSON.parse(
@@ -47,6 +111,7 @@ const ADDON_NAME = manifest.addOns.common.name;
  * The fence is set 10 s before now to absorb GAS-server / local clock skew.
  */
 function clearLogs() {
+  if (LOG_BACKEND === 'axiom') return Date.now() - 2000;
   const fence = Date.now() - 10000;
   if (!gasLogDir || !fs.existsSync(gasLogDir)) return fence;
   const logs = fs.readdirSync(gasLogDir).filter(n => n.endsWith('.log'));
@@ -72,6 +137,9 @@ function clearLogs() {
  *                                 to filter out stale entries from concurrent runs.
  */
 function waitForLogEntry(tagPredicate, timeoutMs = 60000, intervalMs = 500, after = 0) {
+  if (LOG_BACKEND === 'axiom') {
+    return waitForLogEntryAxiom(tagPredicate, timeoutMs, Math.max(intervalMs, 1000), after);
+  }
   return new Promise((resolve, reject) => {
     if (!gasLogDir || !fs.existsSync(gasLogDir)) {
       return reject(new Error(`gasLogDir not set or does not exist: ${gasLogDir}`));
@@ -211,4 +279,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { openDocSidebar, clickSyncNow, sidebarActionRows, clearLogs, waitForLogEntry };
+module.exports = { openDocSidebar, clickSyncNow, sidebarActionRows, clearLogs, waitForLogEntry, assertNoLogAxiom };
