@@ -21,6 +21,22 @@ Ownership rule (§16.8): this driver owns ALL selectors, iframe traversal, and
 wait/timeout knowledge — scenarios call named intents only; no Playwright objects
 leak up to the scenario layer.
 
+Locator convention (GTaskSheet-3zl5): get_by_role(..., name=...) matches the
+ARIA ACCESSIBLE NAME, not the visible text — and CardService's .setAltText()
+sets that accessible name independently of .setText(), so the two can
+diverge (e.g. the homepage Import button is labelled "Import" but its
+altText/accessible name is "View unresolved actions and import them"). Know
+which one a given locator is testing:
+  - Text-bearing button, locating by its on-screen label: match TEXT CONTENT —
+    frame.get_by_role("button").filter(has_text=re.compile(rf"^{re.escape(label)}$"))
+    not frame.get_by_role("button", name=label, exact=True), which silently
+    breaks the moment an altText override is added.
+  - Icon-only / image button with no visible text: accessible name (alt/
+    aria-label) is the ONLY signal available — name= matching is correct and
+    necessary there.
+There is no universally-correct choice between the two; pick based on what
+the button actually renders.
+
 playwright package is a runtime dependency only when using a live browser.
 Unit tests may mock the Page object; playwright need not be installed.
 """
@@ -951,18 +967,22 @@ class UiDriver:
         self._post_act_check()
 
     def show_tab(self, label: str, *, timeout: str = "30s") -> None:
-        """Click a sidebar card button by exact label and wait for busy to clear.
+        """Click a sidebar card button by visible label and wait for busy to clear.
 
         Used to navigate between the homepage and sub-cards (Import, Notify) or
-        to click Back. label must exactly match the button text rendered by
-        CardService (e.g. "Import", "Notify", "Back").
+        to click Back. label must exactly match the button TEXT rendered by
+        CardService (e.g. "Import", "Notify", "Back") — matched on visible text,
+        not accessible name, since CardService buttons may carry a richer
+        a11y altText that legitimately diverges from their visible label (e.g.
+        the homepage Import button's altText is "View unresolved actions and
+        import them"; GTaskSheet-3zl5).
         """
         with self.reporter.step("UIACT", "show_tab", label):
             ms = _parse_timeout(timeout)
             self._sidebar_card()
             assert self._current_card is not None
-            tab_btn = self._current_card.frame.get_by_role(
-                "button", name=label, exact=True
+            tab_btn = self._current_card.frame.get_by_role("button").filter(
+                has_text=re.compile(rf"^{re.escape(label)}$")
             )
             tab_btn.wait_for(state="visible", timeout=ms)
             tab_btn.click()
