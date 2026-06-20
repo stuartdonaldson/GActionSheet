@@ -92,6 +92,7 @@ function _buildTopButtonsSection() {
       .addButton(
         CardService.newTextButton()
           .setText('Import')
+          .setAltText('View unresolved actions and import them')
           .setOnClickAction(_buildCardAction('onShowImport'))
       )
       .addButton(
