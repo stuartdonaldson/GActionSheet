@@ -43,6 +43,7 @@ var GasLogger = (function () {
   var _enabled = true;
   var _currentOp = null;
   var _parentOp = null;
+  var _axiomConfig = null;
   var FLUSH_THRESHOLD = 25;
 
   function _getFolder() {
@@ -58,10 +59,20 @@ var GasLogger = (function () {
     return _folder;
   }
 
-  function _postToAxiom(entries) {
+  function _getAxiomConfig() {
+    if (_axiomConfig) return _axiomConfig;
     var props = PropertiesService.getScriptProperties();
-    var token = props.getProperty('AXIOM_TOKEN');
-    var dataset = props.getProperty('AXIOM_DATASET');
+    _axiomConfig = {
+      token: props.getProperty('AXIOM_TOKEN'),
+      dataset: props.getProperty('AXIOM_DATASET'),
+    };
+    return _axiomConfig;
+  }
+
+  function _postToAxiom(entries) {
+    var config = _getAxiomConfig();
+    var token = config.token;
+    var dataset = config.dataset;
     if (!token || !dataset) return;
     try {
       var rows = entries.map(function (e) {
