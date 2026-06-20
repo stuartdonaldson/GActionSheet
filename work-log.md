@@ -2896,3 +2896,137 @@ Drafted and published docs/USER_GUIDE.md, an end-user guide for GActionSheet. It
 
 ### Key Learnings:
 This repo's GitHub Pages is already live (legacy/Jekyll build, source = master root) and was already serving assets/ images via raw URLs referenced in Constants.js — but markdown files without YAML front matter are served as raw text/markdown, not rendered HTML. Minimal front matter (`---\ntitle: ...\n---`) is sufficient to opt a .md file into Jekyll's HTML rendering on GitHub Pages; no separate HTML conversion step or _config.yml needed. Relative asset paths (e.g. ../assets/product-details/...) continue to resolve correctly post-render since Jekyll preserves source directory structure.
+
+## 2026-06-18 09:35:49
+
+### Summary:
+Executed Batches 2 and 3 of TEST-DEV-PLAN-2026-06-17.md (test/debug backlog while the TEST deployment is out for stakeholder review). Batch 2 (no-deploy): closed GTaskSheet-u0bb (sidebar Team section coverage — team-set/anchor-link vs team-absent/"(none)" states, added `test_sidebar_team_header` to tests/test_sidebar.py, unblocked GTaskSheet-ht19) and GTaskSheet-28q (parentheses-in-action-text status-token hardening, new tests/test_status_token_parens.py locking down the existing trailing-`(Status)` regex behavior for mid-text-parens-with/without-status and the ambiguous trailing-only-parens case). Reclassified GTaskSheet-dq6t out of Batch 2 into Batch 3 after finding its ACs need a table/list doc-seeding fixture that didn't exist (only plain-paragraph `append_doc_paragraph` was available) — closing it required new GAS code and therefore a deploy.
+
+Batch 3 (one controlled `npm run deploy:test` cycle, rev 254): closed GTaskSheet-apcu, -cduk, -ez2e, -dq6t. apcu needed a new testToken-gated `forward_action_rows_test` route (ContractSchema.js + WebApp.js) since the production `forward_action_rows` is `secret`-gated and unreachable from the test harness; covers UC-E AC4's duplicate-forward guard (tests/test_import.py::test_forward_duplicate_guard). cduk's twin IMP (GTaskSheet-6ipb) was marked Closed in bd with **no actual implementation anywhere in the codebase** (no `sync.integrity.complete` log tag, no commit) — implemented the syncAll() DocData integrity pass in SyncManager.js per its frozen AC1-AC5 contract, verified against the pre-existing `test_docdata_integrity_pass` (already written to that contract, just waiting on the code); also extended `set_docdata_row` to support overriding actionCount/resolvedCount/docName, which that test needs. ez2e covered `menuSyncActiveDoc()`/`menuInsertTrackerActiveDoc()` (MenuHandler.js), which depend on `DocumentApp.getActiveDocument()` — unreachable from the stateless `run_fixture` webapp execution — by adding a `TEST_DOC_ID` script-property fallback plus two new TestFixtures.js cases and tests in tests/test_menu_entry_points.py. dq6t scoped to AC-1 through AC-6 (scanner detection in lists/table-cells/tracker-exclusion) via three new doc-seeding fixtures (`append_doc_table`, `append_doc_list_item`, `append_tracker_cell_text`) and new tests/test_floating_action_scanner.py; AC-4's "prefix AI: task" sub-case doesn't match shipped behavior (token must be paragraph-anchored) — documented instead of "fixed"; AC-7/AC-8 (`@create` caret placement inside a table cell) split into follow-up GTaskSheet-4hqn since they need new UiDriver caret-placement capability. Also fixed an unrelated pre-existing bug found while regression-testing: `seed_row` never forwarded `data.globalId` into the row it built. Filed (not fixed, needs a product decision) GTaskSheet-0f0s: `test_sync_all`'s `[nv6g]` assertion assumes a 24h Doc-Not-Found archive eviction threshold, but `ArchiveManager.js` actually uses a flat 30 days for everything. `zai6` (optional stretch) deferred. All work committed locally (7baef4f, 998d9fb) but **not pushed** per explicit no-deploy/no-push instruction during the stakeholder review window — Batch 3 was the one approved exception for the deploy itself, not for pushing to remote.
+
+### Key Learnings:
+A bd issue marked Closed is a claim about a past state, not a current guarantee — `GTaskSheet-6ipb` was Closed with zero trace of its implementation in the repo (no log tag, no commit), only discoverable by actually grepping for the contract's own stated log tag (`sync.integrity.complete`) before trusting the closure and writing tests against "already-shipped" behavior. When a TST ticket's own filing description proposes a fixture approach ("build via REST API or append_doc_paragraph"), verify the named fixture actually supports that shape before accepting the plan — `append_doc_paragraph` only ever supported a body-level plain paragraph, so dq6t's table/list ACs were silently undoable without new GAS code, despite reading as pure test-code additions. `DocumentApp.getActiveDocument()` only resolves inside a real container-bound UI session (menu click, onOpen) — it returns null when invoked via a stateless webapp/run_fixture HTTP execution, so any production code relying on it needs an explicit test-mode fallback (here, the same `TEST_DOC_ID` script property `_handleRunFixture` already stages) to be testable at all. A test failing deep into a long pre-existing scenario can be a *different*, unrelated pre-existing bug uncovered by getting further than before (seed_row's dropped globalId masked the separate ArchiveManager 24h-vs-30-day threshold mismatch) — worth distinguishing "I broke this" from "this was already broken and my fix let the test run far enough to find the next break," and scoping fixes accordingly (fixed the one-liner, filed the deeper one for a product decision rather than guessing at the right threshold).
+
+## 2026-06-19 09:59:48
+
+### Summary:
+Implemented and tested GTaskSheet-4tnr (Doc Not Found eviction redesign), but
+session ended mid-cleanup with nothing yet committed/pushed — three independent
+changesets remain uncommitted in the working tree, plus one full-suite run still
+blocked by an unrelated stale test constant.
+
+- **GTaskSheet-4tnr** (`src/ArchiveManager.js`, `src/WebApp.js`): rewrote the
+  archive sweep from per-row appendRow/deleteRow to a single bulk read →
+  partition → at-most-two-range-write per sheet, wrapped in a LockService lock
+  scoped to just that read-modify-write. `_handleMarkDocNotFound` now stamps
+  Date Modified on every Actions row for a docId at the same moment, so
+  siblings age out of the 24h threshold together. DocData eviction added:
+  a "Doc Not Found" DocData row is evicted once no Actions row references
+  that docId, reusing the existing `_extractDocIdFromString` helper instead of
+  a new regex. Extended (not new) `tests/test_sync_all.py` to assert batched
+  eviction and DocData/Actions consistency — verified passing in isolation.
+  Issue still `in_progress`: full pytest -x suite not yet clean end-to-end,
+  nothing committed.
+- **GTaskSheet-y8a0 (closed)**: fixed `tests/test_import.py::test_import_access_filter`
+  — second `show_tab("Import")` call needs `show_tab("Back")` first (sidebar
+  was already on the Import card, which has no button literally named
+  "Import"). The "File is in trash" dialog seen in failure screenshots was a
+  side effect of the resulting stuck 15s wait, not an independent cause —
+  never recurred after the fix.
+- **GTaskSheet-3sgr (open, P3)**: added `scn.ui.describe_visible_buttons()`,
+  wired into both `UiDriver.capture_failure()` and `tests/conftest.py`'s
+  `pytest_runtest_makereport` hook — every UI test failure report now lists
+  each frame's visible button accessible names (DOM/ARIA-based, not OCR).
+  Issue tracks validating this earns its keep on real failures before
+  promoting the convention into documented best practices.
+- **GTaskSheet-csbv.3**: added a tooltip (`setAltText`) to the sidebar's
+  "Import" button reading "View unresolved actions and import them"
+  (`src/WorkspaceAddonCard.js`). NOT yet deployed/verified — needs to confirm
+  `setAltText` doesn't override the button's accessible name and break the
+  many existing `get_by_role("button", name="Import", exact=True)` locators
+  used throughout the test suite, since CardService renders `setAltText` as
+  the accessible name on icon-only buttons elsewhere in this codebase (an
+  untested combination for a TextButton that also has visible text).
+
+### Key Learnings:
+- A separate, parallel session (forked from `/btw`) independently renamed
+  DocData's `doc_modified`/`Doc Modified` field to `last_sync_time`/`Last Sync
+  Time` across `ContractSchema.js`, `SyncManager.js`, `TestFixtures.js`,
+  `WebApp.js`, and design docs — landing uncommitted in the same working tree
+  as this session's work. It's internally consistent (parses clean, GAS-side
+  reads/writes all updated) but incomplete end-to-end: `tests/test_infrastructure.py`
+  hardcodes `DOCDATA_HEADERS` as a literal Python list (not generated from the
+  contract export), still expecting the old header text — this surfaced as a
+  spurious full-suite failure for GTaskSheet-4tnr that has nothing to do with
+  archive/eviction logic. Running combined, uncoordinated changesets through
+  one full-suite pass conflates unrelated failures; isolating via `git stash`
+  before a close-out verification run is the planned fix, pending user
+  confirmation.
+- `bd` issues can be created independently by parallel sessions investigating
+  the same live failure in real time (GTaskSheet-y8a0 was filed by another
+  session while this one was mid-investigation of the identical bug) — worth
+  checking `bd` for an existing issue before deep-diving a failure, even
+  mid-session.
+- Screenshot-on-UI-failure (GTaskSheet-3tkf) was already automatic and
+  correctly captured every failure in this session, but lacked DOM-derived
+  state (visible button names) that would have shortened root-cause time —
+  now added in GTaskSheet-3sgr's `describe_visible_buttons()`.
+
+### Outstanding for next session:
+- Decide on stashing the rename changeset to get a clean full-suite run, then
+  deploy + verify the Import-button tooltip, then sequence/commit the three
+  (now four) independent changesets and push per the mandatory session-close
+  workflow — none of this has been committed yet.
+
+## 2026-06-19 17:01:18
+
+### Summary:
+Evaluated docs/atdd/journey-logging-design.md and replaced its proposed standalone
+Apps Script webapp + Sheet sink (§4.3) with Axiom as the shared logging sink, after
+confirming with a POC (curl ingest+query round-trip against dataset `nuuts`) that it
+covers the same need with less new infrastructure. Implemented the approved slice
+(GTaskSheet-ishz.1/.2): §4.1 fixture-name-wins event naming and §4.2 synthetic
+`begin_journey_session` event in scn/session.py; buffered Axiom POST sink in
+scn/reporter.py (Python) and src/GasLogger.js (GAS), gated by axiomDataset/axiomToken
+in local.settings.json; `set_axiom_config` WEBAPP_SECRET-gated route (WebApp.js +
+ContractSchema.js) and `registerAxiomConfig()` in manage-deployments.js, wired into
+`npm run deploy:test`. Added unit tests for the naming/synthetic-event fixes and the
+Axiom buffering/resilience behavior (tests/test_scn_session.py, tests/test_scn_reporter.py).
+Per follow-up feedback, also auto-stamped every GasLogger.log() entry with
+BUILD_INFO.version (was ad hoc, ~190 call sites) and added an explicit `webapp.deploy`
+marker event so each deploy is unambiguously identifiable in Axiom, and documented
+GasLogger's new dependency on BUILD_INFO with a defensive fallback.
+
+Deployed to TEST and verified end-to-end: events landed in Axiom for the deploy
+marker, test-token/axiom-config registration, and a full pytest scenario run.
+Used the resulting Axiom data to do real timing analysis (p95/avg duration by event
+name, slowest tests by total traced time) and found a genuine root cause for
+test_b7_write_routes's 68s sync_document outlier: a ~13-event `sync.warn` retry loop,
+not GAS execution time. The full regression suite run during this also reproduced
+test_import_access_filter's known intermittent Playwright timeout
+(GTaskSheet-y8a0/-3sgr/-1o7g) live, now with full Axiom trace coverage of the failure.
+
+### Key Learnings:
+- GAS manifest `urlFetchWhitelist` (src/appsscript.json) silently blocks
+  UrlFetchApp.fetch() to any domain not listed, and a try/catch around the call
+  swallows the resulting exception with no visible error — this is why the first
+  deploy produced zero Axiom rows despite the code being otherwise correct. Added
+  api.axiom.co to the whitelist and added Logger.log() visibility for future
+  non-2xx/thrown POSTs so this class of failure isn't silent again.
+- Axiom defaults `_time` to ingestion time when an event has no explicit `_time`
+  field. Reporter.flush_axiom() batches up to 10 events per POST, so without an
+  explicit `_time` mapped from the real event timestamp (t_wall), every event in
+  one flushed batch appeared to occur simultaneously — collapsing true relative
+  ordering. Fixed by bumping t_wall to microsecond precision and explicitly setting
+  `_time` from it on the Python side (GAS side was already correct, since GasLogger
+  captures `ts` at log()-call time, not flush time).
+- Auditing all 192 GasLogger.log() tag literals confirmed two competing naming
+  conventions (dot.case domain.event vs SCREAMING_SNAKE entry-point names) and zero
+  call-tree correlation ID anywhere (e.g. syncAll()'s per-doc sub-events are only
+  associable with their parent invocation by time-proximity inference). Filed both
+  as separate beads (GTaskSheet-65g1 P1 correlation-ID, GTaskSheet-x94a P2 naming
+  taxonomy) with full findings/evidence/draft AC, explicitly for independent
+  re-analysis in a fresh session rather than acting on this session's notes as-is.
+- local.settings.json key was typo'd as `axiomDataSet` (capital S) against the
+  project's camelCase convention (`axiomToken`, `webappTestUrl`) — cost a deploy
+  cycle to catch via the "Axiom config registration skipped" warning.
