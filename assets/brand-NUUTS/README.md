@@ -18,7 +18,7 @@ brand-NUUTS/
 │   ├── status-review.svg
 │   ├── status-done.svg
 │   ├── status-closed.svg
-│   ├── status-unknown.svg       ← fallback for unrecognised status
+│   ├── status-other.svg         ← fallback for non-standard/unrecognised status
 │   └── action-delete.svg        ← delete button icon (sidebar)
 ├── Design language and logo requirements.zip
 └── Northlake-UU-Tool-Suite-Marks.pptx

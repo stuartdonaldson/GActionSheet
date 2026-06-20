@@ -899,7 +899,7 @@ function _handleVerifyChipIntegrity(payload) {
   for (var si = 0; si < statusKeys.length; si++) {
     urlToStatus[_ACTION_STATUS_IMAGES[statusKeys[si]]] = statusKeys[si].toLowerCase();
   }
-  urlToStatus[_ACTION_DEFAULT_IMAGE] = 'unknown'; // status-unknown.png = any non-standard status
+  urlToStatus[_ACTION_DEFAULT_IMAGE] = 'other'; // status-other.png = any non-standard status (matches the 'other' exemption in Check 3 below)
 
   var violations = [];
   var checkedCount = 0;

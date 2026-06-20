@@ -34,7 +34,7 @@ That's all you need to get going — read on for the rest of what GActionSheet c
 | In Review | ![In Review](../assets/product-details/status-review.png) |
 | Done | ![Done](../assets/product-details/status-done.png) |
 | Closed | ![Closed](../assets/product-details/status-closed.png) |
-| Unknown / free-form | ![Unknown](../assets/product-details/status-unknown.png) |
+| Other / free-form | ![Other](../assets/product-details/status-other.png) |
 
 ---
 

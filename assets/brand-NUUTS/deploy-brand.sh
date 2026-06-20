@@ -78,7 +78,7 @@ ink_status "$SOURCE_DIR/status-in-progress.svg" "$PRODUCT_DETAILS/status-in-prog
 ink_status "$SOURCE_DIR/status-review.svg"      "$PRODUCT_DETAILS/status-review.png"
 ink_status "$SOURCE_DIR/status-done.svg"        "$PRODUCT_DETAILS/status-done.png"
 ink_status "$SOURCE_DIR/status-closed.svg"      "$PRODUCT_DETAILS/status-closed.png"
-ink_status "$SOURCE_DIR/status-unknown.svg"     "$PRODUCT_DETAILS/status-unknown.png"
+ink_status "$SOURCE_DIR/status-other.svg"       "$PRODUCT_DETAILS/status-other.png"
 ink "$SOURCE_DIR/action-delete.svg"      "$PRODUCT_DETAILS/action-delete.png"
 
 # Brand logos
@@ -117,8 +117,8 @@ var _PRODUCT_DETAILS_BASE = '${GITHUB_PAGES_BASE}/';
 /** Ordered list of valid action statuses. Must match ActionSheet dropdown. */
 var _ACTION_STATUSES = ['Open', 'In Progress', 'In Review', 'Done', 'Closed'];
 
-/** Fallback image for unknown/unrecognised status values. */
-var _ACTION_DEFAULT_IMAGE = _PRODUCT_DETAILS_BASE + 'status-unknown.png';
+/** Fallback image for non-standard/unrecognised status values (e.g. 'Backlog'). */
+var _ACTION_DEFAULT_IMAGE = _PRODUCT_DETAILS_BASE + 'status-other.png';
 
 /** Status → icon URL map used by CardService buttons and Docs inline images. */
 var _ACTION_STATUS_IMAGES = {

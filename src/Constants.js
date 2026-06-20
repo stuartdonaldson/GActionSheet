@@ -8,8 +8,8 @@ var _PRODUCT_DETAILS_BASE = 'https://stuartdonaldson.github.io/GActionSheet/asse
 /** Ordered list of valid action statuses. Must match ActionSheet dropdown. */
 var _ACTION_STATUSES = ['Open', 'In Progress', 'In Review', 'Done', 'Closed'];
 
-/** Fallback image for unknown/unrecognised status values. */
-var _ACTION_DEFAULT_IMAGE = _PRODUCT_DETAILS_BASE + 'status-unknown.png';
+/** Fallback image for non-standard/unrecognised status values (e.g. 'Backlog'). */
+var _ACTION_DEFAULT_IMAGE = _PRODUCT_DETAILS_BASE + 'status-other.png';
 
 /** Status → icon URL map used by CardService buttons and Docs inline images. */
 var _ACTION_STATUS_IMAGES = {
