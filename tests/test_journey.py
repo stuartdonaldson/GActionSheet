@@ -26,11 +26,13 @@ Deviations from §16.10 (mechanical, not design):
        add-on.
 """
 import pathlib
+import time
 
 import pytest
 
 from scn.ai import ai
 from scn.engine import CheckpointKind, Severity, Surface
+from scn.reporter import emit_standalone_event
 from scn.session import ScenarioSession
 from scn.ui import UiDriver
 from tests.helpers.gas_log import assert_log, clear_logs
@@ -48,11 +50,19 @@ WARN = Severity.WARN
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def browser_page():
-    """Launch Chromium with saved auth state; yield the page for Acts 4-5."""
+def browser_page(settings):
+    """Launch Chromium with saved auth state; yield the page for Acts 4-5.
+
+    Module-scoped, so this launch/teardown happens outside any single test's
+    ScenarioSession/Reporter lifetime — timed and emitted directly via
+    emit_standalone_event (GTaskSheet-j8cn gap-instrumentation) rather than
+    being an invisible gap between tests.
+    """
     from playwright.sync_api import sync_playwright
 
     auth = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+    run_id = pathlib.Path(__file__).stem  # module-scoped: no per-test request.node here
+    t0 = time.monotonic()
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         ctx = browser.new_context(
@@ -60,9 +70,12 @@ def browser_page():
             viewport={"width": 1280, "height": 900},
         )
         page = ctx.new_page()
+        emit_standalone_event(settings, run_id=run_id, name="browser_launch", dur_s=time.monotonic() - t0)
         yield page
+        t1 = time.monotonic()
         ctx.close()
         browser.close()
+        emit_standalone_event(settings, run_id=run_id, name="browser_teardown", dur_s=time.monotonic() - t1)
 
 
 @pytest.fixture

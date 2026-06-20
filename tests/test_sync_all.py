@@ -412,6 +412,69 @@ def test_sync_all_op_correlation(settings, gas_log_dir, request):
             pass
 
 
+def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
+    """GTaskSheet-j8cn: syncAll()'s op id crosses the addon->WebApp HTTP boundary
+    as parentOp, without the WebApp's own doPost execution adopting it as `op`.
+
+    A sweep over 2 docs makes 2 separate sync_action_rows doPost calls (one per
+    doc) -- each is its own GAS execution, so each gets its own fresh `op` on
+    the webapp.request entry. Both must carry the SAME parentOp, equal to the
+    sweep's own op (independently verified by test_sync_all_op_correlation).
+    """
+    if not gas_log_dir:
+        pytest.skip("gas_log_dir not configured — op correlation requires GAS log access")
+
+    import time
+
+    from tests.helpers.gas_log import clear_logs, collect_logs, wait_for_log
+
+    scn_a = ScenarioSession.new_doc(settings, request=request)
+    scn_b = ScenarioSession.new_doc(settings)
+    try:
+        scn_a.append_paragraph("AI-1: j8cn op-propagation doc A")
+        scn_a.sync()
+        scn_b.append_paragraph("AI-1: j8cn op-propagation doc B")
+        scn_b.sync()
+        time.sleep(12)  # see test_sync_all_op_correlation's clock-skew note
+
+        fence = clear_logs(gas_log_dir)
+        scn_a._post_fixture("sync_all")
+        wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=60, after=fence)
+
+        sweep_op_entries = collect_logs(
+            gas_log_dir, lambda e: e.get("tag") == "sync.all.start", after=fence,
+        )
+        assert sweep_op_entries, "[j8cn] no sync.all.start captured for sweep"
+        sweep_op = sweep_op_entries[0].get("op")
+        assert sweep_op, "[j8cn] sweep has no op id of its own — precondition for this test failed"
+
+        webapp_entries = collect_logs(
+            gas_log_dir,
+            lambda e: e.get("tag") == "webapp.request" and (e.get("data") or {}).get("action") == "sync_action_rows",
+            after=fence,
+        )
+        assert len(webapp_entries) >= 2, (
+            f"[j8cn] expected ≥2 sync_action_rows webapp.request entries (one per doc), got {webapp_entries!r}"
+        )
+
+        webapp_ops = {e.get("op") for e in webapp_entries}
+        assert len(webapp_ops) == len(webapp_entries) and None not in webapp_ops, (
+            f"[j8cn] each doPost execution should mint its OWN op id, not share one: {webapp_ops!r}"
+        )
+
+        webapp_parent_ops = {e.get("parentOp") for e in webapp_entries}
+        assert webapp_parent_ops == {sweep_op}, (
+            f"[j8cn] all sync_action_rows calls in this sweep should carry parentOp={sweep_op!r}, "
+            f"got {webapp_parent_ops!r}"
+        )
+    finally:
+        scn_a.close()
+        try:
+            scn_b._post_route("end_journey_session", {"docId": scn_b.doc_id})
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Integrity pass — GTaskSheet-cduk
 # ---------------------------------------------------------------------------

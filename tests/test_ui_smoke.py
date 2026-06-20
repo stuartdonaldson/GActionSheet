@@ -14,20 +14,29 @@ monitor: an unexpected GAS response or a `*.error` log entry aborts at the act.
 Run:  npm run test:ui-smoke     (streams the live trace; -s enabled)
 """
 import pathlib
+import time
 
 import pytest
 
 from scn.ai import ai
+from scn.reporter import emit_standalone_event
 from scn.session import ScenarioSession
 from scn.ui import UiDriver
 
 
 @pytest.fixture(scope="module")
-def browser_page():
-    """Launch Chromium with saved auth state; yield the page for the UI acts."""
+def browser_page(settings):
+    """Launch Chromium with saved auth state; yield the page for the UI acts.
+
+    Module-scoped, so launch/teardown is outside any single test's Reporter
+    lifetime — timed and emitted directly via emit_standalone_event
+    (GTaskSheet-j8cn gap-instrumentation).
+    """
     from playwright.sync_api import sync_playwright
 
     auth = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+    run_id = pathlib.Path(__file__).stem
+    t0 = time.monotonic()
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         ctx = browser.new_context(
@@ -35,9 +44,12 @@ def browser_page():
             viewport={"width": 1280, "height": 900},
         )
         page = ctx.new_page()
+        emit_standalone_event(settings, run_id=run_id, name="browser_launch", dur_s=time.monotonic() - t0)
         yield page
+        t1 = time.monotonic()
         ctx.close()
         browser.close()
+        emit_standalone_event(settings, run_id=run_id, name="browser_teardown", dur_s=time.monotonic() - t1)
 
 
 @pytest.fixture

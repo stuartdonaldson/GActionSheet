@@ -587,6 +587,10 @@ class ScenarioSession:
                 )
             return {"scope": "SHEET", "rows": len(rows)}
         result = self._post_route("verify_action_rows", {"docId": self.doc_id})
+        result_violations = result.get("violations", [])
+        if result_violations:
+            lines = "\n".join(f"  {v['docId']}: {v['issue']}" for v in result_violations)
+            raise AssertionError(f"Action-row violations ({len(result_violations)}):\n{lines}")
         chip = self._post_route("verify_chip_integrity", {"docId": self.doc_id})
         if self._appended_actions > 0:
             assert chip.get("checked_count", 0) > 0, (

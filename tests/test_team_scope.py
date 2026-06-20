@@ -28,6 +28,8 @@ rows required by S1a/S1b/S1c/S8 — so S6 uses the same no-team-folder setup as
 S2, which produces the same observable outcome (blank teamScope, no-match
 log).
 """
+import pytest
+
 from scn.engine import CheckpointKind, Surface
 from scn.session import ScenarioSession
 from tests.helpers.gas_log import assert_log as _assert_log
@@ -35,6 +37,7 @@ from tests.helpers.gas_log import assert_no_log as _assert_no_log
 from tests.helpers.gas_log import clear_logs
 
 SHEET = Surface.SHEET
+DOC = Surface.DOC
 STEP = CheckpointKind.STEP
 
 
@@ -330,6 +333,23 @@ def test_team_scope(settings, gas_log_dir, request):
         assert err is None, err
         scn_a.expect_callable(check_8, on=SHEET, tag="teamscope sticky-after-move", entry_point="syncDocument")
         scn_a.checkpoint(STEP)
+
+        # ── S9 — drift detection: DocData.teamId out of step with Drive's
+        # teamScope appProperty is caught by verify_consistency(DOC), not
+        # silently trusted (GTaskSheet-j8cn: _syncTeamScope now trusts the
+        # DocData mirror instead of re-reading Drive every sync, so this is
+        # the one remaining place that catches the two falling out of step).
+        # set_docdata_row touches DocData only — Drive's teamScope (still
+        # "TestTeamA" from S8) is left untouched, so this is a real mismatch,
+        # not a simulated one.
+        assert _team_scope(scn_a) == "TestTeamA", "S9 precondition: Drive teamScope should still be TestTeamA"
+        _set_docdata(scn_a, teamId="TestTeamAChild")
+        with pytest.raises(AssertionError, match="teamScope drift"):
+            scn_a.verify_consistency(scope=DOC)
+
+        # Proven non-vacuous: restoring agreement makes the same check pass.
+        _set_docdata(scn_a, teamId="TestTeamA")
+        scn_a.verify_consistency(scope=DOC)  # must not raise
 
     finally:
         for scn in sessions:

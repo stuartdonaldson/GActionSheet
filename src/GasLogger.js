@@ -28,12 +28,21 @@
  * queryable id instead of relying on time-proximity (GTaskSheet-65g1). Module-
  * level state is safe here because each GAS execution gets its own isolated
  * global scope -- concurrent invocations never share this variable.
+ *
+ * Cross-execution correlation: startOp(receivedOpId) never adopts the caller's
+ * op id as this execution's own -- that would collapse concurrent/replayed
+ * invocations under one id. Instead this execution still mints its own fresh
+ * op, and (if a receivedOpId was passed in) stamps it onto every entry as a
+ * separate `parentOp` field. getCurrentOp() lets a caller read its own op id
+ * before issuing a UrlFetchApp call so it can pass it along as opId in the
+ * request payload (GTaskSheet-j8cn).
  */
 var GasLogger = (function () {
   var _folder = null;
   var _entries = [];
   var _enabled = true;
   var _currentOp = null;
+  var _parentOp = null;
   var FLUSH_THRESHOLD = 25;
 
   function _getFolder() {
@@ -58,6 +67,7 @@ var GasLogger = (function () {
       var rows = entries.map(function (e) {
         var row = Object.assign({ _time: e.ts, name: e.tag, side: 'gas', version: e.version }, e.data || {});
         if (e.op) row.op = e.op;
+        if (e.parentOp) row.parentOp = e.parentOp;
         return row;
       });
       var resp = UrlFetchApp.fetch(
@@ -87,12 +97,19 @@ var GasLogger = (function () {
 
     // Begin correlating every log() entry until endOp() is called. Returns
     // the generated op id (callers don't need it, but it's handy for tests).
-    startOp: function () {
+    // receivedOpId (optional): a caller's own op id, propagated in as `parentOp`
+    // on every entry -- this execution still mints its own fresh op either way.
+    startOp: function (receivedOpId) {
       _currentOp = Utilities.getUuid();
+      _parentOp = receivedOpId || null;
       return _currentOp;
     },
 
-    endOp: function () { _currentOp = null; },
+    endOp: function () { _currentOp = null; _parentOp = null; },
+
+    // Lets a caller read its own current op id before issuing a UrlFetchApp
+    // call into another execution, so it can pass it along as opId.
+    getCurrentOp: function () { return _currentOp; },
 
     log: function (tag, data) {
       // version on every entry (not just call sites that remember to add it) so
@@ -101,6 +118,7 @@ var GasLogger = (function () {
       var version = (typeof BUILD_INFO !== 'undefined' && BUILD_INFO.version) || 'unknown';
       var entry = { ts: new Date().toISOString(), tag: tag, version: version, data: data || {} };
       if (_currentOp) entry.op = _currentOp;
+      if (_parentOp) entry.parentOp = _parentOp;
       Logger.log(JSON.stringify(entry));
       if (!_enabled) return;
       _entries.push(entry);

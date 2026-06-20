@@ -292,6 +292,12 @@ function doPost(e) {
     return _jsonResponse({ error: 'bad JSON' }, 200);
   }
 
+  // This execution's own op id, carrying the addon caller's op id (if any) as
+  // parentOp on every entry made while handling this request -- the HTTP-
+  // boundary leg of GTaskSheet-65g1's correlation (GTaskSheet-j8cn). Never
+  // adopts payload.opId as this execution's own op (see GasLogger.startOp doc).
+  GasLogger.startOp(payload.opId);
+
   // Log identity and caller context for every request so errors can be
   // attributed to a specific user and surface without needing PROBE.
   var _id = _getIdentity();
@@ -843,12 +849,18 @@ function _handleSyncActionRows(payload) {
 
 /**
  * Returns ActionSheet rows for a single document without mutating any data.
+ * Also checks DocData.teamId against the live Drive teamScope appProperty —
+ * the one place that pays for ground truth, now that _syncTeamScope (GTaskSheet-
+ * j8cn) trusts the DocData mirror on every sync instead of re-reading Drive.
+ * A mismatch means a prior sync's Drive write and DocData write fell out of
+ * step (e.g. a crashed execution between the two) — surfaced as a violation
+ * here instead of silently going unnoticed forever.
  *
  * Payload shape:
  *   { secret, action: 'verify_action_rows', docUrl }
  *
  * Response shape:
- *   { rows: [{ globalId, id, assigneeEmail, assigneeName, action, status }] }
+ *   { rows: [...], violations: [{ docId, issue }] }
  */
 function _handleVerifyActionRows(payload) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -857,10 +869,31 @@ function _handleVerifyActionRows(payload) {
     return _jsonResponse({ error: 'Actions sheet not found', rows: [] });
   }
   // testToken path sends docId; WEBAPP_SECRET path sends docUrl — normalise to URL form
+  var docId = payload.docId || _extractDocIdFromString(payload.docUrl || '');
   var docUrl = payload.docUrl ||
-    (payload.docId ? 'https://docs.google.com/document/d/' + payload.docId + '/edit' : '');
+    (docId ? 'https://docs.google.com/document/d/' + docId + '/edit' : '');
+
+  var violations = [];
+  if (docId) {
+    var docDataRow = _readDocDataRow(ss, docId);
+    if (docDataRow && docDataRow.syncStatus !== 'UpdateDoc') {
+      var token = ScriptApp.getOAuthToken();
+      var driveTeamScope = _getDocAppProperty(docId, 'teamScope', token) || '';
+      var mirroredTeamId = docDataRow.teamId || '';
+      if (driveTeamScope !== mirroredTeamId) {
+        violations.push({
+          docId: docId,
+          issue: 'teamScope drift: DocData.teamId=' + JSON.stringify(mirroredTeamId) +
+                 ' != Drive teamScope=' + JSON.stringify(driveTeamScope)
+        });
+        GasLogger.log('verify.teamScope.drift', { docId: docId, docDataTeamId: mirroredTeamId, driveTeamScope: driveTeamScope });
+      }
+    }
+  }
+
   return _jsonResponse({
-    rows: _loadRowsForDocUrl(actionsSheet, docUrl)
+    rows: _loadRowsForDocUrl(actionsSheet, docUrl),
+    violations: violations
   });
 }
 

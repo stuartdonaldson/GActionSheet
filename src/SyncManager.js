@@ -845,6 +845,7 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
       action:             'sync_action_rows',
       clientVersion:      BUILD_INFO.version,
       caller:             _getIdentity(),
+      opId:               GasLogger.getCurrentOp(),
       docUrl:             docUrl,
       docTitle:           docTitle,
       docId:              docId || '',
@@ -893,6 +894,7 @@ function _markDocNotFound(docId) {
       action:        'mark_doc_not_found',
       clientVersion: BUILD_INFO.version,
       caller:        _getIdentity(),
+      opId:          GasLogger.getCurrentOp(),
       docId:         docId
     })
   });
@@ -1244,8 +1246,20 @@ function _getOrUpsertDocDataRow(ss, fileId, docName, lastSyncTime, teamId, syncS
  */
 function _syncTeamScope(ss, docId, token, docName) {
   var docDataRow = _readDocDataRow(ss, docId);
-  var teamScope  = _getDocAppProperty(docId, 'teamScope', token);
   var newSyncStatus = docDataRow ? docDataRow.syncStatus : '';
+
+  // DocData.teamId mirrors the Drive teamScope appProperty -- both are written
+  // together, only by this function (the .overridden/.resolved branches below),
+  // so in the steady state (no override pending, already resolved) they're
+  // provably identical. Trusting the mirror skips a Drive REST round trip on
+  // every sync of an already-resolved doc -- the common case, ~2-4s saved per
+  // sync (GTaskSheet-j8cn perf pass). The narrow risk this introduces (a crashed
+  // execution leaving Drive and DocData out of sync) is no longer self-healed
+  // here on the next sync as it was before; verify_consistency(scope=DOC) is
+  // the deliberate place to catch that drift instead, not paid on every sync.
+  var teamScope = (docDataRow && newSyncStatus !== 'UpdateDoc' && docDataRow.teamId)
+    ? docDataRow.teamId
+    : _getDocAppProperty(docId, 'teamScope', token);
 
   if (docDataRow && docDataRow.syncStatus === 'UpdateDoc') {
     teamScope = docDataRow.teamId || '';

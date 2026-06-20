@@ -42,7 +42,7 @@ _AXIOM_TIMEOUT_S = 5
 _UNSET = object()
 
 # Phases (documented for callers; not enforced — kept open for new surfaces).
-PHASES = ("ACT", "QUERY", "UIACT", "CHECK", "CHECKPOINT", "MARK", "MONITOR", "HTTP")
+PHASES = ("ACT", "QUERY", "UIACT", "CHECK", "CHECKPOINT", "MARK", "MONITOR", "HTTP", "SETUP")
 
 
 def _slug(text: str) -> str:
@@ -56,6 +56,42 @@ def _console_from_env(console):
     if console is not _UNSET:
         return console
     return sys.stdout if os.environ.get("SCN_TRACE") == "1" else None
+
+
+def emit_standalone_event(settings: dict, *, run_id: str, name: str, dur_s: float) -> None:
+    """Best-effort Axiom POST for timing outside any Reporter's lifecycle.
+
+    Some costs (e.g. a `browser_page` fixture's Chromium launch/teardown) span
+    before a ScenarioSession/Reporter exists or after it has already closed
+    (pytest tears fixtures down in reverse dependency order, so `browser_page`
+    closes after the `scn` fixture that depends on it). Routing those through a
+    Reporter instance would mean reopening a closed file or guessing at
+    ordering. This writes a single SETUP-phase row directly, settings-driven,
+    with the same never-raise/never-block resilience as Reporter.flush_axiom —
+    a missing/unreachable Axiom sink is silently skipped (GTaskSheet-j8cn:
+    investigation found ~30% of suite wall time as unexplained gaps between
+    tests; this exists to make that visible, not to fix it).
+    """
+    dataset = settings.get("axiomDataset")
+    token = settings.get("axiomToken")
+    if not (dataset and token):
+        return
+    try:
+        requests.post(
+            f"https://api.axiom.co/v1/datasets/{dataset}/ingest",
+            headers={"Authorization": f"Bearer {token}"},
+            json=[{
+                "_time": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+                "phase": "SETUP",
+                "name": name,
+                "dur_s": round(dur_s, 3),
+                "side": "python",
+                "run_id": run_id,
+            }],
+            timeout=_AXIOM_TIMEOUT_S,
+        )
+    except Exception:
+        pass
 
 
 class Reporter:

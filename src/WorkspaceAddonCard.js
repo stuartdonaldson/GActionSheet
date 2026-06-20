@@ -798,6 +798,7 @@ function _patchActionStatus(globalId, newStatus) {
       action:        'patch_action_status',
       clientVersion: BUILD_INFO.version,
       caller:        _getIdentity(),
+      opId:          GasLogger.getCurrentOp(),
       globalId:      globalId,
       newStatus:     newStatus
     })
@@ -831,6 +832,7 @@ function _deleteActionRowFromSheet(globalId) {
       action:        'delete_action_row',
       clientVersion: BUILD_INFO.version,
       caller:        _getIdentity(),
+      opId:          GasLogger.getCurrentOp(),
       globalId:      globalId
     })
   });
