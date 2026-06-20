@@ -19,8 +19,11 @@ stamped now during Sweep 1 and is not backdated, so it remains in Actions under
 the 24-hour grace period.
 """
 import secrets
+import time
+
 import pytest
 
+from scn.ai import ai
 from scn.engine import CheckpointKind, Surface
 from scn.session import ScenarioSession
 from scn.surfaces import SheetReader
@@ -327,6 +330,48 @@ def test_sync_all(sync_ctx):
         assert getattr(row, "sync_status", None) != "Doc Not Found", (
             f"[nv6g §7] unmodified-valid doc incorrectly archived or marked: {row.sync_status!r}"
         )
+
+
+def test_mark_doc_not_found_no_restamp_on_reconfirm(settings, request):
+    """GTaskSheet-4tnr: re-confirming an already-Doc-Not-Found doc must not
+    reset its Date Modified.
+
+    syncAll()'s own sweep already keeps a permanently-missing docId out of the
+    detection path on later sweeps (its alreadyDocNotFound skip-list,
+    SyncManager.js:348-352) -- but syncDocument() is also called directly from
+    doc-context entry points with no such guard (Sync menu item -- MenuHandler.js;
+    sidebar Sync button -- WorkspaceAddonCard.js:351). scn.sync() exercises that
+    same direct path via the sync_document fixture. Without a guard in
+    _handleMarkDocNotFound itself, a user re-clicking Sync on a doc that's still
+    missing would keep resetting the 24h Doc-Not-Found aging clock forever.
+    """
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph(ai(action="4tnr restamp guard action").as_text())
+        scn.sync()
+        scn._post_fixture("trash_doc")
+
+        scn.sync()  # first detection: transitions to Doc Not Found, stamps now
+        rows_1 = scn.find_sheet_actions()
+        assert rows_1, "expected at least one Actions row for this doc"
+        assert rows_1[0].sync_status == "Doc Not Found"
+        first_modified = rows_1[0].modified_date
+        assert first_modified, "[4tnr] modified_date should be stamped on first detection"
+
+        time.sleep(2)  # measurable timestamp delta if a re-stamp happens
+        scn.sync()  # re-confirmation: doc is STILL trashed -- must be a no-op
+        rows_2 = scn.find_sheet_actions()
+        assert rows_2[0].sync_status == "Doc Not Found"
+        assert rows_2[0].modified_date == first_modified, (
+            f"[4tnr] Date Modified changed on re-confirmation of an already-Doc-Not-Found "
+            f"doc: {first_modified!r} -> {rows_2[0].modified_date!r}"
+        )
+    finally:
+        try:
+            scn._post_route("end_journey_session", {"docId": scn.doc_id})
+        except Exception:
+            pass
+        scn.engine.close()
 
 
 # ---------------------------------------------------------------------------

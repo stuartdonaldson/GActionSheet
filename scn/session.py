@@ -906,7 +906,8 @@ def _row_dict_to_ai(row: dict) -> ai:
     """Convert a find_sheet_actions response row (JSON dict) to an ai.
 
     ContractSchema sheetAction field names → ai field names.
-    Dynamic attributes (global_id, assignee_name, sync_status) attached post-init.
+    Dynamic attributes (global_id, assignee_name, sync_status, created_date,
+    modified_date) attached post-init.
     """
     item = ai(
         action=row.get("action_text") or "",
@@ -920,4 +921,5 @@ def _row_dict_to_ai(row: dict) -> ai:
     item.doc_id = row.get("doc_id") or ""
     item.doc_name = row.get("doc_name") or ""
     item.created_date = row.get("created_date") or ""
+    item.modified_date = row.get("modified_date") or ""
     return item

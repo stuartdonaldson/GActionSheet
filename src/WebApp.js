@@ -1050,19 +1050,31 @@ function _handleMarkDocNotFound(payload) {
     return _jsonResponse({ marked: 0 });
   }
 
-  var numRows      = lastRow - 1;
-  var formulasCol7 = actionsSheet.getRange(2, _ACOL.document_formula, numRows, 1).getFormulas();
-  var marked       = 0;
+  var numRows       = lastRow - 1;
+  var formulasCol7  = actionsSheet.getRange(2, _ACOL.document_formula, numRows, 1).getFormulas();
+  var syncStatusCol = actionsSheet.getRange(2, _ACOL.sync_status, numRows, 1).getValues();
+  var marked        = 0;
 
   WriteGuard.wrapPersistent(function () {
     // Stamp the same detection-time timestamp on every row for this docId so
     // they age out of ArchiveManager's 24h Doc Not Found threshold together,
     // not independently (GTaskSheet-4tnr) — a doc going missing is a per-doc
-    // event, not a per-row one.
+    // event, not a per-row one. Only stamp on the actual transition into Doc
+    // Not Found: syncAll() already keeps a permanently-missing docId out of
+    // this path on later sweeps (its own alreadyDocNotFound skip-list), but
+    // syncDocument() is also called directly from doc-context entry points
+    // (Sync menu item, sidebar Sync button — MenuHandler.js, WorkspaceAddonCard.js)
+    // with no such guard. Without this check, re-confirming an already-marked
+    // row on every direct re-sync would keep resetting Date Modified to now,
+    // so the 24h grace period would never actually elapse for a persistently
+    // missing doc someone keeps clicking Sync on — and it would violate the
+    // "Date Modified only changes on a real content change" invariant, since
+    // "still missing" isn't one.
     var now = new Date();
     for (var i = 0; i < formulasCol7.length; i++) {
       var formula = formulasCol7[i][0] || '';
       if (formula.indexOf(docId) === -1) continue;
+      if (syncStatusCol[i][0] === 'Doc Not Found') continue;
       actionsSheet.getRange(i + 2, _ACOL.sync_status).setValue('Doc Not Found');
       actionsSheet.getRange(i + 2, _ACOL.modified_date).setValue(now);
       marked++;
