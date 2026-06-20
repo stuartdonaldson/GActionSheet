@@ -72,7 +72,7 @@ def test_poc_edit_action_propagation(scn, settings):
     # ── Step 2: submit edit via set_status_from_preview fixture wrapper ───────
     # This exercises _setStatusFromPreview: scans the doc, flushes the paragraph
     # via REST API, enqueues a sheet update in ACTION_SHEET_QUEUE.
-    # Expected completion signal: POC_EDIT_ACTION.complete logged.
+    # Expected completion signal: pocEditAction.complete logged.
     #
     # Implementation note: _setStatusFromPreview calls DocumentApp.getActiveDocument()
     # which returns null in HTTP context (standalone script, no active doc).
@@ -101,7 +101,7 @@ def test_poc_edit_action_propagation(scn, settings):
     # ── Step 3: drain the queue via process_pending_sheet_updates ────────────
     # This exercises _processPendingSheetUpdates: reads ACTION_SHEET_QUEUE,
     # calls upsert_action_rows for each entry, clears the queue.
-    # Expected completion signal: POC_ASYNC_SHEET.complete logged.
+    # Expected completion signal: pocAsyncSheet.complete logged.
     scn._post_fixture("process_pending_sheet_updates")
 
     # ── Step 4: assert durable sheet status ──────────────────────────────────

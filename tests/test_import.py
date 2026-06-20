@@ -85,6 +85,45 @@ def _seed_open_action(scn, action_text, assignee=None):
     raise AssertionError(f"seeded action {action_text!r} not found in sheet after sync")
 
 
+def _seed_import_candidate(scn, team_id, action_text, *, sync_status=""):
+    """Fabricate the Actions-row + DocData state list_importable_actions reads,
+    without opening the doc (no append_paragraph/sync() round trip).
+
+    Why this is safe (GTaskSheet-ishz.1 follow-up, 2026-06-20 perf pass):
+    _listImportableActionsData (src/WebApp.js) never reads doc content — it
+    only joins an Actions-sheet row (status/file_id, via seed_row) against a
+    DocData row (teamId/syncStatus, via set_docdata_row). A real scn.sync()
+    additionally pays for DocumentApp.openById + paragraph scan + team-scope
+    folder-walk + flush-back (src/SyncManager.js::syncDocument, ~12-19s per
+    call) to produce exactly those two rows — none of which this test needs
+    to re-verify; that machinery already has its own coverage in
+    tests/test_sync_all.py and the team-scope fixture tests. Using this
+    helper for scn_sibling/scn_other/scn_trashed cut this test's three-doc
+    setup from ~111s of sequential sync_document calls to a handful of cheap
+    fixture POSTs.
+
+    CAUTION — re-derive this helper if the contract changes: if
+    _listImportableActionsData ever starts reading something only a real
+    sync populates (doc title, last-modified time, an in-doc field), this
+    helper's fabricated rows will silently stop matching what a real synced
+    doc would look like, and this test would keep passing without exercising
+    that new path. Check src/WebApp.js::_listImportableActionsData's field
+    reads before trusting this shortcut after such a change.
+    """
+    seed = ai(action=action_text, status="Open")
+    seed.global_id = f"{scn.doc_id}/AI-1"
+    formula = f'=HYPERLINK("https://docs.google.com/document/d/{scn.doc_id}/edit","")'
+    scn._post_fixture("seed_row", {
+        "globalId": seed.global_id,
+        "actionId": 1,
+        "actionText": action_text,
+        "status": "Open",
+        "documentFormula": formula,
+    })
+    _set_docdata(scn, teamId=team_id, syncStatus=sync_status)
+    return seed
+
+
 # ---------------------------------------------------------------------------
 # GTaskSheet-1dxz — J-ACCESS-FILTER P1-P4 (reduced scope)
 # ---------------------------------------------------------------------------
@@ -102,24 +141,25 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         setup_resp = scn_setup._post_fixture("setup_team_scope_fixture")
         teams = setup_resp.get("data") or {}
         team_a = teams["testTeamA"]
-        team_a_child = teams["testTeamAChild"]
 
         # ── Readable (P1-P3): target + sibling, both in testTeamA ────────────
+        # scn_target is the doc whose sidebar UI is actually driven below, so it
+        # needs a real sync() (real DocData row written by the real
+        # team-scope folder-walk it's testing the read side of).
         scn_target = new_doc()
         _move_to_folder(scn_target, team_a)
         scn_target.sync()
         scn_target.ui = UiDriver(browser_page, doc_id=scn_target.doc_id)
 
+        # scn_sibling/scn_other below are pure leadup state for the filter
+        # check — see _seed_import_candidate's docstring for why they skip
+        # the real sync() round trip.
         scn_sibling = new_doc()
-        _move_to_folder(scn_sibling, team_a)
-        scn_sibling.sync()
-        _seed_open_action(scn_sibling, "Import-filter sibling action")
+        _seed_import_candidate(scn_sibling, "TestTeamA", "Import-filter sibling action")
 
         # ── Absent — different team (negative half of P1-P3) ────────────────
         scn_other = new_doc()
-        _move_to_folder(scn_other, team_a_child)
-        scn_other.sync()
-        _seed_open_action(scn_other, "Import-filter other-team action")
+        _seed_import_candidate(scn_other, "TestTeamAChild", "Import-filter other-team action")
 
         fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
         scn_target.ui.show_tab("Import")
@@ -141,9 +181,9 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         assert err is None, err
         assert_log(
             gas_log_dir, fence,
-            lambda e: e.get("tag") == "IMPORT_LIST.done"
+            lambda e: e.get("tag") == "importList.done"
             and e.get("data", {}).get("count", 0) >= 1,
-            "IMPORT_LIST.done",
+            "importList.done",
         )
         scn_target.expect_callable(
             check_readable, on=Surface.UI,
@@ -156,11 +196,14 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         # removed/inaccessible) must be excluded from the import list even
         # though its team matches — list_importable_actions filters on
         # DocData.syncStatus in addition to the team-scope join.
+        # Same leadup-state shortcut as scn_sibling/scn_other (_seed_import_candidate
+        # docstring) — sync_status="Deleted" is set in the same fixture call instead
+        # of a real sync() followed by a separate _set_docdata override.
         scn_trashed = new_doc()
-        _move_to_folder(scn_trashed, team_a)
-        scn_trashed.sync()
-        _seed_open_action(scn_trashed, "Import-filter trashed-doc action")
-        _set_docdata(scn_trashed, syncStatus="Deleted")
+        _seed_import_candidate(
+            scn_trashed, "TestTeamA", "Import-filter trashed-doc action",
+            sync_status="Deleted",
+        )
 
         # scn_target.ui is still showing the Import card from the P1-P3 check
         # above -- its own buttons are Back/Select all/Import selected, not
@@ -203,9 +246,9 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         assert err is None, err
         assert_log(
             gas_log_dir, fence2,
-            lambda e: e.get("tag") == "IMPORT_LIST.access_denied"
+            lambda e: e.get("tag") == "importList.access_denied"
             and "TeamNotFound:" in (e.get("data", {}).get("err") or ""),
-            "IMPORT_LIST.access_denied TeamNotFound",
+            "importList.access_denied TeamNotFound",
         )
         scn_p4.expect_callable(
             check_absent, on=Surface.UI,
@@ -418,9 +461,9 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
         assert result.get("ok") and result.get("inserted", 0) >= 2, result
         assert_log(
             gas_log_dir, fence,
-            lambda e: e.get("tag") == "IMPORT_SELECTED.done"
+            lambda e: e.get("tag") == "importSelected.done"
             and e.get("data", {}).get("inserted", 0) >= 2,
-            "IMPORT_SELECTED.done",
+            "importSelected.done",
         )
 
         def check_ac2():
@@ -454,9 +497,9 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
         # ── AC-3: source rows Forwarded + suffixed + dirty ───────────────────
         assert_log(
             gas_log_dir, fence,
-            lambda e: e.get("tag") == "FORWARD_ROWS.done"
+            lambda e: e.get("tag") == "forwardRows.done"
             and e.get("data", {}).get("count", 0) >= 2,
-            "FORWARD_ROWS.done",
+            "forwardRows.done",
         )
 
         def _forward_check(src_scn, src_action):

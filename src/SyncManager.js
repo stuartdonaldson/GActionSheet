@@ -80,14 +80,14 @@ function syncDocument(docId) {
     try {
       doc = DocumentApp.openById(docId);
     } catch (openErr) {
-      GasLogger.log('sync.warn', { msg: 'Doc not found', docId: docId, err: openErr.message });
+      GasLogger.log('sync.docNotFound.invalid', { msg: 'Doc not found', docId: docId, err: openErr.message });
       _markDocNotFound(docId);
       return;
     }
     // DocumentApp.openById() succeeds on trashed docs — check explicitly.
     try {
       if (DriveApp.getFileById(docId).isTrashed()) {
-        GasLogger.log('sync.warn', { msg: 'Doc not found', docId: docId, err: 'Document is in Trash' });
+        GasLogger.log('sync.docNotFound.trashed', { msg: 'Doc not found', docId: docId, err: 'Document is in Trash' });
         _markDocNotFound(docId);
         return;
       }
@@ -284,7 +284,7 @@ function syncAll() {
   // sync.complete) in Axiom -- see GasLogger.startOp() (GTaskSheet-65g1).
   GasLogger.startOp();
   var _syncId = _getIdentity();
-  GasLogger.log('sync.all.start.identity', { eu: _syncId.eu, au: _syncId.au, version: BUILD_INFO.version });
+  GasLogger.log('sync.all.start.identity', { eu: _syncId.eu, au: _syncId.au });
   try {
     var ss           = SpreadsheetApp.getActiveSpreadsheet();
     var actionsSheet = ss.getSheetByName('Actions');
@@ -368,14 +368,14 @@ function syncAll() {
       }
 
       if (isTrashed) {
-        GasLogger.log('sync.warn', { msg: 'Doc not found', docId: docId, err: 'Document is in Trash' });
+        GasLogger.log('sync.docNotFound.trashed', { msg: 'Doc not found', docId: docId, err: 'Document is in Trash' });
         _markDocNotFound(docId);
         continue;
       }
 
       var lastSynced = syncState[docId] ? syncState[docId].syncedAt : null;
       if (lastSynced && lastModified <= lastSynced && !dirtyDocIds[docId]) {
-        GasLogger.log('sync.skip', { docId: docId });
+        GasLogger.log('sync.skip', { msg: 'unchanged since last sync', docId: docId });
         skipped++;
         continue;
       }

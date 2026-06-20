@@ -99,3 +99,48 @@ Not a code change. If the standalone logging webapp's own deployment is itself s
 - The Python `Reporter` posts to this service (batched at natural checkpoints, not per-event) in addition to its existing local trace files.
 - A merge/report tool reading the log sheet produces one chronologically-sorted, human-readable table — Python steps and GAS-side events interleaved by real timestamp — without requiring the operator to read test source to label any event, written to `test-results/JOURNEY-<slug>-<utc>.log`.
 - No existing AC-drain / JUnit / Allure reporting behavior changes (this is additive to `Reporter`, not a replacement).
+
+## 8. Current state: GAS-side vs Python-side event naming (GTaskSheet-ecs1)
+
+Until §4.3's unified sink ships (still an open decision, §6), GAS-side and Python-side
+events are logged through two separate systems with two different naming schemes, and
+nobody building a single Axiom view that spans one request end-to-end can facet across
+both without already knowing the two vocabularies map to the same operation. This
+section is that mapping — read it before trying to correlate a Python test step with
+the GAS-side events it triggered.
+
+**GAS side** (`GasLogger`, `side:"gas"` in Axiom) uses the `domain.event` taxonomy —
+`knowledge-base/adr/0019-gaslogger-naming-standard.md`.
+
+**Python side** (`scn/reporter.py` / `scn/session.py`'s `ScenarioSession._post()`,
+`side:"python"` in Axiom) names events by the raw action/fixture name straight off the
+wire — `payload.get("fixture") or payload.get("action")` (§4.1) — deliberately, so the
+event reads as "what was actually called," not a derived taxonomy.
+
+Re-pulled live (`python scripts/query_axiom.py --limit 200 --since 24h`, 2026-06-19):
+182 `side:"gas"` events across 18 distinct names, 18 `side:"python"` events across 9
+distinct names — the split still holds.
+
+| Python action/fixture name | Caller | Corresponding GAS-side event(s) |
+|---|---|---|
+| `begin_journey_session` | `ScenarioSession.new_doc()` — direct `_http_post`, not via `run_fixture` | `journey.begin` (`WebApp.js` `_handleJourneySession`) |
+| `end_journey_session` | `ScenarioSession.close()` — `_post_route`, not via `run_fixture` | `journey.end` (same handler) |
+| `append_doc_paragraph` | `ScenarioSession.append_paragraph()` — `_post_route` | `test.append_doc_paragraph` (`WebApp.js`) |
+| `sync_all` | `_post_fixture("sync_all")` → `TestFixtures.js` `case 'sync_all'` → calls `syncAll()` | the full `sync.*`/`archive.*`/`tracker.*` cascade: `sync.all.start(.identity)`, per-doc `sync.scanned`/`sync.complete`/`sync.docNotFound.{invalid,trashed,confirmed}`/`sync.skip`, `sync.teamScope.*`, `sync.archive.doc_not_found`, `archive.complete`, `sync.integrity.complete`, `sync.all.complete` — plus the generic `fixture.setup` every `run_fixture` call produces (below) |
+| `sync_document` | `ScenarioSession.sync()` — `_post_fixture("sync_document")`, reported as Reporter `ACT` step `"sync"` (a different event from the HTTP-level `"sync_document"` name) | `syncDocument(docId)`'s per-doc subset of the same `sync.*` family (no `sync.all.*`) — plus `fixture.setup` |
+| `get_docdata_row`, `set_docdata_row` | `_post_fixture(...)` | **no domain-specific GAS tag** — these fixtures only produce the generic `fixture.setup` wrapper (`data.scenario` carries the fixture name); read/write DocData directly with no other logged side effect |
+| any other `_post_fixture(name)` call (`uc_a_clear`, `sidebar_set_status`, `sync_status_doc_not_found`, ...) | `TestFixtures.js`'s `setupTestFixtures()` switch | `fixture.setup` (always) **+** that case's own `fixture.<name>` tag, if the case logs one explicitly — not all cases do (see `get_docdata_row`/`set_docdata_row` above) |
+
+**Why `fixture.setup` is the GAS-side anchor for most fixture calls, not a per-fixture
+tag:** `setupTestFixtures()` logs one generic `GasLogger.log('fixture.setup', {
+scenario: resolvedScenario })` after every successful run, regardless of which `case`
+ran (`TestFixtures.js`, end of function) — that's the event to correlate against a
+Python `_post_fixture()` call when the specific fixture case has no GasLogger call of
+its own. A fixture's own `fixture.<name>` tag, when present, is additional detail from
+inside that case, not a replacement for the generic wrapper.
+
+**This is documentation, not a fix.** No code changed to produce this table; it
+re-derives and records the mapping so a human or dashboard query can bridge the two
+vocabularies manually. §4.3's unified-sink design remains the architectural fix for
+needing this table at all, and remains an explicit open decision (§6) — not implemented
+as a side effect of writing this section.

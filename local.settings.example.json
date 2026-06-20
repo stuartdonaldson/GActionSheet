@@ -14,6 +14,11 @@
 
   "webappSecret": "YOUR_WEBAPP_SECRET_SCRIPT_PROPERTY_VALUE",
 
+  "_note_axiom": "Used by scripts/query_axiom.py and src/WebApp.js's set_axiom_config route. axiomToken is the ingest token (write-only, used by GasLogger.flush() server-side); axiomQueryToken is a separate read-only API token for querying — get both from the Axiom org settings.",
+  "axiomDataset": "YOUR_AXIOM_DATASET_NAME",
+  "axiomToken": "YOUR_AXIOM_INGEST_TOKEN",
+  "axiomQueryToken": "YOUR_AXIOM_QUERY_TOKEN",
+
   "_note_testToken": "Auto-populated by npm run deploy:test — do not edit manually.",
   "_note_webappTestUrl": "Auto-written by npm run deploy:test from the TEST-WEB-APP deployment ID — do not set manually. deploy:test always overwrites this with the current derived URL so it cannot become stale.",
   "webappTestUrl": "",

@@ -4,7 +4,7 @@
  * Set PROBE_ENABLED = false to silence all probes without removing call sites.
  * Delete this file + all lines marked [PROBE] from call sites to strip permanently.
  *
- * All GasLogger tags are prefixed "PROBE." — one grep finds everything.
+ * All GasLogger tags are prefixed "probe." — one grep finds everything.
  * RunId is the primary correlation key; seed it via a doGet/doPost hit before
  * exercising UI surfaces (sidebar, chip hover, menu).
  *
@@ -72,7 +72,7 @@ function PROBE_log(surface, extraData) {
   var keys = Object.keys(extra);
   for (var i = 0; i < keys.length; i++) entry[keys[i]] = extra[keys[i]];
 
-  GasLogger.log('PROBE.' + surface, entry);
+  GasLogger.log('probe.' + surface, entry);
   GasLogger.flush();
 }
 

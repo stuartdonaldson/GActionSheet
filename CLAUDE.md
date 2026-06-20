@@ -109,11 +109,25 @@ bd close <id>         # Complete work
 ## python
 `/mnt/c/dev/venvs/uv1/bin/python3` is the best python interpreter to use with it's virtual environment
 
+## Querying Axiom Logs
+
+Use `python scripts/query_axiom.py` — don't hand-roll the Axiom APL query/auth again.
+Reads `axiomDataset`/`axiomQueryToken` from `local.settings.json`. Examples:
+
+```bash
+python scripts/query_axiom.py                          # last 200 events, last 24h
+python scripts/query_axiom.py --limit 50 --since 2h
+python scripts/query_axiom.py --side python             # or --side gas
+python scripts/query_axiom.py --name sync.warn
+python scripts/query_axiom.py --where "data.docId == '1AAE...'"
+python scripts/query_axiom.py --raw /tmp/dump.json       # full JSON for offline analysis
+```
+
 ## Testing Strategy & Issue Conventions
 
 This project follows the ATDD lifecycle. Authoritative sources (all legacy
 references are mapped in `docs/atdd/ID-map.md` — start there):
-- **Universal testing & lifecycle principles** (`T1`–`T24`, `I1`–`I11`: entry-point coverage + call-site, durable-state assertion, negatives, idempotency, run-isolated clones, expectation-queue/checkpoints, permutation batching, twin-track independence) → DevStandard `knowledge-base/bdd/sdlc-testing-principles.md` and `sdlc-implementation-principles.md`. Cite the ID, don't restate.
+- **Universal testing & lifecycle principles** (`T1`–`T24`, `I1`–`I11`: entry-point coverage + call-site, durable-state assertion, negatives, idempotency, run-isolated clones, expectation-queue/checkpoints, permutation batching, twin-track independence) → DevStandard `knowledge-base/methodology/testing/bdd/sdlc-testing-principles.md` and `sdlc-implementation-principles.md`. Cite the ID, don't restate.
 - **GAS+Python acceptance-testing mechanics** → GAS-Practices `best-practices/gas-acceptance-testing/`.
 - **Project realization** (the `scn/` scenario model, canonical journey, contract) → `docs/atdd/ID-map.md` (§`scn/` module map) and archived source `docs/atdd/archive/atdd-lifecycle.md` §15–§16.
 
@@ -121,7 +135,7 @@ For long running tests, always route test output to a fail rather than pipe to t
 
 Every Playwright/UI test failure must, as a matter of course, capture a screenshot + diagnostics (screenshot path, frame URLs, and for locator waits the per-frame match-count / is_visible / bbox). This is automated (GTaskSheet-3tkf): bounded driver waits call `UiDriver.capture_failure(...)` before raising, and a `pytest_runtest_makereport` hook in `tests/conftest.py` screenshots the active page on any UI-test failure. Add a new bounded wait? Route its failure through `capture_failure` — never copy-paste a capture block. For interactions Playwright cannot drive with a direct mouse gesture (e.g. the `onLinkPreview` link-preview card), try the `Ctrl+F` -> type -> `Enter` -> `Escape` cursor-placement technique (GTaskSheet-39jk/cug8, `UiDriver.open_link_preview`, `tests/test_link_preview.py`) before falling back to a non-UI route-fallback method — see epic GTaskSheet-pw5x.
 
-Methodology declaration — Testing: `atdd-bdd` (DevStandard). Key rules for every session:
+Methodology declaration — Testing: `atdd-bdd` — DevStandard `knowledge-base/methodology/testing/bdd/README.md`. Key rules for every session:
 
 **Issue title prefixes (required on all new issues):**
 - `[IMP]` — GAS implementation work

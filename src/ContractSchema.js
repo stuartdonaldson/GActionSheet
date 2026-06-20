@@ -189,7 +189,7 @@ var CONTRACT_SCHEMA = Object.freeze({
       // an error leak. rows are pre-sorted by doc_name ASC then AI-N ASC, but
       // the renderer groups/sorts again per the frozen contract (epic-d-import-
       // contract-seams).
-      //   Completion signal: synchronous response; GasLogger 'IMPORT_LIST.done'.
+      //   Completion signal: synchronous response; GasLogger 'importList.done'.
       list_importable_actions: Object.freeze({
         request:  Object.freeze(['action', 'secret', 'docId', 'clientVersion', 'caller']),
         response: Object.freeze(['ok', 'teamId', 'rows']),

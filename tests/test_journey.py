@@ -238,11 +238,11 @@ def test_journey(scn, expected_version, gas_log_dir):
     scn.ui.create_action(created)      # fills @-menu form; autocomplete (in TEST_CONTACTS)
     # GTaskSheet-5vr6: cursor lands on an empty paragraph (Ctrl+End+Enter before
     # @create) — the chip-insertion path that used to throw on an empty
-    # paragraph/list-item. CREATE_ACTION_TRIGGER.done confirms _submitCreateAction
+    # paragraph/list-item. actionTrigger.done confirms _submitCreateAction
     # ran to completion without the uncaught _insertActionChip exception.
     assert_log(
         gas_log_dir, _fence,
-        lambda e: e.get("tag") == "CREATE_ACTION_TRIGGER.done",
+        lambda e: e.get("tag") == "actionTrigger.done",
         "[5vr6] create_action done",
     )
 

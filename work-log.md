@@ -3030,3 +3030,43 @@ test_import_access_filter's known intermittent Playwright timeout
 - local.settings.json key was typo'd as `axiomDataSet` (capital S) against the
   project's camelCase convention (`axiomToken`, `webappTestUrl`) — cost a deploy
   cycle to catch via the "Axiom config registration skipped" warning.
+
+## 2026-06-19 18:24:30
+
+### Summary:
+Audited GTaskSheet-x94a (GasLogger tag-naming taxonomy) against current src/*.js — re-derived the rename map independently (28 call sites across EditorAddonCard.js/WebApp.js/PROBE.js, plus a missed snake_case outlier `verify_chip_integrity.done`) rather than trusting the bead's stale snapshot, and confirmed which tests assert on the literal old tag strings. Documented findings in knowledge-base/staging/gaslogger-tag-taxonomy.md. Extended the audit to the data-parameter keys (not just tag names) and found a real `err`/`error` key split, a redundant/shadowing `version` field bug, and two false-positive "duplicates" that are actually distinct entity roles — filed as GTaskSheet-9dss.
+
+Queried live Axiom data (200 most recent events) to validate the plan against real traffic, not just static grep. Found `sync.warn` is the single largest event bucket (29%) and is overloaded across two distinct conditions, split further by a `'Doc not found'`/`'Doc Not Found'` msg-casing mismatch — filed as GTaskSheet-aa7j. Also found GAS-side and Python-side logging use two entirely unrelated naming systems (domain.event vs raw action/fixture names) with no documented bridge — filed as GTaskSheet-ecs1.
+
+Built `scripts/query_axiom.py` (limit/since/side/name/where/raw filters, reads axiomDataset/axiomQueryToken from local.settings.json) so future Axiom lookups don't require re-deriving the APL query+auth shape by hand. Documented it in CLAUDE.md and `bd remember`, and added placeholder Axiom keys to local.settings.example.json.
+
+### Key Learnings:
+Axiom's APL query API takes `apl`/`startTime`/`endTime` as top-level JSON fields (not just inside the APL string) via POST to `/v1/datasets/_apl?format=legacy`; the ingest token (`axiomToken`) and query token (`axiomQueryToken`) are separate credentials. `_postToAxiom`'s `Object.assign(baseRow, e.data)` means any call site that includes a key matching a reserved field (e.g. `version`) silently overwrites the auto-stamped value — call sites must never set `ts`/`tag`/`version`/`op` inside the data object.
+
+## 2026-06-19 19:01:16
+
+### Summary:
+Resolved GTaskSheet-x94a, GTaskSheet-9dss, and GTaskSheet-ecs1 (GasLogger tag/parameter taxonomy cleanup).
+- Renamed all SCREAMING_SNAKE/snake_case-domain GasLogger tags to the `domain.event` convention across `src/EditorAddonCard.js`, `src/WebApp.js`, `src/PROBE.js`, plus matching doc comments and test assertions (`tests/test_import.py`, `tests/test_journey.py`, `tests/test_poc_features.py`, `src/ContractSchema.js`).
+- Fixed `error:`/`error` key inconsistencies in `src/TestFixtures.js`'s `fixture.*` calls (renamed to `err:` + added `msg:` where missing) and removed two redundant explicit `version:` fields that were silently shadowing GasLogger's auto-stamped field (`EditorAddonCard.js`, `SyncManager.js`).
+- Replaced the transient staging audit (`knowledge-base/staging/gaslogger-tag-taxonomy.md`, deleted) with two durable ADRs: `knowledge-base/adr/0019-gaslogger-naming-standard.md` (tag convention) and `0020-gaslogger-data-key-standard.md` (parameter-key convention), each with an "applying to new call sites" checklist.
+- Re-pulled a live Axiom sample (200 events/24h) to verify the GAS-side vs Python-side event-naming split (182/18) still holds, and added §8 to `docs/atdd/journey-logging-design.md` mapping each Python action/fixture name to its corresponding GAS `domain.event` family.
+- Deliberately left open: GTaskSheet-aa7j (splitting the overloaded `sync.warn` tag) — separate, larger-blast-radius decision.
+
+### Key Learnings:
+- `GasLogger.log()`'s `_postToAxiom` spreads `e.data` *after* the auto-stamped base row (`{ version, op, ts, tag }`), so any call site passing those keys inside `data` silently overwrites the auto-stamped value — now a documented reserved-keys rule (ADR-0020).
+- `TestFixtures.js`'s `setupTestFixtures()` always logs a generic `fixture.setup` event after any `run_fixture` call regardless of which case ran — this is the GAS-side anchor to correlate against a Python `_post_fixture()` call when that specific case has no domain-specific `GasLogger.log()` of its own (e.g. `get_docdata_row`, `set_docdata_row`).
+
+## 2026-06-19 20:09:22
+
+### Summary:
+Closed out GTaskSheet-ishz.1 (journey-logging/Axiom rollout) and folded in GTaskSheet-aa7j at the same time since both ADR-0019/0020 conventions now applied directly to it: split the overloaded `sync.warn` GasLogger tag into `sync.docNotFound.{invalid,trashed,confirmed}` (`src/SyncManager.js:83,90,371`, `src/WebApp.js:1055`), standardized on lowercase `'Doc not found'` as the disambiguating `msg` now that the tag itself disambiguates, and added `msg: 'unchanged since last sync'` to `sync.skip` (`src/SyncManager.js:378`). Updated `docs/atdd/journey-logging-design.md`'s sync_all event-cascade table to match. Verified via grep that no test asserts on the literal old tag/msg strings (tests only assert the persisted `Sync Status` sheet column, untouched by this change).
+
+Ran the full `pytest -x` regression gate per the backstop rule before closing — found `tests/test_import.py::test_import_access_filter` failing on `scn_target.ui.show_tab("Import")` (30s timeout). Investigated rather than dismissing as flaky: pulled the local pytest trace + cross-referenced Axiom GAS-side events by docId to build a merged timeline, which showed (a) the failure-diagnostics screenshot is misleading — `tests/conftest.py`'s `pytest_runtest_makereport` hook only fires after the test's own `finally:`-block cleanup has already trashed the docs, so "Take out of trash" in the screenshot is a ~17s-late artifact, not the doc's real state at the timeout moment; (b) the failure reproduces identically even after a major leadup-time cut (135.83s → 67.83s), ruling out setup-timing as the cause. Filed as GTaskSheet-3zl5 (P1 bug) with the full evidence chain and a concrete next-step (check `open_sidebar()`/`_current_card` for a stale Playwright frame handle).
+
+While investigating the gap, found and fixed a real test-perf issue along the way: `scn_sibling`/`scn_other`/`scn_trashed` in `test_import_access_filter` were paying for full `syncDocument()` round trips (doc open + paragraph scan + team-scope walk + flush-back, ~12-19s each) purely to produce a DocData row + Actions row that `_listImportableActionsData` (the function actually under test) reads but never opens the doc to get. Added `_seed_import_candidate()` (`tests/test_import.py`) using the existing `seed_row`/`set_docdata_row` fixtures instead — documented in its docstring why this is safe and what to re-check if `_listImportableActionsData`'s field reads ever change. Cut this test's leadup time roughly in half.
+
+### Key Learnings:
+- `pytest_runtest_makereport`'s `report.when == "call"` gate means any test whose own `finally:` block does cleanup (trashing/closing docs) will have already run that cleanup by the time the hook's screenshot fires — diagnostics captured this way describe the test's *post-cleanup* state, not the failure moment. Bounded UI waits should call `self.capture_failure()` inline on their own timeout (the way `create_action()` already does) rather than rely on this fallback when cleanup mutates the page's subject.
+- When a function under test doesn't read something (e.g. `_listImportableActionsData` never opens the doc), test setup shouldn't either — `seed_row`/`set_docdata_row` can fabricate exactly the rows a server-side read path consumes, and this codebase already has more than one precedent for it (`test_sync_all.py`, `test_menu_entry_points.py`'s synthetic never-resolves docId).
+- Before trusting a failure screenshot as ground truth, check what captured it and when — `git grep` for the capture call site and read its surrounding control flow, not just the image.

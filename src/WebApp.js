@@ -962,7 +962,7 @@ function _handleVerifyChipIntegrity(payload) {
     }
   }
 
-  GasLogger.log('verify_chip_integrity.done', { docId: docId, checked: checkedCount, violations: violations.length });
+  GasLogger.log('verify.chipIntegrity.done', { docId: docId, checked: checkedCount, violations: violations.length });
   return _jsonResponse({ violations: violations, checked_count: checkedCount });
 }
 
@@ -1052,7 +1052,7 @@ function _handleMarkDocNotFound(payload) {
     }
   });
 
-  GasLogger.log('sync.warn', { msg: 'Doc Not Found', docId: docId, marked: marked });
+  GasLogger.log('sync.docNotFound.confirmed', { msg: 'Doc not found', docId: docId, markedCount: marked });
   return _jsonResponse({ marked: marked });
 }
 
@@ -1192,7 +1192,7 @@ function _listImportableActionsData(docId) {
   try {
     assertTeamAccess(teamId, ss);
   } catch (e) {
-    GasLogger.log('IMPORT_LIST.access_denied', { docId: docId, teamId: teamId, err: e.message });
+    GasLogger.log('importList.access_denied', { docId: docId, teamId: teamId, err: e.message });
     return { teamId: teamId, rows: [] };
   }
 
@@ -1248,7 +1248,7 @@ function _listImportableActionsData(docId) {
   var docIds = {};
   for (var j = 0; j < rows.length; j++) docIds[rows[j].doc_id] = true;
 
-  GasLogger.log('IMPORT_LIST.done', { teamId: teamId, count: rows.length, docCount: Object.keys(docIds).length });
+  GasLogger.log('importList.done', { teamId: teamId, count: rows.length, docCount: Object.keys(docIds).length });
   return { teamId: teamId, rows: rows };
 }
 
@@ -1387,7 +1387,7 @@ function _handleForwardActionRows(payload) {
   // otherwise see these writes.
   SpreadsheetApp.flush();
 
-  GasLogger.log('FORWARD_ROWS.done', { count: forwarded.length });
+  GasLogger.log('forwardRows.done', { count: forwarded.length });
   GasLogger.flush();
   return _jsonResponse({ ok: true, forwarded: forwarded });
 }
@@ -1646,7 +1646,7 @@ function _handleForwardActionRowsAtdd(payload) {
 
   SpreadsheetApp.flush();
 
-  GasLogger.log('FORWARD_ROWS_TEST.done', { count: forwarded.length });
+  GasLogger.log('forwardRowsTest.done', { count: forwarded.length });
   GasLogger.flush();
   return _jsonResponse({ ok: true, forwarded: forwarded });
 }

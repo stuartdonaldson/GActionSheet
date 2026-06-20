@@ -27,13 +27,13 @@
  * createActionTrigger
  * Triggered when the user selects "Create action" from the Docs @-menu.
  * Registered via appsscript.json addOns.docs.createActionTrigger.
- * Log tag: CREATE_ACTION_TRIGGER
+ * Log tag: actionTrigger.start
  *
  * @param {GoogleAppsScript.Addons.EventObject} e
  * @returns {GoogleAppsScript.Card_Service.Card}
  */
 function createActionTrigger(e) { // eslint-disable-line no-unused-vars
-  GasLogger.log('CREATE_ACTION_TRIGGER', { docId: e && e.docs && e.docs.id });
+  GasLogger.log('actionTrigger.start', { docId: e && e.docs && e.docs.id });
   return _buildCreationCard();
 }
 
@@ -41,7 +41,7 @@ function createActionTrigger(e) { // eslint-disable-line no-unused-vars
  * onLinkPreview
  * Triggered when a user hovers over an action smart-chip link.
  * Registered via appsscript.json addOns.docs.linkPreviewTriggers.
- * Log tag: LINK_PREVIEW
+ * Log tag: linkPreview.start
  *
  * @param {GoogleAppsScript.Addons.EventObject} e
  * @returns {GoogleAppsScript.Card_Service.Card}
@@ -49,7 +49,7 @@ function createActionTrigger(e) { // eslint-disable-line no-unused-vars
 function onLinkPreview(e) { // eslint-disable-line no-unused-vars
   var url = (e && e.docs && e.docs.matchedUrl && e.docs.matchedUrl.url) || '';
   var _id = _getIdentity();
-  GasLogger.log('LINK_PREVIEW', { url: url, version: BUILD_INFO.version, eu: _id.eu, au: _id.au });
+  GasLogger.log('linkPreview.start', { url: url, eu: _id.eu, au: _id.au });
 
   // [PROBE]
   PROBE_log('chipHover.' + PROBE_docState(DocumentApp.getActiveDocument()), {
@@ -61,7 +61,7 @@ function onLinkPreview(e) { // eslint-disable-line no-unused-vars
     GasLogger.flush();
     return card;
   } catch (err) {
-    GasLogger.log('LINK_PREVIEW.error', { msg: String(err), eu: _id.eu, au: _id.au });
+    GasLogger.log('linkPreview.error', { msg: String(err), eu: _id.eu, au: _id.au });
     GasLogger.flush();
     return _buildMessageCard('Preview error', 'Could not load action preview. Please report this to your administrator.\n\n' + String(err));
   }
@@ -96,7 +96,7 @@ function _submitCreateAction(e) {
     }
 
     if (!actionText) {
-      GasLogger.log('CREATE_ACTION_TRIGGER.validation', { msg: 'actionText required' });
+      GasLogger.log('actionTrigger.validation', { msg: 'actionText required' });
       GasLogger.flush();
       return CardService.newActionResponseBuilder()
         .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Required', 'Action text cannot be empty.')))
@@ -116,7 +116,7 @@ function _submitCreateAction(e) {
     var insertError = _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName || assigneeEmail);
 
     if (insertError) {
-      GasLogger.log('CREATE_ACTION_TRIGGER.error', { msg: 'chip insert failed', err: insertError });
+      GasLogger.log('actionTrigger.error', { msg: 'chip insert failed', err: insertError });
       GasLogger.flush();
       return CardService.newActionResponseBuilder()
         .setNavigation(CardService.newNavigation().updateCard(
@@ -125,12 +125,12 @@ function _submitCreateAction(e) {
         .build();
     }
 
-    GasLogger.log('CREATE_ACTION_TRIGGER.done', { globalId: globalId });
+    GasLogger.log('actionTrigger.done', { globalId: globalId });
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText + '\n\nSync now to record it in the ActionSheet.')))
       .build();
   } catch (err) {
-    GasLogger.log('CREATE_ACTION_TRIGGER.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
+    GasLogger.log('actionTrigger.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
     GasLogger.flush();
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().updateCard(
@@ -161,7 +161,7 @@ function _submitImport(e) {
   try {
     var selected = _collectImportSelection(e);
     if (selected.length === 0) {
-      GasLogger.log('IMPORT_SELECTED.validation', { msg: 'no selection' });
+      GasLogger.log('importSelected.validation', { msg: 'no selection' });
       GasLogger.flush();
       return CardService.newActionResponseBuilder()
         .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Nothing selected', 'Select at least one action.')))
@@ -171,7 +171,7 @@ function _submitImport(e) {
     var doc    = DocumentApp.getActiveDocument();
     var cursor = doc.getCursor();
     if (!cursor) {
-      GasLogger.log('INSERT_CHIP.warn', { msg: 'no cursor' });
+      GasLogger.log('insertChip.warn', { msg: 'no cursor' });
       GasLogger.flush();
       return CardService.newActionResponseBuilder()
         .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('No cursor', 'No cursor position found — click in the document to place your cursor, then try again.')))
@@ -184,7 +184,7 @@ function _submitImport(e) {
     // Re-fetch authoritative rows — never trust client-supplied action text (ADR-0008).
     var listResult = _callWebApp('list_importable_actions', { docId: docId });
     if (!listResult || listResult.error) {
-      GasLogger.log('IMPORT_SELECTED.error', { msg: 'list_importable_actions failed', err: listResult && listResult.error });
+      GasLogger.log('importSelected.error', { msg: 'list_importable_actions failed', err: listResult && listResult.error });
       GasLogger.flush();
       return CardService.newActionResponseBuilder()
         .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Unable to load importable actions right now.')))
@@ -199,7 +199,7 @@ function _submitImport(e) {
     });
 
     if (importRows.length === 0) {
-      GasLogger.log('IMPORT_SELECTED.validation', { msg: 'selection not found in importable rows' });
+      GasLogger.log('importSelected.validation', { msg: 'selection not found in importable rows' });
       GasLogger.flush();
       return CardService.newActionResponseBuilder()
         .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Nothing selected', 'Select at least one action.')))
@@ -210,7 +210,7 @@ function _submitImport(e) {
     // (REST inserts are not seen by DocumentApp mid-run).
     var cursorResult = _resolveCursorIndex(doc, cursor, token);
     if (cursorResult.index === null) {
-      GasLogger.log('IMPORT_SELECTED.error', { msg: cursorResult.error, paraText: (cursorResult.paraText || '').slice(0, 60), paraOffset: cursorResult.paraOffset });
+      GasLogger.log('importSelected.error', { msg: cursorResult.error, paraText: (cursorResult.paraText || '').slice(0, 60), paraOffset: cursorResult.paraOffset });
       GasLogger.flush();
       return CardService.newActionResponseBuilder()
         .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Insert failed', cursorResult.error)))
@@ -228,7 +228,7 @@ function _submitImport(e) {
       .setNavigation(CardService.newNavigation().updateCard(_buildImportCard(doc.getId(), false)))
       .build();
   } catch (err) {
-    GasLogger.log('IMPORT_SELECTED.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
+    GasLogger.log('importSelected.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
     GasLogger.flush();
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().updateCard(
@@ -363,7 +363,7 @@ function _globalIdFromChipUrl(url) {
 function _buildPreviewCard(url, statusOverride, docOverride) {
   var globalId  = _globalIdFromChipUrl(url);
   var actionId  = parseGlobalId(globalId).actionId;
-  GasLogger.log('PREVIEW_CARD.lookup', { globalId: globalId, actionId: actionId });
+  GasLogger.log('previewCard.lookup', { globalId: globalId, actionId: actionId });
   var doc      = docOverride || DocumentApp.getActiveDocument();
   var scanned  = _scanFloatingActions(doc);
   var match    = null;
@@ -371,7 +371,7 @@ function _buildPreviewCard(url, statusOverride, docOverride) {
     if (scanned[fi].globalId === globalId) { match = scanned[fi]; break; }
   }
   var action = match ? { action: match.actionText, status: statusOverride || match.status, assigneeEmail: match.assigneeEmail, assigneeName: match.assigneeName } : null;
-  GasLogger.log('PREVIEW_CARD.result', { found: !!action, action: action ? action.action : null, status: action ? action.status : null });
+  GasLogger.log('previewCard.result', { found: !!action, action: action ? action.action : null, status: action ? action.status : null });
 
   var actionText = (action && action.action)        || '';
   var status     = (action && action.status)         || '';
@@ -443,7 +443,7 @@ function _buildPreviewCard(url, statusOverride, docOverride) {
 /**
  * Handles a status icon tap directly from the preview card.
  * Updates doc paragraph, refreshes tracker, schedules async sheet update.
- * Log tag: POC_EDIT_ACTION.complete
+ * Log tag: pocEditAction.complete
  *
  * @param {GoogleAppsScript.Addons.EventObject} e
  * @returns {GoogleAppsScript.Card_Service.ActionResponse}
@@ -473,7 +473,7 @@ function _setStatusFromPreview(e, docOverride) { // eslint-disable-line no-unuse
   var flushed = _flushActionParagraph(docId, token, N, globalId, actionText, newStatus, assigneeEmail, assigneeName);
 
   if (!flushed) {
-    GasLogger.log('POC_EDIT_ACTION.flush_failed', { globalId: globalId });
+    GasLogger.log('pocEditAction.flush_failed', { globalId: globalId });
     GasLogger.flush();
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Error', 'Failed to update action in document.')))
@@ -492,7 +492,7 @@ function _setStatusFromPreview(e, docOverride) { // eslint-disable-line no-unuse
     docId:          docId
   });
 
-  GasLogger.log('POC_EDIT_ACTION.complete', { globalId: globalId, status: newStatus });
+  GasLogger.log('pocEditAction.complete', { globalId: globalId, status: newStatus });
 
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().updateCard(_buildPreviewCard(url, newStatus, doc)))
@@ -541,7 +541,7 @@ function _scheduleSheetUpdate(params) {
 /**
  * Time-based trigger handler: atomically drains ACTION_SHEET_QUEUE under a lock,
  * processes the snapshot, then deletes only this trigger instance.
- * Log tag: POC_ASYNC_SHEET.complete
+ * Log tag: pocAsyncSheet.complete
  *
  * @param {Object} e  GAS trigger event — e.triggerUid used for self-cleanup
  */
@@ -602,7 +602,7 @@ function _processPendingSheetUpdates(e) { // eslint-disable-line no-unused-vars
     }
   }
 
-  GasLogger.log('POC_ASYNC_SHEET.complete', { processed: snapshot.length });
+  GasLogger.log('pocAsyncSheet.complete', { processed: snapshot.length });
   GasLogger.flush();
 }
 
@@ -662,7 +662,7 @@ function _getNextActionN(doc) {
 function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, assigneeName) {
   var cursor = doc.getCursor();
   if (!cursor) {
-    GasLogger.log('INSERT_CHIP.warn', { msg: 'no cursor' });
+    GasLogger.log('insertChip.warn', { msg: 'no cursor' });
     return 'No cursor position found — click in the document to place your cursor, then try again.';
   }
 
@@ -671,7 +671,7 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
 
   var cursorResult = _resolveCursorIndex(doc, cursor, token);
   if (cursorResult.index === null) {
-    GasLogger.log('INSERT_CHIP.error', { msg: cursorResult.error, paraText: (cursorResult.paraText || '').slice(0, 60), paraOffset: cursorResult.paraOffset });
+    GasLogger.log('insertChip.error', { msg: cursorResult.error, paraText: (cursorResult.paraText || '').slice(0, 60), paraOffset: cursorResult.paraOffset });
     return cursorResult.error;
   }
 
@@ -682,7 +682,7 @@ function _insertActionChip(doc, N, globalId, actionText, assigneeEmail, status, 
 
   if (!fragResult.ok) return fragResult.error;
 
-  GasLogger.log('INSERT_CHIP.done', { globalId: globalId, cursorIndex: cursorResult.index });
+  GasLogger.log('insertChip.done', { globalId: globalId, cursorIndex: cursorResult.index });
   return null;
 }
 
@@ -844,7 +844,7 @@ function _importSelectedRows(doc, docId, token, index, importRows) {
     }, k > 0);
 
     if (!fragResult.ok) {
-      GasLogger.log('IMPORT_SELECTED.error', { msg: 'chip insert failed', err: fragResult.error, k: k });
+      GasLogger.log('importSelected.error', { msg: 'chip insert failed', err: fragResult.error, k: k });
       return {
         ok: false, title: 'Insert failed',
         error: 'Action ' + (k + 1) + ' of ' + importRows.length + ' could not be inserted.\n\n' + fragResult.error
@@ -872,7 +872,7 @@ function _importSelectedRows(doc, docId, token, index, importRows) {
   });
 
   if (!upsertResult || upsertResult.error) {
-    GasLogger.log('IMPORT_SELECTED.error', { msg: 'upsert failed', err: upsertResult && upsertResult.error });
+    GasLogger.log('importSelected.error', { msg: 'upsert failed', err: upsertResult && upsertResult.error });
     return {
       ok: false, title: 'Error',
       error: 'Actions were inserted in the document but could not be saved: ' + ((upsertResult && upsertResult.error) || 'unknown error')
@@ -885,10 +885,10 @@ function _importSelectedRows(doc, docId, token, index, importRows) {
     targetDocName: doc.getName()
   });
   if (!forwardResult || forwardResult.error) {
-    GasLogger.log('IMPORT_SELECTED.error', { msg: 'forward failed', err: forwardResult && forwardResult.error });
+    GasLogger.log('importSelected.error', { msg: 'forward failed', err: forwardResult && forwardResult.error });
   }
 
-  GasLogger.log('IMPORT_SELECTED.done', { inserted: newRows.length, baseN: baseN });
+  GasLogger.log('importSelected.done', { inserted: newRows.length, baseN: baseN });
   return { ok: true, inserted: newRows.length, baseN: baseN };
 }
 
@@ -984,7 +984,7 @@ function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
 
   if (batchResp.getResponseCode() !== 200) {
     var batchErr = 'HTTP ' + batchResp.getResponseCode() + ': ' + batchResp.getContentText().substring(0, 200);
-    GasLogger.log('INSERT_CHIP.error', {
+    GasLogger.log('insertChip.error', {
       msg:  'batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
       body: batchResp.getContentText().substring(0, 300)
     });

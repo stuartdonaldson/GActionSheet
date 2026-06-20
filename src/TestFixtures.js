@@ -548,7 +548,8 @@ function setupTestFixtures(scenario, data) {
         } catch (chipErr) {
           GasLogger.log('fixture.uc_a_clear', {
             assigneeEmail: ucaEmail,
-            error: 'chip insert: ' + chipErr.message
+            msg: 'chip insert failed',
+            err: chipErr.message
           });
         }
         if (ucaChipOk) {
@@ -563,7 +564,8 @@ function setupTestFixtures(scenario, data) {
           } catch (emailErr) {
             GasLogger.log('fixture.uc_a_clear', {
               assigneeEmail: ucaEmail,
-              error: 'email item append: ' + emailErr.message
+              msg: 'email item append failed',
+              err: emailErr.message
             });
           }
         }
@@ -587,7 +589,8 @@ function setupTestFixtures(scenario, data) {
           permChipOk = true;
         } catch (permChipErr) {
           GasLogger.log('fixture.uc_a_permutations', {
-            error: 'chip insert: ' + permChipErr.message
+            msg: 'chip insert failed',
+            err: permChipErr.message
           });
         }
         if (permChipOk) {
@@ -605,7 +608,7 @@ function setupTestFixtures(scenario, data) {
               'Perm: Write the project documentation');
           } catch (e4) { permErrors.push('plain-text: ' + e4.message); }
           if (permErrors.length > 0) {
-            GasLogger.log('fixture.uc_a_permutations', { error: permErrors.join('; ') });
+            GasLogger.log('fixture.uc_a_permutations', { msg: 'permutation insert failed', err: permErrors.join('; ') });
           } else {
             GasLogger.log('fixture.uc_a_permutations', { itemsInserted: 4 });
           }
@@ -1782,7 +1785,7 @@ function setupTestFixtures(scenario, data) {
           }
         }
         if (!sduId) {
-          GasLogger.log('fixture.scenario_delete_unassigned', { error: 'not found', target: sduTarget });
+          GasLogger.log('fixture.scenario_delete_unassigned', { msg: 'target action not found', target: sduTarget });
           _TF_RESULT = { tag: 'fixture.scenario_delete_unassigned', data: { error: 'not found' } };
           break;
         }
@@ -1831,7 +1834,7 @@ function setupTestFixtures(scenario, data) {
           }
         }
         if (!sssNrId) {
-          GasLogger.log('fixture.sidebar_set_status', { error: 'action not found', target: sssTargetText });
+          GasLogger.log('fixture.sidebar_set_status', { msg: 'action not found', target: sssTargetText });
           _TF_RESULT = { tag: 'fixture.sidebar_set_status', data: { error: 'action not found' } };
           docAlreadyClosed = false;
           break;
@@ -1858,7 +1861,7 @@ function setupTestFixtures(scenario, data) {
           }
         }
         if (!sdaNrId) {
-          GasLogger.log('fixture.sidebar_delete_action', { error: 'action not found', target: sdaTargetText });
+          GasLogger.log('fixture.sidebar_delete_action', { msg: 'action not found', target: sdaTargetText });
           _TF_RESULT = { tag: 'fixture.sidebar_delete_action', data: { error: 'action not found' } };
           docAlreadyClosed = false;
           break;
@@ -2334,7 +2337,7 @@ function setupTestFixtures(scenario, data) {
     // Catch errors that escape the per-scenario try blocks so the test always
     // receives a log entry instead of timing out on an empty flush.
     GasLogger.log('fixture.error', { msg: outerErr.message, scenario: resolvedScenario });
-    GasLogger.log('fixture.' + resolvedScenario, { error: outerErr.message });
+    GasLogger.log('fixture.' + resolvedScenario, { err: outerErr.message });
     return { tag: 'fixture.' + resolvedScenario, error: outerErr.message };
   } finally {
     GasLogger.flush(); // still fires after return — needed for Playwright log-polling compat
