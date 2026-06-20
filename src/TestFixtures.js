@@ -2329,7 +2329,11 @@ function setupTestFixtures(scenario, data) {
       doc.saveAndClose();
     }
 
-    GasLogger.log('fixture.setup', { scenario: resolvedScenario });
+    // Scenario folded into the tag itself (not just the data payload) so the
+    // name alone identifies which fixture ran, matching the per-scenario tags
+    // already used above (fixture.uc_b_conflict, fixture.sync_status_archive, etc.)
+    // instead of standing in for all of them under one generic name.
+    GasLogger.log('fixture.' + resolvedScenario + '.setup', { scenario: resolvedScenario });
     // Return structured result for HTTP callers (_handleRunFixture in TestWebApp.js).
     // Playwright callers ignore the return value and use GasLogger.flush() instead.
     return _TF_RESULT || { tag: 'fixture.' + resolvedScenario, data: {} };
