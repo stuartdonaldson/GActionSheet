@@ -259,11 +259,18 @@ class TestGestures:
 
 class TestSetStatus:
     def _make_card(self):
-        """Card whose frame returns status_btn then busy on successive locator() calls."""
+        """Card whose frame returns status_btn then busy on successive locator() calls.
+
+        set_status() (scn/ui.py) calls .first on the status-button locator
+        (GTaskSheet-cug8, af45fc7) before using it — status_btn here stands in
+        for that .first, not the bare locator() return.
+        """
         frame = MagicMock()
+        status_locator = MagicMock()
         status_btn = MagicMock()
+        status_locator.first = status_btn
         busy = MagicMock()
-        frame.locator.side_effect = [status_btn, busy]
+        frame.locator.side_effect = [status_locator, busy]
         return Card(frame), status_btn, busy
 
     def test_finds_status_button_by_aria_label(self, driver):

@@ -144,3 +144,58 @@ re-derives and records the mapping so a human or dashboard query can bridge the 
 vocabularies manually. §4.3's unified-sink design remains the architectural fix for
 needing this table at all, and remains an explicit open decision (§6) — not implemented
 as a side effect of writing this section.
+
+## 9. GAS-side call-tree correlation: `op`/`parentOp` (GTaskSheet-65g1, GTaskSheet-j8cn)
+
+Before this, a multi-step GAS execution's own sub-events (e.g. `syncAll()`'s
+`sync.all.start` then per-doc `sync.scanned`/`sync.complete` ×N then
+`sync.all.complete`) had nothing tying them together except time proximity — fragile,
+and exactly the kind of manual reconstruction this whole doc exists to eliminate (§1).
+
+**Mechanism** (`GasLogger.startOp()` / `endOp()` / `getCurrentOp()`,
+`src/GasLogger.js`): module-level state (`_currentOp`, `_parentOp`) holds a
+`Utilities.getUuid()` minted at `startOp()`, stamped as `entry.op` on every
+`GasLogger.log()` call until `endOp()` clears it. `_postToAxiom`'s row mapping
+includes `op`/`parentOp` when present, so a single invocation's sub-events become
+queryable by exact id, not time-window guessing.
+
+**Why module-level state is safe:** each GAS execution (each `doPost`/`doGet`/trigger
+invocation) gets its own isolated global scope — there is no shared memory across
+concurrent invocations. A module-level "current op" variable can't leak between two
+simultaneous `syncAll()` runs the way it would in a long-lived server process; it only
+ever needs to survive within one execution's own call stack, between that execution's
+`startOp()` and `endOp()`.
+
+**Cross-execution correlation (`parentOp`):** `startOp(receivedOpId)` never adopts a
+caller's id as its own (that would collapse concurrent/replayed invocations under one
+id, breaking "op is unique per execution"). Instead the callee still mints its own
+fresh `op`, and if a `receivedOpId` was passed in, stamps it onto every entry as a
+separate `parentOp` field — the trace-id/span-id shape from distributed tracing (`op`
+= this execution's own span, `parentOp` = the caller's span). `getCurrentOp()` lets a
+caller read its own op id before issuing a `UrlFetchApp` call so it can pass it along
+as `opId` in the request payload. This is what GTaskSheet-j8cn wired across the
+addon→WebApp HTTP boundary: `WebApp.js`'s `doPost` reads `payload.opId` and passes it
+into `startOp()`; `WorkspaceAddonCard.js`/`EditorAddonCard.js`/`SyncManager.js` outbound
+calls read `GasLogger.getCurrentOp()` and set it as `opId` on the way out.
+
+**Current scope: `syncAll()` only.** `journey-session` begin/end
+(`WebApp.js`'s `_handleJourneySession`) and other multi-step-looking entry points
+(import flows) were evaluated and found *not* to need `op` — each handler invocation
+(`begin_journey_session`, `end_journey_session`) emits exactly **one** `log()` call, so
+there are no within-invocation sub-events to correlate. `docId` already links the begin
+and end events across their two separate `doPost` executions. **Before re-proposing
+wiring `op` into journey-session (or any other entry point), re-check that this is
+still true** — it was an empirical finding (count the `GasLogger.log()` call sites
+inside the handler), not a general exclusion rule.
+
+**Verification it's non-vacuous:** `tests/test_sync_all.py::test_sync_all_op_correlation`
+asserts two back-to-back `syncAll()` sweeps each have their own sub-events sharing
+exactly one `op` id, and the two sweeps get different ids — proved to actually fail
+(not a fence artifact) by reverting the `GasLogger.js`/`SyncManager.js` changes and
+redeploying TEST before restoring.
+
+**Related follow-ups (both closed, kept here as the historical pointer):**
+GTaskSheet-j8cn (cross-invocation `parentOp` propagation, addon→WebApp — described
+above) and GTaskSheet-x94a (`GasLogger` tag-naming taxonomy cleanup, unrelated to
+correlation but touched the same call sites around the same time;
+`knowledge-base/adr/0019-gaslogger-naming-standard.md`).

@@ -313,18 +313,19 @@ class ScenarioSession:
         No-op when gasLogDir is unset. Returns the matched entry (or None).
         """
         from datetime import datetime
-        from tests.helpers.gas_log import _scan_logs
+        from tests.helpers.gas_log import collect_logs
 
         log_dir = self.settings.get("gasLogDir")
         if not log_dir:
             return None
         if fence is None:
             fence = self._gas_fence
-        entry = _scan_logs(
+        entries = collect_logs(
             log_dir,
             lambda e: str(e.get("tag", "")).endswith(".error"),
             after=fence,
         )
+        entry = entries[0] if entries else None
         if not entry:
             return None
 

@@ -126,6 +126,7 @@ function _submitCreateAction(e) {
     }
 
     GasLogger.log('actionTrigger.done', { globalId: globalId });
+    GasLogger.flush();
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText + '\n\nSync now to record it in the ActionSheet.')))
       .build();

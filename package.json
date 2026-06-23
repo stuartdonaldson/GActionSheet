@@ -20,6 +20,7 @@
     "test:cycle": "npm run test:full; npm run test:report",
     "test:playwright:debug": "npx playwright test --config tests/playwright/playwright.config.js --retries=0",
     "test:playwright:blank-doc": "npx playwright test tests/playwright/sidebar_shell.test.js -g \"brand-new blank doc\" --config tests/playwright/playwright.config.js --retries=0",
+    "auth:user": "node tests/playwright/auth.setup.js --account=user",
     "auth:test.u1": "node tests/playwright/auth.setup.js --account=test.u1",
     "auth:test.u2": "node tests/playwright/auth.setup.js --account=test.u2",
     "auth:test.u3": "node tests/playwright/auth.setup.js --account=test.u3",

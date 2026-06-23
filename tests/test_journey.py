@@ -266,6 +266,13 @@ def test_journey(scn, expected_version, gas_log_dir):
     scn.verify(created, on=DOC, status="Open", tag="[journey ui-create]", entry_point="_submitCreateAction")  # cheap doc probe, now
     scn.verify(created, on=SHEET, status="Open", at=INTEGRITY, tag="[journey ui-create]")  # async sheet write → defer
 
+    # GTaskSheet-5ab2c9c-regression: _submitCreateAction no longer upserts the
+    # sheet row itself (doc is source of truth; "the sheet row will be created
+    # by the next sync" — EditorAddonCard.js comment). The deferred SHEET
+    # expectation above needs that sync to actually happen before the
+    # checkpoint reads the sheet, or it observes a row that was never written.
+    scn.sync()
+
     # D1: drain the Open SHEET expectation before set_status changes it (Coordination Log)
     scn.checkpoint(INTEGRITY)
 

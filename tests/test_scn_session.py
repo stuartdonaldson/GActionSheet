@@ -596,8 +596,21 @@ def _write_log(log_dir, tag, *, data="boom"):
     (log_dir / "run.log").write_text(_json.dumps(entry) + "\n")
 
 
-def test_check_gas_errors_raises_on_error_entry(tmp_path):
+def _force_file_backend(monkeypatch):
+    """_check_gas_errors now dispatches through gas_log's public collect_logs(),
+    which auto-selects file vs axiom backend from the real local.settings.json
+    (GTaskSheet-1nln follow-up: _scan_logs was removed in the file/axiom
+    backend split). These tests exercise the file-dir-scanning path
+    specifically via tmp_path, so force that backend rather than depend on
+    whatever axiom config happens to be present in this dev environment.
+    """
+    import tests.helpers.gas_log as gas_log
+    monkeypatch.setattr(gas_log, "_backend", lambda: "file")
+
+
+def test_check_gas_errors_raises_on_error_entry(tmp_path, monkeypatch):
     """A *.error entry logged after session start aborts by default (fail-fast on)."""
+    _force_file_backend(monkeypatch)
     scn = _make_session(settings={**SETTINGS, "gasLogDir": str(tmp_path)})
     _write_log(tmp_path, "addon.sync.error")
     with pytest.raises(AssertionError, match="addon.sync.error"):
@@ -606,6 +619,7 @@ def test_check_gas_errors_raises_on_error_entry(tmp_path):
 
 def test_check_gas_errors_suppressed_by_env(tmp_path, monkeypatch):
     """SCN_FAILFAST=0 downgrades the post-Act guard to trace-only (returns, no raise)."""
+    _force_file_backend(monkeypatch)
     monkeypatch.setenv("SCN_FAILFAST", "0")
     scn = _make_session(settings={**SETTINGS, "gasLogDir": str(tmp_path)})
     _write_log(tmp_path, "sync.error")
@@ -613,8 +627,9 @@ def test_check_gas_errors_suppressed_by_env(tmp_path, monkeypatch):
     assert entry is not None and entry["tag"] == "sync.error"
 
 
-def test_check_gas_errors_ignores_non_error_tags(tmp_path):
+def test_check_gas_errors_ignores_non_error_tags(tmp_path, monkeypatch):
     """Non-.error tags do not trip the monitor."""
+    _force_file_backend(monkeypatch)
     scn = _make_session(settings={**SETTINGS, "gasLogDir": str(tmp_path)})
     _write_log(tmp_path, "addon.sync.ok")
     assert scn._check_gas_errors() is None
@@ -628,6 +643,7 @@ def test_check_gas_errors_noop_without_log_dir():
 
 def test_assert_no_addon_error_always_raises(tmp_path, monkeypatch):
     """Explicit assert_no_addon_error raises even when SCN_FAILFAST=0."""
+    _force_file_backend(monkeypatch)
     monkeypatch.setenv("SCN_FAILFAST", "0")
     scn = _make_session(settings={**SETTINGS, "gasLogDir": str(tmp_path)})
     with pytest.raises(AssertionError, match="x.error"):
