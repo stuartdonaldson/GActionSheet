@@ -142,7 +142,14 @@ Beads (all created):
 Acceptance test scenario:
 - Given two open team-scoped actions selected in Import from documents readable by the current user, when Import is executed at the current paragraph, then both actions are inserted as new floating actions with new AI-N values, source rows are set to `Forwarded` with `[Forward:<DocName> AI-N]` suffixes, rows are marked dirty, and a post-import sync updates the document action table; actions from unreadable source documents are never listed.
 
-### EPIC-E — Add Notify tab and assignee reminder email flow — `GTaskSheet-gc43`
+### EPIC-E — Add Notify tab and assignee reminder email flow — `GTaskSheet-gc43` — INDEFINITE BACKLOG
+
+**Status (2026-06-22): closed, not delivered.** Paused 2026-06-15 immediately after EPIC-D
+closed, never resumed, and closed out 2026-06-22 rather than left open/deferred so it stops
+showing as pending work. Goal/design below is retained as a starting point, not a frozen plan —
+if/when this is reactivated, re-derive the approach against whatever has shipped by then
+(email-sending mechanism, template engine, team-scope model may all have moved); don't assume
+the beads below still match current code.
 
 Goal: add Notify capability to send reminders to selected assignees with unresolved
 team-scoped actions.
@@ -156,18 +163,20 @@ template/renderer/sender; `GTaskSheet-tv54`).
 Access rule: Notify must only aggregate and present actions from source documents readable
 by the current user.
 
-Beads (all created):
-- `[INF] Align email-template approach with Funnel "Assignee reminder" entry` — `model:opus` — `GTaskSheet-tv54`
-- `[IMP] Notify tab: assignee aggregation with unresolved counts` — `model:sonnet` — `GTaskSheet-xiv8`
-- `[IMP] Send reminder emails (HtmlService template + GmailApp, XSS escaping)` — `model:opus` — `GTaskSheet-f3v9`
-- `[IMP] Reuse team-scope security gate + access filter on Notify reads` — `model:sonnet` — `GTaskSheet-ajns`
-- `[TST] Bind Notify assertions to J-ACCESS-FILTER (P1-P4)` — `model:sonnet` — `GTaskSheet-ay5w`
-- `[TST] Cross-feature parity assertion (Import document set == Notify document set)` — `model:haiku` — `GTaskSheet-7fng`
-- `[TST] Template rendering and escaping checks for notification emails` — `model:sonnet` — `GTaskSheet-twwo`
-- `[FIX] Notification count drift and send failures` — `model:sonnet` — `GTaskSheet-1xpj`
+Beads (all closed 2026-06-22 as indefinite-backlog; kept here as reference for reactivation,
+not as a to-do list):
+- `[INF] Align email-template approach with Funnel "Assignee reminder" entry` — `GTaskSheet-tv54` (closed earlier, delivered)
+- `[IMP] Notify tab: assignee aggregation with unresolved counts` — `GTaskSheet-xiv8`
+- `[IMP] Send reminder emails (HtmlService template + GmailApp, XSS escaping)` — `GTaskSheet-f3v9`
+- `[IMP] Reuse team-scope security gate + access filter on Notify reads` — `GTaskSheet-ajns`
+- `[TST] Bind Notify assertions to J-ACCESS-FILTER (P1-P4)` — `GTaskSheet-ay5w`
+- `[TST] Cross-feature parity assertion (Import document set == Notify document set)` — `GTaskSheet-7fng`
+- `[TST] Template rendering and escaping checks for notification emails` — `GTaskSheet-twwo`
+- `[FIX] Notification count drift and send failures` — `GTaskSheet-1xpj`
 - `[GATE] Final sign-off for EPIC-E` (re-runs EPIC-D-PRE DocStatus regression smoke) — `GTaskSheet-s3ga`
 
-Acceptance test scenario:
+Acceptance test scenario (as originally scoped — re-validate against current J-ACCESS-FILTER
+and email-sending standards before reusing):
 - Given team-scoped unresolved actions across multiple assignees from documents readable by the current user, when two assignees are selected in Notify and send is triggered, then only those assignees receive templated reminder emails with correct unresolved-action lists and counts, and actions from unreadable source documents are excluded from counts and emails.
 
 ### Shared test asset requirement (EPIC-D and EPIC-E)
@@ -473,12 +482,13 @@ as the authoritative source). Do not conflate with the action-identity ADR (ADR-
 
 ## Future design: sidebar tabs — Import and Notify
 
-> Updated 2026-06-17. The tabbed sidebar shell and the **Import** tab below are
+> Updated 2026-06-22. The tabbed sidebar shell and the **Import** tab below are
 > **delivered** — see EPIC-D-PRE (`GTaskSheet-uz7h`) and EPIC-D (`GTaskSheet-yb2w`) above,
-> and `docs/CONTEXT.md` UC-E for the as-built description. Only the **Notify** tab
-> (EPIC-E, `GTaskSheet-gc43`, open) remains an unimplemented proposal.
+> and `docs/CONTEXT.md` UC-E for the as-built description. The **Notify** tab
+> (EPIC-E, `GTaskSheet-gc43`) is an indefinite-backlog proposal, not delivered — see the
+> EPIC-E section above for status and the bead list kept as a reactivation reference.
 > Related funnel entry: Assignee reminder (§Funnel) covers similar email mechanics;
-> when both are promoted, align on a shared email-template approach.
+> if either is reactivated, align on a shared email-template approach.
 
 ### Sidebar tab model (delivered)
 
@@ -488,7 +498,7 @@ The sidebar is a tabbed CardService shell (ADR-0015) with three tabs:
 |-----|---------|--------|
 | DocStatus | Sync-status functionality | Delivered |
 | Import | Browse and import open team actions into the current document | Delivered (EPIC-D) |
-| Notify | Email open-action reminders to assignees | Proposed (EPIC-E, below) |
+| Notify | Email open-action reminders to assignees | Indefinite backlog (EPIC-E, below) |
 
 ---
 

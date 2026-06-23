@@ -3129,3 +3129,72 @@ Full `pytest -x` surfaced three pieces of pre-existing debt, none touching the f
 - A field computed in a state object but never rendered anywhere (`homepageState.docName`) is often a sign that the consuming feature (here, the header subtitle) was anticipated but never wired up — worth grepping for orphan fields before adding new state.
 - CardService `setImageUrl()` icons are proxied through Google's image CDN (`lh3.googleusercontent.com`) in the rendered DOM — asserting on the original asset URL substring in a test will always fail; assert presence/count instead.
 - Re-running a "maybe flaky" failure once more before accepting that label is cheap and sometimes corrects the record — `test_journey`'s log-wait timeout had been filed as possibly transient but reproduced identically on retry, changing it from low-priority debt to a likely real regression worth higher attention.
+
+## 2026-06-22 06:34:05
+
+### Summary:
+Ran `/catch-up` after a gap; found `work-log.md` was 3 commits behind (the prior session's `GTaskSheet-ishz.3/.5/.7` Axiom flush-routing/calibration-probe work was never logged — noted as doc drift, not backfilled here).
+
+Closed out two pending decisions surfaced during catch-up:
+- **GTaskSheet-csbv.3** (Import button semantics split) — closed; current Import-tab/'Import selected' two-step behavior is acceptable as-is, deferred pending actual end-user feedback rather than speculative UX work.
+- **EPIC-E (Notify tab) chain** — closed all 10 beads (`GTaskSheet-gc43` epic, `s3ga` gate, `1xpj`, `7fng`, `ajns`, `ay5w`, `f3v9`, `twwo`, `xiv8`, plus already-closed `tv54`) as indefinite backlog rather than leaving them `deferred` (on hold since 2026-06-15, never resumed). Updated `knowledge-base/ROADMAP.md`'s EPIC-E section with a 2026-06-22 status note (closed, not delivered, design retained only as a non-frozen starting point) and the bead-ID list as a reactivation reference, plus two cross-references elsewhere in the doc (Import/Notify intro, sidebar tab-model table) to stop calling EPIC-E "open"/"proposed".
+
+User then asked to verify the bd/git remote setup matches their understanding (issues.jsonl gitignored, bd syncing through the same GitHub remote via bd-managed sync) by checking docs/forums, not just assuming. Used the `bd-maintenance` skill plus a live `WebFetch` of beads' `SYNC_CONCEPTS.md` to confirm rather than guess:
+- `issues.jsonl`/`interactions.jsonl` are correctly gitignored via `.beads/.gitignore` (confirmed via `git check-ignore -v`) — matches upstream's own description of the jsonl export as "not the canonical cross-machine sync channel."
+- `bd dolt remote list` and `git remote -v` already point at the same GitHub URL (`https://github.com/stuartdonaldson/GActionSheet.git`) — matches upstream's documented setup ("the Dolt remote can be the same `origin` URL used for source code", synced via `refs/dolt/data`). Live `bd dolt push` succeeded, confirming this session's closes are actually synced.
+- Found one real gap: bd's git hooks (`pre-commit`/`post-merge`/`pre-push`/`post-checkout`/`prepare-commit-msg`) existed as templates in `.beads/hooks/` but were never installed into `.git/hooks/` (only `.sample` placeholders were present). Fixed via `bd hooks install`; verified all five are now active.
+
+### Key Learnings:
+- A bd issue's catch-up status can mask in-flight work happening in a *different* session — `scn/session.py`/`tests/test_scn_session.py` showing dirty in `git status` lined up suspiciously well with `GTaskSheet-ishz.2`'s still-open AC (`begin_journey_session` Reporter event); flagged rather than assumed safe to touch.
+- Closing an epic/chain as "indefinite backlog" is different from leaving it `deferred` — deferred still reads as pending/resumable-soon; closing with a reactivation-reference note in the roadmap (bead IDs, not re-opened tickets) is the better signal when there's no concrete resume date and the eventual approach may differ from what's currently speculated.
+- When a user says "confirm against docs/forums" rather than "I think bd does X", don't rely on memory or CLAUDE.md's summary alone — fetch the actual upstream doc. In this case it surfaced a real, if minor, gap (hooks never installed) that pure local inspection of config files didn't make obvious until cross-checked against what the doc says *should* exist.
+
+## 2026-06-22 23:01:51
+
+### Summary:
+Validated the uncommitted `GTaskSheet-ishz.2` regression-coverage work (file/axiom log-backend
+split in `scn/session.py`/`tests/helpers/gas_log.py`, `GasLogger.flush()` call in
+`EditorAddonCard.js`, locator/test fixes) via repeated full-suite `pytest` runs. Two successive
+credential expiries blocked progress before a real signal emerged:
+
+1. **Test token expired** — `npm run deploy:test` minted a fresh token (valid to 2026-06-23),
+   re-stamped `Version.js`/`deployment-ledger/test.jsonl`, and unblocked the HTTP-fixture tests
+   (256 -> 279 passing).
+2. **Stale Google session** — refreshing `.auth/test.u1.json`/`test.u2.json`/`nuuts.service.json`
+   via the existing `npm run auth:*` scripts did *not* fix anything, because every UI/integration
+   test (`tests/test_ui_smoke.py`, `test_sidebar.py`, `test_import.py`, `test_journey.py`,
+   `test_link_preview.py`, `tests/helpers/download.py`) hardcodes `.auth/user.json` specifically.
+   A mistaken `--account=user.json` run had left a stray `.auth/user.json.json` instead of
+   refreshing the real file. Added `auth:user` to `package.json` (`--account=user`, matching the
+   convention of the other `auth:*` scripts) so this account refreshes the same way as the others.
+   Removed the stray file; user re-ran the new script in a real (non-Claude-Code) terminal since
+   the login step requires interactive stdin that `!`-launched background tasks can't supply.
+
+After both refreshes: **306 passed, 6 failed** (down from 30 failed/5 errored under the expired
+test token, and from 56 failed/errored under both expired credentials). Retried the 6 failures in
+isolation: 5 passed cleanly (confirms GAS-cold-start/quota flakiness from hammering the live TEST
+WebApp across 4 full-suite runs in ~3 hours, not real regressions). One — `test_sidebar.py::
+test_sidebar_shell_controls` — failed identically twice; diagnostics show the Import button was
+actually present in the frame at failure time, pointing to a locator/render race rather than a
+missing control. Filed as tech debt (`GTaskSheet-t6hx`) rather than chased further, since it has
+no connection to this session's code diff and needs reproduction outside heavy-load conditions to
+isolate root cause.
+
+### Key Learnings:
+- When several tests fail with superficially different error signatures (`FixtureTokenError`,
+  `401 Unauthorized`, `HTTP 500`, Playwright `TimeoutError` on `.docs-title-outer`) after a long
+  idle period, check for a single shared root cause (expired credential) before treating them as
+  independent regressions — grouping by literal exception class undercounts how many failures
+  share one fix.
+- A project can have multiple `npm run auth:*` scripts for named accounts while the actual test
+  helpers hardcode a different, unsuffixed file (`.auth/user.json`) — refreshing the named
+  accounts gives a false sense of "auth refreshed" if nothing greps the test helpers for which
+  file they actually read.
+- `!`-prefixed commands that look interactive can still get intercepted as a backgrounded task by
+  the harness, with no stdin path back to the user — don't assume `!` always gives a live TTY;
+  if a command needs to block on real keyboard input (e.g. "press Enter after logging in"), advise
+  running it in a genuinely separate terminal instead.
+- A Playwright locator timeout doesn't always mean the element is missing — the `capture_failure`
+  diagnostics dump (visible-buttons list) can show the element was present in the frame at
+  failure time, which reclassifies the bug from "broken feature" to "race condition," changing
+  the appropriate fix and urgency.
