@@ -3198,3 +3198,24 @@ isolate root cause.
   diagnostics dump (visible-buttons list) can show the element was present in the frame at
   failure time, which reclassifies the bug from "broken feature" to "race condition," changing
   the appropriate fix and urgency.
+
+## 2026-06-24 03:47:01
+
+### Summary:
+Closed out the `GTaskSheet-ishz.2` validation work from the prior entry. Filed `GTaskSheet-t6hx`
+([TST] `test_sidebar_shell_controls` Import-button locator race) as tech debt rather than chasing
+it further, since the diagnostics dump showed the button present at failure time and it has no
+connection to this session's diff. Split the dirty tree into three commits matching repo
+convention -- `c0eadbd` (ishz.2 implementation + tests), `55de5dd` (EPIC-E closeout + work-log),
+`0dad780` (deploy stamp) -- closed `ishz.2`, and pushed. Found one leftover untracked file,
+`staging/probe-responses-c25b2b72-...txt`: cross-checked it against `staging/probe-runs.md`'s
+registry and found it was captured 2026-06-20 but never registered or referenced by any analysis
+doc, unlike its 20+ tracked siblings -- an orphaned capture, not an established pattern half-
+followed. Confirmed with the user and deleted it. Working tree is now clean; origin up to date.
+
+### Key Learnings:
+- Before deciding whether to commit or delete an untracked file that looks like it belongs to an
+  established pattern (e.g. one of many similarly-named tracked files), check whether the
+  pattern's own index/registry actually references it -- a file matching the naming convention
+  isn't enough; if the registry row and the cross-referencing analysis doc are both missing, it's
+  more likely an orphan than an in-progress instance of the pattern.
