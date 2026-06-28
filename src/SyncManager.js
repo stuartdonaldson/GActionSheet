@@ -556,72 +556,95 @@ function _syncSheetRowToDoc(sheet, row) {
  * @param {Object} seenN   mutable duplicate-tracking map
  */
 function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
-  var fullText   = para.getText().replace(/\n$/, '');
-  var tokenMatch = fullText.match(/^AI-(\d+):\s*/);
-  if (!tokenMatch) return null;
+  var fullText    = para.getText().replace(/\n$/, '');
+  var lines       = fullText.split('\n');
+  var numChildren = para.getNumChildren();
 
-  var N          = parseInt(tokenMatch[1], 10);
-  var globalId   = docId + '/AI-' + N;
-  var afterToken = fullText.slice(tokenMatch[0].length);
-
-  // Walk children: skip leading INLINE_IMAGE, find the AI-N: TEXT, then look
-  // for an optional assignee chip or email-text after it.
-  var numChildren         = para.getNumChildren();
-  var assigneeEmail       = '';
-  var assigneeName        = '';
-  var assigneeSearchStart = 0;
+  // Build per-line child ranges by locating LINE_BREAK elements.
+  // childRanges[i] = [startChildIdx, endChildIdx) for line i.
+  var lbIndices = [];
   for (var ci = 0; ci < numChildren; ci++) {
-    var ch = para.getChild(ci);
-    if (ch.getType() === DocumentApp.ElementType.INLINE_IMAGE) continue;
-    if (ch.getType() === DocumentApp.ElementType.TEXT) { assigneeSearchStart = ci + 1; break; }
+    if (para.getChild(ci).getType() === DocumentApp.ElementType.LINE_BREAK) lbIndices.push(ci);
   }
-  for (var ai = assigneeSearchStart; ai < numChildren; ai++) {
-    var ac = para.getChild(ai);
-    if (ac.getType() === DocumentApp.ElementType.PERSON) {
-      assigneeEmail = ac.asPerson().getEmail() || '';
-      assigneeName  = ac.asPerson().getName()  || '';
-      break;
+  var childRanges = [];
+  var prev = 0;
+  for (var li = 0; li < lbIndices.length; li++) {
+    childRanges.push([prev, lbIndices[li]]);
+    prev = lbIndices[li] + 1;
+  }
+  childRanges.push([prev, numChildren]);
+
+  var actions = [];
+  for (var si = 0; si < lines.length; si++) {
+    var segText    = lines[si];
+    var tokenMatch = segText.match(/^AI-(\d+):\s*/);
+    if (!tokenMatch) continue;
+
+    var N          = parseInt(tokenMatch[1], 10);
+    var globalId   = docId + '/AI-' + N;
+    var afterToken = segText.slice(tokenMatch[0].length);
+
+    var childStart = childRanges[si][0];
+    var childEnd   = childRanges[si][1];
+
+    // Walk children in this segment's range for the assignee chip or email.
+    var assigneeEmail       = '';
+    var assigneeName        = '';
+    var assigneeSearchStart = childStart;
+    for (var ci2 = childStart; ci2 < childEnd; ci2++) {
+      var ch = para.getChild(ci2);
+      if (ch.getType() === DocumentApp.ElementType.INLINE_IMAGE) continue;
+      if (ch.getType() === DocumentApp.ElementType.TEXT) { assigneeSearchStart = ci2 + 1; break; }
     }
-    if (ac.getType() === DocumentApp.ElementType.TEXT) {
-      var t  = ac.asText().getText();
-      var em = t.match(/^[\s]*([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
-      if (em) { assigneeEmail = em[1]; assigneeName = _nameFromEmail(assigneeEmail); }
-      break;
+    for (var ai = assigneeSearchStart; ai < childEnd; ai++) {
+      var ac = para.getChild(ai);
+      if (ac.getType() === DocumentApp.ElementType.PERSON) {
+        assigneeEmail = ac.asPerson().getEmail() || '';
+        assigneeName  = ac.asPerson().getName()  || '';
+        break;
+      }
+      if (ac.getType() === DocumentApp.ElementType.TEXT) {
+        var t  = ac.asText().getText();
+        var em = t.match(/^[\s]*([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
+        if (em) { assigneeEmail = em[1]; assigneeName = _nameFromEmail(assigneeEmail); }
+        break;
+      }
     }
+
+    var actionText    = afterToken;
+    var assigneeStrip = afterToken.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
+    if (assigneeStrip) {
+      actionText = afterToken.slice(assigneeStrip[0].length);
+      if (!assigneeEmail) {
+        assigneeEmail = assigneeStrip[1];
+        assigneeName  = _nameFromEmail(assigneeEmail);
+      }
+    }
+
+    var status            = 'Open';
+    var statusMatch       = actionText.match(/\(([^)]*)\)\s*$/);
+    var hasExplicitStatus = !!statusMatch;
+    if (statusMatch) {
+      status     = statusMatch[1].trim() || 'Open';
+      actionText = actionText.slice(0, actionText.length - statusMatch[0].length).trim();
+    }
+
+    actions.push({
+      bodyChildIndex:    bodyIdx,
+      paragraph:         para,
+      globalId:          globalId,
+      N:                 N,
+      assigneeEmail:     assigneeEmail,
+      assigneeName:      assigneeName,
+      actionText:        actionText,
+      status:            status,
+      hasExplicitStatus: hasExplicitStatus,
+      isDuplicate:       seenN[N] === true
+    });
+    seenN[N] = true;
   }
 
-  var actionText    = afterToken;
-  var assigneeStrip = afterToken.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
-  if (assigneeStrip) {
-    actionText = afterToken.slice(assigneeStrip[0].length);
-    if (!assigneeEmail) {
-      assigneeEmail = assigneeStrip[1];
-      assigneeName  = _nameFromEmail(assigneeEmail);
-    }
-  }
-
-  var status            = 'Open';
-  var statusMatch       = actionText.match(/\(([^)]*)\)\s*$/);
-  var hasExplicitStatus = !!statusMatch;
-  if (statusMatch) {
-    status     = statusMatch[1].trim() || 'Open';
-    actionText = actionText.slice(0, actionText.length - statusMatch[0].length).trim();
-  }
-
-  var action = {
-    bodyChildIndex:    bodyIdx,
-    paragraph:         para,
-    globalId:          globalId,
-    N:                 N,
-    assigneeEmail:     assigneeEmail,
-    assigneeName:      assigneeName,
-    actionText:        actionText,
-    status:            status,
-    hasExplicitStatus: hasExplicitStatus,
-    isDuplicate:       seenN[N] === true
-  };
-  seenN[N] = true;
-  return action;
+  return actions;
 }
 
 /**
@@ -640,8 +663,8 @@ function _collectTableCellActions(table, tableBodyIdx, docId, actions, seenN) {
                  : cpt === DocumentApp.ElementType.LIST_ITEM  ? cp.asListItem()
                  : null;
         if (!para) continue;
-        var action = _parseParagraphAsFloatingAction(para, tableBodyIdx, docId, seenN);
-        if (action) actions.push(action);
+        var found = _parseParagraphAsFloatingAction(para, tableBodyIdx, docId, seenN);
+        for (var fi = 0; fi < found.length; fi++) actions.push(found[fi]);
       }
     }
   }
@@ -692,8 +715,8 @@ function _scanFloatingActions(doc) {
     }
 
     var para   = isPara ? child.asParagraph() : child.asListItem();
-    var action = _parseParagraphAsFloatingAction(para, i, docId, seenN);
-    if (action) actions.push(action);
+    var found = _parseParagraphAsFloatingAction(para, i, docId, seenN);
+    for (var fi = 0; fi < found.length; fi++) actions.push(found[fi]);
   }
   return actions;
 }
@@ -722,10 +745,16 @@ function _collectTokenParagraphs(body) {
   var trackerTableSkipped = false;
 
   function scanPara(para) {
-    var text = para.getText().replace(/\n$/, '');
-    var m = text.match(/^AI-(\d+):/);
-    if (m) { numbered.push(parseInt(m[1], 10)); return; }
-    if (/^AI:/.test(text)) placeholders.push(para);
+    var text  = para.getText().replace(/\n$/, '');
+    var lines = text.split('\n');
+    var charOffset = 0;
+    for (var li = 0; li < lines.length; li++) {
+      var line = lines[li];
+      var m = line.match(/^AI-(\d+):/);
+      if (m) { numbered.push(parseInt(m[1], 10)); }
+      else if (/^AI:/.test(line)) { placeholders.push({ para: para, offset: charOffset }); }
+      charOffset += line.length + 1; // +1 for the \n separator
+    }
   }
 
   for (var i = 0; i < n; i++) {
@@ -773,8 +802,9 @@ function _assignPlaceholderTokens(doc) {
   var newGlobalIds = [];
   for (var j = 0; j < found.placeholders.length; j++) {
     maxN++;
-    // Insert '-N' at position 2 (between 'AI' and ':') → 'AI:' becomes 'AI-N:'
-    found.placeholders[j].editAsText().insertText(2, '-' + maxN);
+    var item = found.placeholders[j];
+    // Insert '-N' at position 2+offset (between 'AI' and ':') → 'AI:' becomes 'AI-N:'
+    item.para.editAsText().insertText(2 + item.offset, '-' + maxN);
     newGlobalIds.push(docId + '/AI-' + maxN);
     assigned++;
   }

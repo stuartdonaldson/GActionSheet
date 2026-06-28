@@ -1749,6 +1749,25 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'append_doc_paragraph_with_soft_returns': {
+        // Appends a paragraph with soft returns (LINE_BREAK elements).
+        // data.segments = array of text strings; these are joined with LINE_BREAK
+        // elements between them. E.g., ['line 1', 'line 2'] produces "line 1\nline 2"
+        // with actual LINE_BREAK child elements (GTaskSheet-e2t9 soft-return AI detection).
+        var adswrSegments = data.segments || [];
+        if (adswrSegments.length === 0) {
+          _TF_RESULT = { tag: 'fixture.append_doc_paragraph_with_soft_returns', data: { error: 'segments required' } };
+          break;
+        }
+        var adswrPara = body.appendParagraph(adswrSegments[0] || '');
+        for (var adswrI = 1; adswrI < adswrSegments.length; adswrI++) {
+          adswrPara.appendLineBreak();
+          adswrPara.appendText(adswrSegments[adswrI]);
+        }
+        _TF_RESULT = { tag: 'fixture.append_doc_paragraph_with_soft_returns', data: { ok: true } };
+        break;
+      }
+
       case 'append_tracker_cell_text': {
         // Appends an AI: token into the LAST data row's first cell of the
         // existing Action Item Tracker table (must already exist via

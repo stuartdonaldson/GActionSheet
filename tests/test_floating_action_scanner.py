@@ -161,3 +161,91 @@ def test_tracker_table_tokens_excluded(settings, request):
         _assert_action_absent(scn, action_text)
     finally:
         scn.close()
+
+
+# ---------------------------------------------------------------------------
+# Soft-return support (GTaskSheet-e2t9/xtnt)
+# ---------------------------------------------------------------------------
+
+def test_soft_return_preamble_action_detected(settings, request):
+    """A paragraph with preamble text + soft return (LINE_BREAK) + AI-N: token
+    produces a floating action with correct N, assignee, and actionText."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        action_text = "e2t9 soft-return action after preamble"
+        scn._post_fixture("append_doc_paragraph_with_soft_returns", {
+            "segments": [
+                "Meeting notes and discussion",
+                f"AI-5: {action_text}"
+            ]
+        })
+        scn.sync()
+
+        row = _find_action(scn, action_text)
+        assert row.action_id == "AI-5"
+    finally:
+        scn.close()
+
+
+def test_soft_return_multiple_actions_same_paragraph(settings, request):
+    """A paragraph with two AI items separated by soft returns produces two
+    distinct floating actions."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        action1 = "first action on soft-return line"
+        action2 = "second action on soft-return line"
+        scn._post_fixture("append_doc_paragraph_with_soft_returns", {
+            "segments": [
+                "Preamble context",
+                f"AI-7: {action1}",
+                f"AI-8: {action2}"
+            ]
+        })
+        scn.sync()
+
+        row1 = _find_action(scn, action1)
+        row2 = _find_action(scn, action2)
+        assert row1.action_id == "AI-7"
+        assert row2.action_id == "AI-8"
+        assert row1.global_id != row2.global_id
+    finally:
+        scn.close()
+
+
+def test_soft_return_bare_placeholder_assigned(settings, request):
+    """A paragraph with bare 'AI:' (no number) on a soft-return line is assigned
+    a number by _assignPlaceholderTokens."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        action_text = "e2t9 bare placeholder on soft-return"
+        scn._post_fixture("append_doc_paragraph_with_soft_returns", {
+            "segments": [
+                "Some context",
+                f"AI: {action_text}"
+            ]
+        })
+        scn.sync()
+
+        row = _find_action(scn, action_text)
+        # Should be assigned a number (e.g., AI-1 if it's the first)
+        assert row.action_id is not None
+        assert row.action_id.startswith("AI-")
+    finally:
+        scn.close()
+
+
+def test_paragraph_start_ai_unchanged(settings, request):
+    """Regression: a paragraph starting with AI-N: (no soft returns) is still
+    detected correctly."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        action_text = "e2t9 paragraph-start action unchanged"
+        scn._post_fixture("append_doc_paragraph_with_soft_returns", {
+            "segments": [f"AI-3: {action_text}"]
+        })
+        scn.sync()
+
+        row = _find_action(scn, action_text)
+        assert row.action_id == "AI-3"
+    finally:
+        scn.close()
