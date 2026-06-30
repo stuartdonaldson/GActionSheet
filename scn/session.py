@@ -111,6 +111,7 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
+            final_url = resp.geturl()
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(
@@ -127,11 +128,15 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
             "Re-register with: python scripts/refresh_test_token.py (or npm run deploy:test)."
         )
 
+    # GAS always redirects /exec → script.googleusercontent.com/macros/echo (normal).
+    # When the final URL differs from the request URL AND the body is non-JSON, include
+    # the redirect destination so the cause is unambiguous.
     try:
         result = json.loads(raw)
     except json.JSONDecodeError as exc:
+        redir = f" (redirected to {final_url!r})" if final_url != url else ""
         raise RuntimeError(
-            f"Non-JSON response (action={payload.get('action')!r}): {raw!r}"
+            f"Non-JSON response (action={payload.get('action')!r}){redir}: {raw!r}"
         ) from exc
 
     if "error" in result:
