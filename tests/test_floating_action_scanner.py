@@ -1,8 +1,8 @@
 """
 test_floating_action_scanner.py — floating action scanner: table cells,
 bulleted lists, mixed placement, tracker-table exclusion (GTaskSheet-dq6t
-AC-1 through AC-6), and soft-return multi-AI-token paragraphs
-(GTaskSheet-d7z8/mrd8 AC-1 through AC-4).
+AC-1 through AC-6), and soft-return single-AI-per-paragraph model
+(GTaskSheet-cn5v AC-T1 through AC-T4).
 
 AC-7/AC-8 (@create mid-cell caret placement, Playwright-driven) need a new
 UiDriver capability for placing the caret inside a specific table cell —
@@ -164,11 +164,11 @@ def test_tracker_table_tokens_excluded(settings, request):
 
 
 # ---------------------------------------------------------------------------
-# Soft-return multi-AI-token paragraphs (GTaskSheet-d7z8/mrd8)
+# Soft-return paragraphs — one AI: token per paragraph (GTaskSheet-cn5v)
 # ---------------------------------------------------------------------------
 
 def test_soft_return_context_before_token(settings, request):
-    """AC-1: A paragraph whose text has contextual text on the first line and
+    """AC-T1: A paragraph whose text has contextual text on the first line and
     AI-1: on the second line (soft return) is detected; the contextual line
     does not appear in any sheet row."""
     scn = ScenarioSession.new_doc(settings, request=request)
@@ -184,64 +184,48 @@ def test_soft_return_context_before_token(settings, request):
         scn.close()
 
 
-def test_soft_return_multi_ai_token(settings, request):
-    """AC-2: A single paragraph with two AI-N: tokens separated by soft returns
-    produces one sheet row per token with the correct globalIds and actionTexts."""
+def test_soft_return_continuation_in_action_text(settings, request):
+    """AC-T2: Soft-return continuation lines after the token are part of action
+    text (to end of paragraph)."""
     scn = ScenarioSession.new_doc(settings, request=request)
     try:
         scn._post_fixture("append_doc_soft_paragraph",
-                          {"text": "AI-1: d7z8 first multi-token\nAI-2: d7z8 second multi-token"})
+                          {"text": "context\nAI-1: action text\ncontinuation line"})
         scn.sync()
 
-        row1 = _find_action(scn, "d7z8 first multi-token")
-        row2 = _find_action(scn, "d7z8 second multi-token")
-        assert row1.global_id.endswith("/AI-1")
-        assert row2.global_id.endswith("/AI-2")
-        assert row1.global_id != row2.global_id
+        row = _find_action(scn, "action text\ncontinuation line")
+        assert row.global_id.endswith("/AI-1")
     finally:
         scn.close()
 
 
-def test_soft_return_bare_ai_assigned(settings, request):
-    """AC-2 + bare AI: A paragraph with AI-1: and a bare AI: (assigned next N
-    by _assignPlaceholderTokens) produces two rows with contiguous AI numbers."""
+def test_soft_return_bare_ai_with_continuation(settings, request):
+    """AC-T3: A bare AI: token followed by soft-return continuation lines
+    produces one row with the continuation included in action text; the bare
+    token is assigned a number by _assignPlaceholderTokens."""
     scn = ScenarioSession.new_doc(settings, request=request)
     try:
         scn._post_fixture("append_doc_soft_paragraph",
-                          {"text": "AI-1: d7z8 numbered first\nAI: d7z8 bare gets next"})
+                          {"text": "context\nAI: bare action\ncontinuation"})
         scn.sync()
 
-        row1 = _find_action(scn, "d7z8 numbered first")
-        row2 = _find_action(scn, "d7z8 bare gets next")
-        assert row1.global_id.endswith("/AI-1")
-        # bare AI: is assigned AI-2 (next after AI-1 in this doc)
-        assert row2.global_id.endswith("/AI-2")
+        row = _find_action(scn, "bare action\ncontinuation")
+        assert row.global_id is not None
     finally:
         scn.close()
 
 
-def test_soft_return_full_pattern(settings, request):
-    """AC-4: The full user-authored pattern:
-      'some contextual text\\nAI-1: My action\\nSecond line\\nAI: My new action\\nAnother line'
-    syncs to exactly two sheet rows with correct actionTexts (contextual text
-    excluded; continuation lines merged into actionText)."""
+def test_soft_return_context_and_multiline_action(settings, request):
+    """AC-T4: Context intro before the token is excluded; all soft-return lines
+    after the token through end of paragraph are included in action text."""
     scn = ScenarioSession.new_doc(settings, request=request)
     try:
-        text = (
-            "some contextual text\n"
-            "AI-1: d7z8 my action\n"
-            "Second line\n"
-            "AI: d7z8 my new action\n"
-            "Another line"
-        )
-        scn._post_fixture("append_doc_soft_paragraph", {"text": text})
+        scn._post_fixture("append_doc_soft_paragraph",
+                          {"text": "context intro\nAI-1: main action\nline 2\nline 3"})
         scn.sync()
 
-        # Two rows produced; contextual text absent
-        row1 = _find_action(scn, "d7z8 my action\nSecond line")
-        row2 = _find_action(scn, "d7z8 my new action\nAnother line")
-        assert row1.global_id.endswith("/AI-1")
-        assert row2.global_id.endswith("/AI-2")
-        _assert_action_absent(scn, "some contextual text")
+        row = _find_action(scn, "main action\nline 2\nline 3")
+        assert row.global_id.endswith("/AI-1")
+        _assert_action_absent(scn, "context intro")
     finally:
         scn.close()

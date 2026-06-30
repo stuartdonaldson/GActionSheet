@@ -1564,10 +1564,12 @@ function _flushActionParagraph(docId, token, N, globalId, actionText, status, as
   var tokenLen   = ('AI-' + N + ': ').length;
 
   // GET to find paragraph indices — include table cell content so AI-N tokens
-  // inside table cells are found. builtText is text-run content only.
+  // inside table cells are found. Element startIndex/endIndex are needed to
+  // map text-run character offsets back to absolute document positions, which
+  // is required for soft-return paragraphs where the token is mid-paragraph.
   var _FLUSH_FIELDS = [
-    'startIndex,endIndex,paragraph/elements(textRun/content)',
-    'table/tableRows/tableCells/content(startIndex,endIndex,paragraph/elements(textRun/content))'
+    'startIndex,endIndex,paragraph/elements(startIndex,endIndex,textRun/content)',
+    'table/tableRows/tableCells/content(startIndex,endIndex,paragraph/elements(startIndex,endIndex,textRun/content))'
   ].join(',');
   var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=body.content(' + _FLUSH_FIELDS + ')',
     { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
@@ -1587,14 +1589,61 @@ function _flushActionParagraph(docId, token, N, globalId, actionText, status, as
     for (var ii = 0; ii < items.length; ii++) {
       var item = items[ii];
       if (item.paragraph) {
-        var runs = item.paragraph.elements || [];
-        var builtText = '';
-        for (var jj = 0; jj < runs.length; jj++) {
-          if (runs[jj].textRun) builtText += runs[jj].textRun.content || '';
+        var elements = item.paragraph.elements || [];
+        // Build a concatenated text string and a position map from textRun
+        // elements only (images and person chips are skipped in text but still
+        // consume a document-index slot, so each run's startIndex is used
+        // directly rather than recomputing from character counts).
+        var fullText = '';
+        var runMap   = []; // {startDocIdx, startTextIdx, len}
+        for (var jj = 0; jj < elements.length; jj++) {
+          var el = elements[jj];
+          if (!el.textRun || el.startIndex === undefined) continue;
+          var tc = el.textRun.content || '';
+          runMap.push({ startDocIdx: el.startIndex, startTextIdx: fullText.length, len: tc.length });
+          fullText += tc;
         }
-        var m = builtText.replace(/\n$/, '').match(/^AI-(\d+):/);
-        if (m && parseInt(m[1], 10) === N) {
-          found.push({ pStart: item.startIndex, pEnd: item.endIndex });
+        // Find AI-N: at position 0 or immediately after a soft-return char.
+        var prefix = 'AI-' + N + ':';
+        var tokenTextIdx = -1;
+        if (fullText.substr(0, prefix.length) === prefix) {
+          tokenTextIdx = 0;
+        } else {
+          for (var si = 0; si < fullText.length - prefix.length; si++) {
+            var ch = fullText[si];
+            if ((ch === '\n' || ch === '\r' || ch === '\v') &&
+                fullText.substr(si + 1, prefix.length) === prefix) {
+              tokenTextIdx = si + 1;
+              break;
+            }
+          }
+        }
+        if (tokenTextIdx >= 0) {
+          // Map tokenTextIdx to its absolute document index, and also compute
+          // lineDocIdx — the document index of the character right after the
+          // preceding newline (= pStart when the token is at paragraph start).
+          // lineDocIdx is the delete/insert anchor: it correctly clears any
+          // image that a previous flush may have placed on this line.
+          var nlTextIdx       = tokenTextIdx === 0 ? -1 : tokenTextIdx - 1;
+          var afterNlTextIdx  = nlTextIdx + 1; // == tokenTextIdx; == 0 at para start
+          var tokenDocIdx = -1;
+          var lineDocIdx  = -1;
+          for (var ri = 0; ri < runMap.length; ri++) {
+            var run    = runMap[ri];
+            var runEnd = run.startTextIdx + run.len;
+            if (tokenDocIdx < 0 && tokenTextIdx >= run.startTextIdx && tokenTextIdx < runEnd) {
+              tokenDocIdx = run.startDocIdx + (tokenTextIdx - run.startTextIdx);
+            }
+            if (lineDocIdx < 0 && afterNlTextIdx >= run.startTextIdx && afterNlTextIdx <= runEnd) {
+              lineDocIdx = run.startDocIdx + (afterNlTextIdx - run.startTextIdx);
+            }
+            if (tokenDocIdx >= 0 && lineDocIdx >= 0) break;
+          }
+          if (tokenDocIdx >= 0) {
+            if (lineDocIdx < 0) lineDocIdx = item.startIndex;
+            found.push({ pStart: item.startIndex, pEnd: item.endIndex,
+                         tokenDocIdx: tokenDocIdx, lineDocIdx: lineDocIdx });
+          }
         }
       }
       if (item.table) {
@@ -1602,9 +1651,8 @@ function _flushActionParagraph(docId, token, N, globalId, actionText, status, as
         for (var r = 0; r < tableRows.length; r++) {
           var cells = tableRows[r].tableCells || [];
           for (var c = 0; c < cells.length; c++) {
-            var cellItems = (cells[c].content || []);
-            var nested = _collectOccurrences(cellItems);
-            for (var n = 0; n < nested.length; n++) found.push(nested[n]);
+            var nested = _collectOccurrences(cells[c].content || []);
+            for (var ni = 0; ni < nested.length; ni++) found.push(nested[ni]);
           }
         }
       }
@@ -1623,33 +1671,39 @@ function _flushActionParagraph(docId, token, N, globalId, actionText, status, as
 
     var requests = [];
     for (var oi = 0; oi < occurrences.length; oi++) {
-      var pStart = occurrences[oi].pStart;
-      var pEnd   = occurrences[oi].pEnd;
+      var pEnd     = occurrences[oi].pEnd;
+      // insertAt: for simple paragraphs this equals pStart; for soft-return
+      // paragraphs it is the document index right after the preceding \n,
+      // which also clears any image placed there by a previous flush.
+      var insertAt = occurrences[oi].lineDocIdx !== undefined
+                       ? occurrences[oi].lineDocIdx
+                       : occurrences[oi].pStart;
 
-      // Delete existing paragraph content, preserving the trailing \n at pEnd-1.
-      if (pEnd - 1 > pStart) {
-        requests.push({ deleteContentRange: { range: { startIndex: pStart, endIndex: pEnd - 1 } } });
+      // Delete from insertAt to pEnd-1, preserving any contextual prefix text
+      // and the mandatory trailing \n of the paragraph node.
+      if (pEnd - 1 > insertAt) {
+        requests.push({ deleteContentRange: { range: { startIndex: insertAt, endIndex: pEnd - 1 } } });
       }
 
-      // Re-insert in reverse order (each inserts at pStart, pushing prior content right).
-      // Final paragraph order: [image][AI-N: text][optional person chip][action text (status)]
+      // Re-insert in reverse order (each inserts at insertAt, pushing prior content right).
+      // Final line order: [image][AI-N: text][optional person chip][action text (status)]
       if (validEmail) {
-        requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: pStart } } });
+        requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: insertAt } } });
         // insertPerson rejects any name field in personProperties — email only
-        requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: pStart } } });
+        requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: insertAt } } });
       } else {
-        requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: pStart } } });
+        requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: insertAt } } });
       }
-      requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: pStart } } });
+      requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: insertAt } } });
       requests.push({ insertInlineImage: {
-        uri: imgUrl, location: { index: pStart },
+        uri: imgUrl, location: { index: insertAt },
         objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
       }});
       requests.push({ updateTextStyle: {
-        range: { startIndex: pStart, endIndex: pStart + 1 + tokenLen },
+        range: { startIndex: insertAt, endIndex: insertAt + 1 + tokenLen },
         textStyle: { link: { url: chipUrl } }, fields: 'link'
       }});
-      requests.push(_chipBadgeStyleRequest(pStart + 1, pStart + 1 + tokenLen));
+      requests.push(_chipBadgeStyleRequest(insertAt + 1, insertAt + 1 + tokenLen));
     }
 
     var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
