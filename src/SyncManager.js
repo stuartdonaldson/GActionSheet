@@ -1624,18 +1624,27 @@ function _flushActionParagraph(docId, token, N, globalId, actionText, status, as
           // preceding newline (= pStart when the token is at paragraph start).
           // lineDocIdx is the delete/insert anchor: it correctly clears any
           // image that a previous flush may have placed on this line.
-          var nlTextIdx       = tokenTextIdx === 0 ? -1 : tokenTextIdx - 1;
-          var afterNlTextIdx  = nlTextIdx + 1; // == tokenTextIdx; == 0 at para start
+          //
+          // When the token is at the start of the paragraph (tokenTextIdx===0)
+          // lineDocIdx is item.startIndex — the paragraph node boundary, which
+          // is BEFORE any existing inlineObjectElement. Searching the runMap for
+          // afterNlTextIdx=0 would land on the first textRun (pStart+1, after
+          // the image), skipping the image and leaving stale images in place.
           var tokenDocIdx = -1;
-          var lineDocIdx  = -1;
+          var lineDocIdx  = tokenTextIdx === 0 ? item.startIndex : -1;
           for (var ri = 0; ri < runMap.length; ri++) {
             var run    = runMap[ri];
             var runEnd = run.startTextIdx + run.len;
             if (tokenDocIdx < 0 && tokenTextIdx >= run.startTextIdx && tokenTextIdx < runEnd) {
               tokenDocIdx = run.startDocIdx + (tokenTextIdx - run.startTextIdx);
             }
-            if (lineDocIdx < 0 && afterNlTextIdx >= run.startTextIdx && afterNlTextIdx <= runEnd) {
-              lineDocIdx = run.startDocIdx + (afterNlTextIdx - run.startTextIdx);
+            if (lineDocIdx < 0) {
+              // Soft-return case: find doc index of char immediately after the
+              // preceding \n (afterNlTextIdx = tokenTextIdx).
+              var afterNlTextIdx = tokenTextIdx;
+              if (afterNlTextIdx >= run.startTextIdx && afterNlTextIdx <= runEnd) {
+                lineDocIdx = run.startDocIdx + (afterNlTextIdx - run.startTextIdx);
+              }
             }
             if (tokenDocIdx >= 0 && lineDocIdx >= 0) break;
           }
