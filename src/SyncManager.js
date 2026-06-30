@@ -640,11 +640,108 @@ function _collectTableCellActions(table, tableBodyIdx, docId, actions, seenN) {
                  : cpt === DocumentApp.ElementType.LIST_ITEM  ? cp.asListItem()
                  : null;
         if (!para) continue;
-        var action = _parseParagraphAsFloatingAction(para, tableBodyIdx, docId, seenN);
-        if (action) actions.push(action);
+        _collectActionsFromParagraph(para, tableBodyIdx, docId, seenN, actions);
       }
     }
   }
+}
+
+/**
+ * Handles paragraphs containing one or more AI-N: tokens that appear after
+ * soft-return (\n) lines — the pattern where the user writes contextual text
+ * on the first line(s) and AI-N: tokens on subsequent lines within a single
+ * paragraph element.
+ *
+ * Returns an array of action objects (one per AI-N: token found).
+ * Text-based email assignee detection only; PERSON chips are handled by the
+ * single-token fast path in _collectActionsFromParagraph.
+ */
+function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText) {
+  // Normalize all line-separator variants (soft returns in DocumentApp may be
+  // \r, \r\n, or \v depending on the GAS runtime version).
+  var normalized = fullText.replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n');
+  var lines   = normalized.split('\n');
+  var results = [];
+  var curN    = null;
+  var curLines = [];
+
+  function flush() {
+    if (curN === null) return;
+    var rawText = curLines.join('\n').trim();
+    var assigneeEmail = '';
+    var assigneeName  = '';
+    var emailMatch = rawText.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
+    if (emailMatch) {
+      assigneeEmail = emailMatch[1];
+      assigneeName  = _nameFromEmail(assigneeEmail);
+      rawText = rawText.slice(emailMatch[0].length);
+    }
+    var status = 'Open';
+    var hasExplicitStatus = false;
+    var statusMatch = rawText.match(/\(([^)]*)\)\s*$/);
+    if (statusMatch) {
+      status = statusMatch[1].trim() || 'Open';
+      rawText = rawText.slice(0, rawText.length - statusMatch[0].length).trim();
+      hasExplicitStatus = true;
+    }
+    var N = curN;
+    results.push({
+      bodyChildIndex:    bodyIdx,
+      paragraph:         para,
+      globalId:          docId + '/AI-' + N,
+      N:                 N,
+      assigneeEmail:     assigneeEmail,
+      assigneeName:      assigneeName,
+      actionText:        rawText,
+      status:            status,
+      hasExplicitStatus: hasExplicitStatus,
+      isDuplicate:       seenN[N] === true
+    });
+    seenN[N] = true;
+  }
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var m = line.match(/^AI-(\d+):\s*/);
+    if (m) {
+      flush();
+      curN    = parseInt(m[1], 10);
+      curLines = [line.slice(m[0].length)];
+    } else if (curN !== null) {
+      curLines.push(line); // continuation line
+    }
+    // else: contextual text before first AI token — skip (AC-3)
+  }
+  flush();
+  return results;
+}
+
+/**
+ * Collects floating actions from a single paragraph/list-item, dispatching
+ * to the correct parser based on whether the paragraph has a single leading
+ * AI-N: token (fast path, PERSON chip support) or uses the soft-return
+ * multi-token pattern (new path, text-based assignee only).
+ *
+ * Appends any found actions to the `actions` array in place.
+ */
+function _collectActionsFromParagraph(para, bodyIdx, docId, seenN, actions) {
+  // Normalize line endings before scanning so \r, \r\n, and \v (soft return
+  // variants across GAS runtime versions) all work.
+  var raw  = para.getText();
+  var text = raw.replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n').replace(/\n$/, '');
+  var tokenCount = (text.match(/(?:^|\n)AI-\d+:/g) || []).length;
+  if (tokenCount === 0) return;
+
+  // Single token at paragraph start: use existing logic (handles PERSON chips).
+  if (tokenCount === 1 && /^AI-\d+:/.test(text)) {
+    var action = _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN);
+    if (action) actions.push(action);
+    return;
+  }
+
+  // Multi-token or soft-return (token not at paragraph start): new parser.
+  var softActions = _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, text);
+  for (var i = 0; i < softActions.length; i++) actions.push(softActions[i]);
 }
 
 /**
@@ -653,7 +750,8 @@ function _collectTableCellActions(table, tableBodyIdx, docId, actions, seenN) {
  * table cells (see _collectTableCellActions).
  *
  * Detection: paragraph full text starts with "AI-N:" (optionally preceded by
- * an inline image, which does not appear in DocumentApp getText()).
+ * an inline image, which does not appear in DocumentApp getText()), or contains
+ * one or more AI-N: tokens after soft-return (\n) lines.
  *
  * @param {GoogleAppsScript.Document.Document} doc
  * @returns {Array<{bodyChildIndex, paragraph, globalId, N, assigneeEmail, assigneeName, actionText, status, hasExplicitStatus, isDuplicate}>}
@@ -691,9 +789,8 @@ function _scanFloatingActions(doc) {
       }
     }
 
-    var para   = isPara ? child.asParagraph() : child.asListItem();
-    var action = _parseParagraphAsFloatingAction(para, i, docId, seenN);
-    if (action) actions.push(action);
+    var para = isPara ? child.asParagraph() : child.asListItem();
+    _collectActionsFromParagraph(para, i, docId, seenN, actions);
   }
   return actions;
 }
@@ -722,10 +819,26 @@ function _collectTokenParagraphs(body) {
   var trackerTableSkipped = false;
 
   function scanPara(para) {
-    var text = para.getText().replace(/\n$/, '');
-    var m = text.match(/^AI-(\d+):/);
-    if (m) { numbered.push(parseInt(m[1], 10)); return; }
-    if (/^AI:/.test(text)) placeholders.push(para);
+    var raw   = para.getText();
+    var text  = raw.replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n').replace(/\n$/, '');
+    var lines = text.split('\n');
+    var lineOffset = 0;
+    for (var li = 0; li < lines.length; li++) {
+      var line = lines[li];
+      var m = line.match(/^AI-(\d+):/);
+      if (m) {
+        numbered.push(parseInt(m[1], 10));
+      } else if (/^AI:/.test(line)) {
+        // lineOffset is the character offset into the normalized text.
+        // The actual paragraph text may use different byte widths for the
+        // line separator; editAsText offsets work on the raw getText() bytes.
+        // Recompute offset from raw text using a search from lineOffset onward.
+        var rawOffset = raw.indexOf(line, lineOffset);
+        if (rawOffset === -1) rawOffset = lineOffset; // fallback
+        placeholders.push({ para: para, offset: rawOffset });
+      }
+      lineOffset += lines[li].length + 1; // +1 for the normalized \n
+    }
   }
 
   for (var i = 0; i < n; i++) {
@@ -771,12 +884,28 @@ function _assignPlaceholderTokens(doc) {
 
   var assigned     = 0;
   var newGlobalIds = [];
-  for (var j = 0; j < found.placeholders.length; j++) {
-    maxN++;
-    // Insert '-N' at position 2 (between 'AI' and ':') → 'AI:' becomes 'AI-N:'
-    found.placeholders[j].editAsText().insertText(2, '-' + maxN);
-    newGlobalIds.push(docId + '/AI-' + maxN);
-    assigned++;
+
+  // placeholders is [{para, offset}, ...] in left-to-right document order.
+  // Assign N values left-to-right so earlier occurrences get lower numbers.
+  // Within a paragraph, insert right-to-left to avoid offset drift.
+  var pi = 0;
+  while (pi < found.placeholders.length) {
+    var groupPara  = found.placeholders[pi].para;
+    var groupStart = pi;
+    while (pi < found.placeholders.length && found.placeholders[pi].para === groupPara) pi++;
+    // Assign N values for this group (left-to-right)
+    var groupNs = [];
+    for (var k = groupStart; k < pi; k++) {
+      maxN++;
+      groupNs.push(maxN);
+      newGlobalIds.push(docId + '/AI-' + maxN);
+      assigned++;
+    }
+    // Insert '-N' right-to-left within the paragraph to avoid offset drift.
+    // offset+2 is the position between 'AI' and ':'.
+    for (var k = pi - 1; k >= groupStart; k--) {
+      groupPara.editAsText().insertText(found.placeholders[k].offset + 2, '-' + groupNs[k - groupStart]);
+    }
   }
 
   return { count: assigned, newGlobalIds: newGlobalIds };

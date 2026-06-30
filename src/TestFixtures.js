@@ -1749,6 +1749,17 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'append_doc_soft_paragraph': {
+        // Appends a body-level paragraph whose text contains embedded line
+        // breaks (soft returns / Shift+Enter in DocumentApp).  Used to seed
+        // the soft-return multi-AI-token patterns (GTaskSheet-d7z8/mrd8).
+        // Note: DocumentApp represents soft returns as \r (not \n) in getText();
+        // the scanner normalizes line endings before processing.
+        body.appendParagraph(data.text || '');
+        _TF_RESULT = { tag: 'fixture.append_doc_soft_paragraph', data: { ok: true } };
+        break;
+      }
+
       case 'append_tracker_cell_text': {
         // Appends an AI: token into the LAST data row's first cell of the
         // existing Action Item Tracker table (must already exist via
