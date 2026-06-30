@@ -574,7 +574,7 @@ function _handleUpsertActionRows(payload) {
         var newId     = _extractActionId(row.globalId);
         var newEmail  = row.assigneeEmail || existing.assigneeEmail;
         var newName   = row.assigneeName  || existing.assigneeName;
-        var newText   = row.actionText    || existing.action;
+        var newText   = _normalizeActionText(row.actionText    || existing.action);
         var newStatus = row.status        || existing.status;
         var changed = newId    !== existing.id           ||
                       newEmail !== existing.assigneeEmail ||
@@ -600,7 +600,7 @@ function _handleUpsertActionRows(payload) {
           _extractActionId(row.globalId),
           row.assigneeEmail || '',
           row.assigneeName  || '',
-          row.actionText    || '',
+          _normalizeActionText(row.actionText) || '',
           row.status        || 'Open',
           docFormula,
           createdDate,
@@ -663,6 +663,15 @@ function parseGlobalId(globalId) {
 
 function _extractActionId(globalId) {
   return parseGlobalId(globalId).actionId;
+}
+
+// Collapse soft-return (\v), hard-return (\n), and carriage-return (\r)
+// characters to a single space so the sheet value is always single-line.
+// Flush reads action text from the sheet and passes it to insertText; a \n
+// there creates a new paragraph rather than a soft return.
+function _normalizeActionText(text) {
+  if (!text) return text;
+  return text.replace(/[\v\n\r]+/g, ' ').replace(/  +/g, ' ').trim();
 }
 
 function _rowIdentityKey(assigneeEmail, action, status) {
@@ -766,7 +775,7 @@ function _handleSyncActionRows(payload) {
           _extractActionId(row.globalId),
           row.assigneeEmail || '',
           row.assigneeName  || '',
-          row.actionText    || '',
+          _normalizeActionText(row.actionText) || '',
           row.status        || 'Open',
           docFormula,
           now,
@@ -800,7 +809,7 @@ function _handleSyncActionRows(payload) {
             existing.status !== row.status) {
           actionsSheet.getRange(rowIdx, _ACOL.assignee_email).setValue(row.assigneeEmail || '');
           actionsSheet.getRange(rowIdx, _ACOL.assignee_name).setValue(row.assigneeName  || '');
-          actionsSheet.getRange(rowIdx, _ACOL.action_text).setValue(row.actionText || '');
+          actionsSheet.getRange(rowIdx, _ACOL.action_text).setValue(_normalizeActionText(row.actionText) || '');
           actionsSheet.getRange(rowIdx, _ACOL.status).setValue(row.status || 'Open');
           actionsSheet.getRange(rowIdx, _ACOL.modified_date).setValue(now);
           updated++;

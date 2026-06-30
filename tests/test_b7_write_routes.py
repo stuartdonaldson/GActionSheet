@@ -407,3 +407,92 @@ def test_wpe1_url_format_agnostic_matching(scn_wpe1, settings):
             f"[wpe1] row orphaned/marked after sync: action={row.action!r}, "
             f"sync_status={row.sync_status!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# [2eui] action_text normalization — soft/hard-return chars stripped at write
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def scn_2eui(settings, request):
+    s = ScenarioSession.new_doc(settings, request=request)
+    yield s
+    s.close()
+
+
+def test_2eui_soft_return_normalized_on_upsert_insert(scn_2eui, settings):
+    """GTaskSheet-2eui: upsert_action_rows INSERT path strips \\v / \\n from
+    action text before writing to the sheet so flush roundtrips never produce
+    a hard paragraph break."""
+    raw_text    = "First line\vSecond line"
+    normal_text = "First line Second line"
+    global_id   = f"{scn_2eui.doc_id}/AI-1"
+    doc_url     = f"https://docs.google.com/document/d/{scn_2eui.doc_id}/edit"
+
+    resp = scn_2eui._post({
+        "secret":   settings["webappSecret"],
+        "action":   "upsert_action_rows",
+        "docUrl":   doc_url,
+        "docTitle": "2eui test doc",
+        "rows": [{
+            "globalId":     global_id,
+            "assigneeEmail": "",
+            "assigneeName":  "",
+            "actionText":   raw_text,
+            "status":       "Open",
+        }],
+    })
+    assert resp.get("inserted") == 1, f"[2eui] expected inserted=1, got {resp!r}"
+
+    rows = scn_2eui.find_sheet_actions()
+    row  = next((r for r in rows if r.action == normal_text), None)
+    assert row is not None, (
+        f"[2eui] INSERT: expected action_text={normal_text!r} in sheet; "
+        f"found actions: {[r.action for r in rows]!r}"
+    )
+    assert "\v" not in row.action and "\n" not in row.action, (
+        f"[2eui] INSERT: action_text still contains line-break chars: {row.action!r}"
+    )
+
+
+def test_2eui_soft_return_normalized_on_upsert_update(scn_2eui, settings):
+    """GTaskSheet-2eui: upsert_action_rows UPDATE path strips \\v / \\n before
+    writing so existing rows are also cleaned up on the next write."""
+    # Insert a clean row first via sync
+    target = ai(action="2eui update-path action", assignee="")
+    scn_2eui.append_paragraph(target.as_text())
+    scn_2eui.sync()
+
+    rows = scn_2eui.find_sheet_actions()
+    match = next((r for r in rows if r.action == target.action), None)
+    assert match is not None, "[2eui] action not found after sync"
+
+    global_id   = f"{scn_2eui.doc_id}/{match.action_id}"
+    raw_text    = "Updated\nwith newline"
+    normal_text = "Updated with newline"
+    doc_url     = f"https://docs.google.com/document/d/{scn_2eui.doc_id}/edit"
+
+    resp = scn_2eui._post({
+        "secret":   settings["webappSecret"],
+        "action":   "upsert_action_rows",
+        "docUrl":   doc_url,
+        "docTitle": "2eui test doc",
+        "rows": [{
+            "globalId":     global_id,
+            "assigneeEmail": "",
+            "assigneeName":  "",
+            "actionText":   raw_text,
+            "status":       "Open",
+        }],
+    })
+    assert resp.get("updated") == 1, f"[2eui] expected updated=1, got {resp!r}"
+
+    rows = scn_2eui.find_sheet_actions()
+    row  = next((r for r in rows if r.action == normal_text), None)
+    assert row is not None, (
+        f"[2eui] UPDATE: expected action_text={normal_text!r} in sheet; "
+        f"found actions: {[r.action for r in rows]!r}"
+    )
+    assert "\v" not in row.action and "\n" not in row.action, (
+        f"[2eui] UPDATE: action_text still contains line-break chars: {row.action!r}"
+    )
