@@ -92,16 +92,19 @@ function ensureSheetStructure() {
     var archiveSheet  = _getOrCreateSheet(ss, 'Archive');
     var teamDataSheet = _getOrCreateSheet(ss, 'TeamData');
     var docDataSheet  = _getOrCreateSheet(ss, 'DocData');
+    var configSheet   = _getOrCreateSheet(ss, 'Config');
     _getOrCreateSheet(ss, 'TestControl');
 
     var actionHeaders   = CONTRACT_SCHEMA.sheetAction.headers.slice();
     var teamDataHeaders = CONTRACT_SCHEMA.sheetTeamData.headers.slice();
     var docDataHeaders  = CONTRACT_SCHEMA.sheetDocData.headers.slice();
+    var configHeaders   = CONTRACT_SCHEMA.sheetConfig.headers.slice();
 
     _ensureHeaders(actionsSheet,  actionHeaders);
     _ensureHeaders(archiveSheet,  actionHeaders);
     _ensureHeaders(teamDataSheet, teamDataHeaders);
     _ensureHeaders(docDataSheet,  docDataHeaders);
+    _ensureHeaders(configSheet,   configHeaders);
 
     _resolveDocFolderId(ss);
 

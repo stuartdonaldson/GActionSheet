@@ -968,6 +968,14 @@ function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
   });
   requests.push(_chipBadgeStyleRequest(fragIndex + 1, fragIndex + 1 + tokenLen));
 
+  // Action-text style (GTaskSheet-d99c) — same Config-sourced style and range
+  // math as SyncManager.js's _buildFlushRequests; null when no 'action_text'
+  // Config row exists yet, leaving today's inherited default formatting.
+  var trailingTextOnly  = (validEmail ? ' ' : '') + actionText + ' (' + status + ')';
+  var actionTextStart   = fragIndex + 1 + tokenLen + (validEmail ? 1 : 0);
+  var actionTextStyleReq = _actionTextStyleRequest(actionTextStart, actionTextStart + trailingTextOnly.length);
+  if (actionTextStyleReq) requests.push(actionTextStyleReq);
+
   var trailingLen = validEmail
     ? 1 + (' ' + actionText + ' (' + status + ')').length
     : (actionText + ' (' + status + ')').length;

@@ -508,8 +508,24 @@ function _buildActionListSection(homepageState) {
     return section;
   }
 
-  for (var i = 0; i < homepageState.floatingActions.length; i++) {
-    var action = homepageState.floatingActions[i];
+  // Render in AI-N order rather than document order (GTaskSheet-kkm7.6),
+  // mirroring the Import tab's existing per-group AI-N sort above. Sort a
+  // local copy only — homepageState.floatingActions stays in doc-scan order
+  // for its other consumers (missing-anchor count, status summary, Tracker
+  // table), which are order-independent. Not-yet-anchored actions (no
+  // globalId, "Needs sync") have no N to sort by; keep them after every
+  // numbered action, in their existing relative order.
+  var sortedActions = homepageState.floatingActions.slice().sort(function (a, b) {
+    var aN = a.globalId ? parseGlobalId(a.globalId).N : null;
+    var bN = b.globalId ? parseGlobalId(b.globalId).N : null;
+    if (aN === null && bN === null) return 0;
+    if (aN === null) return 1;
+    if (bN === null) return -1;
+    return aN - bN;
+  });
+
+  for (var i = 0; i < sortedActions.length; i++) {
+    var action = sortedActions[i];
     var assignee = action.assigneeName || action.assigneeEmail || 'Unassigned';
     var actionId = action.globalId ? parseGlobalId(action.globalId).actionId : '';
     // Compact: AI-N • Assignee • Status on the top label line

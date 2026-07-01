@@ -81,14 +81,14 @@ function syncDocument(docId) {
       doc = DocumentApp.openById(docId);
     } catch (openErr) {
       GasLogger.log('sync.docNotFound.invalid', { msg: 'Doc not found', docId: docId, err: openErr.message });
-      _markDocNotFound(docId);
+      _markDocNotFound([docId]);
       return;
     }
     // DocumentApp.openById() succeeds on trashed docs — check explicitly.
     try {
       if (DriveApp.getFileById(docId).isTrashed()) {
         GasLogger.log('sync.docNotFound.trashed', { msg: 'Doc not found', docId: docId, err: 'Document is in Trash' });
-        _markDocNotFound(docId);
+        _markDocNotFound([docId]);
         return;
       }
     } catch (driveErr) {
@@ -230,11 +230,17 @@ function syncDocument(docId) {
       var docId2 = doc.getId();
       doc.saveAndClose(); // close before REST calls
       var token = ScriptApp.getOAuthToken();
+      // One GET + one batchUpdate for every action item needing a flush in
+      // this doc, instead of one GET + one batchUpdate per item
+      // (GTaskSheet-kkm7.3).
+      var flushItems = flushIds.map(function (gid) {
+        var f = toFlush[gid];
+        return { N: f.N, globalId: f.globalId, actionText: f.action, status: f.status,
+                 assigneeEmail: f.assigneeEmail, assigneeName: f.assigneeName };
+      });
+      var flushResults = _flushActionParagraphs(docId2, token, flushItems);
       for (var ti = 0; ti < flushIds.length; ti++) {
-        var f  = toFlush[flushIds[ti]];
-        var ok = _flushActionParagraph(docId2, token, f.N, f.globalId,
-          f.action, f.status, f.assigneeEmail, f.assigneeName);
-        if (!ok) _remarkRowDirty(f.globalId);
+        if (!flushResults[flushIds[ti]]) _remarkRowDirty(flushIds[ti]);
       }
     } else {
       doc.saveAndClose();
@@ -341,7 +347,21 @@ function syncAll() {
       GasLogger.log('sync.archive.doc_not_found', { docIds: Object.keys(alreadyDocNotFound) });
     }
 
+    // Single batched Drive call for trash/modified/name metadata across every
+    // tracked doc, replacing what was previously one DriveApp.getFileById()
+    // round trip per doc (GTaskSheet-kkm7.2). Falls back to the old per-doc
+    // DriveApp path if the batch fetch itself fails, so a transient Drive/
+    // network error degrades to the slower-but-correct behavior rather than
+    // misclassifying every doc as not-found.
+    var driveMetadata = null;
+    try {
+      driveMetadata = _fetchDriveDocMetadata();
+    } catch (metaErr) {
+      GasLogger.log('sync.driveMetadata.error', { msg: metaErr.message });
+    }
+
     var synced = 0, skipped = 0;
+    var notFoundDocIds = [];
     for (var j = 0; j < docIds.length; j++) {
       var docId = docIds[j];
 
@@ -351,24 +371,38 @@ function syncAll() {
         continue;
       }
 
-      // Single Drive call: trash check + last-modified timestamp.
-      var driveFile, isTrashed, lastModified, docTitle;
-      try {
-        driveFile    = DriveApp.getFileById(docId);
-        isTrashed    = driveFile.isTrashed();
-        lastModified = driveFile.getLastUpdated();
-        docTitle     = driveFile.getName();
-      } catch (driveErr) {
-        // Can't reach Drive — fall through to syncDocument which handles open failure.
-        syncDocument(docId);
-        _updateSyncState(syncStateSheet, docId, new Date(), '', syncState);
-        synced++;
-        continue;
+      var isTrashed, lastModified, docTitle;
+      if (driveMetadata) {
+        var meta = driveMetadata[docId];
+        if (!meta) {
+          // Absent from the batch listing — genuinely gone or inaccessible,
+          // same end state as the old per-doc DriveApp.getFileById() throw.
+          GasLogger.log('sync.docNotFound.missing', { msg: 'Doc not found', docId: docId, err: 'Absent from Drive metadata listing' });
+          notFoundDocIds.push(docId);
+          continue;
+        }
+        isTrashed    = meta.trashed;
+        lastModified = meta.lastModified;
+        docTitle     = meta.name;
+      } else {
+        // Fallback: batch fetch failed above, check this doc individually.
+        try {
+          var driveFile = DriveApp.getFileById(docId);
+          isTrashed    = driveFile.isTrashed();
+          lastModified = driveFile.getLastUpdated();
+          docTitle     = driveFile.getName();
+        } catch (driveErr) {
+          // Can't reach Drive — fall through to syncDocument which handles open failure.
+          syncDocument(docId);
+          _updateSyncState(syncStateSheet, docId, new Date(), '', syncState);
+          synced++;
+          continue;
+        }
       }
 
       if (isTrashed) {
         GasLogger.log('sync.docNotFound.trashed', { msg: 'Doc not found', docId: docId, err: 'Document is in Trash' });
-        _markDocNotFound(docId);
+        notFoundDocIds.push(docId);
         continue;
       }
 
@@ -384,7 +418,13 @@ function syncAll() {
       synced++;
     }
 
-    GasLogger.log('sync.all.complete', { docCount: docIds.length, synced: synced, skipped: skipped });
+    // One webapp call for every not-found doc found this sweep, instead of one
+    // per doc (GTaskSheet-kkm7.1).
+    if (notFoundDocIds.length > 0) {
+      _markDocNotFound(notFoundDocIds);
+    }
+
+    GasLogger.log('sync.all.complete', { docCount: docIds.length, synced: synced, skipped: skipped, notFound: notFoundDocIds.length });
 
     // ── DocData integrity pass (GTaskSheet-6ipb) ──────────────────────────
     // Docs skipped above by the lastModified<=lastSynced optimization never
@@ -1004,11 +1044,15 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
 
 /**
  * POSTs mark_doc_not_found to the WebApp so it can stamp 'Doc Not Found' on
- * all Actions rows whose Document formula references this docId.
+ * all Actions rows whose Document formula references any of docIds. One HTTP
+ * round trip regardless of how many docs are being marked (GTaskSheet-kkm7.1)
+ * — callers (syncDocument's own-doc not-found paths, syncAll's sweep) collect
+ * every not-found docId for this invocation and call this once.
  *
- * @param {string} docId
+ * @param {string[]} docIds
  */
-function _markDocNotFound(docId) {
+function _markDocNotFound(docIds) {
+  if (!docIds || docIds.length === 0) return;
   var webAppUrl = getWebAppUrl();
   var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
   if (!webAppUrl) return;
@@ -1024,10 +1068,58 @@ function _markDocNotFound(docId) {
       clientVersion: BUILD_INFO.version,
       caller:        _getIdentity(),
       opId:          GasLogger.getCurrentOp(),
-      docId:         docId
+      docIds:        docIds
     })
   });
   GasLogger.flush();
+}
+
+/**
+ * Fetches trashed/modifiedTime/name metadata for every Google Doc visible to
+ * the calling identity in a single (paginated) Drive REST call, replacing one
+ * DriveApp.getFileById() call per tracked doc in syncAll()'s loop
+ * (GTaskSheet-kkm7.2). Throws on any non-200 page so callers can fall back to
+ * the per-doc path rather than silently treating every doc as not-found.
+ *
+ * @return {Object<string, {trashed: boolean, lastModified: Date, name: string}>}
+ *   map of docId -> metadata, covering every Google Doc the listing returns.
+ */
+function _fetchDriveDocMetadata() {
+  var token      = ScriptApp.getOAuthToken();
+  var baseUrl    = 'https://www.googleapis.com/drive/v3/files';
+  var fields     = 'nextPageToken,files(id,trashed,modifiedTime,name)';
+  var q          = "mimeType='application/vnd.google-apps.document'";
+  var map        = {};
+  var pageToken  = null;
+  var pages      = 0;
+
+  do {
+    var url = baseUrl + '?q=' + encodeURIComponent(q) +
+      '&fields=' + encodeURIComponent(fields) +
+      '&pageSize=1000' +
+      (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    var resp = UrlFetchApp.fetch(url, {
+      headers:            { Authorization: 'Bearer ' + token },
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) {
+      throw new Error('files.list failed: HTTP ' + resp.getResponseCode());
+    }
+    var body  = JSON.parse(resp.getContentText());
+    var files = body.files || [];
+    for (var i = 0; i < files.length; i++) {
+      map[files[i].id] = {
+        trashed:      !!files[i].trashed,
+        lastModified: new Date(files[i].modifiedTime),
+        name:         files[i].name
+      };
+    }
+    pageToken = body.nextPageToken || null;
+    pages++;
+  } while (pageToken);
+
+  GasLogger.log('sync.driveMetadata.fetched', { count: Object.keys(map).length, pages: pages });
+  return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -1320,9 +1412,18 @@ function _getOrUpsertDocDataRow(ss, fileId, docName, lastSyncTime, teamId, syncS
   var numCols    = CONTRACT_SCHEMA.sheetDocData.headers.length;
   var docUpdated = new Date();
 
+  // Doc Name is a HYPERLINK formula, not a plain string, so clicking it opens
+  // the document (GTaskSheet-46qv) -- same pattern as the Actions sheet's
+  // document_formula column. fileId is the Drive doc ID already required by
+  // every caller, so the edit URL needs no extra plumbing. Read side is
+  // unaffected: getValues() returns a HYPERLINK formula's computed display
+  // text (the title), identical to today's plain-string read.
+  var docNameFormula = '=HYPERLINK("https://docs.google.com/document/d/' + fileId +
+    '/edit","' + _escapeQuotes(docName) + '")';
+
   var rowValues = [];
   rowValues[cols.file_id - 1]        = fileId;
-  rowValues[cols.doc_name - 1]       = docName;
+  rowValues[cols.doc_name - 1]       = docNameFormula;
   rowValues[cols.last_sync_time - 1]   = lastSyncTime;
   rowValues[cols.doc_updated - 1]    = docUpdated;
   rowValues[cols.sync_status - 1]    = syncStatus;
@@ -1507,44 +1608,568 @@ function _updateSyncState(syncStateSheet, docId, syncedAt, docTitle, stateMap) {
 
 
 // ---------------------------------------------------------------------------
-// Shared chip styling
+// Shared chip styling — configurable via configFormat() (GTaskSheet-d99c)
 // ---------------------------------------------------------------------------
+
+// Style applied to the 'AI-N:' token when the Config sheet has no 'ai_token'
+// row yet — exactly the hardcoded style this project used before configFormat()
+// existed, so behavior is unchanged until someone runs it.
+var _DEFAULT_AI_TOKEN_STYLE = Object.freeze({
+  fontFamily: 'Comic Sans MS', fontSize: null, color: '#4C1D95',
+  bold: true, italic: false, underline: false
+});
+
+var _actionFormatConfigCache = null;
+
+/**
+ * Reads the Config sheet's 'ai_token'/'action_text' rows once per GAS
+ * execution (module-level cache — each execution gets a fresh global scope,
+ * so this never serves stale data across separate requests). Falls back to
+ * _DEFAULT_AI_TOKEN_STYLE for ai_token and null for action_text (meaning "no
+ * override, inherit whatever the doc already has") when the Config sheet or
+ * a given row doesn't exist yet — configFormat() is opt-in (GTaskSheet-d99c).
+ *
+ * @returns {{aiToken: Object, actionText: ?Object}}
+ */
+function _getActionFormatConfig() {
+  if (_actionFormatConfigCache) return _actionFormatConfigCache;
+  _actionFormatConfigCache = _readActionFormatConfig(_openActionSheetSpreadsheet());
+  return _actionFormatConfigCache;
+}
+
+function _readActionFormatConfig(ss) {
+  var result = { aiToken: _DEFAULT_AI_TOKEN_STYLE, actionText: null };
+  var sheet = ss.getSheetByName('Config');
+  if (!sheet) return result;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return result;
+  var cols   = CONTRACT_SCHEMA.sheetConfig.columnsByField;
+  var values = sheet.getRange(2, 1, lastRow - 1, CONTRACT_SCHEMA.sheetConfig.headers.length).getValues();
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    var key = row[cols.key - 1];
+    if (key !== 'ai_token' && key !== 'action_text') continue;
+    var parsed;
+    try {
+      parsed = JSON.parse(row[cols.value - 1] || '{}');
+    } catch (e) {
+      GasLogger.log('configFormat.parseError', { key: key, msg: e.message });
+      continue;
+    }
+    var entry = {
+      fontFamily: parsed.fontFamily || 'Arial',
+      fontSize:   parsed.fontSize   || null,
+      color:      parsed.color     || '#000000',
+      bold:       !!parsed.bold,
+      italic:     !!parsed.italic,
+      underline:  !!parsed.underline
+    };
+    if (key === 'ai_token') result.aiToken = entry;
+    else result.actionText = entry;
+  }
+  return result;
+}
+
+/**
+ * Converts a '#rrggbb' hex string to the {red,green,blue} 0..1 float triple
+ * the Docs REST API's rgbColor expects. Returns black on malformed input.
+ *
+ * @param {string} hex
+ * @returns {{red:number, green:number, blue:number}}
+ */
+function _hexToRgbColor(hex) {
+  var h = String(hex || '').replace('#', '');
+  if (h.length !== 6) return { red: 0, green: 0, blue: 0 };
+  return {
+    red:   parseInt(h.substr(0, 2), 16) / 255,
+    green: parseInt(h.substr(2, 2), 16) / 255,
+    blue:  parseInt(h.substr(4, 2), 16) / 255
+  };
+}
 
 /**
  * Returns the updateTextStyle request that applies the AI-N chip badge style
- * over [startIndex, endIndex): bold Comic Sans, purple text (#4C1D95), no
- * hyperlink underline. No background is set — the badge is purple text only.
+ * (font/size/color/bold/italic/underline, sourced from the Config sheet's
+ * 'ai_token' row — GTaskSheet-d99c) over [startIndex, endIndex).
  *
- * Shared by _flushActionParagraph (sync flush), _insertActionChip (creation),
- * and _insertTrackerIdLinks (tracker ID column) so the badge appearance is
- * defined in exactly one place.
+ * Shared by _flushActionParagraph (sync flush), _applyActionFragment
+ * (creation/import), and _insertTrackerIdLinks (tracker ID column) so the
+ * badge appearance is defined in exactly one place.
  *
  * @param {number} startIndex
  * @param {number} endIndex
  * @returns {Object} A Docs REST batchUpdate request object.
  */
 function _chipBadgeStyleRequest(startIndex, endIndex) {
-  return {
-    updateTextStyle: {
-      range: { startIndex: startIndex, endIndex: endIndex },
-      textStyle: {
-        bold: true, underline: false,
-        foregroundColor: { color: { rgbColor: { red: 0.298, green: 0.114, blue: 0.584 } } },
-        weightedFontFamily: { fontFamily: 'Comic Sans MS', weight: 700 }
-      },
-      fields: 'bold,underline,foregroundColor,weightedFontFamily'
-    }
+  var cfg   = _getActionFormatConfig().aiToken;
+  var style = {
+    bold: !!cfg.bold, italic: !!cfg.italic, underline: !!cfg.underline,
+    foregroundColor: { color: { rgbColor: _hexToRgbColor(cfg.color) } },
+    weightedFontFamily: { fontFamily: cfg.fontFamily, weight: cfg.bold ? 700 : 400 }
   };
+  var fields = 'bold,italic,underline,foregroundColor,weightedFontFamily';
+  if (cfg.fontSize) {
+    style.fontSize = { magnitude: cfg.fontSize, unit: 'PT' };
+    fields += ',fontSize';
+  }
+  return { updateTextStyle: { range: { startIndex: startIndex, endIndex: endIndex }, textStyle: style, fields: fields } };
+}
+
+/**
+ * Returns the updateTextStyle request that applies the action-text style
+ * (font/size/color/bold/italic/underline, sourced from the Config sheet's
+ * 'action_text' row — GTaskSheet-d99c) over [startIndex, endIndex), or null
+ * when no 'action_text' row exists yet — callers must skip pushing a null
+ * result, leaving the doc's default/inherited formatting untouched (opt-in,
+ * no behavior change until configFormat() is run).
+ *
+ * @param {number} startIndex
+ * @param {number} endIndex
+ * @returns {?Object} A Docs REST batchUpdate request object, or null.
+ */
+function _actionTextStyleRequest(startIndex, endIndex) {
+  var cfg = _getActionFormatConfig().actionText;
+  if (!cfg) return null;
+  var style = {
+    bold: !!cfg.bold, italic: !!cfg.italic, underline: !!cfg.underline,
+    foregroundColor: { color: { rgbColor: _hexToRgbColor(cfg.color) } },
+    weightedFontFamily: { fontFamily: cfg.fontFamily }
+  };
+  var fields = 'bold,italic,underline,foregroundColor,weightedFontFamily';
+  if (cfg.fontSize) {
+    style.fontSize = { magnitude: cfg.fontSize, unit: 'PT' };
+    fields += ',fontSize';
+  }
+  return { updateTextStyle: { range: { startIndex: startIndex, endIndex: endIndex }, textStyle: style, fields: fields } };
+}
+
+// ---------------------------------------------------------------------------
+// configFormat — samples action-item style from a reference doc (GTaskSheet-d99c)
+// ---------------------------------------------------------------------------
+
+/**
+ * Menu entry point (Setup > Configure Action Format, MenuHandler.js). Prompts
+ * for a Doc ID/URL, finds that document's first floating action in document
+ * order, samples the 'AI-N:' token's and the action text's font/size/color/
+ * bold/italic/underline, and writes them to the Config sheet. Every
+ * subsequent chip write (sync flush, sidebar/preview status change, Import
+ * create-chip, Tracker Table ID links) picks up the new style via
+ * _getActionFormatConfig() — forward-only, nothing already written is
+ * reformatted by this call.
+ */
+function configFormat() {
+  var ui = SpreadsheetApp.getUi();
+  var resp = ui.prompt(
+    'Configure Action Format',
+    'Enter the Doc ID (or URL) of a document whose first action item has the formatting you want to use:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+
+  var raw = resp.getResponseText().trim();
+  if (!raw) {
+    ui.alert('No Doc ID entered.');
+    return;
+  }
+  var idMatch = raw.match(/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]+)/);
+  var docId = idMatch ? idMatch[1] : raw;
+
+  var doc;
+  try {
+    doc = DocumentApp.openById(docId);
+  } catch (e) {
+    ui.alert('Could not open document: ' + e.message);
+    return;
+  }
+
+  var actions = _scanFloatingActions(doc);
+  if (actions.length === 0) {
+    ui.alert('No action items (AI-N:) found in that document.');
+    return;
+  }
+
+  var first  = actions[0];
+  var sample = _sampleActionItemStyle(first);
+  if (!sample) {
+    ui.alert('Could not determine text style for the first action item (AI-' + first.N + ').');
+    return;
+  }
+
+  _writeActionFormatConfig(SpreadsheetApp.getActiveSpreadsheet(), sample);
+  _actionFormatConfigCache = null; // invalidate so later writes in this same execution see the new config
+
+  GasLogger.log('configFormat.complete', { docId: docId, N: first.N, aiToken: sample.aiToken, actionText: sample.actionText });
+  GasLogger.flush();
+
+  ui.alert(
+    'Action format updated from AI-' + first.N + ' in "' + doc.getName() + '".\n\n' +
+    'AI-N: token — ' + sample.aiToken.fontFamily + ', ' + sample.aiToken.fontSize + 'pt, ' + sample.aiToken.color +
+      (sample.aiToken.bold ? ', bold' : '') + (sample.aiToken.italic ? ', italic' : '') + (sample.aiToken.underline ? ', underline' : '') + '\n' +
+    'Action text — ' + sample.actionText.fontFamily + ', ' + sample.actionText.fontSize + 'pt, ' + sample.actionText.color +
+      (sample.actionText.bold ? ', bold' : '') + (sample.actionText.italic ? ', italic' : '') + (sample.actionText.underline ? ', underline' : '')
+  );
+}
+
+/**
+ * Samples font family/size/color/bold/italic/underline separately for the
+ * 'AI-N:' token text and the action-text content of one floating action,
+ * using DocumentApp's per-character Text style getters. Returns null if the
+ * token text can't be located within its own paragraph (shouldn't happen —
+ * action came from _scanFloatingActions, which only returns matched tokens).
+ *
+ * @param {{N:number, paragraph:GoogleAppsScript.Document.Paragraph}} action
+ * @returns {?{aiToken:Object, actionText:Object}}
+ */
+function _sampleActionItemStyle(action) {
+  var para     = action.paragraph;
+  var text     = para.editAsText();
+  var fullText = para.getText();
+  var prefix   = 'AI-' + action.N + ':';
+  var tokenStart = fullText.indexOf(prefix);
+  if (tokenStart < 0) return null;
+
+  var tokenSampleOffset = tokenStart + 1; // safely inside "AI-"
+  var tokenEnd          = tokenStart + prefix.length; // just after ':'
+  var afterToken         = fullText.slice(tokenEnd);
+  var leadingSpace        = afterToken.match(/^\s*/)[0].length;
+  var actionSampleOffset  = tokenEnd + leadingSpace;
+  if (actionSampleOffset >= fullText.length) {
+    actionSampleOffset = Math.max(tokenSampleOffset, fullText.length - 1);
+  }
+
+  function sampleAt(offset) {
+    var color = text.getForegroundColor(offset);
+    return {
+      fontFamily: text.getFontFamily(offset) || 'Arial',
+      fontSize:   text.getFontSize(offset)   || 11,
+      color:      color || '#000000',
+      bold:       !!text.isBold(offset),
+      italic:     !!text.isItalic(offset),
+      underline:  !!text.isUnderline(offset)
+    };
+  }
+
+  return { aiToken: sampleAt(tokenSampleOffset), actionText: sampleAt(actionSampleOffset) };
+}
+
+/**
+ * Upserts the 'ai_token' and 'action_text' rows in the Config sheet (creating
+ * the sheet with its header row if absent).
+ *
+ * @param {Spreadsheet} ss
+ * @param {{aiToken:Object, actionText:Object}} sample
+ */
+function _writeActionFormatConfig(ss, sample) {
+  var sheet = ss.getSheetByName('Config');
+  if (!sheet) {
+    sheet = ss.insertSheet('Config');
+    sheet.getRange(1, 1, 1, CONTRACT_SCHEMA.sheetConfig.headers.length).setValues([CONTRACT_SCHEMA.sheetConfig.headers]);
+    sheet.setFrozenRows(1);
+  }
+  _upsertConfigRow(sheet, 'ai_token', sample.aiToken);
+  _upsertConfigRow(sheet, 'action_text', sample.actionText);
+}
+
+function _upsertConfigRow(sheet, key, style) {
+  var cols    = CONTRACT_SCHEMA.sheetConfig.columnsByField;
+  var lastRow = sheet.getLastRow();
+  var targetRow = -1;
+  if (lastRow >= 2) {
+    var ids = sheet.getRange(2, cols.key, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (ids[i][0] === key) { targetRow = i + 2; break; }
+    }
+  }
+  if (targetRow === -1) targetRow = lastRow + 1;
+
+  var rowValues = [];
+  rowValues[cols.key - 1]   = key;
+  rowValues[cols.value - 1] = JSON.stringify({
+    fontFamily: style.fontFamily,
+    fontSize:   style.fontSize,
+    color:      style.color,
+    bold:       !!style.bold,
+    italic:     !!style.italic,
+    underline:  !!style.underline
+  });
+  sheet.getRange(targetRow, 1, 1, CONTRACT_SCHEMA.sheetConfig.headers.length).setValues([rowValues]);
 }
 
 // ---------------------------------------------------------------------------
 // REST flush — rewrites an AI-N: paragraph in place
 // ---------------------------------------------------------------------------
 
+// Fields fetched for a flush GET — include table cell content so AI-N tokens
+// inside table cells are found. Element startIndex/endIndex are needed to
+// map text-run character offsets back to absolute document positions, which
+// is required for soft-return paragraphs where the token is mid-paragraph.
+var _FLUSH_FIELDS = [
+  'startIndex,endIndex,paragraph/elements(startIndex,endIndex,textRun/content)',
+  'table/tableRows/tableCells/content(startIndex,endIndex,paragraph/elements(startIndex,endIndex,textRun/content))'
+].join(',');
+
 /**
- * Rewrites the content of an AI-N: paragraph via REST API batchUpdate.
- * Preserves the paragraph node (does not delete the trailing \n).
- * Caller must have called doc.saveAndClose() before invoking this.
+ * Collects every occurrence of the 'AI-N:' token (at paragraph start, or
+ * immediately after a soft-return) within a Docs REST body.content tree,
+ * searching top-level paragraphs and table cells. Shared by
+ * _flushActionParagraphs so a doc's content tree is parsed once per GET
+ * regardless of how many distinct N values are being flushed in that GET.
+ *
+ * @param {Array} items   body.content (or a table cell's content) array
+ * @param {number} N      the integer from the AI-N: token being searched for
+ * @returns {Array<{pStart:number, pEnd:number, tokenDocIdx:number, lineDocIdx:number}>}
+ */
+function _collectFlushOccurrences(items, N) {
+  var found = [];
+  var prefix = 'AI-' + N + ':';
+  for (var ii = 0; ii < items.length; ii++) {
+    var item = items[ii];
+    if (item.paragraph) {
+      var elements = item.paragraph.elements || [];
+      // Build a concatenated text string and a position map from textRun
+      // elements only (images and person chips are skipped in text but still
+      // consume a document-index slot, so each run's startIndex is used
+      // directly rather than recomputing from character counts).
+      var fullText = '';
+      var runMap   = []; // {startDocIdx, startTextIdx, len}
+      for (var jj = 0; jj < elements.length; jj++) {
+        var el = elements[jj];
+        if (!el.textRun || el.startIndex === undefined) continue;
+        var tc = el.textRun.content || '';
+        runMap.push({ startDocIdx: el.startIndex, startTextIdx: fullText.length, len: tc.length });
+        fullText += tc;
+      }
+      // Find AI-N: at position 0 or immediately after a soft-return char.
+      var tokenTextIdx = -1;
+      if (fullText.substr(0, prefix.length) === prefix) {
+        tokenTextIdx = 0;
+      } else {
+        for (var si = 0; si < fullText.length - prefix.length; si++) {
+          var ch = fullText[si];
+          if ((ch === '\n' || ch === '\r' || ch === '\v') &&
+              fullText.substr(si + 1, prefix.length) === prefix) {
+            tokenTextIdx = si + 1;
+            break;
+          }
+        }
+      }
+      if (tokenTextIdx >= 0) {
+        // Map tokenTextIdx to its absolute document index, and also compute
+        // lineDocIdx — the document index of the character right after the
+        // preceding newline (= pStart when the token is at paragraph start).
+        // lineDocIdx is the delete/insert anchor: it correctly clears any
+        // image that a previous flush may have placed on this line.
+        //
+        // When the token is at the start of the paragraph (tokenTextIdx===0)
+        // lineDocIdx is item.startIndex — the paragraph node boundary, which
+        // is BEFORE any existing inlineObjectElement. Searching the runMap for
+        // afterNlTextIdx=0 would land on the first textRun (pStart+1, after
+        // the image), skipping the image and leaving stale images in place.
+        var tokenDocIdx = -1;
+        var lineDocIdx  = tokenTextIdx === 0 ? item.startIndex : -1;
+        for (var ri = 0; ri < runMap.length; ri++) {
+          var run    = runMap[ri];
+          var runEnd = run.startTextIdx + run.len;
+          if (tokenDocIdx < 0 && tokenTextIdx >= run.startTextIdx && tokenTextIdx < runEnd) {
+            tokenDocIdx = run.startDocIdx + (tokenTextIdx - run.startTextIdx);
+          }
+          if (lineDocIdx < 0) {
+            // Soft-return case: find doc index of char immediately after the
+            // preceding \n (afterNlTextIdx = tokenTextIdx).
+            var afterNlTextIdx = tokenTextIdx;
+            if (afterNlTextIdx >= run.startTextIdx && afterNlTextIdx <= runEnd) {
+              lineDocIdx = run.startDocIdx + (afterNlTextIdx - run.startTextIdx);
+            }
+          }
+          if (tokenDocIdx >= 0 && lineDocIdx >= 0) break;
+        }
+        if (tokenDocIdx >= 0) {
+          if (lineDocIdx < 0) lineDocIdx = item.startIndex;
+          found.push({ pStart: item.startIndex, pEnd: item.endIndex,
+                       tokenDocIdx: tokenDocIdx, lineDocIdx: lineDocIdx });
+        }
+      }
+    }
+    if (item.table) {
+      var tableRows = item.table.tableRows || [];
+      for (var r = 0; r < tableRows.length; r++) {
+        var cells = tableRows[r].tableCells || [];
+        for (var c = 0; c < cells.length; c++) {
+          var nested = _collectFlushOccurrences(cells[c].content || [], N);
+          for (var ni = 0; ni < nested.length; ni++) found.push(nested[ni]);
+        }
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Builds the ordered batchUpdate request list for one AI-N: occurrence —
+ * delete the existing paragraph content, then re-insert
+ * [image][AI-N: text][optional person chip][action text (status)] in reverse
+ * order (each insertText/insertPerson/insertInlineImage call targets the same
+ * insertAt index, pushing prior content right).
+ *
+ * @param {{pEnd:number, lineDocIdx:number, pStart:number}} occurrence
+ * @param {{N:number, globalId:string, actionText:string, status:string,
+ *          assigneeEmail:string, assigneeName:string}} item
+ * @returns {Array<Object>} requests to append to one batchUpdate call
+ */
+function _buildFlushRequests(occurrence, item) {
+  var chipUrl    = _buildChipUrl(item.globalId);
+  var imgUrl     = getStatusIconUrl(item.status);
+  var validEmail = item.assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.assigneeEmail);
+  var tokenLen   = ('AI-' + item.N + ': ').length;
+  var pEnd       = occurrence.pEnd;
+  // actionText sourced from a live doc rescan (sidebar/preview-card status
+  // taps) carries the document's raw soft-return characters, unlike actionText
+  // sourced from the sheet (already collapsed by WebApp.js's
+  // _normalizeActionText at every sheet-write site, GTaskSheet-2eui/755o). A
+  // bare \n here would create a hard paragraph break via insertText below; an
+  // unrecognized \r/\v is silently dropped, concatenating lines with no
+  // separator (GTaskSheet-kkm7.5). Normalizing here, the one place every flush
+  // call site funnels through, makes the sheet-side normalization redundant
+  // but harmless (idempotent) rather than load-bearing for this path.
+  var actionText = _normalizeActionText(item.actionText);
+  // insertAt: for simple paragraphs this equals pStart; for soft-return
+  // paragraphs it is the document index right after the preceding \n, which
+  // also clears any image placed there by a previous flush.
+  var insertAt   = occurrence.lineDocIdx !== undefined ? occurrence.lineDocIdx : occurrence.pStart;
+
+  var requests = [];
+  // Delete from insertAt to pEnd-1, preserving any contextual prefix text
+  // and the mandatory trailing \n of the paragraph node.
+  if (pEnd - 1 > insertAt) {
+    requests.push({ deleteContentRange: { range: { startIndex: insertAt, endIndex: pEnd - 1 } } });
+  }
+  if (validEmail) {
+    requests.push({ insertText: { text: ' ' + actionText + ' (' + item.status + ')', location: { index: insertAt } } });
+    // insertPerson rejects any name field in personProperties — email only
+    requests.push({ insertPerson: { personProperties: { email: item.assigneeEmail }, location: { index: insertAt } } });
+  } else {
+    requests.push({ insertText: { text: actionText + ' (' + item.status + ')', location: { index: insertAt } } });
+  }
+  requests.push({ insertText: { text: 'AI-' + item.N + ': ', location: { index: insertAt } } });
+  requests.push({ insertInlineImage: {
+    uri: imgUrl, location: { index: insertAt },
+    objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
+  }});
+  requests.push({ updateTextStyle: {
+    range: { startIndex: insertAt, endIndex: insertAt + 1 + tokenLen },
+    textStyle: { link: { url: chipUrl } }, fields: 'link'
+  }});
+  requests.push(_chipBadgeStyleRequest(insertAt + 1, insertAt + 1 + tokenLen));
+
+  // Action-text style (GTaskSheet-d99c) — final layout left-to-right is
+  // [image][token][optional person chip][' '?actionText (status)]; only push
+  // when a Config 'action_text' row exists, else leave today's inherited
+  // default formatting untouched.
+  var trailingText  = (validEmail ? ' ' : '') + actionText + ' (' + item.status + ')';
+  var actionTextStart = insertAt + 1 + tokenLen + (validEmail ? 1 : 0);
+  var actionTextStyleReq = _actionTextStyleRequest(actionTextStart, actionTextStart + trailingText.length);
+  if (actionTextStyleReq) requests.push(actionTextStyleReq);
+
+  return requests;
+}
+
+/**
+ * Rewrites the content of every item's AI-N: paragraph via ONE Docs REST GET
+ * + ONE batchUpdate for the whole doc, regardless of how many action items
+ * are being flushed (GTaskSheet-kkm7.3) — replaces what was previously one
+ * GET + one batchUpdate per item. Preserves each paragraph node (does not
+ * delete its trailing \n). Caller must have called doc.saveAndClose() before
+ * invoking this.
+ *
+ * Fault granularity: a missing paragraph for one item only fails that item
+ * (others still flush). A GET failure fails every item (shared fetch, no
+ * fallback). A batchUpdate failure fails every item that had a request in
+ * that one call — this is coarser than the old per-item batchUpdate, but
+ * callers already remark a failed item Dirty for retry on the next sync
+ * (_remarkRowDirty), so a transient combined-batch failure self-heals on the
+ * next sweep exactly like an individual failure did before.
+ *
+ * @param {string} docId
+ * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
+ * @param {Array<{N:number, globalId:string, actionText:string, status:string,
+ *                assigneeEmail:string, assigneeName:string}>} items
+ * @returns {Object<string, boolean>} globalId -> whether that item flushed
+ */
+function _flushActionParagraphs(docId, token, items) {
+  var t0      = Date.now();
+  var baseUrl = 'https://docs.googleapis.com/v1/documents/';
+  var results = {};
+
+  var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=body.content(' + _FLUSH_FIELDS + ')',
+    { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+  if (getResp.getResponseCode() !== 200) {
+    GasLogger.log('flush.error', { msg: 'GET failed: HTTP ' + getResp.getResponseCode(), docId: docId, batchSize: items.length });
+    for (var fi = 0; fi < items.length; fi++) results[items[fi].globalId] = false;
+    return results;
+  }
+  var tGet = Date.now();
+
+  var getBody = JSON.parse(getResp.getContentText());
+  var content = (getBody.body || {}).content || [];
+
+  // Find every item's occurrence(s) against the one parsed content tree, then
+  // flatten into a single globally-sorted request list so requests targeting
+  // a higher document index always run before ones targeting a lower index —
+  // required because batchUpdate applies requests in array order and earlier
+  // edits shift the indices of everything after them in the document.
+  var pending = []; // {occurrence, item}
+  for (var ii = 0; ii < items.length; ii++) {
+    var occurrences = _collectFlushOccurrences(content, items[ii].N);
+    if (occurrences.length === 0) {
+      GasLogger.log('flush.warn', { msg: 'Paragraph not found', globalId: items[ii].globalId });
+      results[items[ii].globalId] = false;
+      continue;
+    }
+    results[items[ii].globalId] = true; // tentative — flipped to false below if the shared batchUpdate fails
+    for (var oi = 0; oi < occurrences.length; oi++) {
+      pending.push({ occurrence: occurrences[oi], item: items[ii] });
+    }
+  }
+
+  if (pending.length === 0) return results;
+
+  pending.sort(function (a, b) { return b.occurrence.pStart - a.occurrence.pStart; });
+
+  var requests = [];
+  for (var pi = 0; pi < pending.length; pi++) {
+    var built = _buildFlushRequests(pending[pi].occurrence, pending[pi].item);
+    for (var bi = 0; bi < built.length; bi++) requests.push(built[bi]);
+  }
+
+  var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
+    method: 'post', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    payload: JSON.stringify({ requests: requests })
+  });
+  var tBatch = Date.now();
+
+  if (batchResp.getResponseCode() === 200) {
+    GasLogger.log('flush.done', {
+      docId: docId, batchSize: items.length, copies: pending.length,
+      ms: { get: tGet - t0, batchUpdate: tBatch - tGet, total: tBatch - t0 }
+    });
+    return results;
+  }
+
+  GasLogger.log('flush.error', {
+    msg: 'batchUpdate failed: HTTP ' + batchResp.getResponseCode(),
+    body: batchResp.getContentText().substring(0, 300), docId: docId, batchSize: items.length
+  });
+  for (var gi in results) {
+    if (results.hasOwnProperty(gi) && results[gi] === true) results[gi] = false;
+  }
+  return results;
+}
+
+/**
+ * Single-item convenience wrapper over _flushActionParagraphs for the
+ * interactive call sites (preview-card status tap, sidebar status set) that
+ * only ever flush one action at a time.
  *
  * @param {string} docId
  * @param {string} token          OAuth token from ScriptApp.getOAuthToken()
@@ -1554,180 +2179,14 @@ function _chipBadgeStyleRequest(startIndex, endIndex) {
  * @param {string} status         Status string
  * @param {string} assigneeEmail  May be empty
  * @param {string=} assigneeName  Optional display name for person chip
+ * @returns {boolean} whether the item flushed
  */
 function _flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail, assigneeName) {
-  var baseUrl = 'https://docs.googleapis.com/v1/documents/';
-  var chipUrl = _buildChipUrl(globalId);
-  var imgUrl = getStatusIconUrl(status);
-
-  var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);
-  var tokenLen   = ('AI-' + N + ': ').length;
-
-  // GET to find paragraph indices — include table cell content so AI-N tokens
-  // inside table cells are found. Element startIndex/endIndex are needed to
-  // map text-run character offsets back to absolute document positions, which
-  // is required for soft-return paragraphs where the token is mid-paragraph.
-  var _FLUSH_FIELDS = [
-    'startIndex,endIndex,paragraph/elements(startIndex,endIndex,textRun/content)',
-    'table/tableRows/tableCells/content(startIndex,endIndex,paragraph/elements(startIndex,endIndex,textRun/content))'
-  ].join(',');
-  var getResp = UrlFetchApp.fetch(baseUrl + docId + '?fields=body.content(' + _FLUSH_FIELDS + ')',
-    { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
-  if (getResp.getResponseCode() !== 200) {
-    GasLogger.log('flush.error', { msg: 'GET failed: HTTP ' + getResp.getResponseCode(), globalId: globalId });
-    return false;
-  }
-
-  var getBody = JSON.parse(getResp.getContentText());
-  var content = (getBody.body || {}).content || [];
-
-  // Collect ALL occurrences of this AI-N: token from top-level paragraphs and
-  // table cells. Process descending so lower-index paragraphs are unaffected
-  // by higher-index changes.
-  function _collectOccurrences(items) {
-    var found = [];
-    for (var ii = 0; ii < items.length; ii++) {
-      var item = items[ii];
-      if (item.paragraph) {
-        var elements = item.paragraph.elements || [];
-        // Build a concatenated text string and a position map from textRun
-        // elements only (images and person chips are skipped in text but still
-        // consume a document-index slot, so each run's startIndex is used
-        // directly rather than recomputing from character counts).
-        var fullText = '';
-        var runMap   = []; // {startDocIdx, startTextIdx, len}
-        for (var jj = 0; jj < elements.length; jj++) {
-          var el = elements[jj];
-          if (!el.textRun || el.startIndex === undefined) continue;
-          var tc = el.textRun.content || '';
-          runMap.push({ startDocIdx: el.startIndex, startTextIdx: fullText.length, len: tc.length });
-          fullText += tc;
-        }
-        // Find AI-N: at position 0 or immediately after a soft-return char.
-        var prefix = 'AI-' + N + ':';
-        var tokenTextIdx = -1;
-        if (fullText.substr(0, prefix.length) === prefix) {
-          tokenTextIdx = 0;
-        } else {
-          for (var si = 0; si < fullText.length - prefix.length; si++) {
-            var ch = fullText[si];
-            if ((ch === '\n' || ch === '\r' || ch === '\v') &&
-                fullText.substr(si + 1, prefix.length) === prefix) {
-              tokenTextIdx = si + 1;
-              break;
-            }
-          }
-        }
-        if (tokenTextIdx >= 0) {
-          // Map tokenTextIdx to its absolute document index, and also compute
-          // lineDocIdx — the document index of the character right after the
-          // preceding newline (= pStart when the token is at paragraph start).
-          // lineDocIdx is the delete/insert anchor: it correctly clears any
-          // image that a previous flush may have placed on this line.
-          //
-          // When the token is at the start of the paragraph (tokenTextIdx===0)
-          // lineDocIdx is item.startIndex — the paragraph node boundary, which
-          // is BEFORE any existing inlineObjectElement. Searching the runMap for
-          // afterNlTextIdx=0 would land on the first textRun (pStart+1, after
-          // the image), skipping the image and leaving stale images in place.
-          var tokenDocIdx = -1;
-          var lineDocIdx  = tokenTextIdx === 0 ? item.startIndex : -1;
-          for (var ri = 0; ri < runMap.length; ri++) {
-            var run    = runMap[ri];
-            var runEnd = run.startTextIdx + run.len;
-            if (tokenDocIdx < 0 && tokenTextIdx >= run.startTextIdx && tokenTextIdx < runEnd) {
-              tokenDocIdx = run.startDocIdx + (tokenTextIdx - run.startTextIdx);
-            }
-            if (lineDocIdx < 0) {
-              // Soft-return case: find doc index of char immediately after the
-              // preceding \n (afterNlTextIdx = tokenTextIdx).
-              var afterNlTextIdx = tokenTextIdx;
-              if (afterNlTextIdx >= run.startTextIdx && afterNlTextIdx <= runEnd) {
-                lineDocIdx = run.startDocIdx + (afterNlTextIdx - run.startTextIdx);
-              }
-            }
-            if (tokenDocIdx >= 0 && lineDocIdx >= 0) break;
-          }
-          if (tokenDocIdx >= 0) {
-            if (lineDocIdx < 0) lineDocIdx = item.startIndex;
-            found.push({ pStart: item.startIndex, pEnd: item.endIndex,
-                         tokenDocIdx: tokenDocIdx, lineDocIdx: lineDocIdx });
-          }
-        }
-      }
-      if (item.table) {
-        var tableRows = item.table.tableRows || [];
-        for (var r = 0; r < tableRows.length; r++) {
-          var cells = tableRows[r].tableCells || [];
-          for (var c = 0; c < cells.length; c++) {
-            var nested = _collectOccurrences(cells[c].content || []);
-            for (var ni = 0; ni < nested.length; ni++) found.push(nested[ni]);
-          }
-        }
-      }
-    }
-    return found;
-  }
-
-  var occurrences = _collectOccurrences(content);
-
-  if (occurrences.length === 0) {
-    GasLogger.log('flush.warn', { msg: 'Paragraph not found', globalId: globalId });
-    return false;
-  }
-
-    occurrences.sort(function(a, b) { return b.pStart - a.pStart; });
-
-    var requests = [];
-    for (var oi = 0; oi < occurrences.length; oi++) {
-      var pEnd     = occurrences[oi].pEnd;
-      // insertAt: for simple paragraphs this equals pStart; for soft-return
-      // paragraphs it is the document index right after the preceding \n,
-      // which also clears any image placed there by a previous flush.
-      var insertAt = occurrences[oi].lineDocIdx !== undefined
-                       ? occurrences[oi].lineDocIdx
-                       : occurrences[oi].pStart;
-
-      // Delete from insertAt to pEnd-1, preserving any contextual prefix text
-      // and the mandatory trailing \n of the paragraph node.
-      if (pEnd - 1 > insertAt) {
-        requests.push({ deleteContentRange: { range: { startIndex: insertAt, endIndex: pEnd - 1 } } });
-      }
-
-      // Re-insert in reverse order (each inserts at insertAt, pushing prior content right).
-      // Final line order: [image][AI-N: text][optional person chip][action text (status)]
-      if (validEmail) {
-        requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: insertAt } } });
-        // insertPerson rejects any name field in personProperties — email only
-        requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: insertAt } } });
-      } else {
-        requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: insertAt } } });
-      }
-      requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: insertAt } } });
-      requests.push({ insertInlineImage: {
-        uri: imgUrl, location: { index: insertAt },
-        objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
-      }});
-      requests.push({ updateTextStyle: {
-        range: { startIndex: insertAt, endIndex: insertAt + 1 + tokenLen },
-        textStyle: { link: { url: chipUrl } }, fields: 'link'
-      }});
-      requests.push(_chipBadgeStyleRequest(insertAt + 1, insertAt + 1 + tokenLen));
-    }
-
-    var batchResp = UrlFetchApp.fetch(baseUrl + docId + ':batchUpdate', {
-      method: 'post', muteHttpExceptions: true,
-      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-      payload: JSON.stringify({ requests: requests })
-    });
-
-    if (batchResp.getResponseCode() === 200) {
-      GasLogger.log('flush.done', { globalId: globalId, status: status, copies: occurrences.length });
-      return true;
-    }
-
-  GasLogger.log('flush.error', { msg: 'batchUpdate failed: HTTP ' + batchResp.getResponseCode(), body: batchResp.getContentText().substring(0, 300), globalId: globalId });
-  return false;
+  var results = _flushActionParagraphs(docId, token, [{
+    N: N, globalId: globalId, actionText: actionText, status: status,
+    assigneeEmail: assigneeEmail, assigneeName: assigneeName || ''
+  }]);
+  return !!results[globalId];
 }
 
 

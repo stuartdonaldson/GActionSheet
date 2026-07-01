@@ -26,6 +26,7 @@ function onOpen() {
           .addItem('Ensure Sheet Structure', 'menuEnsureSheetStructure')
           .addItem('Initialize Triggers', 'menuInitializeTriggers')
           .addItem('Bootstrap Test Properties', 'menuBootstrap')
+          .addItem('Configure Action Format', 'menuConfigFormat')
       )
       .addSubMenu(
         SpreadsheetApp.getUi().createMenu('Test')
@@ -67,6 +68,10 @@ function menuInitializeTriggers() {
 
 function menuBootstrap() {
   bootstrap();
+}
+
+function menuConfigFormat() {
+  configFormat();
 }
 
 function menuSync() {

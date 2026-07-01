@@ -41,6 +41,21 @@ var CONTRACT_SCHEMA = Object.freeze({
     })
   }),
 
+  // configFormat() (MenuHandler.js -> SyncManager.js) writes one row per
+  // Key ('ai_token' | 'action_text') sampled from a reference document's
+  // first floating action; _getActionFormatConfig() reads it back to style
+  // every subsequent doc write (GTaskSheet-d99c). Value is a JSON-encoded
+  // {fontFamily, fontSize, color, bold, italic, underline} object rather than
+  // one column per field, so adding a new style property never requires a
+  // schema/column change.
+  sheetConfig: Object.freeze({
+    headers: Object.freeze(['Key', 'Value']),
+    columnsByField: Object.freeze({
+      key: 1,
+      value: 2
+    })
+  }),
+
   sheetAction: Object.freeze({
     fields: Object.freeze([
       'global_id',
