@@ -81,6 +81,10 @@ function doGet(e) {
     return _handleSurvey(e);
   }
 
+  if (e && e.parameter && e.parameter.cmd === 'register') {
+    return _handleRegister(e);
+  }
+
   var params = (e && e.parameter) ? JSON.stringify(e.parameter) : '{}';
   return ContentService.createTextOutput(
     'GActionSheet ' + BUILD_INFO.version + '\n' +
@@ -126,7 +130,8 @@ function _handlePreviewNotice(e) {
     teamName: (docDataRow && docDataRow.teamId) || '',
     actionId: ain,
     status:   row.status || 'Open',
-    docLink:  'https://docs.google.com/document/d/' + encodeURIComponent(docId) + '/edit'
+    docLink:  'https://docs.google.com/document/d/' + encodeURIComponent(docId) + '/edit',
+    docId:    docId
   });
 }
 
@@ -147,13 +152,16 @@ function _renderPreviewNotice(model) {
     var teamRow = model.teamName
       ? '<p><strong>Team:</strong> ' + _escapeHtml(model.teamName) + '</p>'
       : '';
+    var syncLink = ACTION_CHIP_URL_BASE + '?cmd=register&docId=' + encodeURIComponent(model.docId);
     body =
       '<h1>' + _escapeHtml(model.actionId) + '</h1>' +
       '<p><strong>Document:</strong> ' + _escapeHtml(model.docName) + '</p>' +
       teamRow +
       '<p><strong>Status:</strong> ' + _escapeHtml(model.status) + '</p>' +
       '<p><a href="' + _escapeHtml(model.docLink) + '" target="_blank">' +
-        'Open the document to view or edit this action</a></p>';
+        'Open the document to view or edit this action</a></p>' +
+      '<p><a href="' + _escapeHtml(syncLink) + '" target="_top">Sync this document</a></p>' +
+      '<p><a href="' + _escapeHtml(ACTION_CHIP_URL_BASE + '?cmd=register') + '" target="_top">Register a new document</a></p>';
   }
 
   return _renderBrandedPage('GActionSheet', body);
@@ -273,6 +281,120 @@ function _renderTeamView(model) {
   }
 
   return _renderBrandedPage('GActionSheet — Team View', body);
+}
+
+/**
+ * doGet ?cmd=register[&docId=<docId-or-url>] — self-service document
+ * registration for callers without add-on access. No docId param renders a
+ * prompt form; a submitted docId is resolved, gated on Drive folder ancestry
+ * (must sit under a TeamData-registered team folder — _walkFolderForTeam,
+ * SyncManager.js), and — only on a match — registered/synced via the same
+ * syncDocument() entry point the add-on menu uses (MenuHandler.js). A doc
+ * outside any team folder is refused rather than silently registered with no
+ * team, so every DocData row this route creates always has a resolvable team
+ * contact.
+ *
+ * @param {Object} e doGet event; reads e.parameter.docId.
+ * @return {HtmlOutput}
+ */
+function _handleRegister(e) {
+  var input = (e && e.parameter && e.parameter.docId) || '';
+  if (!input) {
+    return _renderRegisterForm();
+  }
+
+  var docId = _parseDocIdInput(input);
+  if (!docId) {
+    return _renderRegisterResult({ ok: false, reason: 'unparseable', input: input });
+  }
+
+  // _walkFolderForTeam swallows Drive errors internally and returns null for
+  // both "no matching ancestor" and "doc inaccessible" — check accessibility
+  // separately first so a bad/unreadable docId gets its own message instead
+  // of the misleading "move it into a team folder" copy.
+  try {
+    DriveApp.getFileById(docId);
+  } catch (ex) {
+    GasLogger.log('webapp.register.error', { docId: docId, msg: ex.message });
+    GasLogger.flush();
+    return _renderRegisterResult({ ok: false, reason: 'not-found', docId: docId });
+  }
+
+  var ss = _openActionSheetSpreadsheet();
+  var teamDataRows = _readTeamDataRows(ss);
+  var walkResult = _walkFolderForTeam(docId, teamDataRows);
+
+  if (!walkResult) {
+    GasLogger.log('webapp.register.no-team', { docId: docId });
+    GasLogger.flush();
+    return _renderRegisterResult({ ok: false, reason: 'no-team', docId: docId });
+  }
+
+  syncDocument(docId);
+  GasLogger.log('webapp.register.synced', { docId: docId, teamId: walkResult.teamId });
+  GasLogger.flush();
+  return _renderRegisterResult({ ok: true, docId: docId, teamId: walkResult.teamId });
+}
+
+/**
+ * Accepts either a bare Drive file ID or a full Google Docs URL and returns
+ * the file ID, or '' if neither pattern matches.
+ */
+function _parseDocIdInput(input) {
+  var s = String(input || '').trim();
+  if (!s) return '';
+  var fromUrl = _extractDocIdFromString(s);
+  if (fromUrl) return fromUrl;
+  return /^[a-zA-Z0-9_-]{10,}$/.test(s) ? s : '';
+}
+
+function _renderRegisterForm() {
+  var body =
+    '<h1>Register a document</h1>' +
+    '<p>Enter the document ID or the full Google Docs URL. The document must ' +
+    'live inside a folder that has already been registered for a team.</p>' +
+    '<form method="GET" target="_top">' +
+      '<input type="hidden" name="cmd" value="register">' +
+      '<input type="text" name="docId" placeholder="Document ID or URL" ' +
+        'style="width:100%;padding:6px;box-sizing:border-box">' +
+      '<p><button type="submit">Register &amp; sync</button></p>' +
+    '</form>';
+  return _renderBrandedPage('GActionSheet — Register a Document', body);
+}
+
+/**
+ * @param {{ok: boolean, reason?: string, input?: string, docId?: string, teamId?: string}} model
+ */
+function _renderRegisterResult(model) {
+  var body;
+  if (model.ok) {
+    var docLink = 'https://docs.google.com/document/d/' + encodeURIComponent(model.docId) + '/edit';
+    body =
+      '<h1>Document registered</h1>' +
+      '<p>Team: <strong>' + _escapeHtml(model.teamId) + '</strong></p>' +
+      '<p>The document has been synced.</p>' +
+      '<p><a href="' + _escapeHtml(docLink) + '" target="_blank">Open the document</a></p>' +
+      '<p><a href="' + _escapeHtml(ACTION_CHIP_URL_BASE + '?cmd=register') + '" target="_top">Register another document</a></p>';
+  } else if (model.reason === 'unparseable') {
+    body =
+      '<h1>Could not read that document</h1>' +
+      '<p>"' + _escapeHtml(model.input) + '" is not a recognizable document ID or Google Docs URL.</p>' +
+      '<p><a href="' + _escapeHtml(ACTION_CHIP_URL_BASE + '?cmd=register') + '" target="_top">Try again</a></p>';
+  } else if (model.reason === 'no-team') {
+    body =
+      '<h1>Document is not under a registered team folder</h1>' +
+      '<p>This document cannot be registered because it is not stored inside ' +
+      'a folder that has been set up for a team. Move it into a team folder ' +
+      'and try again, or contact your team lead.</p>' +
+      '<p><a href="' + _escapeHtml(ACTION_CHIP_URL_BASE + '?cmd=register') + '" target="_top">Try again</a></p>';
+  } else {
+    body =
+      '<h1>Document not found</h1>' +
+      '<p>The document could not be opened — it may not exist, or this ' +
+      'service may not have access to it.</p>' +
+      '<p><a href="' + _escapeHtml(ACTION_CHIP_URL_BASE + '?cmd=register') + '" target="_top">Try again</a></p>';
+  }
+  return _renderBrandedPage('GActionSheet — Register a Document', body);
 }
 
 /**
@@ -1074,10 +1196,14 @@ function _loadRowsForDocUrl(actionsSheet, docUrl) {
 }
 
 /**
- * Marks all Actions rows whose Document formula references docId as
- * 'Doc Not Found' in the Sync Status column.
+ * Marks all Actions rows whose Document formula references any of docIds as
+ * 'Doc Not Found' in the Sync Status column. One sheet read + one batched
+ * write regardless of how many docIds are passed (GTaskSheet-kkm7.1) — a
+ * syncAll() sweep that finds N missing docs sends them all in a single call
+ * instead of N separate ones, each of which used to re-read the whole Actions
+ * sheet and write matched rows one cell at a time.
  *
- * Payload shape: { secret, action: 'mark_doc_not_found', docId }
+ * Payload shape: { secret, action: 'mark_doc_not_found', docIds: string[] }
  */
 function _handleMarkDocNotFound(payload) {
   var ss           = SpreadsheetApp.getActiveSpreadsheet();
@@ -1086,49 +1212,73 @@ function _handleMarkDocNotFound(payload) {
     return _jsonResponse({ error: 'Actions sheet not found', marked: 0 });
   }
 
-  var docId   = payload.docId || '';
+  var docIds  = payload.docIds || (payload.docId ? [payload.docId] : []);
   var lastRow = actionsSheet.getLastRow();
-  if (!docId || lastRow < 2) {
+  if (docIds.length === 0 || lastRow < 2) {
     return _jsonResponse({ marked: 0 });
   }
 
   var numRows       = lastRow - 1;
   var formulasCol7  = actionsSheet.getRange(2, _ACOL.document_formula, numRows, 1).getFormulas();
   var syncStatusCol = actionsSheet.getRange(2, _ACOL.sync_status, numRows, 1).getValues();
-  var marked        = 0;
+
+  // One pass over the sheet's in-memory snapshot to find every row matching
+  // any docId, instead of repeating the scan once per docId.
+  var statusA1s     = [];
+  var modifiedA1s    = [];
+  var markedByDocId = {};
+  for (var i = 0; i < formulasCol7.length; i++) {
+    var formula = formulasCol7[i][0] || '';
+    var matchedDocId = null;
+    for (var di = 0; di < docIds.length; di++) {
+      if (formula.indexOf(docIds[di]) !== -1) { matchedDocId = docIds[di]; break; }
+    }
+    if (!matchedDocId) continue;
+    if (syncStatusCol[i][0] === 'Doc Not Found') continue;
+    var rowNum = i + 2;
+    statusA1s.push(actionsSheet.getRange(rowNum, _ACOL.sync_status).getA1Notation());
+    modifiedA1s.push(actionsSheet.getRange(rowNum, _ACOL.modified_date).getA1Notation());
+    markedByDocId[matchedDocId] = (markedByDocId[matchedDocId] || 0) + 1;
+  }
+
+  var totalMarked = statusA1s.length;
 
   WriteGuard.wrapPersistent(function () {
-    // Stamp the same detection-time timestamp on every row for this docId so
-    // they age out of ArchiveManager's 24h Doc Not Found threshold together,
-    // not independently (GTaskSheet-4tnr) — a doc going missing is a per-doc
-    // event, not a per-row one. Only stamp on the actual transition into Doc
-    // Not Found: syncAll() already keeps a permanently-missing docId out of
-    // this path on later sweeps (its own alreadyDocNotFound skip-list), but
-    // syncDocument() is also called directly from doc-context entry points
-    // (Sync menu item, sidebar Sync button — MenuHandler.js, WorkspaceAddonCard.js)
-    // with no such guard. Without this check, re-confirming an already-marked
-    // row on every direct re-sync would keep resetting Date Modified to now,
-    // so the 24h grace period would never actually elapse for a persistently
-    // missing doc someone keeps clicking Sync on — and it would violate the
-    // "Date Modified only changes on a real content change" invariant, since
-    // "still missing" isn't one.
-    var now = new Date();
-    for (var i = 0; i < formulasCol7.length; i++) {
-      var formula = formulasCol7[i][0] || '';
-      if (formula.indexOf(docId) === -1) continue;
-      if (syncStatusCol[i][0] === 'Doc Not Found') continue;
-      actionsSheet.getRange(i + 2, _ACOL.sync_status).setValue('Doc Not Found');
-      actionsSheet.getRange(i + 2, _ACOL.modified_date).setValue(now);
-      marked++;
+    // Stamp the same detection-time timestamp on every row across every docId
+    // in this batch so they age out of ArchiveManager's 24h Doc Not Found
+    // threshold together, not independently (GTaskSheet-4tnr) — a doc going
+    // missing is a per-doc event, not a per-row one. Only stamp on the actual
+    // transition into Doc Not Found: syncAll() already keeps a permanently-
+    // missing docId out of this path on later sweeps (its own
+    // alreadyDocNotFound skip-list), but syncDocument() is also called
+    // directly from doc-context entry points (Sync menu item, sidebar Sync
+    // button — MenuHandler.js, WorkspaceAddonCard.js) with no such guard.
+    // Without this check, re-confirming an already-marked row on every direct
+    // re-sync would keep resetting Date Modified to now, so the 24h grace
+    // period would never actually elapse for a persistently missing doc
+    // someone keeps clicking Sync on — and it would violate the "Date
+    // Modified only changes on a real content change" invariant, since "still
+    // missing" isn't one.
+    //
+    // getRangeList(...).setValue(...) writes the same value to every listed
+    // (possibly non-contiguous) cell in one call — this is what collapses the
+    // old per-row setValue() loop into a single write per column.
+    if (totalMarked > 0) {
+      var now = new Date();
+      actionsSheet.getRangeList(statusA1s).setValue('Doc Not Found');
+      actionsSheet.getRangeList(modifiedA1s).setValue(now);
     }
 
-    if (marked > 0) {
-      // Mirror the Doc Not Found status to DocData (GTaskSheet-zc21), preserving
-      // any existing Team Id / counts so the row stays a consistent record of
-      // the document even after it becomes unreachable.
-      var existingDocDataRow = _readDocDataRow(ss, docId);
+    // Mirror the Doc Not Found status to DocData (GTaskSheet-zc21) for every
+    // affected docId, preserving any existing Team Id / counts so the row
+    // stays a consistent record of the document even after it becomes
+    // unreachable. Still one upsert per docId (a sheet op, not a network
+    // round trip) — only the Actions-sheet read/write collapsed above.
+    for (var dk in markedByDocId) {
+      if (!markedByDocId.hasOwnProperty(dk)) continue;
+      var existingDocDataRow = _readDocDataRow(ss, dk);
       _getOrUpsertDocDataRow(
-        ss, docId,
+        ss, dk,
         existingDocDataRow ? existingDocDataRow.docName : '',
         existingDocDataRow ? existingDocDataRow.lastSyncTime : new Date(),
         existingDocDataRow ? existingDocDataRow.teamId : '',
@@ -1139,8 +1289,8 @@ function _handleMarkDocNotFound(payload) {
     }
   });
 
-  GasLogger.log('sync.docNotFound.confirmed', { msg: 'Doc not found', docId: docId, markedCount: marked });
-  return _jsonResponse({ marked: marked });
+  GasLogger.log('sync.docNotFound.confirmed', { msg: 'Doc not found', docIds: docIds, markedByDocId: markedByDocId, totalMarked: totalMarked });
+  return _jsonResponse({ marked: totalMarked, markedByDocId: markedByDocId });
 }
 
 /**

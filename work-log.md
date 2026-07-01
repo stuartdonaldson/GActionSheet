@@ -3219,3 +3219,87 @@ followed. Confirmed with the user and deleted it. Working tree is now clean; ori
   pattern's own index/registry actually references it -- a file matching the naming convention
   isn't enough; if the registry row and the cross-referencing analysis doc are both missing, it's
   more likely an orphan than an in-progress instance of the pattern.
+
+## 2026-06-30 07:21:46
+
+### Summary
+Simplified the soft-return floating action model to one-AI-per-paragraph; updated tests accordingly; fixed the flush path so soft-return paragraphs receive image icon, hyperlink, and chip badge (they were silently skipped before).
+
+### Work completed
+
+**Model simplification (GTaskSheet-cn5v — closed)**
+- Old model: multiple AI: tokens could share one paragraph, separated by soft returns.
+- New model: one AI: token per paragraph; action text runs from the token to end of paragraph including any soft-return continuation lines; contextual prefix lines (before the token) are excluded.
+- Removed three tests (multi-token scenarios): `test_soft_return_multi_ai_token`, `test_soft_return_bare_ai_assigned`, `test_soft_return_full_pattern`.
+- Added/kept four tests covering the simplified model (AC-T1 through AC-T4). All green.
+- Test file updated by a dedicated agent (twin-ticket no-shared-context rule enforced).
+
+**Flush fix (GTaskSheet-til5 — closed)**
+- Root cause: `_flushActionParagraph._collectOccurrences` matched only paragraphs whose full REST-API text starts with `AI-N:`. Soft-return paragraphs (`"context\nAI-1: action"`) were never found → `flush.warn: Paragraph not found` → no image, no hyperlink, no status write-back.
+- Fix (SyncManager.js ~line 1566):
+  1. `_FLUSH_FIELDS`: added `startIndex,endIndex` to `paragraph/elements(...)` so each textRun element carries its absolute document position.
+  2. `_collectOccurrences`: rewritten. Builds a text→doc-position map from textRun elements; searches for `AI-N:` at position 0 or after any soft-return char (`\n`/`\r`/`\v`); computes `lineDocIdx` — the document index right after the preceding `\n` — as the delete/insert anchor. This correctly clears any image a prior flush placed on that line, preventing image duplication on re-flush.
+  3. Rewrite loop: uses `lineDocIdx` as `insertAt` instead of `pStart`. For simple (non-soft-return) paragraphs `lineDocIdx === pStart`, so no behaviour change there.
+- Commit: `95d2e71 fix(flush): find AI-N: tokens in soft-return paragraphs`
+
+### Transient 404 issue during testing
+During the AC verification run, `test_soft_return_continuation_in_action_text` (AC-T2) failed twice with HTTP 404 before passing on a third attempt. Two failure modes were observed:
+- Mode A (first failure in batch run): GAS logged `sync.error` with `msg: sync_action_rows failed: HTTP 404`; body was Google HTML, not a JSON API error.
+- Mode B (standalone retry): `begin_journey_session` itself returned 404 — WebApp URL returned "Sorry, unable to open the file at this time." Test failed in <30s before any sync code ran.
+- **Likely cause**: GAS/Drive/Sheets API per-account throttling after rapid sequential test runs. The deploy smoke test showed 200 OK and a valid token, ruling out auth or deployment issues.
+- **Resolution**: Waited (implicit gap between tool calls), re-ran — passed in 26s.
+- **Key diagnostic**: if a retry passes, it's throttle. If it fails consistently, investigate deploy/auth.
+- Full troubleshooting checklist saved to bd memory key `gas-webapp-404-throttle`.
+
+### Not yet done
+- Full test suite (`pytest -x`) pending — user asked to verify ACs first; full run not yet started.
+- Push to remote pending.
+
+## 2026-07-01 01:23:14
+
+### Summary
+Diagnosed and fixed sync performance bottlenecks via Axiom trace analysis; batched three per-doc REST call patterns; fixed a soft-return corruption bug the batching work surfaced; added a sidebar ordering fix and a new configFormat() feature for configurable action-item text styling; added a call_webapp.py tool to stop hand-rolling curl/urllib against the WebApp.
+
+### Work completed
+
+**Performance investigation**
+- Pulled real Axiom traces for `sync.all` runs. Found one 338s sync where ~260s was spent in a serial loop calling `mark_doc_not_found` once per trashed/missing doc (33 calls in one trace), each doing its own full Actions-sheet read + per-row `setValue()` writes. Also found `syncAll` calling `DriveApp.getFileById()` once per tracked doc just for trash/modified-time checks, and `_flushActionParagraph` doing one GET + one `batchUpdate` per action item instead of per doc.
+
+**Batching fixes (epic GTaskSheet-kkm7, issues .1-.3)**
+- `mark_doc_not_found`: `syncAll` now collects all not-found docIds and fires one webapp call per sweep; `_handleMarkDocNotFound` (WebApp.js) does one sheet read + one `getRangeList().setValue()` batched write across all matched rows instead of per-doc reads/writes.
+- Drive metadata: new `_fetchDriveDocMetadata()` does one paginated `files.list` REST call (matches existing `urlFetchWhitelist`, unlike the batch endpoint which would need a manifest change) building a docId→{trashed,lastModified,name} map, replacing per-doc `DriveApp.getFileById()`. Falls back to the old per-doc path if the batch fetch itself fails.
+- Chip flush: `_flushActionParagraph` → `_flushActionParagraphs`, one GET + one `batchUpdate` per doc covering every changed action item (`_collectFlushOccurrences`/`_buildFlushRequests` extracted as shared helpers). Single-item call sites (sidebar/preview-card status taps) now route through the same function with a one-element list — no duplicated logic.
+
+**Soft-return corruption fix (GTaskSheet-kkm7.5)**
+- User-reported bug: a multi-line soft-return action item lost all line breaks after a sidebar status change (became fully concatenated, no separator). Root cause: `_normalizeActionText()` (added in the prior session, f8dc3a6) only strips `\v`/`\n`/`\r` at the four sheet-write sites in WebApp.js; the sidebar status-set path never touches the sheet — it rescans the live doc and passes raw un-normalized text straight into flush, where an unrecognized `\r` is silently dropped by the Docs API. Fix: normalize `actionText` once inside `_buildFlushRequests`, the one chokepoint every flush path now shares — pre-existing bug, not caused by the batching refactor, just newly exposed by it.
+
+**Sidebar ordering (GTaskSheet-kkm7.6)**
+- `_buildActionListSection` (WorkspaceAddonCard.js) now renders a locally-sorted copy of the action list by AI-N ascending (mirrors the existing Import-tab sort), with not-yet-anchored actions kept after all numbered ones. Underlying scan order is untouched for other consumers.
+
+**DocData Doc Name as hyperlink (GTaskSheet-46qv)**
+- `_getOrUpsertDocDataRow` now writes an `=HYPERLINK(...)` formula for the Doc Name cell instead of plain text, reusing the exact pattern already used for the Actions sheet's `document_formula` column. Read side unaffected (`getValues()` returns the computed title text either way).
+
+**configFormat() feature (GTaskSheet-d99c)**
+- New Setup-menu item "Configure Action Format" prompts for a Doc ID/URL, finds that doc's first AI-N: action in document order, samples font family/size/color/bold/italic/underline separately for the AI-N: token and the action text (via DocumentApp's per-offset Text style getters), and writes them to a new Config sheet.
+- Applied via `_getActionFormatConfig()` (execution-scoped cache) → `_chipBadgeStyleRequest` (shared by doc-sync flush, Import/create-chip path, and Tracker Table ID links — falls back to the original hardcoded Comic Sans MS/bold/purple style when unconfigured) and new `_actionTextStyleRequest` (returns null/no-op until configured — forward-only, no retroactive reformat of existing chips).
+- Config sheet schema iterated once at user's request: `Key | Value` columns, with Value holding a JSON-encoded style object, instead of one column per style property — new style properties won't need a schema change.
+- Verified via smoke test (sync completes cleanly with no Config rows present — default fallback path unaffected); the actual sampling/application path is not yet covered by an automated test (needs a new fixture to programmatically set rich-text style in a test doc).
+
+**Tooling: call_webapp.py + CLAUDE.md**
+- Added `scripts/call_webapp.py`, mirroring `query_axiom.py`'s role — reads `webappTestUrl`/`webappProdUrl`/`webappDevUrl`, `testToken`, `webappSecret` from `local.settings.json`, auto-selects the right auth field per route, reuses `scn.session.ScenarioSession._http_post`'s error handling so manual probes fail with the same diagnosable messages a test run would (including flagging GAS deployment-propagation lag). Declared in CLAUDE.md as the only sanctioned way to call the WebApp manually.
+
+### bd issues
+- Epic `GTaskSheet-kkm7` with children `.1`-`.6` (batching fixes, soft-return fix, sidebar ordering) — all implementation issues closed out by code, `.4` (regression test twin) still open.
+- `GTaskSheet-46qv` (DocData hyperlink) and `GTaskSheet-d99c` (configFormat) — both implemented, neither has a regression test yet.
+
+### Not yet done
+- Regression tests for all of the above (GTaskSheet-kkm7.4 and equivalent coverage for 46qv/d99c) — paused for user inspection before running the full suite again; last full `test_sync_all.py` run hit transient GAS deployment-propagation 404s/non-JSON responses unrelated to the code changes.
+- Push to remote pending.
+
+## 2026-07-01 10:36:59
+
+### Summary:
+Added a self-service `cmd=register` route to `doGet` (WebApp.js) so non-add-on users can register/sync a document via a plain browser link — prompts for a doc ID/URL, gates registration on Drive folder ancestry (must be under a TeamData-registered team folder via existing `_walkFolderForTeam`), then calls the existing `syncDocument(docId)` entry point. Added "Sync this document" / "Register a new document" links to the action-status (`cmd=preview`) page. Deployed to TEST and verified all paths live: form load, successful register+sync, unparseable input, doc-not-found, team-folder-URL input, and the new links on the preview page.
+
+### Key Learnings:
+Apps Script HtmlService/ContentService pages render inside a sandboxed googleusercontent.com iframe. Any `<a href>` or `<form>` without an explicit `target` navigates inside that sandbox iframe instead of the top window — this silently breaks links that cross a redirect chain (e.g. the custom-domain `ACTION_CHIP_URL_BASE` → `script.google.com` 307/302 hop), even though pasting the same URL directly into the address bar works fine. Fix: `target="_top"` for same-site WebApp navigation, `target="_blank"` for external/Google-Doc links. Saved as bd memory `webapp-html-links-need-target` since this applies to every future `_render*` page in WebApp.js.
