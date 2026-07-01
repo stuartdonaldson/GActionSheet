@@ -123,6 +123,33 @@ python scripts/query_axiom.py --where "data.docId == '1AAE...'"
 python scripts/query_axiom.py --raw /tmp/dump.json       # full JSON for offline analysis
 ```
 
+## Calling the WebApp Manually
+
+`python scripts/call_webapp.py` is the **only** sanctioned way to call the GAS WebApp
+outside of a pytest run — never hand-roll `curl`/`urllib` against `webappTestUrl` directly.
+It reads `webappTestUrl`/`webappProdUrl`/`webappDevUrl`, `testToken`, and `webappSecret`
+from `local.settings.json` and picks the correct auth field automatically (`secret` for
+production-gated routes, `testToken` for test-support routes — see `WebApp.js`'s `doPost`
+gate order). The WebApp deployment is `access:ANYONE_ANONYMOUS`, so no OAuth/Authorization
+header is needed or supported for external callers — auth lives entirely in the JSON body.
+
+Manual `curl`/`urllib` calls are exactly how mistakes happen: missing the `secret` field
+(silently returns `unauthorized`), mishandling the `/exec` → `script.googleusercontent.com`
+redirect, or hitting the wrong environment. `call_webapp.py` encodes the same error handling
+as `scn.session.ScenarioSession._http_post` (the pytest harness's own POST helper) so a
+manual probe fails with the same diagnosable message a test run would produce — including
+flagging GAS deployment-propagation lag (non-JSON/echo-page response right after a redeploy)
+instead of a bare traceback.
+
+```bash
+python scripts/call_webapp.py get_test_config
+python scripts/call_webapp.py begin_journey_session
+python scripts/call_webapp.py run_fixture --data '{"fixture": "sync_all"}'
+python scripts/call_webapp.py mark_doc_not_found --data '{"docIds": ["abc123"]}'
+python scripts/call_webapp.py end_journey_session --data '{"docId": "abc123"}'
+python scripts/call_webapp.py sync_action_rows --env prod --data '{"docId": "abc123"}'
+```
+
 ## Testing Strategy & Issue Conventions
 
 This project follows the ATDD lifecycle. Authoritative sources (all legacy
