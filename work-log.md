@@ -3303,3 +3303,16 @@ Added a self-service `cmd=register` route to `doGet` (WebApp.js) so non-add-on u
 
 ### Key Learnings:
 Apps Script HtmlService/ContentService pages render inside a sandboxed googleusercontent.com iframe. Any `<a href>` or `<form>` without an explicit `target` navigates inside that sandbox iframe instead of the top window — this silently breaks links that cross a redirect chain (e.g. the custom-domain `ACTION_CHIP_URL_BASE` → `script.google.com` 307/302 hop), even though pasting the same URL directly into the address bar works fine. Fix: `target="_top"` for same-site WebApp navigation, `target="_blank"` for external/Google-Doc links. Saved as bd memory `webapp-html-links-need-target` since this applies to every future `_render*` page in WebApp.js.
+
+## 2026-07-01 10:56:16
+
+### Summary:
+Committed and pushed everything that was outstanding as of this session (resolves the earlier "push to remote pending" note): 3 commits to `master`, all pushed clean.
+1. `201dfc2` — the `cmd=register` WebApp feature + `target="_top"`/`target="_blank"` fix.
+2. `906cd08` — `scripts/call_webapp.py` (new) + CLAUDE.md doc for it + removed stale `RESTART-HERE.sh`.
+3. `0c2ace3` — pre-existing uncommitted work from before this session: GTaskSheet-d99c (`configFormat` action-item styling, new Config sheet) and GTaskSheet-kkm7 batching/ordering (Doc-Not-Found batching, Drive metadata batching, flush batching, sidebar AI-N ordering) — bundled into one commit since their diffs interleave in `SyncManager.js`.
+
+Working tree and `origin/master` are now in sync.
+
+### Key Learnings:
+Pre-existing uncommitted changes from prior sessions accumulate in the working tree; when asked to "commit everything," evaluate diffs per-file before bundling — group by ticket/feature where the diff is cleanly separable (tooling vs. feature), but don't force a hunk-level split across files where two tickets' changes interleave in the same function (SyncManager.js) — the bisectability gain isn't worth the risk of a broken intermediate commit for GAS's non-compiled, non-typed codebase.
