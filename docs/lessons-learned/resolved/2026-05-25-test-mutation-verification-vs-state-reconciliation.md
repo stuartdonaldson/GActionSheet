@@ -69,3 +69,14 @@ human approval of the reconciliation spec), any future sync/state-mutation UC's 
 required to state all-field consistency invariants, and test design would be gated on
 including reconciliation assertions — directly addressing the postcondition-vs-AC-bullets
 gap this LL identified.
+
+## Update (2026-07-02)
+
+`GTaskSheet-mpi9` closed 2026-06-18 with item 4 deliberately deferred, not carried forward as
+a tracked issue — left only as a documented precondition. That left this item's decision point
+silently dangling for over a month (confirmed 2026-07-02: no reconciliation-discipline content
+in CLAUDE.md or implementation-gate SKILL.md). The other embedded item — the `docTitle`/`docName`
+staleness code defect — is separately fixed (`GTaskSheet-8in`, closed; verified in
+`src/WebApp.js:923-941`, the doc-wins branch unconditionally refreshes the `HYPERLINK` formula
+when it differs). Item 4 (the reconciliation-discipline lever) is now re-tracked as
+`GTaskSheet-bupd`, still gated on your approval of the UC-C/D reconciliation spec.

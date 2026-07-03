@@ -174,6 +174,8 @@ Methodology declaration — Testing: `atdd-bdd` — DevStandard `knowledge-base/
 
 **Pre-code contract:** before either ticket starts coding, document in the issue description: (1) GAS entry-point signature, (2) GAS log tag that signals completion, (3) output schema (XLSX columns / DOCX structure) the test will assert against.
 
+**`[INF]` design-bead authoring:** when an `[INF]` bead's deliverable is an artifact consumed by downstream beads, `--description` (scope of the artifact), `--acceptance` (done criteria), and `--design` (questions the artifact must answer) are required at creation time. An `[INF]` bead with empty content fields is incomplete — downstream `[IMP]`/`[TST]` beads are not created until it is workable.
+
 **No shared context:** the `[TST]` owner must not read GAS implementation; the `[IMP]` owner must not read test assertions. The contract is the only shared artifact.
 
 **Review-fidelity phasing (ADR-0013):** an optional AC-validation phase may be inserted *upstream* of the twin-ticket cycle. Use the lowest fidelity that can surface design error:
@@ -191,6 +193,13 @@ Rules when choosing Slice:
 - **"Keep open" ≠ "build now."** An open seam must be expressible as a one-liner + a test parameter. Anything larger goes to ROADMAP §Funnel for value/risk evaluation — not pulled into the current slice.
 - **No-shared-context preserved at hardening.** The slice implementation is throwaway, or the hardening `[TST]` is authored by a fresh-context agent against the frozen contract only — never reading slice code.
 - **Blocking hardening bead required.** The gate produces a *created, blocking* hardening bead. Slice is not done until its hardening `[TST]` is green; the entry-point coverage invariant still holds.
+
+**Ordering is oracle-driven; coverage-before-merge is the invariant _(lever under test — GTaskSheet-m65t; candidate for DevStandard T23 promotion, see `docs/methodology/oracle-ordering-lever.md`)_.**
+"Test-first" bundles two claims; only one is load-bearing. **Coverage-before-merge** — durable invariants and every state-modifying entry point (T17) are tested before merge — is non-negotiable. **Ordering** — whether the test is written before the implementation — is chosen by the *oracle*:
+- **Specifiable oracle** (correct answer is a precise value/state you can write down before coding — parsed value, row status, contract shape): **test-first** (red → green). Debugging the test *is* debugging the contract.
+- **Perceptual oracle** (you recognize "correct" on sight but cannot cheaply pre-specify it — most UI/UX, rendered output, layout/feel): **Slice** (implement-first → human review → freeze AC → author hardening `[TST]` against the frozen contract). A pre-written assertion here is both expensive *and* blind to the emergent anomaly the human eye catches. State why an assertion cannot cheaply pre-specify "correct."
+
+When implement-first is chosen, three guardrails keep the coverage invariant honest (all already in force above): (1) harden the durable invariant, not the volatile surface still under review; (2) blocking hardening `[TST]` bead — slice not done until green; (3) the hardening assertion is proven to fail against the frozen contract (Backstop rules, below). *Diagnostic:* if the test is dramatically harder to write than the implementation, that asymmetry names the regime — immature harness (invest and amortize), perceptual oracle (use review, harden only the invariant), or a churning contract (slice first).
 
 **Existing open issues** are not retroactively renamed — apply the prefix convention to all issues created from this point forward.
 

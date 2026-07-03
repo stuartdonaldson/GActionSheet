@@ -79,3 +79,9 @@ b: add a deployment checklist to `OPERATIONS.md` — after `npm run deploy:test`
    `npm run deploy:prod`: (1) confirm Version.js shows correct URL; (2) update GCP Marketplace
    SDK App Configuration to new version number; (3) in Docs, reinstall the add-on from the
    side panel to pick up the new deployment
+
+## Resolution (2026-07-01)
+Documentation lever applied: guidance integrated into DevStandard `knowledge-base/gas-addon-guide.md`
+§"WebApp URL must be deployment-stamped at build time, not self-registered (LL 2026-06-02)". The
+code-fix verification (WEBAPP_URL stamped at deploy time vs. self-registered on first visit) is
+tracked separately in GTaskSheet-g7ep. Moved to resolved/.

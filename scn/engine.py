@@ -206,6 +206,17 @@ class CheckpointEngine:
                 _cache[surface] = read(surface)
             return _cache[surface]
 
+        # Fire read_consistency() at most once per drain() call regardless of how
+        # many expectations in this drain carry needs_consistency=True (GTaskSheet-k1g9).
+        # Mirrors the get_actuals per-surface cache above — same drain, same cost model.
+        _consistency_cache: dict = {"fetched": False}
+
+        def get_consistency() -> None:
+            if not _consistency_cache["fetched"]:
+                if read_consistency is not None:
+                    read_consistency()
+                _consistency_cache["fetched"] = True
+
         to_retire: list[Expectation] = []
 
         for e in targetable:
@@ -253,8 +264,7 @@ class CheckpointEngine:
                 and e.needs_consistency
                 and not e.consistency_discharged
             ):
-                if read_consistency is not None:
-                    read_consistency()
+                get_consistency()
                 e.consistency_discharged = True
 
             # §4.5 step 4 — targeting enforcement: explicit target must fully satisfy OBS

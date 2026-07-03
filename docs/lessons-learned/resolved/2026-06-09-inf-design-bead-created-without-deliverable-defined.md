@@ -57,3 +57,8 @@ d: Add to the EPIC planning bead template in ROADMAP §Planning — after the be
 add: "Before closing the planning step, each `[INF]` design bead must have its description,
 acceptance criteria, and design stub populated. Downstream `[IMP]`/`[TST]` beads are not
 created until the `[INF]` bead is workable."
+
+## Resolution (2026-07-01)
+Lever applied: `[INF]` design-bead authoring rule added to project CLAUDE.md Testing Strategy
+(description/acceptance/design required at creation when the deliverable blocks downstream beads).
+Dogfooded on GTaskSheet-m65t. Moved to resolved/.

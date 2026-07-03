@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import io
 import json
 import os
 import pathlib
@@ -572,20 +573,46 @@ class ScenarioSession:
                      closure (session.py:511-519).
 
         scope=SHEET — ARTIFACT-convenience authority.  Downloads the xlsx and asserts
-                      col7 doc_name present and col10 sync_status not an error state.
-                      Does NOT call any GAS route.  Equivalent to an artifact-side
-                      verify(on=SHEET) check; placed here for caller ergonomics only.
+                      col7 doc_name present, matches the doc's actual current title
+                      (GTaskSheet-k1g9), and col10 sync_status not an error state.
+                      Does NOT call any GAS route (verify_action_rows/verify_chip_integrity
+                      untouched) -- the doc-name-correctness check downloads the .docx
+                      artifact (already-sanctioned download_docx path, same as DOC/TRACKER
+                      reads) and reads its core_properties.title, which Google Docs' docx
+                      export sets to the live Drive document name.  Equivalent to an
+                      artifact-side verify(on=SHEET) check; placed here for caller
+                      ergonomics only.
         """
         if scope == Surface.SHEET:
-            from tests.helpers.download import download_xlsx
+            from tests.helpers.download import download_docx, download_xlsx
+            import docx as _docx_pkg
+
             xlsx = download_xlsx(self.sheet_id)
             rows = SheetReader().read(xlsx, self.doc_id)
             _SYNC_ERROR_STATES = {"Dirty", "Deleted", "Doc Not Found"}
+
+            current_title = None
+            if rows:
+                # Only fetch the docx (extra download) if there's a row to check the
+                # name against -- no rows means nothing to compare.
+                docx_bytes = download_docx(self.doc_id)
+                current_title = _docx_pkg.Document(
+                    io.BytesIO(docx_bytes)
+                ).core_properties.title or None
+
             for row in rows:
                 # M2-guarded col 7: document_formula must resolve to a doc_id and doc_name
                 assert row.doc_name is not None, (
                     f"col7 document_formula missing doc_name for {row.global_id!r}"
                 )
+                # doc-name-correctness (GTaskSheet-k1g9): the Sheet's cached doc_name
+                # must match the document's actual current title -- catches the
+                # stale-name-after-rename bug the presence-only check above misses.
+                if current_title is not None and row.doc_name != current_title:
+                    raise AssertionError(
+                        f"col7 document_formula doc_name stale for {row.global_id!r}: "
+                        f"expected={current_title!r}, actual={row.doc_name!r}"
+                    )
                 # M2-guarded col 10: after a clean sync no row should be in an error state.
                 # Blank ("") is the normal post-sync value; Dirty/Deleted/Doc Not Found are errors.
                 assert row.sync_status not in _SYNC_ERROR_STATES, (

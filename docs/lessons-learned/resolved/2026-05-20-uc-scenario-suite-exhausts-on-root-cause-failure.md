@@ -50,3 +50,8 @@ bd memory ensures the AI applies it in future sessions without the user repeatin
 Within-test assertion accumulation (multiple defects per test) is explicitly preserved — `-x` only
 blocks starting the *next* test.
 Branch B left open — `_parseAssigneeFromText` unit test for `rest` value is a bd issue candidate.
+
+## Resolution (2026-07-01)
+Branch A applied and confirmed: `pytest -x` is the documented default (CLAUDE.md Testing Strategy
+"Backstop rules" + implementation-gate Step 6 [IMP]-close full-suite gate). Branch B (focused unit
+test for `_parseAssigneeFromText` `rest` output) handed to GTaskSheet-a4sg. Moved to resolved/.

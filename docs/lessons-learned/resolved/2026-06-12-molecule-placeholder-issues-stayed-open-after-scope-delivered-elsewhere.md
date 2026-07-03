@@ -183,3 +183,8 @@ or session-start check, so it only fires when a human happens to inspect that ex
   are closed (bd's own "eligible for close") but the epic remains open. Lower-cost than
   Branch A/B/C's title-matching since it needs no text search, just child-status aggregation.
 - c, b, e: unchanged from original capture.
+
+## Resolution (2026-07-01)
+Immediate actions (mol-66r/mol-dhd child closures) taken 2026-06-12. Residual tool refinements
+(Branch A title-matching, Branch B `bd stale` tuning, Branch D "100%-children-closed-parent-open"
+check) handed to GTaskSheet-mcji. Moved to resolved/.

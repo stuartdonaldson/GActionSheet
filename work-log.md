@@ -3316,3 +3316,52 @@ Working tree and `origin/master` are now in sync.
 
 ### Key Learnings:
 Pre-existing uncommitted changes from prior sessions accumulate in the working tree; when asked to "commit everything," evaluate diffs per-file before bundling — group by ticket/feature where the diff is cleanly separable (tooling vs. feature), but don't force a hunk-level split across files where two tickets' changes interleave in the same function (SyncManager.js) — the bisectability gain isn't worth the risk of a broken intermediate commit for GAS's non-compiled, non-typed codebase.
+
+## 2026-07-01 13:13:14
+
+### Summary:
+Methodology session — no production code changed. Reviewed docs/lessons-learned (14 entries) and
+identified six recurring threads (missing pre-execution guardrails; test-first discipline gaps;
+cross-session visibility collapse; convention-encoded-but-unenforced; late-captured platform
+constraints; aggregate-debt needing LLM synthesis). Discussion converged on a durable methodology
+lever: **"ordering is oracle-driven; coverage-before-merge is the invariant"** — a refinement of
+DevStandard T23 (review-fidelity phasing) that separates negotiable test-first *ordering* from the
+non-negotiable *coverage-before-merge* guarantee, using an oracle test (specifiable → test-first;
+perceptual → Slice/implement-first→review→freeze→harden) as the trigger.
+
+Recon confirmed the framework was already ~75% there (T23 Slice tier, durable-invariant rule,
+T5/T17, ADR-0013 blocking-hardening-bead, mpi9 proof-of-effectiveness). Deployed the delta as a
+project-local **lever under test** (not into DevStandard until proven):
+- CLAUDE.md Testing Strategy — oracle-ordering rule + 3 guardrails.
+- implementation-gate SKILL.md → v2.2 — Step 4 "Oracle & phase declaration" + success criterion.
+- docs/methodology/oracle-ordering-lever.md — portable artifact (cross-project paste-in +
+  promotion criteria + evidence log).
+- Tracker: GTaskSheet-m65t (prove-then-promote to T23).
+
+Also structured the lessons-learned staging cleanup (staging dir was being used as a backlog):
+- GTaskSheet-hp89 — [INF] mechanical cleanup for a clear-context Haiku, driven by a self-contained
+  runbook (knowledge-base/staging/ll-cleanup-plan-2026-07-01.md): 7 staged LLs → 0 (6 resolved,
+  1 reclassified to references), 2 carrier bd issues, 1 CLAUDE.md [INF]-authoring rule.
+- GTaskSheet-g7ep — [FIX] Sonnet investigation split (verify WEBAPP_URL is deploy-time stamped).
+
+### Key Learnings:
+- Apply the framework's own "lowest fidelity that surfaces error" discipline recursively to
+  methodology changes: trial a lever project-local before hardening it into DevStandard (which
+  propagates to all projects). Earn ratification with runtime evidence; don't assert it.
+- The lessons-learned *staging* dir is a capture surface, not a backlog. An LL's job ends when its
+  root cause is captured AND its lever is applied or handed to a bd issue → then it moves to
+  resolved/. Reference material isn't an LL (→ knowledge-base/references/). This is what keeps the
+  "background noise" from accumulating; fold it into the lessons-learned skill, not a new LL.
+- gas-addon-guide.md lives at DevStandard/knowledge-base/, NOT in the project — and already
+  contains the smart-chip and webapp-url LL guidance, which collapsed most of the anticipated
+  Sonnet work to mechanical resolution.
+- Split executor work by model capability: fully-specifiable mechanical steps → clear-context
+  Haiku with a self-contained runbook; open-ended code/git investigation → Sonnet.
+
+## 2026-07-02 17:49:57
+
+### Summary:
+Reviewed and resolved a Haiku-run subagent session's LL/bd cleanup output. Closed GTaskSheet-a4sg as obsolete (target code deleted before ticket filed). Verified GTaskSheet-mcji's technical-debt v1.1 work was already correctly applied in DevStandard with no overlapping bd/LL items; committed it there (a999f00, unpushed) and closed mcji. Reviewed all 13 resolved lessons-learned files for further groupings and relevance — found 4 accurate clusters, plus one genuinely stale thread: the 2026-05-25 reconciliation LL's carrier issue (mpi9) closed 2026-06-18 without re-tracking its item 4, leaving a real decision silently dangling for a month. Investigated existing cross-surface verification mechanisms (scn/session.py verify_all_expectations, verify_consistency scope=DOC/SHEET) in depth before proposing new process — found the plumbing was ~90% already there, narrowing the fix from "new CLAUDE.md rule" to "extend existing mechanism." Also found and diagnosed a latent performance bug: read_consistency() in scn/engine.py's drain() is not memoized per checkpoint like get_actuals is, so N verify_all_expectations() calls at one INTEGRITY checkpoint would cost Nx GAS round trips — confirmed current test usage avoids this by convention (1-2 calls/test) but the risk was latent. Bundled the fix into a twin-ticket pair: GTaskSheet-k1g9 [INF] (memoize read_consistency, extend ai/check_present_consistent with globalId+dates, add SHEET doc-name-correctness check) + GTaskSheet-dxz3 [TST] (proof-of-effectiveness tests, authored against k1g9's design contract per no-shared-context rule). Superseded/closed the interim GTaskSheet-bupd.
+
+### Key Learnings:
+Closed bd issues can silently drop deferred sub-items if they're not spun out into their own tracked issue before the parent closes — check referenced "open" issues in archived docs for staleness before trusting them. Before proposing a new process/rule to fix a test coverage gap, grep the existing test harness for a mechanism that already does most of the job — verify_all_expectations/check_present_consistent covered ~90% of what looked like a missing capability. Caching/memoization added for one expensive operation (get_actuals) doesn't automatically apply to a sibling operation in the same code path (read_consistency) — worth checking each expensive call site individually rather than assuming symmetry.

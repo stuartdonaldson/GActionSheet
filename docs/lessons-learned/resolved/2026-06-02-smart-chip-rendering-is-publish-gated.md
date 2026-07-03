@@ -71,3 +71,8 @@ b: add a "Smart chip constraints" section to `gas-addon-guide.md` covering the t
 b: add a developer checklist note to `docs/poc-editor-addon-migration.md` success criteria:
    "visual chip pill rendering is confirmed only after domain-install or Marketplace publish;
    mechanism confirmation (pattern match + preview card fires) is the POC bar"
+
+## Resolution (2026-07-01)
+Guidance already integrated into DevStandard `knowledge-base/gas-addon-guide.md` §"Three platform
+gates invisible at development time (LL 2026-06-02)" (incl. the hallucinated-CardService warning).
+Lever applied. Moved to resolved/.

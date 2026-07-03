@@ -34,7 +34,13 @@ def check_present_consistent(
 
     Matching key: expected['action_id'] if set, else expected['action'] text.
     Checks: action text; action_id (exact if set, else valid AI-N); status (if set);
-    assignee email (if set); assignee_name (if reader set it, via expected_name()).
+    assignee email (if set); assignee_name (if reader set it, via expected_name());
+    global_id, created_date, modified_date (GTaskSheet-k1g9) -- compared only when
+    present in `expected` AND the reader populated the same attribute on `actual`
+    (mirrors the assignee_name hasattr() guard below). Currently only SHEET actuals
+    (scn/surfaces.py SheetReader) carry global_id/created_date/modified_date; DOC and
+    TRACKER readers do not set them, so these checks are a no-op on those surfaces
+    even if the caller's expected dict happens to carry the fields.
     DOC surface: all matching occurrences must be identical to each other (§16.5).
 
     Returns None on pass, error string on failure.
@@ -128,6 +134,18 @@ def check_present_consistent(
                         f"[{tag}] {surface.value}: assignee_name mismatch: "
                         f"expected={exp_name!r}, actual={actual.assignee_name!r}"
                     )
+
+    # global_id / created_date / modified_date (GTaskSheet-k1g9): compared only when
+    # the caller pinned the field in `expected` AND the reader populated it on `actual`.
+    for field_name in ("global_id", "created_date", "modified_date"):
+        if field_name in expected and hasattr(actual, field_name):
+            exp_val = expected[field_name]
+            act_val = getattr(actual, field_name)
+            if act_val != exp_val:
+                return (
+                    f"[{tag}] {surface.value}: {field_name} mismatch: "
+                    f"expected={exp_val!r}, actual={act_val!r}"
+                )
 
     return None
 

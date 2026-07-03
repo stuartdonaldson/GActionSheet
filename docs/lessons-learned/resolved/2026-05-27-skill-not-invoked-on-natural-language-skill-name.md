@@ -21,3 +21,9 @@ Root cause: The instruction governing skill invocation only specifies the `/<nam
 ## Initial Candidates
 b: add to global CLAUDE.md — "if the user's message contains a known skill name (with or without slash), invoke the skill via the Skill tool before executing the task directly; slash prefix is not required"
 c: not applicable — skill auto-trigger rules are inside the skill file and unreadable before invocation; the fix must be in the governing instruction layer, not inside the skill
+
+## Resolution (2026-07-01)
+Out of project scope. The only lever is a global-instruction change (recognise a skill named as a
+natural-language noun phrase, not only the `/name` form) in the user-scoped global CLAUDE.md —
+cross-project, not a GActionSheet artifact. Recorded here for global-instruction follow-up; no
+project change owed. Moved to resolved/.

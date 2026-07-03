@@ -12,12 +12,12 @@ description: >-
   documentation-only, config-only, or test-only changes with no new logic.
 metadata:
   category: process
-  version: "2.1"
+  version: "2.2"
   status: documented
   validation: untested
   priority: high
   created: "2026-03-26"
-  last_updated: "2026-06-18"
+  last_updated: "2026-07-01"
   depends_on: []
   conflicts_with: []
   related_skills: [test-functional, lessons-learned]
@@ -62,7 +62,14 @@ Each step enforces a named principle and adds the gate-specific fail condition t
 3. **AC / contract gate** (enforces I4, T4) → confirm AC and the pre-code contract are drafted and frozen → read them → state "done" in one sentence. | **Fail:** if AC are absent or ambiguous, draft candidate AC and review with the user before any code — do not implement on inference.
    - **Proof-of-effectiveness sub-step:** if the AC introduces a new integrity/quality assertion (not a first-pass functional red-phase test), the contract must also state how the assertion will be proven to fail — i.e. that it actually catches the violation it claims to check, not only that it passes. | **Fail:** an assertion with no stated failure-demonstration is not contract-complete; add one before proceeding.
 
-4. **ATDD phase declaration** (enforces I7) → declare the current phase explicitly: red / green / refactor, and comply with that phase's read restriction. The internal unit loop within Green is implementation-track TDD (I8). | **Fail:** if no phase can be declared, the work is not ready — return to Step 3.
+4. **Oracle & phase declaration** (enforces I7, T23) → first declare the **oracle type**, which sets the ordering:
+   - **Specifiable oracle** — correct is a precise value/state writable *before* coding (parsed value, row status, contract shape) → **test-first**: proceed red → green → refactor.
+   - **Perceptual oracle** — correct is recognized on sight but not cheaply pre-specifiable (most UI/UX, rendered output, layout/feel) → **Slice** (T23): implement a thin instance → human review → freeze the AC → then author the hardening `[TST]` against the frozen contract. State explicitly why an assertion cannot cheaply pre-specify "correct."
+
+   Then declare the current phase (red / green / refactor, or slice / hardening) and comply with its read restriction. The internal unit loop within Green is implementation-track TDD (I8).
+
+   **Ordering is negotiable; coverage-before-merge is not** — whichever path, the durable invariants and every state-modifying entry point (T17) are tested before merge. When implement-first (Slice) is chosen, three guardrails keep that invariant honest: (1) harden the durable invariant, not the volatile surface still under review (T23 durable-invariant rule); (2) a blocking hardening `[TST]` bead exists and the slice is not done until it is green (ADR-0013); (3) the hardening assertion is proven to fail against the frozen contract (Step 3 proof-of-effectiveness). *Diagnostic:* if the test is dramatically harder to write than the implementation, that asymmetry names the regime — immature harness (invest and amortize), perceptual oracle (use review, harden only the invariant), or a churning contract (slice first). | **Fail:** if no oracle/phase can be declared, the work is not ready — return to Step 3.
+   *(Lever under test — GTaskSheet-m65t; pending DevStandard T23 promotion.)*
 
 5. **Test-before-commit** (enforces I5, T5) → before staging, run the narrowest test covering the current AC; in red, confirm the test exists and is listed failing; in green/refactor, it must pass. | **Fail:** if no test exists, write one first — staging is blocked until a test runs; if the runner is unavailable, record the block on the issue before staging.
 
@@ -79,7 +86,8 @@ Each step enforces a named principle and adds the gate-specific fail condition t
 - [ ] Tracked issue exists before implementation begins
 - [ ] AC and contract read; "done" stated in one sentence before writing code
 - [ ] For new integrity/quality assertions: contract states how the assertion's effectiveness will be proven (failure demonstration), not just that it passes
-- [ ] ATDD phase declared explicitly (red/green/refactor)
+- [ ] Oracle type declared (specifiable → test-first; perceptual → Slice); for perceptual, why an assertion can't cheaply pre-specify "correct" is stated
+- [ ] ATDD phase declared explicitly (red/green/refactor, or slice/hardening)
 - [ ] In red phase: no implementation files read (verify: read calls target specs and test files only, per I7)
 - [ ] Test run completed before staging (verify: test output shown in session)
 - [ ] Test-infrastructure compatibility confirmed (detection format, route/contract, sheet structure, log tags) before committing to the approach
@@ -124,4 +132,4 @@ Hooks are OPTIONAL — use them only after repeated gate-bypass incidents; skip 
 **Prevented by:** Step 7 (I10) — done is "AC tests pass," not "no crash."
 
 ---
-_Document generated 2026-06-08; updated 2026-06-18 (GTaskSheet-mpi9: proof-of-effectiveness sub-step, test-infra compatibility check, full-suite close gate)._
+_Document generated 2026-06-08; updated 2026-06-18 (GTaskSheet-mpi9: proof-of-effectiveness sub-step, test-infra compatibility check, full-suite close gate); updated 2026-07-01 (GTaskSheet-m65t: oracle & phase declaration — lever under test, pending DevStandard T23 promotion)._
