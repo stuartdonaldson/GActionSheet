@@ -1037,3 +1037,173 @@ class TestCheckPresentConsistentUI:
         expected = {"action": "x", "action_id": "AI-1", "status": "Open", "assignee": "someone@example.com"}
         result = check_present_consistent(expected, [self._actual(assignee=None)], Surface.UI, "[t]")
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestReadConsistencyMemoization — GTaskSheet-k1g9 proof-of-effectiveness
+# ---------------------------------------------------------------------------
+
+class TestReadConsistencyMemoization:
+    """Verify read_consistency() is called at most once per drain() (GTaskSheet-k1g9)."""
+
+    def test_read_consistency_called_once_per_drain_despite_multiple_needs_consistency_expectations(self):
+        """Memoization: 2+ needs_consistency expectations → read_consistency() fires once."""
+        engine = CheckpointEngine()
+        call_count = [0]  # closure container
+
+        def stub_read_consistency():
+            call_count[0] += 1
+
+        # Enqueue two expectations both targeting the same INTEGRITY drain with needs_consistency=True.
+        e1 = _exp(
+            [Surface.SHEET],
+            kind="PRESENT_CONSISTENT",
+            target=INTEGRITY_TARGET,
+            needs_consistency=True,
+            tag="[test AC1]",
+            action="Do thing 1",
+        )
+        e2 = _exp(
+            [Surface.SHEET],
+            kind="PRESENT_CONSISTENT",
+            target=INTEGRITY_TARGET,
+            needs_consistency=True,
+            tag="[test AC2]",
+            action="Do thing 2",
+        )
+        engine.enqueue(e1)
+        engine.enqueue(e2)
+
+        # Drain at INTEGRITY; both expectations should be evaluated, but read_consistency called once.
+        engine.drain(
+            CheckpointKind.INTEGRITY,
+            read=lambda s: [
+                ai(action="Do thing 1", action_id="AI-1", status="Open", assignee="a@example.com"),
+                ai(action="Do thing 2", action_id="AI-2", status="Open", assignee="b@example.com"),
+            ],
+            read_consistency=stub_read_consistency,
+        )
+
+        assert call_count[0] == 1, f"Expected read_consistency() called once, got {call_count[0]}"
+        assert len(engine.queue) == 0  # both drained
+
+    def test_read_consistency_not_called_at_step_checkpoint(self):
+        """read_consistency only fires at INTEGRITY; STEP checkpoints skip it."""
+        engine = CheckpointEngine()
+        call_count = [0]
+
+        def stub_read_consistency():
+            call_count[0] += 1
+
+        e = _exp([Surface.DOC], target=AUTO, needs_consistency=True, action="Thing")
+        engine.enqueue(e)
+
+        # Drain at STEP (not INTEGRITY); read_consistency should not be called.
+        engine.drain(
+            CheckpointKind.STEP,
+            on=frozenset({Surface.DOC}),
+            read=lambda s: [ai(action="Thing", action_id="AI-1")],
+            read_consistency=stub_read_consistency,
+        )
+
+        assert call_count[0] == 0, f"Expected read_consistency not called at STEP, got {call_count[0]}"
+
+
+# ---------------------------------------------------------------------------
+# TestCheckPresentConsistentExtensions — GTaskSheet-k1g9 field comparisons
+# ---------------------------------------------------------------------------
+
+class TestCheckPresentConsistentExtensions:
+    """Verify extended fields (global_id, created_date, modified_date) are compared (GTaskSheet-k1g9)."""
+
+    def test_fail_global_id_mismatch(self):
+        """Proof-of-effectiveness: check_present_consistent fails on global_id mismatch."""
+        from datetime import datetime
+        expected = {
+            "action": "Sync doc",
+            "global_id": "doc-abc/AI-1",
+            "created_date": datetime(2026, 1, 1),
+            "modified_date": datetime(2026, 1, 2),
+        }
+        actual = ai(action="Sync doc", action_id="AI-1")
+        actual.global_id = "doc-xyz/AI-1"  # Mismatch!
+        actual.created_date = datetime(2026, 1, 1)
+        actual.modified_date = datetime(2026, 1, 2)
+        result = check_present_consistent(expected, [actual], Surface.SHEET, "[test]")
+        assert result is not None, "Should fail on global_id mismatch"
+        assert "global_id" in result.lower()
+
+    def test_fail_created_date_mismatch(self):
+        """Proof-of-effectiveness: check_present_consistent fails on created_date mismatch."""
+        from datetime import datetime
+        expected = {
+            "action": "Sync doc",
+            "global_id": "doc-abc/AI-1",
+            "created_date": datetime(2026, 1, 1),
+            "modified_date": datetime(2026, 1, 2),
+        }
+        actual = ai(action="Sync doc", action_id="AI-1")
+        actual.global_id = "doc-abc/AI-1"
+        actual.created_date = datetime(2026, 2, 1)  # Mismatch!
+        actual.modified_date = datetime(2026, 1, 2)
+        result = check_present_consistent(expected, [actual], Surface.SHEET, "[test]")
+        assert result is not None, "Should fail on created_date mismatch"
+        assert "created_date" in result.lower()
+
+    def test_fail_modified_date_mismatch(self):
+        """Proof-of-effectiveness: check_present_consistent fails on modified_date mismatch."""
+        from datetime import datetime
+        expected = {
+            "action": "Sync doc",
+            "global_id": "doc-abc/AI-1",
+            "created_date": datetime(2026, 1, 1),
+            "modified_date": datetime(2026, 1, 2),
+        }
+        actual = ai(action="Sync doc", action_id="AI-1")
+        actual.global_id = "doc-abc/AI-1"
+        actual.created_date = datetime(2026, 1, 1)
+        actual.modified_date = datetime(2026, 2, 2)  # Mismatch!
+        result = check_present_consistent(expected, [actual], Surface.SHEET, "[test]")
+        assert result is not None, "Should fail on modified_date mismatch"
+        assert "modified_date" in result.lower()
+
+    def test_pass_all_fields_consistent(self):
+        """Pass when all extended fields match."""
+        from datetime import datetime
+        expected = {
+            "action": "Sync doc",
+            "global_id": "doc-abc/AI-1",
+            "created_date": datetime(2026, 1, 1),
+            "modified_date": datetime(2026, 1, 2),
+        }
+        actual = ai(action="Sync doc", action_id="AI-1")
+        actual.global_id = "doc-abc/AI-1"
+        actual.created_date = datetime(2026, 1, 1)
+        actual.modified_date = datetime(2026, 1, 2)
+        result = check_present_consistent(expected, [actual], Surface.SHEET, "[test]")
+        assert result is None, "Should pass when all fields match"
+
+    def test_pass_extended_fields_not_in_expected_skipped(self):
+        """Pass when extended fields are NOT in expected dict (no comparison)."""
+        from datetime import datetime
+        # Expected dict has no global_id/dates — they should not be compared even if on actual.
+        expected = {"action": "Sync doc", "action_id": "AI-1"}
+        actual = ai(action="Sync doc", action_id="AI-1")
+        actual.global_id = "doc-abc/AI-1"
+        actual.created_date = datetime(2026, 1, 1)
+        actual.modified_date = datetime(2026, 1, 2)
+        result = check_present_consistent(expected, [actual], Surface.SHEET, "[test]")
+        assert result is None, "Should pass when extended fields not pinned in expected"
+
+    def test_pass_extended_fields_not_on_actual_skipped(self):
+        """Pass when extended fields are NOT on actual (no comparison); hasattr guard."""
+        from datetime import datetime
+        expected = {
+            "action": "Sync doc",
+            "global_id": "doc-abc/AI-1",
+            "created_date": datetime(2026, 1, 1),
+        }
+        # Actual has no global_id attribute (e.g., DOC surface reader doesn't extract it).
+        actual = ai(action="Sync doc", action_id="AI-1")  # No global_id/dates
+        result = check_present_consistent(expected, [actual], Surface.SHEET, "[test]")
+        assert result is None, "Should pass when actual lacks the attribute (hasattr guard)"

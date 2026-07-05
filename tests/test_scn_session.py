@@ -676,3 +676,9 @@ def test_attach_ui_failure_screenshot_noop_without_ui():
     scn._attach_ui_failure_screenshot(Surface.UI, "[journey ui-fail AC1]", "boom")
 
     scn._reporter.attach_screenshot.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TestVerifyConsistencyScopeSheet — GTaskSheet-k1g9 doc-name staleness check
+# ---------------------------------------------------------------------------
+
