@@ -2,7 +2,14 @@
 
 Workspace Add-on that tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Actions are identified by an in-text `AI-N:` token at the start of each checklist item, followed by a person chip (assignee) and the action text; status is a trailing parenthesized token, e.g., `(Open)`, `(Closed)`. Identity survives edits because the token embeds the durable `AI-N` prefix unique per document.
 
-**Status:** Active prototype
+## Status
+_Last updated: 2026-07-06_
+
+**Last 3 weeks:** Sync reliability hardening (soft-return `AI-N:` token detection, doc-not-found archiving, sheet text normalization); configurable action-item styling with batched/ordered sync writes; new team-view summary page and published [User Guide](docs/USER_GUIDE.md); logging/observability overhaul (Axiom ingest, per-invocation op-id correlation); test harness hardening (memoized consistency checks, entry-point coverage guards).
+
+**Waiting on:** Chris, Stuart, and anyone else using GActionSheet day-to-day — feedback and suggestions on what to improve next. Try it and report friction points.
+
+Full backlog: `bdls --ready` (or run `bd prime`)
 
 ---
 
