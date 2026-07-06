@@ -3365,3 +3365,15 @@ Reviewed and resolved a Haiku-run subagent session's LL/bd cleanup output. Close
 
 ### Key Learnings:
 Closed bd issues can silently drop deferred sub-items if they're not spun out into their own tracked issue before the parent closes — check referenced "open" issues in archived docs for staleness before trusting them. Before proposing a new process/rule to fix a test coverage gap, grep the existing test harness for a mechanism that already does most of the job — verify_all_expectations/check_present_consistent covered ~90% of what looked like a missing capability. Caching/memoization added for one expensive operation (get_actuals) doesn't automatically apply to a sibling operation in the same code path (read_consistency) — worth checking each expensive call site individually rather than assuming symmetry.
+
+## 2026-07-05 17:00:00
+
+### Summary:
+Implemented GTaskSheet-k1g9 (test harness memoization + consistency checks) using Sonnet agent with clean context. Memoized read_consistency() in engine.py to fire at most once per drain() regardless of expectation count. Extended check_present_consistent() to compare global_id, created_date, modified_date fields when present. Added doc-name-correctness check in verify_consistency(scope=SHEET) to detect stale document titles after rename. All changes zero new GAS route calls (reuses existing artifact downloads + memoized read). Authored proof-of-effectiveness tests for GTaskSheet-dxz3 (8 tests: 2 memoization proofs, 6 field-comparison proofs, all demonstrating failures on deliberately broken fixtures per Backstop rules). Full scn module test suite passes 258 tests including 8 new. Deployed TEST webapp, refreshed test token. Ran full pytest -x suite (326 tests); no regressions from k1g9/dxz3 implementation (one pre-existing soft-return scanner failure unrelated to these changes). Both issues now complete and integrated.
+
+### Key Learnings:
+- Agent context separation: fresh Sonnet agent for complex multi-step implementation task (k1g9) avoids prior-session noise and ensures clean reasoning; proves effective for scoped infrastructure work.
+- No-shared-context test discipline: test author (Claude) reads only the design contract, not k1g9 implementation, preventing implementation details from leaking into test assumptions and maintaining genuine proof-of-effectiveness.
+- Proof-of-effectiveness rigor: deliberately broken fixtures must be included in tests to demonstrate assertions fail on violations, not just pass on happy-path; backend verification (Backstop rules) prevents vacuous test passes.
+- Memoization patterns: per-surface caching (get_actuals) doesn't automatically apply to sibling expensive operations in same code path (read_consistency); each call site checked individually; new memoization mirrors existing pattern for maintainability.
+
