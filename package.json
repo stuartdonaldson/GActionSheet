@@ -1,6 +1,6 @@
 {
   "name": "gactionsheet",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "scripts": {
     "export-contract": "node scripts/export-contract.js",
