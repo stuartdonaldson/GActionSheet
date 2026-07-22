@@ -52,7 +52,7 @@ After running, commit all changed files and deploy:
 ```bash
 git add assets/product-details/ assets/store-details/ src/Constants.js src/appsscript.json
 git commit -m "chore(brand): regenerate assets"
-npm run deploy:test
+pnpm run deploy:test
 ```
 
 ---

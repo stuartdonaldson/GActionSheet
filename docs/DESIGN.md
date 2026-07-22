@@ -99,7 +99,7 @@ Context column refers to the execution contexts defined in §Runtime Architectur
 ### Deployment Pipeline
 
 ```
-npm run deploy:test
+pnpm run deploy:test
   └─ update-revision.js        → stamps src/Version.js with version + timestamp
   └─ manage-deployments.js     → finds TEST-WEB-APP deployment by anchor string
                                   clasp push (--force if needed)
@@ -107,7 +107,7 @@ npm run deploy:test
                                   writes .deploy-metadata.json
 ```
 
-Release pipeline (`npm run release:patch`) additionally runs `commit-deploy-stamp.js`, which reads `.deploy-metadata.json` and commits `src/Version.js` with deployment metadata.
+Release pipeline (`pnpm run release:patch`) additionally runs `commit-deploy-stamp.js`, which reads `.deploy-metadata.json` and commits `src/Version.js` with deployment metadata.
 
 ### Script Properties
 

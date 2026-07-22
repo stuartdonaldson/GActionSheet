@@ -230,16 +230,16 @@ test structure is not required; the entry point may be exercised as part of any 
 
 ## GAS Deployment
 
-Use the npm scripts in `package.json` — never invoke `clasp` directly.
+Use the pnpm scripts in `package.json` — never invoke `clasp` directly.
 
 | Goal | Command |
 |------|---------|
-| Deploy for test cycle | `npm run deploy:test` |
-| Deploy to production | `npm run deploy:prod` |
-| Push only (no redeploy) | `npm run push` |
+| Deploy for test cycle | `pnpm run deploy:test` |
+| Deploy to production | `pnpm run deploy:prod` |
+| Push only (no redeploy) | `pnpm run push` |
 
 `clasp logs | tail -50` to look at the last 50 lines of the logs in the cloud google apps server environment
-`npm run deploy:test` runs `update-revision.js` + `manage-deployments.js --deploy-prod`
-in one step. Running `clasp push` (or `npm run push`) alone leaves the versioned
+`pnpm run deploy:test` runs `update-revision.js` + `manage-deployments.js --deploy-prod`
+in one step. Running `clasp push` (or `pnpm run push`) alone leaves the versioned
 WebApp deployment stale — the test suite will call the old revision and produce
 `sync.warn: Non-JSON response` failures.

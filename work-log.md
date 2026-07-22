@@ -3377,3 +3377,38 @@ Implemented GTaskSheet-k1g9 (test harness memoization + consistency checks) usin
 - Proof-of-effectiveness rigor: deliberately broken fixtures must be included in tests to demonstrate assertions fail on violations, not just pass on happy-path; backend verification (Backstop rules) prevents vacuous test passes.
 - Memoization patterns: per-surface caching (get_actuals) doesn't automatically apply to sibling expensive operations in same code path (read_consistency); each call site checked individually; new memoization mirrors existing pattern for maintainability.
 
+
+## 2026-07-21 13:16:29
+
+### Summary:
+Relocated repository from /mnt/c/dev/GActionSheet to /home/stuar/proj/GActionSheet. Merged scattered Claude Code history dirs into the new location and
+rewrote the matching ~/.claude.json project references. Performed by the
+move-to-proj tool, not an interactive session.
+
+## 2026-07-21 16:45:00
+_session 4293e280 · v3 · 07-21_
+
+### Objective 1: Audit disk usage of Python venv and node_modules
+Rationale: User is conserving drive space and noticed this project uses "a significant amount of drive space given the actual amount of code involved."
+Outcome [internal]: Found a stray local `.venv` (31M, uv-created) that nothing in the repo referenced — all `package.json` test scripts hard-code the shared `/mnt/c/dev/venvs/uv1` interpreter, which already had every dependency `pyproject.toml` needs. Confirmed via import check, then deleted (`.gitignore`'d, unreferenced). `node_modules` (52M) was dominated by `allure-commandline` (33M), a standalone CLI bundled as an npm devDependency rather than genuinely project-specific.
+
+### Objective 2: Move allure-commandline to a global install
+Rationale: `allure-commandline` is a report-generator CLI, not a library the project code imports — installing it per-repo wastes disk without benefit.
+Outcome [developer-facing]: Installed globally via `npm i -g allure-commandline` (no root needed — node is nvm-managed, user-owned prefix). Removed it from `package.json` devDependencies; `test:report`/`test:serve` now call the global `allure` binary instead of `npx allure`. `node_modules` dropped 52M → 19M. Verified `pnpm run test:report`(later) regenerates the allure report successfully.
+
+### Objective 3: Migrate GActionSheet from npm to pnpm  [accreted]
+Transition: Grew out of the node_modules discussion — user asked about pnpm's cross-project dedup via its hardlinked content-addressable store, then decided to migrate this repo now that ~/proj (its actual filesystem) can benefit, rather than treating it as a future-someday idea.
+Rationale: pnpm hardlinks package copies from one global store into every consuming project's `node_modules`, but only within the same filesystem/device — repos on `/mnt/c`, `/mnt/g` (Google Drive/OneDrive-synced mounts) don't share a device with a Linux-side store and would see no benefit (and cloud-sync clients generally mishandle hardlinks). `~/proj` is native Linux ext4, so it's the one place migration actually pays off today.
+Rejected: A blanket "migrate every repo" plan — user's own framing was to only migrate repos when they land in `~/proj`, which the standalone `move-to-proj` tool exists to handle (see Objective 4).
+Outcome [developer-facing]: `pnpm import` converted `package-lock.json` → `pnpm-lock.yaml` preserving exact resolved versions; `package-lock.json` removed; `node_modules` rebuilt under pnpm. `package.json` pinned `"packageManager": "pnpm@11.15.1"` and gained an `only-allow`-based `preinstall` guard (added as a real devDependency, not an `npx`-fetched one, to avoid a network dependency on every install) blocking accidental `npm install`. Confirmed the guard actually blocks `npm install` and that a clean `pnpm install` + `pnpm run test:report` round-trips successfully.
+Outcome [internal]: Living docs (`CLAUDE.md`, `README.md`, `docs/OPERATIONS.md`, `docs/DESIGN.md`, `docs/security-architecture.md`, `.auth/README.md`, `assets/brand-NUUTS/README.md`, `local.settings.example.json`) updated from `npm run`/`npm install` wording to `pnpm` equivalents; historical/dated docs (session reviews, resolved lessons-learned, the POC-era migration doc) deliberately left untouched since they're records of what happened at the time, not current guidance.
+
+### Objective 4: Extend `~/bin/move-to-proj` to automate pnpm migration on future moves  [accreted]
+Transition: Once the manual GActionSheet migration proved out the exact recipe, user asked to fold it into the existing move-to-proj tool so future repos landing in ~/proj get migrated automatically and idempotently, rather than repeating the manual steps each time.
+Rationale: "the process should be idempotent" and, where judgment is needed (deciding which docs are living process guidance vs. immutable historical records), the user explicitly allowed delegating to a `claude` invocation rather than hand-rolling fragile heuristics in bash: "if this is too risky to be done in the script, you could collect the data and run a claude command to assist in it if necessary."
+Rejected: An initial design invoking `claude -p ... --permission-mode acceptEdits` directly from the script was blocked by the auto-mode permission classifier (a script granting a spawned Claude Code instance edit rights on its own read as a self-invoking-agent risk). Surfaced this to the user rather than working around it silently; user chose to keep the design as-is and approve the specific invocation manually rather than weakening it (e.g. dropping acceptEdits, or making the script print-only).
+Outcome [developer-facing]: `move-to-proj` now runs a `migrate_to_pnpm` step after any move/rename: installs pnpm globally if missing, converts the lockfile, rebuilds `node_modules`, pins `packageManager` + the `only-allow` guard — all skipped (idempotent) if a repo is already migrated (detected via `packageManager` field + lockfile state, no separate marker needed for this part). It then greps for residual `npm run/install/ci` references outside a few historical-by-convention directories and hands the candidate list to a headless, once-per-repo `claude -p` review (tracked via a `.claude/.pnpm-migration-reviewed` marker) that updates living docs and explicitly leaves ambiguous or historical files alone rather than guessing. Nothing the script or the headless review does is committed or pushed automatically — left for manual `git diff` review.
+Outcome [internal]: Test run against the already-migrated GActionSheet repo confirmed idempotency (mechanical steps skipped, "already migrated") and the doc-review step correctly filtered out generated allure-report/test-results JSON that the grep exclusion list itself missed, and correctly declined to guess on genuinely ambiguous files (a cross-project reference doc, a permission-config file it lacked write access to).
+
+### Key Learnings:
+pnpm's hardlink-based space savings require the store and consuming project to share a filesystem/device; WSL2's `/mnt/c` (drvfs) and network-sync-backed mounts like `/mnt/g` (Google Drive/OneDrive) don't share a device with the native-Linux `~/proj` tree, and pnpm transparently falls back to copying (not erroring) when it detects a cross-device install — so mixing npm and pnpm repos on the same machine is safe, just with dedup only available within each filesystem silo.

@@ -19,8 +19,8 @@
   "axiomToken": "YOUR_AXIOM_INGEST_TOKEN",
   "axiomQueryToken": "YOUR_AXIOM_QUERY_TOKEN",
 
-  "_note_testToken": "Auto-populated by npm run deploy:test — do not edit manually.",
-  "_note_webappTestUrl": "Auto-written by npm run deploy:test from the TEST-WEB-APP deployment ID — do not set manually. deploy:test always overwrites this with the current derived URL so it cannot become stale.",
+  "_note_testToken": "Auto-populated by pnpm run deploy:test — do not edit manually.",
+  "_note_webappTestUrl": "Auto-written by pnpm run deploy:test from the TEST-WEB-APP deployment ID — do not set manually. deploy:test always overwrites this with the current derived URL so it cannot become stale.",
   "webappTestUrl": "",
   "testToken": "",
   "testTokenExpiresAt": ""

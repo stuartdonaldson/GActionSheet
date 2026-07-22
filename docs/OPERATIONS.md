@@ -45,15 +45,15 @@ Omitting this causes a hard runtime error on the first `UrlFetchApp.fetch` call.
 
 ## Deployment
 
-Use the npm scripts — never invoke `clasp` directly.
+Use the pnpm scripts — never invoke `clasp` directly.
 
 | Goal | Command |
 |------|---------|
-| Deploy for test cycle | `npm run deploy:test` |
-| Deploy to production | `npm run deploy:prod` |
-| Push source only (no new version) | `npm run push` |
+| Deploy for test cycle | `pnpm run deploy:test` |
+| Deploy to production | `pnpm run deploy:prod` |
+| Push source only (no new version) | `pnpm run push` |
 
-**`npm run deploy:test`** runs `update-revision.js` (stamps `src/Version.js`) then `manage-deployments.js --deploy-prod` (pushes source and repoints the TEST Web App deployment). Running `clasp push` or `npm run push` alone leaves the versioned Web App deployment stale — the test suite will call the old revision and produce `sync.warn: Non-JSON response` failures.
+**`pnpm run deploy:test`** runs `update-revision.js` (stamps `src/Version.js`) then `manage-deployments.js --deploy-prod` (pushes source and repoints the TEST Web App deployment). Running `clasp push` or `pnpm run push` alone leaves the versioned Web App deployment stale — the test suite will call the old revision and produce `sync.warn: Non-JSON response` failures.
 
 **Deployment IDs** are maintained via `clasp deploy -i <id>` so Web App URLs never change across pushes. IDs are stored in `.deploy-metadata.json`.
 
@@ -206,10 +206,10 @@ accounts so the read-denied path is genuinely exercised rather than simulated.
 | `nuuts.service` | `.auth/nuuts.service.json` *(future)* | Production service/deployer account | Reader/Editor on team folders + the ActionSheet only |
 
 `test.u2` is the same second Google account used by the Probe tests
-(`npm run probe:test.u2`). Setup for a restricted account:
+(`pnpm run probe:test.u2`). Setup for a restricted account:
 
 1. Capture its storage state: `node tests/playwright/auth.setup.js --account=test.u2`
-   (sign in as the restricted account when prompted). Or `npm run auth:test.u2`.
+   (sign in as the restricted account when prompted). Or `pnpm run auth:test.u2`.
 2. In Drive, share the intended team folder with the restricted account as **Reader**.
    Do **not** share the other team folders — that asymmetry is what produces the deny path.
 3. Seed one source document with ≥1 team-scoped action in each relevant team folder
@@ -243,7 +243,7 @@ The harness selects the account per run via `PROBE_AUTH_STATE` (defaults to
 # Parser unit tests only (fast, no GAS/network):
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_floating_action_parser.py -x -v
 
-# §16.10 canonical ATDD journey — Acts 1–3 (requires live GAS — npm run deploy:test first):
+# §16.10 canonical ATDD journey — Acts 1–3 (requires live GAS — pnpm run deploy:test first):
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey_acts_1_3.py -x -v
 
 # §16.10 canonical ATDD journey — full Acts 1–5 (also the primary browser smoke test):
@@ -256,7 +256,7 @@ The harness selects the account per run via `PROBE_AUTH_STATE` (defaults to
 Workspace Add-on homepage card (Sync now, Insert tracker) and the `@`-menu
 editor trigger — these only work once the add-on test deployment is installed
 in the test Google account (one-time setup, see above) *and* is serving the
-revision just pushed by `npm run deploy:test`. Before Act 1, the journey opens
+revision just pushed by `pnpm run deploy:test`. Before Act 1, the journey opens
 the sidebar and reads its `BUILD_INFO.version` footer (`scn.ui.read_version`),
 comparing it against `src/Version.js` (`expected_version` fixture,
 `tests/helpers/version.py`):
@@ -277,10 +277,10 @@ Each UC scenario test has significant setup/teardown cost (GAS invocation, up to
 All UC tests use **HTTP fixture invocation** — no browser required for setup. The Python test suite POSTs directly to the Web App `run_fixture` route using the `testToken` from `local.settings.json`.
 
 **Prerequisites for running tests:**
-1. `npm run deploy:test` — pushes source, stamps the revision, repoints the TEST Web App deployment, writes `testToken` and `testTokenExpiresAt` to `local.settings.json`.
+1. `pnpm run deploy:test` — pushes source, stamps the revision, repoints the TEST Web App deployment, writes `testToken` and `testTokenExpiresAt` to `local.settings.json`.
 2. `local.settings.json` must contain `testSheetId`, `testDocId`, `webappSecret`, and `testToken`.
 
-**Token expiry:** `testTokenExpiresAt` in `local.settings.json` records the expiry. If the token expires mid-session, re-run `npm run deploy:test` to rotate it.
+**Token expiry:** `testTokenExpiresAt` in `local.settings.json` records the expiry. If the token expires mid-session, re-run `pnpm run deploy:test` to rotate it.
 
 > **`webappTestUrl` is auto-managed — do not set it manually.** `deploy:test` derives the TEST Web App URL from the `TEST-WEB-APP` deployment ID returned by `clasp deployments` and always overwrites `webappTestUrl` in `local.settings.json` with the authoritative value. A manually-set URL cannot become stale because it is overwritten on every successful deploy.
 
@@ -292,7 +292,7 @@ Every scenario run writes a per-step trace to `test-results/runs/<node>_<utc>.tr
 
 - **`SCN_TRACE=1`** — additionally streams the per-step trace live to the console as the run progresses. Use it to watch a long run and see which step it is currently stuck on. Each line shows the phase (`ACT` / `QUERY` / `UIACT` / `CHECK` / `CHECKPOINT` / `MONITOR` / `HTTP`), elapsed timestamp, and duration.
 - **`SCN_FAILFAST`** — fail-fast GAS-error monitoring is ON by default: a `*.error` GAS log entry (or an unexpected/non-JSON HTTP response) following any act aborts the run immediately at the source, instead of surfacing 10 minutes later at the consistency checkpoint. Set `SCN_FAILFAST=0` to disable raising (trace-only).
-- **`npm run test:ui-smoke`** — the fast (<1 min) high-risk UI smoke test (new doc → floating action → `@`-action → sidebar sync → insert table); streams the live trace.
+- **`pnpm run test:ui-smoke`** — the fast (<1 min) high-risk UI smoke test (new doc → floating action → `@`-action → sidebar sync → insert table); streams the live trace.
 - **`python scripts/trace_report.py [trace.jsonl]`** — renders a timeline, per-phase totals, slowest steps, and CHECK coverage rollup from a trace. Defaults to the latest run under `test-results/runs/`.
 
 #### Allure step naming and UI-failure screenshots
@@ -420,4 +420,4 @@ later and is not part of the mol-06g 8-scenario sign-off baseline above.
 Visit the new Web App URL once in a browser tab — `doGet` auto-normalizes and stores the URL in `WEBAPP_URL`. No manual copy-paste required.
 
 ### testToken expired (tests fail with "test-token-expired")
-Run `npm run deploy:test`. The deployment script generates a fresh UUID, POSTs it to the Web App, stores it in script properties, and writes the new token and expiry to `local.settings.json`.
+Run `pnpm run deploy:test`. The deployment script generates a fresh UUID, POSTs it to the Web App, stores it in script properties, and writes the new token and expiry to `local.settings.json`.

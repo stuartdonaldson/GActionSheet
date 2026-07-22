@@ -95,7 +95,7 @@ Three independent mechanisms, by route class:
    `doPost` (WebApp.js:146) before any production handler. Stored in Script
    Properties, never in source.
 3. **`TEST_TOKEN` (per-deployment, expiring)** — `_checkTestToken` (TestWebApp.js).
-   A UUID minted by `npm run deploy:test`, expiring after a fixed window, gating the
+   A UUID minted by `pnpm run deploy:test`, expiring after a fixed window, gating the
    test-support/fixture routes so the Python harness can drive GAS without a browser.
 
 The **`probe` action bypasses both gates by design** (WebApp.js:100) but is inert in

@@ -2,22 +2,24 @@
   "name": "gactionsheet",
   "version": "0.2.2",
   "private": true,
+  "packageManager": "pnpm@11.15.1",
   "scripts": {
+    "preinstall": "only-allow pnpm",
     "export-contract": "node scripts/export-contract.js",
     "push": "node manage-deployments.js --deploy-dev",
     "deploy:test": "node manage-deployments.js --deploy-test",
     "deploy:prod": "node manage-deployments.js --deploy-prod",
     "manage-deployments": "node manage-deployments.js",
-    "release:patch": "npm version patch && npm run deploy:prod && node commit-deploy-stamp.js && git push --follow-tags",
-    "release:minor": "npm version minor && npm run deploy:prod && node commit-deploy-stamp.js && git push --follow-tags",
-    "release:major": "npm version major && npm run deploy:prod && node commit-deploy-stamp.js && git push --follow-tags",
+    "release:patch": "npm version patch && pnpm run deploy:prod && node commit-deploy-stamp.js && git push --follow-tags",
+    "release:minor": "npm version minor && pnpm run deploy:prod && node commit-deploy-stamp.js && git push --follow-tags",
+    "release:major": "npm version major && pnpm run deploy:prod && node commit-deploy-stamp.js && git push --follow-tags",
     "test:prep": "/mnt/c/dev/venvs/uv1/bin/python3 write-environment.py",
-    "test:smoke": "npm run test:prep && npx playwright test tests/playwright/smoke.test.js --config tests/playwright/playwright.config.js",
-    "test:ui-smoke": "npm run test:prep && SCN_TRACE=1 /mnt/c/dev/venvs/uv1/bin/python3 -m pytest tests/test_ui_smoke.py -s -m smoke",
-    "test:full": "npm run test:prep && /mnt/c/dev/venvs/uv1/bin/python3 -m pytest --alluredir=test-results/allure-results --junitxml=test-results/junit/pytest.xml && npx playwright test --config tests/playwright/playwright.config.js",
-    "test:report": "npx allure generate test-results/allure-results -o allure-report --clean",
-    "test:serve": "npm run test:report && npx allure open allure-report -h 0.0.0.0 -p 5050",
-    "test:cycle": "npm run test:full; npm run test:report",
+    "test:smoke": "pnpm run test:prep && npx playwright test tests/playwright/smoke.test.js --config tests/playwright/playwright.config.js",
+    "test:ui-smoke": "pnpm run test:prep && SCN_TRACE=1 /mnt/c/dev/venvs/uv1/bin/python3 -m pytest tests/test_ui_smoke.py -s -m smoke",
+    "test:full": "pnpm run test:prep && /mnt/c/dev/venvs/uv1/bin/python3 -m pytest --alluredir=test-results/allure-results --junitxml=test-results/junit/pytest.xml && npx playwright test --config tests/playwright/playwright.config.js",
+    "test:report": "allure generate test-results/allure-results -o allure-report --clean",
+    "test:serve": "pnpm run test:report && allure open allure-report -h 0.0.0.0 -p 5050",
+    "test:cycle": "pnpm run test:full; pnpm run test:report",
     "test:playwright:debug": "npx playwright test --config tests/playwright/playwright.config.js --retries=0",
     "test:playwright:blank-doc": "npx playwright test tests/playwright/sidebar_shell.test.js -g \"brand-new blank doc\" --config tests/playwright/playwright.config.js --retries=0",
     "auth:user": "node tests/playwright/auth.setup.js --account=user",
@@ -37,7 +39,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.59.1",
-    "allure-commandline": "^2.42.0",
-    "allure-playwright": "^3.9.0"
+    "allure-playwright": "^3.9.0",
+    "only-allow": "1.2.2"
   }
 }

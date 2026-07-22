@@ -47,12 +47,12 @@ A timed sweep on the ActionSheet (every 30 minutes) picks up changes in docs no 
 Use the repo scripts instead of calling `clasp` directly:
 
 ```bash
-npm install
-npm run push
-npm run deploy:test
+pnpm install
+pnpm run push
+pnpm run deploy:test
 ```
 
-`npm run deploy:test` pushes the Apps Script sources and repoints the TEST web-app deployment to the new revision. `npm run deploy:prod` does the same for production.
+`pnpm run deploy:test` pushes the Apps Script sources and repoints the TEST web-app deployment to the new revision. `pnpm run deploy:prod` does the same for production.
 
 ### Manual test report
 Use this prompt - update for current folder structure:
@@ -73,8 +73,8 @@ Report → write pipeline-report.md ONLY (bdreport style):
 ### Allure test reporting
 Project is defining best practices captured in GAS-Practices for test reporting.
 ```
-npm run test:report
-npm run test:server
+pnpm run test:report
+pnpm run test:server
 ```
 
 ### First run

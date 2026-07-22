@@ -56,4 +56,4 @@
 
 sync.remote: "https://github.com/stuartdonaldson/GActionSheet.git"
 
-export.auto: false
+export.auto: true
