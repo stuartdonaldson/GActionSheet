@@ -52,3 +52,4 @@ __pycache__/
 *.pyc
 .claude/worktrees/
 .deploy-metadata.json
+.bd-run-beads
