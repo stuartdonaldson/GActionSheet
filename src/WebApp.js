@@ -441,6 +441,15 @@ function doPost(e) {
     return _jsonResponse({ probe: 'ok', version: BUILD_INFO.version }, 200);
   }
 
+  // [SPIKE] GTaskSheet-79dw.2 — gated on SPIKE_ENABLED, bypasses the secret gate
+  // intentionally (mirrors the probe route above). See src/SPIKE.js.
+  if (payload.action === 'spike_check_access' && SPIKE_ENABLED) {
+    return _handleSpikeCheckAccess(payload);
+  }
+  if (payload.action === 'spike_seed_access' && SPIKE_ENABLED) {
+    return _handleSpikeSeedAccess(payload);
+  }
+
   // Test-token-gated routes — authenticated by per-deployment TEST_TOKEN, not WEBAPP_SECRET.
   // Checked before the WEBAPP_SECRET gate. Includes run_fixture (fixture dispatcher) and
   // ATDD test-support routes from ContractSchema.js webApp.testRouteNames (bead .9) and

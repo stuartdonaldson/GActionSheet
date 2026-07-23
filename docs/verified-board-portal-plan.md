@@ -239,10 +239,14 @@ through a domain-managed group*? (A4, A5, A6)
 | (e) link-share | folder shared "anyone with link" | observe whether `getAccess` over-grants |
 
 **Fallback path (only if (c) returns `NONE`/`UNKNOWN`)**
-- `Drive.Permissions.list(folderId)` → find `type: 'group'` grants and their roles.
-- `AdminDirectory.Members.hasMember(groupKey, externalEmail)` per matching group
-  (works for external members **because the group is domain-managed**), enable Admin SDK
-  Directory advanced service.
+- `Drive.Permissions.list(folderId, {supportsAllDrives:true})` (Drive v2) → find
+  `type: 'group'` grants and their roles.
+- `AdminDirectory.Members.get(groupKey, externalEmail)` per matching group (catch the
+  thrown 404 as "not a member") — **not** `Members.hasMember()`, which throws `Invalid
+  Input: memberKey` for external/non-domain memberKeys even on confirmed members
+  (discovered running this spike; see
+  `knowledge-base/references/gas-admin-directory-external-groups.md` for the full gotcha
+  list, including OAuth-consent-screen scope registration and Shared Drive sharing).
 - Combine: effective role = highest role of any group the email is a confirmed member of,
   plus any direct permission.
 
@@ -255,6 +259,44 @@ through a domain-managed group*? (A4, A5, A6)
 (c), the folder-scoped group model (R3/R7) is not achievable as specified — fall back to
 per-document `getAccess`, an explicit allowlist, or require direct (non-group) sharing.
 
+**RESULT (2026-07-23): PASS — all three assumptions confirmed against real production
+data (Communications team Shared Drive `0AOp6vlyPY_E6Uk9PVA`).**
+
+| Case | Result | Evidence |
+|------|--------|----------|
+| (a) direct VIEW | ✅ PASS | `f3go30@gmail.com` granted direct viewer on the folder → `getAccess` returned `VIEW`, `method: getAccess` |
+| (b) direct EDIT | ✅ PASS | Same email upgraded to direct editor → `getAccess` returned `EDIT` (Drive correctly upgrades viewer→editor in place) |
+| **(c) group read/write** | ✅ **PASS — the load-bearing case** | `stuart.donaldson@gmail.com` (external, no direct grant) resolved to `EDIT` via the Admin SDK fallback (`method: adminSdk, groupExpandUsed: true`) — confirmed member of one of the folder's domain-managed groups |
+| (d) no access | ✅ PASS | An unrelated external email with no direct grant and no group membership returned `NONE` on both the direct folder and the same real folder used for case (c) — no false positive |
+| (e) link-share over-grant | ⚠️ **Not independently exercised** | `0AOp6vlyPY_E6Uk9PVA` is the Shared Drive **root**; Google's Drive API rejects `Permissions.insert({type:'anyone'})` on a top-level Shared Drive folder outright (`Cannot share top level folders of shared drives to domains or anyone`) — no mutation occurred. This is itself a reassuring negative finding: the over-share risk case (e) worries about is blocked by Drive/Workspace policy at the Shared Drive root. Testing on an actual team subfolder (the more representative "board folder" shape) is deferred — not blocking, since (c)/(d) already establish default-deny + correct group resolution. |
+
+**Assumption verdicts:**
+- **A4** (getAccess reflects group-conferred access) — **REFUTED as literally stated**:
+  `getAccess()` alone does NOT expand group membership; it returns `NONE` for
+  group-only access. The fallback (A5) is required, not optional, for case (c).
+- **A5** (Admin SDK fallback reliable for domain-managed groups incl. external members)
+  — ✅ **CONFIRMED**, with a correction: use `AdminDirectory.Members.get(groupKey,
+  memberKey)`, not `.hasMember()` — the latter throws `Invalid Input: memberKey` for
+  external memberKeys even on confirmed members (see
+  `knowledge-base/references/gas-admin-directory-external-groups.md`).
+- **A6** (VIEW/COMMENT vs EDIT/OWNER trustworthy for view/sync gating) — ✅ **CONFIRMED**
+  for both the direct (`getAccess`) and group-conferred (Admin SDK role mapping) paths.
+
+**Operational gotchas discovered (full detail in
+`knowledge-base/references/gas-admin-directory-external-groups.md`):** a newly-added
+OAuth scope must be registered on the consent screen (manifest scope alone is silently
+dropped); the underlying API (Admin SDK) must be separately enabled in GCP Console, or
+the consent prompt never appears at all; forcing re-authorization requires revoking the
+app's grant at `myaccount.google.com/permissions` then re-running an editor function
+that actually calls the new service; `DriveApp.setSharing()` doesn't support Shared
+Drive items (use `Drive.Permissions.insert`/`.remove` instead).
+
+**Gate outcome:** S2 passes on the load-bearing case (c) plus (a)/(b)/(d) — the
+folder-scoped domain-group ACL model (R3/R4/R5/R7) is achievable as specified, via
+`getAccess()` + the corrected Admin SDK fallback (not `getAccess()` alone, contra A4's
+literal wording). §7 gate (both spikes green) is cleared; `GTaskSheet-1hyh` is
+unblocked. Case (e) remains an open, non-blocking follow-up.
+
 ---
 
 ## 7. Gate
@@ -262,6 +304,18 @@ per-document `getAccess`, an explicit allowlist, or require direct (non-group) s
 Both spikes green → the static+GIS architecture and the folder-scoped group ACL are
 confirmed; proceed to propagate (§8) and build Milestone 1. Either red → record which
 assumption failed, revise this plan, and re-decide before any propagation.
+
+**GATE CLEARED (2026-07-23): both S1 and S2 PASS.** Propagation (§8a) is now unblocked —
+not yet executed as of this writing; still a deliberate separate step per §8a's own
+framing ("nothing below happens until the gate clears"). Note the mid-course
+architecture split discovered while executing S2 (ADR-0002, accepted in NUUC-Dispatch):
+NUUC-Dispatch verifies+signs identity only; GActionSheet (this repo) owns the folder-ACL
+authorization check, since it already holds the expanded Drive/Admin-SDK scopes and
+stays Internal-only (see NUUC-Dispatch ADR-0002 §Context for why the split exists —
+external-facing identity verification needs minimal scope to avoid OAuth
+review/friction; ACL evaluation needs expanded scope and stays domain-internal). §4's
+architecture diagram and §8a's propagation list should be revised to reflect this split
+before Milestone 1 build begins.
 
 ---
 
