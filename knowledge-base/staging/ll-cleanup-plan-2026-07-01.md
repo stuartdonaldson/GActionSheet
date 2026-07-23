@@ -21,14 +21,14 @@ bd create "[TST] Unit-test _parseAssigneeFromText rest output (LL 2026-05-20 Bra
   --type task -p 3 \
   --description "Branch B of LL 2026-05-20 (uc-scenario-suite-exhausts). Add a focused, deterministic parser unit test (T12) asserting the 'rest' return value of _parseAssigneeFromText after token extraction. Root cause was BARE_EMAIL_RE '\\s*' eating the field separator so action=='' — only caught at the 6-minute UC-scenario level. A parser-level test surfaces it in seconds. Add to test_floating_action_parser.py." \
   --acceptance "Test asserts the exact 'rest' string for at least: (a) a bare-email assignee followed by action text, (b) the field-separator-adjacent case that triggered the bug. Test fails if BARE_EMAIL_RE over-consumes the separator."
-# → record the ID printed, e.g. GTaskSheet-XXXX  (call it BRANCH_B_ID)
+# → record the ID printed, e.g. gts-XXXX  (call it BRANCH_B_ID)
 
 bd create "[INF] /technical-debt v1.1 refinements (LL 2026-06-12 residuals)" \
   --type task -p 3 \
-  --description "Residuals from LL 2026-06-12 (molecule-placeholder issues stayed open). The immediate mol-66r/mol-dhd child closures were done 2026-06-12; these are the carried-forward tool refinements. Branch A: /technical-debt implicit-resolve check should also match recently-closed bead titles/close-reasons against the TITLES of open molecule-formula step children sharing a parent epic (empty descriptions defeat the current commit-vs-description match). Branch B: tune 'bd stale' threshold against this project's epic/molecule cadence (21-day-dormant placeholder children were not flagged). Branch D: add a '100%-children-closed but parent still open' check (bd's own 'eligible for close' signal has no aggregate surface)." \
+  --description "Residuals from LL 2026-06-12 (molecule-placeholder issues stayed open). The immediate mol66r/moldhd child closures were done 2026-06-12; these are the carried-forward tool refinements. Branch A: /technical-debt implicit-resolve check should also match recently-closed bead titles/close-reasons against the TITLES of open molecule-formula step children sharing a parent epic (empty descriptions defeat the current commit-vs-description match). Branch B: tune 'bd stale' threshold against this project's epic/molecule cadence (21-day-dormant placeholder children were not flagged). Branch D: add a '100%-children-closed but parent still open' check (bd's own 'eligible for close' signal has no aggregate surface)." \
   --design "Where each refinement lands: Branch A/D → /technical-debt SKILL.md checks; Branch B → bd stale config or a session-start-check step. Open question: is title-matching precise enough to avoid false 'superseded' calls, or does it need human confirm (as the existing implicit-resolve check already requires)?" \
   --acceptance "Each of Branch A, B, D is either implemented in the named artifact or explicitly deferred with rationale recorded on this issue."
-# → record the ID printed, e.g. GTaskSheet-YYYY  (call it TECHDEBT_V11_ID)
+# → record the ID printed, e.g. gts-YYYY  (call it TECHDEBT_V11_ID)
 ```
 
 ## Step 2 — Add the `[INF]`-authoring rule to project CLAUDE.md (resolves LL 2026-06-09)
@@ -48,7 +48,7 @@ it is workable.
 
 For each file below: append the given `## Resolution (2026-07-01)` block to the end of the file,
 then `git mv docs/lessons-learned/<file> docs/lessons-learned/resolved/<file>`.
-Substitute BRANCH_B_ID / TECHDEBT_V11_ID captured in Step 1. SONNET_BEAD_ID is **GTaskSheet-g7ep**.
+Substitute BRANCH_B_ID / TECHDEBT_V11_ID captured in Step 1. SONNET_BEAD_ID is **gts-g7ep**.
 
 **2026-05-20-uc-scenario-suite-exhausts-on-root-cause-failure.md**
 ```
@@ -81,7 +81,7 @@ Lever applied. Moved to resolved/.
 Documentation lever applied: guidance integrated into DevStandard `knowledge-base/gas-addon-guide.md`
 §"WebApp URL must be deployment-stamped at build time, not self-registered (LL 2026-06-02)". The
 code-fix verification (WEBAPP_URL stamped at deploy time vs. self-registered on first visit) is
-tracked separately in GTaskSheet-g7ep. Moved to resolved/.
+tracked separately in gts-g7ep. Moved to resolved/.
 ```
 
 **2026-06-09-inf-design-bead-created-without-deliverable-defined.md**
@@ -89,13 +89,13 @@ tracked separately in GTaskSheet-g7ep. Moved to resolved/.
 ## Resolution (2026-07-01)
 Lever applied: `[INF]` design-bead authoring rule added to project CLAUDE.md Testing Strategy
 (description/acceptance/design required at creation when the deliverable blocks downstream beads).
-Dogfooded on GTaskSheet-m65t. Moved to resolved/.
+Dogfooded on gts-m65t. Moved to resolved/.
 ```
 
 **2026-06-12-molecule-placeholder-issues-stayed-open-after-scope-delivered-elsewhere.md**
 ```
 ## Resolution (2026-07-01)
-Immediate actions (mol-66r/mol-dhd child closures) taken 2026-06-12. Residual tool refinements
+Immediate actions (mol66r/moldhd child closures) taken 2026-06-12. Residual tool refinements
 (Branch A title-matching, Branch B `bd stale` tuning, Branch D "100%-children-closed-parent-open"
 check) handed to TECHDEBT_V11_ID. Moved to resolved/.
 ```

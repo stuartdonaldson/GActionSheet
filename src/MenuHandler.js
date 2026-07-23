@@ -85,7 +85,7 @@ function menuSync() {
  * statelessly via the Sheet-bound web app, so it has no active document —
  * fall back to TEST_DOC_ID, the same script property _handleRunFixture
  * (TestWebApp.js) stages for the duration of a fixture call, to make these
- * wrappers reachable from a test (GTaskSheet-ez2e) without changing
+ * wrappers reachable from a test (gts-ez2e) without changing
  * production behavior (the real menu click always has an active document).
  */
 function _activeOrTestDocId() {

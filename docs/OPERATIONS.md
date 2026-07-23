@@ -308,7 +308,7 @@ drained it. On a `Surface.UI` FAIL-severity miss, a screenshot of the live
 page is attached to the report named `"<tag> UI FAIL"`. Both apply uniformly
 to every pytest scenario — no per-test opt-in.
 
-**Screenshot on every UI failure (GTaskSheet-3tkf).** Beyond drained-checkpoint
+**Screenshot on every UI failure (gts-3tkf).** Beyond drained-checkpoint
 misses, *any* failing UI test — timeout or assertion — automatically saves a
 full-page PNG and reports diagnostics, via two layers so there is no
 copy-pasted capture logic:
@@ -330,9 +330,9 @@ copy-pasted capture logic:
 #### onLinkPreview card rendering — `tests/test_link_preview.py`
 
 The `onLinkPreview` add-on card (rendered via `addons.gsuite.google.com`) was
-previously believed to require a real human mouse hover (GTaskSheet-s9so) and
-was covered only by a headed, human-instructed interactive test. GTaskSheet-39jk
-and GTaskSheet-cug8 found that placing the text cursor on the `AI-N:` chip link
+previously believed to require a real human mouse hover (gts-s9so) and
+was covered only by a headed, human-instructed interactive test. gts-39jk
+and gts-cug8 found that placing the text cursor on the `AI-N:` chip link
 via `Ctrl+F` -> type -> `Enter` -> `Escape` (no mouse) fires the add-on's
 `onLinkPreview` trigger, and re-placing the cursor after moving it away renders
 the card — reproducible headless. `tests/test_link_preview.py` drives this
@@ -357,7 +357,7 @@ of calling pytest directly:
 
 ```bash
 /mnt/c/dev/venvs/uv1/bin/python3 scripts/run_test_exec.py \
-  -q "Investigating GTaskSheet-XXXX: <question>" \
+  -q "Investigating gts-XXXX: <question>" \
   tests/test_journey.py -x -v < /dev/null
 ```
 
@@ -397,12 +397,12 @@ UC-E import/forward across docs) are covered by the following test files:
 | UC-E — import an open action from a teammate's doc (forward) | `tests/test_import.py` (`test_import_access_filter` AC1; `test_import_flow_forward_sync` AC2–AC4, incl. `created_date` carry-over) |
 | Timed sweep (`syncAll`) | `tests/test_sync_all.py` |
 
-**Sign-off (GTaskSheet-mol-06g, 2026-05-21):** all 8 UC scenarios pass — 14
-passed, 2 xfailed (pipe-delimited assignee, tracked under `GTaskSheet-tis`).
+**Sign-off (gts-mol06g, 2026-05-21):** all 8 UC scenarios pass — 14
+passed, 2 xfailed (pipe-delimited assignee, tracked under `gts-tis`).
 This is the last full-suite run across the UC matrix; later regression runs
-(e.g. `GTaskSheet-gdll`) are targeted spot-checks against specific surfaces,
+(e.g. `gts-gdll`) are targeted spot-checks against specific surfaces,
 not a re-run of the full UC matrix. UC-E (EPIC-D import/forward) was added
-later and is not part of the mol-06g 8-scenario sign-off baseline above.
+later and is not part of the mol06g 8-scenario sign-off baseline above.
 
 ---
 

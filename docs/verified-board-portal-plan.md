@@ -67,7 +67,7 @@ plan builds on.
   new project hosts **NUUC-Dispatch** (sibling repo to GActionSheet), a standalone Apps Script
   Web App scoped for now to the S1 identity-verification harness only — not the full
   dispatch-to-other-NUUC-apps design, which stays a future direction, not built. Provisioning
-  tracked as `GTaskSheet-79dw.3` (see §8), separate from `hc6v` (which stays scoped to
+  tracked as `gts-79dw.3` (see §8), separate from `hc6v` (which stays scoped to
   ADR-0017 Phase 2 on the existing project).
 - **Team/folder model** — ADR-0014 (folder-walk team scope) and `assertTeamAccess(teamId,
   ss)` (`src/SyncManager.js`) — but note that check probes access **as the deployer**,
@@ -179,7 +179,7 @@ identity for a personal/external account and have GAS verify it? (A1, A2, A3, A7
 - Spike GAS routes (in NUUC-Dispatch's `src/WebApp.js`) live behind a `SPIKE_ENABLED` flag
   (default `false`, like `PROBE`) so they never expose in a real deployment. Deploy with
   NUUC-Dispatch's own `pnpm run deploy:test`.
-- Tracked as `GTaskSheet-79dw.3` (not `hc6v`, which stays scoped to ADR-0017 Phase 2 on the
+- Tracked as `gts-79dw.3` (not `hc6v`, which stays scoped to ADR-0017 Phase 2 on the
   existing GActionSheet project).
 
 **Pass criteria**
@@ -210,7 +210,7 @@ steps 3/11 + §Failure Modes; diagnosis/repair tooling: `pnpm run admin -- getAu
 and `SPIKE_authProbe`.
 
 **Gate outcome:** S1 passes → the committed dispatcher build (ADR-0002 signing) and
-Spike S2 (`GTaskSheet-79dw.2`) are unblocked.
+Spike S2 (`gts-79dw.2`) are unblocked.
 
 ---
 
@@ -294,7 +294,7 @@ Drive items (use `Drive.Permissions.insert`/`.remove` instead).
 **Gate outcome:** S2 passes on the load-bearing case (c) plus (a)/(b)/(d) — the
 folder-scoped domain-group ACL model (R3/R4/R5/R7) is achievable as specified, via
 `getAccess()` + the corrected Admin SDK fallback (not `getAccess()` alone, contra A4's
-literal wording). §7 gate (both spikes green) is cleared; `GTaskSheet-1hyh` is
+literal wording). §7 gate (both spikes green) is cleared; `gts-1hyh` is
 unblocked. Case (e) remains an open, non-blocking follow-up.
 
 ---
@@ -325,37 +325,58 @@ The spikes are **beads** — execute from them cold; this doc is their shared co
 
 | Bead | Role |
 |------|------|
-| `GTaskSheet-79dw` [EPIC] | Authorized web app AI editing (parent). Description still names the *old* auth-code-on-`/exec` target — to be revised after the gate. |
-| `GTaskSheet-hc6v` [INF] | **Operator prerequisite (ADR-0017 Phase 2 only)** — provision the OAuth Web client on the *existing* GActionSheet GCP project (consent screen External/Published, `openid email`). No longer blocks S1. |
-| `GTaskSheet-79dw.3` [INF] | **Operator prerequisite (S1)** — provision a *separate* GCP project + OAuth Web client for **NUUC-Dispatch** (consent screen External/Published, `openid email`; **github.io as Authorized JavaScript origin**). **Blocks S1.** |
-| **`GTaskSheet-79dw.1`** [INF] | **Spike S1** — verifiable identity from a static GitHub Pages page via `doGet`/`doPost`. Blocked by `79dw.3`; **blocks S2 and `6dlp`.** |
-| **`GTaskSheet-79dw.2`** [INF] | **Spike S2** — verify a gmail/external email's read/write access to the board folder/doc incl. domain-managed group. Blocked by S1; **blocks `1hyh`.** |
-| `GTaskSheet-1hyh` [IMP] | Old per-document authz gate — superseded in framing by S2; kept as the eventual *build* of the authz gate, now blocked by S2. |
-| `GTaskSheet-6dlp` [IMP] | Deferred editing build — blocked by S1. |
+| `gts-79dw` [EPIC] | Authorized web app AI editing (parent). Description still names the *old* auth-code-on-`/exec` target — to be revised after the gate. |
+| `gts-hc6v` [INF] | **Operator prerequisite (ADR-0017 Phase 2 only)** — provision the OAuth Web client on the *existing* GActionSheet GCP project (consent screen External/Published, `openid email`). No longer blocks S1. |
+| `gts-79dw.3` [INF] | **Operator prerequisite (S1)** — provision a *separate* GCP project + OAuth Web client for **NUUC-Dispatch** (consent screen External/Published, `openid email`; **github.io as Authorized JavaScript origin**). **Blocks S1.** |
+| **`gts-79dw.1`** [INF] | **Spike S1** — verifiable identity from a static GitHub Pages page via `doGet`/`doPost`. Blocked by `79dw.3`; **blocks S2 and `6dlp`.** |
+| **`gts-79dw.2`** [INF] | **Spike S2** — verify a gmail/external email's read/write access to the board folder/doc incl. domain-managed group. Blocked by S1; **blocks `1hyh`.** |
+| `gts-1hyh` [IMP] | Old per-document authz gate — superseded in framing by S2; kept as the eventual *build* of the authz gate, now blocked by S2. |
+| `gts-6dlp` [IMP] | Deferred editing build — blocked by S1. |
 
 ## 8a. Propagation (deferred — only after §7 passes)
 
 Nothing below happens until the gate clears:
 - **ADR** — revise ADR-0017 (still *Proposed*) or write **ADR-0021**: static-first-party +
-  GIS flip; folder-scoped domain-group authz. → `adr-quality-check`.
+  GIS flip; folder-scoped domain-group authz. → `adr-quality-check`. *(not yet done)*
 - **CONTEXT.md** — new Core Capability + UC (external board member reviews/syncs board
-  actions via verified link). → `use-case-quality-check`.
+  actions via verified link). → `use-case-quality-check`. *(not yet done)*
 - **docs/security-architecture.md** — Boundary 1 gains a verified-identity gate beyond
   `WEBAPP_SECRET`; add static origin as a trust boundary + a finding for the new surface.
+  *(not yet done)*
 - **OPERATIONS.md** — OAuth client / GIS setup, board-folder id config, Admin SDK
-  enablement, static-pages repo + publish pipeline (StaticHTMLonGas Steps 5–6).
-- **bd** — revise epic `GTaskSheet-79dw` description to the static+GIS target; file the
-  Milestone-1 board-listing + sync twin-tickets.
+  enablement, static-pages repo + publish pipeline (StaticHTMLonGas Steps 5–6). *(not yet
+  done)*
+- **bd** — ✅ done 2026-07-23: epic `gts-79dw` description revised to the
+  static+GIS/split-repo target; Milestone-1 twin-tickets filed under new child epic
+  `gts-79dw.4` — see table below.
+
+| Bead | Role |
+|------|------|
+| `gts-79dw.4` [EPIC] | Milestone 1 parent: verified board-listing + sync (read-only). |
+| `gts-79dw.4.1`/`.4.2` [IMP]/[TST] | Verify ID token + resolve folder-access tier (R1,R2,R3–R8). Test-first (specifiable, not user-visible). |
+| `gts-79dw.4.3` [IMP] | Board-listing endpoint, Open/All filter (R9–R13). Slice; depends on `.4.1`; implemented alongside `.4.5`/`.4.7`, no separate pre-implementation test. |
+| `gts-79dw.4.5` [IMP] | Sync entry point gated on write tier (R14,R15). Slice; depends on `.4.1`; implemented alongside `.4.3`/`.4.7`. |
+| `gts-79dw.4.7` [IMP] | Board-listing UI (list + filter + sync button). Slice; depends on `.4.3`/`.4.5`. |
+| `gts-79dw.4.8` [TST] | Single e2e hardening test for `.4.3`+`.4.5`+`.4.7` together, authored against the frozen slice-review AC. Blocks `.4.7`. |
+| ~~`.4.4`/`.4.6`~~ | Closed 2026-07-23 — superseded, consolidated into `.4.8` (implement-first ordering revision). |
 
 ---
 
 ## 9. Milestone 1 build (post-gate, for reference — not committed yet)
 
-Oracle-driven ordering (CLAUDE.md):
-- **Test-first** (specifiable): token verify (R2), folder-access→tier (R3–R7), filter
-  semantics (R10–R12), sync entry-point (R14–R15).
-- **Slice** (perceptual): static list UI + filter control + sync button — implement-first →
-  human review → freeze AC → harden `[TST]` against frozen contract.
+Oracle-driven ordering (CLAUDE.md), **revised 2026-07-23**:
+- **Test-first** (specifiable): token verify + folder-access→tier resolution (R2–R7) only
+  — `gts-79dw.4.1`/`.4.2`. This is a precise security contract with no user-visible
+  surface.
+- **Slice** (perceptual) — everything the user actually sees or interacts with: listing +
+  filter semantics (R9–R13), sync entry-point (R14–R15), and the list/filter/sync-button UI
+  are implemented together first (`gts-79dw.4.3`/`.4.5`/`.4.7`), reviewed as one
+  working experience, AC frozen at that review, then hardened by a single e2e test
+  (`gts-79dw.4.8`) covering all three entry points + UI regression. Rationale: filter
+  and sync-gating behavior are cheap to state as rules but the actual experience (is the
+  list readable, does the filter control feel right, does sync-button gating read as
+  expected) is what needs iterating on — pre-writing narrow endpoint tests before that
+  review would lock in assumptions the review is meant to challenge.
 - **Pipeline**: static-pages repo + build/publish chained into deploy; cross-origin
   regression test + a "Phase-1 GAS notice still works" guard.
 

@@ -4,7 +4,7 @@ Date: 2026-05-20
 Domain: testing
 
 ## Observation
-During green-phase implementation of GTaskSheet-709/oln/35b, the full test suite was run.
+During green-phase implementation of gts-709/oln/35b, the full test suite was run.
 `test_uc_scenarios.py` executed all 8 end-to-end GAS scenarios sequentially.
 uc1 failed with `action=''` (root cause: BARE_EMAIL_RE `\s*` eating the field separator).
 All remaining scenarios also failed — including uc3_sheet_wins and uc3_doc_wins which each
@@ -54,4 +54,4 @@ Branch B left open — `_parseAssigneeFromText` unit test for `rest` value is a 
 ## Resolution (2026-07-01)
 Branch A applied and confirmed: `pytest -x` is the documented default (CLAUDE.md Testing Strategy
 "Backstop rules" + implementation-gate Step 6 [IMP]-close full-suite gate). Branch B (focused unit
-test for `_parseAssigneeFromText` `rest` output) handed to GTaskSheet-a4sg. Moved to resolved/.
+test for `_parseAssigneeFromText` `rest` output) handed to gts-a4sg. Moved to resolved/.

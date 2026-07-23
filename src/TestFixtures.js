@@ -899,7 +899,7 @@ function setupTestFixtures(scenario, data) {
         break;
 
       case 'force_homepage_error':
-        // GTaskSheet-rvwu AC-5: trip buildHomepageCard's catch branch on the
+        // gts-rvwu AC-5: trip buildHomepageCard's catch branch on the
         // next homepage render. Caller must clear via 'clear_homepage_error_force'.
         PropertiesService.getScriptProperties().setProperty('_TEST_FORCE_HOMEPAGE_ERROR', 'true');
         break;
@@ -1212,13 +1212,13 @@ function setupTestFixtures(scenario, data) {
       }
 
       // -----------------------------------------------------------------------
-      // UC-C scenarios: insert / refresh the in-doc tracker table (GTaskSheet-mol-bgq)
+      // UC-C scenarios: insert / refresh the in-doc tracker table (gts-mol-bgq)
       //
       // All three scenarios accumulate on the shared clone doc without resetting.
       // Scenario prefixes: UCC-FIRST: / UCC-REFRESH: / UCC-VIEWONLY:
       //
       // RED PHASE: insertTrackerTable() is defined by the UC-C implementation
-      // (GTaskSheet-mol-vzk). Until that lands these scenarios will log an error
+      // (gts-mol-vzk). Until that lands these scenarios will log an error
       // tag and the Python tests will fail as expected.
       // -----------------------------------------------------------------------
 
@@ -1351,7 +1351,7 @@ function setupTestFixtures(scenario, data) {
       case 'uc_c_idempotent_refresh': {
         // Insert two chip-led FAs, sync+insert tracker, then call insertTrackerTable
         // again with NO intervening changes. The second call must be a no-op
-        // (tracker.skip — GTaskSheet-yo9q): same {id, action, status} rows as
+        // (tracker.skip — gts-yo9q): same {id, action, status} rows as
         // the first call.
         var ucCIRToken = ScriptApp.getOAuthToken();
         var ucCIREmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
@@ -1376,7 +1376,7 @@ function setupTestFixtures(scenario, data) {
       }
 
       // -----------------------------------------------------------------------
-      // Sync Status column scenarios (GTaskSheet-ly5 AC1–AC7)
+      // Sync Status column scenarios (gts-ly5 AC1–AC7)
       //
       // Each scenario accumulates on the shared clone doc without resetting.
       // Scenario prefixes: SS-DEL: / SS-NF: / SS-REC: / SS-EDIT: / SS-ARCH:
@@ -1708,7 +1708,7 @@ function setupTestFixtures(scenario, data) {
         // one paragraph (or list item) per cell. The only doc-seeding fixture
         // able to place AI: tokens inside table cells; append_doc_paragraph
         // (WebApp.js) only supports body-level plain paragraphs
-        // (GTaskSheet-dq6t AC-3/AC-4/AC-5).
+        // (gts-dq6t AC-3/AC-4/AC-5).
         var adtRows    = data.rows || [];
         var adtNumRows = adtRows.length;
         var adtNumCols = adtNumRows > 0 ? adtRows[0].length : 0;
@@ -1742,7 +1742,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'append_doc_list_item': {
         // Body-level bulleted list item containing an AI: token
-        // (GTaskSheet-dq6t AC-1/AC-2) — append_doc_paragraph only appends a
+        // (gts-dq6t AC-1/AC-2) — append_doc_paragraph only appends a
         // plain (non-list) paragraph.
         body.appendListItem(data.text || '');
         _TF_RESULT = { tag: 'fixture.append_doc_list_item', data: { ok: true } };
@@ -1752,7 +1752,7 @@ function setupTestFixtures(scenario, data) {
       case 'append_doc_soft_paragraph': {
         // Appends a body-level paragraph whose text contains embedded line
         // breaks (soft returns / Shift+Enter in DocumentApp).  Used to seed
-        // the soft-return multi-AI-token patterns (GTaskSheet-d7z8/mrd8).
+        // the soft-return multi-AI-token patterns (gts-d7z8/mrd8).
         // Note: DocumentApp represents soft returns as \r (not \n) in getText();
         // the scanner normalizes line endings before processing.
         body.appendParagraph(data.text || '');
@@ -1764,7 +1764,7 @@ function setupTestFixtures(scenario, data) {
         // Appends an AI: token into the LAST data row's first cell of the
         // existing Action Item Tracker table (must already exist via
         // 'insert_tracker_table') to verify the scanner's tracker-table
-        // exclusion (GTaskSheet-dq6t AC-6). Locates the table the same way
+        // exclusion (gts-dq6t AC-6). Locates the table the same way
         // _scanFloatingActions does: the first TABLE body-child after the
         // 'Action Item Summary' heading paragraph.
         var atctN           = body.getNumChildren();
@@ -1827,7 +1827,7 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'assert_team_access': {
-        // Calls the assertTeamAccess(teamId, ss) security gate (GTaskSheet-me6w.5)
+        // Calls the assertTeamAccess(teamId, ss) security gate (gts-me6w.5)
         // and reports the outcome instead of letting the thrown error propagate,
         // so the test harness can assert on TeamNotFound / TeamAccessDenied.
         var atfTeamId = data.teamId || '';
@@ -1957,7 +1957,7 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'get_team_scope': {
-        // Returns the document's Drive appProperty 'teamScope' (GTaskSheet-me6w.6).
+        // Returns the document's Drive appProperty 'teamScope' (gts-me6w.6).
         var gtsDocId = data.docId || testDocId;
         var gtsToken = ScriptApp.getOAuthToken();
         _TF_RESULT = {
@@ -1969,7 +1969,7 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'get_docdata_row': {
-        // Returns the DocData row for fileId (default testDocId), or null (GTaskSheet-me6w.6).
+        // Returns the DocData row for fileId (default testDocId), or null (gts-me6w.6).
         var gddFileId = data.fileId || testDocId;
         _TF_RESULT = {
           tag: 'fixture.get_docdata_row',
@@ -1980,7 +1980,7 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'get_team_data_rows': {
-        // Returns all TeamData rows ({teamId, folderId, contact}) (GTaskSheet-zc21).
+        // Returns all TeamData rows ({teamId, folderId, contact}) (gts-zc21).
         // Used to verify TeamData fixture setup never mutates pre-existing rows.
         _TF_RESULT = {
           tag: 'fixture.get_team_data_rows',
@@ -1992,7 +1992,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'debug_drive_ancestors': {
         // Diagnostic: returns the chain of ancestor folders ({id, name}) from
-        // fileId's immediate parent up to My Drive root (GTaskSheet-u2np).
+        // fileId's immediate parent up to My Drive root (gts-u2np).
         // Useful for explaining unexpected teamScope folder-walk matches.
         var ddaFileId = data.fileId || testSheetId;
         var ddaChain  = [];
@@ -2012,8 +2012,8 @@ function setupTestFixtures(scenario, data) {
 
       case 'set_docdata_row': {
         // Upserts a DocData row, overriding only the fields supplied
-        // (GTaskSheet-me6w.6: teamId/syncStatus, for the UpdateDoc-override
-        // scenarios S3/S7; GTaskSheet-cduk: actionCount/resolvedCount/docName,
+        // (gts-me6w.6: teamId/syncStatus, for the UpdateDoc-override
+        // scenarios S3/S7; gts-cduk: actionCount/resolvedCount/docName,
         // to corrupt a row so the syncAll() integrity pass has something to
         // reconcile). Acts on a row already created by a prior sync.
         var sdrFileId = data.fileId || testDocId;
@@ -2038,7 +2038,7 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'move_doc_to_folder': {
-        // Moves a doc into the given folder (GTaskSheet-me6w.6) — used by the
+        // Moves a doc into the given folder (gts-me6w.6) — used by the
         // sticky-after-move scenario (S8) and the folder-hierarchy fixture.
         var mdtfDocId    = data.docId || testDocId;
         var mdtfFolderId = data.folderId;
@@ -2055,7 +2055,7 @@ function setupTestFixtures(scenario, data) {
       case 'setup_team_scope_fixture': {
         // Idempotent (check-exists-or-create, no cleanup) folder hierarchy +
         // TeamData rows for the S1a/S1b/S1c/S8 folder-walk scenarios
-        // (GTaskSheet-me6w.6). Folder IDs are persisted in script properties so
+        // (gts-me6w.6). Folder IDs are persisted in script properties so
         // repeat runs reuse the same Drive folders.
         //
         //   testTeamA (parent, registered TestTeamA)
@@ -2065,7 +2065,7 @@ function setupTestFixtures(scenario, data) {
         //
         //   testTeamNoTeam (sibling of testTeamA, unregistered, no TeamData
         //   row) — used by S2/S6 for the folder-walk no-match path
-        //   (GTaskSheet-u2np).
+        //   (gts-u2np).
         var stsfProps = PropertiesService.getScriptProperties();
 
         var stsfRootIter = DriveApp.getFileById(testSheetId).getParents();
@@ -2095,7 +2095,7 @@ function setupTestFixtures(scenario, data) {
         stsfDeepId = stsfDeep.getId();
         stsfProps.setProperty('TEAMSCOPE_FOLDER_A_DEEP', stsfDeepId);
 
-        // No-team folder (GTaskSheet-u2np): the live TeamData row
+        // No-team folder (gts-u2np): the live TeamData row
         // 'TestGActionSheet' registers stsfRoot itself (testSheetId's parent
         // "GActionSheet" folder) — so any descendant of stsfRoot walks up to
         // a match. Create the no-team folder at My Drive root instead, which
@@ -2181,7 +2181,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'menu_sync_active_doc': {
         // menuSyncActiveDoc() -> syncDocument(docId) — Docs-menu wrapper
-        // call-site (GTaskSheet-ez2e), distinct from the already-covered
+        // call-site (gts-ez2e), distinct from the already-covered
         // syncDocument() core. doc.saveAndClose() first so syncDocument's own
         // open of testDocId doesn't lock against this dispatcher's handle.
         doc.saveAndClose();
@@ -2194,7 +2194,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'menu_insert_tracker_active_doc': {
         // menuInsertTrackerActiveDoc() -> insertTrackerTable(docId) — Docs-menu
-        // wrapper call-site (GTaskSheet-ez2e), distinct from the already-covered
+        // wrapper call-site (gts-ez2e), distinct from the already-covered
         // insertTrackerTable() core (see the 'insert_tracker_table' case above).
         doc.saveAndClose();
         docAlreadyClosed = true;
@@ -2268,7 +2268,7 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'team_data_slice': {
-        // Slice-BUILD for EPIC-A (GTaskSheet-5r4l.2, ADR-0013).
+        // Slice-BUILD for EPIC-A (gts-5r4l.2, ADR-0013).
         // Creates a sample DocData tab and performs the two durable-invariant
         // smoke checks in-process, returning results for Python assertion:
         //   (a) round-trip: rows written then read back are identical (non-date cols)
@@ -2420,7 +2420,7 @@ function setupAndSync(scenario) {
  *
  * @param {string} [docId]  Defaults to TEST_DOC_ID script property.
  * @param {?{teamId: string}} [expected]  Optional Team Scope expectation
- *   (GTaskSheet-me6w.6). When expected.teamId is set, additionally asserts:
+ *   (gts-me6w.6). When expected.teamId is set, additionally asserts:
  *     - the document's Drive appProperty 'teamScope' === expected.teamId
  *     - DocData[fileId].team_id === expected.teamId
  *     - DocData[fileId] exists with doc_name, last_sync_time, action_count,
@@ -2516,7 +2516,7 @@ function verifyConsistencyForTest(docId, expected) {
 
     _runConsistencyChecks(result, floatingActions, tracker, sheetRows, result.docTitle, archivedIds);
 
-    // DocData consistency (GTaskSheet-zc21) — runs whenever a DocData row exists
+    // DocData consistency (gts-zc21) — runs whenever a DocData row exists
     // for this doc, independent of `expected`. Verifies DocData.team_id matches
     // the document's actual teamScope appProperty, and that DocData.action_count
     // / resolved_count match BOTH the document's floating actions AND the
@@ -2560,7 +2560,7 @@ function verifyConsistencyForTest(docId, expected) {
       }
     }
 
-    // Team Scope consistency (GTaskSheet-me6w.6) — only when requested.
+    // Team Scope consistency (gts-me6w.6) — only when requested.
     if (expected && expected.teamId !== undefined && expected.teamId !== null) {
       if (vcfTeamScope !== expected.teamId) {
         result.issues.push(
@@ -2674,7 +2674,7 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
       // which is correct — skip the mismatch for this case.
       var docNameEmpty   = floating.assigneeName === '';
       var sheetDerived   = _isEmailDerivedName(floating.assigneeEmail, sheet.assigneeName);
-      // GTaskSheet-mpe1: a directory-resolved chip name (e.g. "Northlake
+      // gts-mpe1: a directory-resolved chip name (e.g. "Northlake
       // Minister") is propagated to the sheet on the next syncAll sweep, not
       // immediately (see SyncManager.js sync.sheet-to-doc.done note) — skip
       // this case too.

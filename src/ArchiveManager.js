@@ -3,7 +3,7 @@
  *
  * Moves eligible rows from the "Actions" sheet to the "Archive" sheet, and
  * evicts "DocData" rows once their docId has gone Doc Not Found long enough
- * that nothing is still converging on it (GTaskSheet-4tnr).
+ * that nothing is still converging on it (gts-4tnr).
  *
  * Eligibility (DESIGN.md §Archive Manager):
  *   - Actions row: Status == "Closed" (exact, case-sensitive match) and

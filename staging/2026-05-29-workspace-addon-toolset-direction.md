@@ -112,7 +112,7 @@ core / engine (host-agnostic, unsuffixed):
   stays deferred to the product-framing ADR.
 - **Migration note:** chips inserted under the old `GActionSheet/action` path will not
   fire `onLinkPreview` until re-flushed; a sync rewrites each chip to the new
-  `NUTS/action` URL. Acceptable pre-production (no live deployment yet — GTaskSheet-erc).
+  `NUTS/action` URL. Acceptable pre-production (no live deployment yet — gts-erc).
 
 ### Before building the HtmlService side-chat — open items
 - **Two UI delivery paths exist:** (A) HtmlService sidebar via `onOpen` (embedded,

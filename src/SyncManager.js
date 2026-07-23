@@ -232,7 +232,7 @@ function syncDocument(docId) {
       var token = ScriptApp.getOAuthToken();
       // One GET + one batchUpdate for every action item needing a flush in
       // this doc, instead of one GET + one batchUpdate per item
-      // (GTaskSheet-kkm7.3).
+      // (gts-kkm7.3).
       var flushItems = flushIds.map(function (gid) {
         var f = toFlush[gid];
         return { N: f.N, globalId: f.globalId, actionText: f.action, status: f.status,
@@ -286,7 +286,7 @@ function syncDocument(docId) {
  */
 function syncAll() {
   // opId correlates this invocation's sub-events (per-doc sync.scanned/
-  // sync.complete) in Axiom -- see GasLogger.startOp() (GTaskSheet-65g1).
+  // sync.complete) in Axiom -- see GasLogger.startOp() (gts-65g1).
   GasLogger.startOp();
   var _syncId = _getIdentity();
   GasLogger.log('sync.all.start.identity', { eu: _syncId.eu, au: _syncId.au });
@@ -349,7 +349,7 @@ function syncAll() {
 
     // Single batched Drive call for trash/modified/name metadata across every
     // tracked doc, replacing what was previously one DriveApp.getFileById()
-    // round trip per doc (GTaskSheet-kkm7.2). Falls back to the old per-doc
+    // round trip per doc (gts-kkm7.2). Falls back to the old per-doc
     // DriveApp path if the batch fetch itself fails, so a transient Drive/
     // network error degrades to the slower-but-correct behavior rather than
     // misclassifying every doc as not-found.
@@ -419,14 +419,14 @@ function syncAll() {
     }
 
     // One webapp call for every not-found doc found this sweep, instead of one
-    // per doc (GTaskSheet-kkm7.1).
+    // per doc (gts-kkm7.1).
     if (notFoundDocIds.length > 0) {
       _markDocNotFound(notFoundDocIds);
     }
 
     GasLogger.log('sync.all.complete', { docCount: docIds.length, synced: synced, skipped: skipped, notFound: notFoundDocIds.length });
 
-    // ── DocData integrity pass (GTaskSheet-6ipb) ──────────────────────────
+    // ── DocData integrity pass (gts-6ipb) ──────────────────────────
     // Docs skipped above by the lastModified<=lastSynced optimization never
     // refresh their DocData row even if Actions rows changed state since the
     // last sync (e.g. closed via sheet edit). Recompute action_count/
@@ -1045,7 +1045,7 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
 /**
  * POSTs mark_doc_not_found to the WebApp so it can stamp 'Doc Not Found' on
  * all Actions rows whose Document formula references any of docIds. One HTTP
- * round trip regardless of how many docs are being marked (GTaskSheet-kkm7.1)
+ * round trip regardless of how many docs are being marked (gts-kkm7.1)
  * — callers (syncDocument's own-doc not-found paths, syncAll's sweep) collect
  * every not-found docId for this invocation and call this once.
  *
@@ -1078,7 +1078,7 @@ function _markDocNotFound(docIds) {
  * Fetches trashed/modifiedTime/name metadata for every Google Doc visible to
  * the calling identity in a single (paginated) Drive REST call, replacing one
  * DriveApp.getFileById() call per tracked doc in syncAll()'s loop
- * (GTaskSheet-kkm7.2). Throws on any non-200 page so callers can fall back to
+ * (gts-kkm7.2). Throws on any non-200 page so callers can fall back to
  * the per-doc path rather than silently treating every doc as not-found.
  *
  * @return {Object<string, {trashed: boolean, lastModified: Date, name: string}>}
@@ -1124,7 +1124,7 @@ function _fetchDriveDocMetadata() {
 
 // ---------------------------------------------------------------------------
 // Team Scope: Drive appProperty read/write and folder-walk auto-assignment
-// (GTaskSheet-me6w.3 — see knowledge-base/staging/epic-b-team-property-sync.md)
+// (gts-me6w.3 — see knowledge-base/staging/epic-b-team-property-sync.md)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1259,7 +1259,7 @@ function _walkFolderForTeam(docId, teamDataRows) {
 
 // ---------------------------------------------------------------------------
 // Team Scope: security gate
-// (GTaskSheet-me6w.5 — see knowledge-base/staging/epic-b-team-property-sync.md)
+// (gts-me6w.5 — see knowledge-base/staging/epic-b-team-property-sync.md)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1298,11 +1298,11 @@ function assertTeamAccess(teamId, ss) {
 
 // ---------------------------------------------------------------------------
 // Team Scope: DocData sync (DocWins + UpdateDoc write-back)
-// (GTaskSheet-me6w.4 — see knowledge-base/staging/epic-b-team-property-sync.md)
+// (gts-me6w.4 — see knowledge-base/staging/epic-b-team-property-sync.md)
 // ---------------------------------------------------------------------------
 
 /**
- * DocData field contract (GTaskSheet-rename, was Doc Modified/Doc Updated):
+ * DocData field contract (gts-rename, was Doc Modified/Doc Updated):
  *
  * - lastSyncTime: timestamp of the last time a FULL document sync ran for
  *   this doc (_syncTeamScope, below). Set unconditionally on every full sync
@@ -1356,7 +1356,7 @@ function _readDocDataRow(ss, docId) {
 
 /**
  * Reads all DocData rows. Read-only. Used to build a fileId -> row lookup map
- * (e.g. for Import's per-action Team Id join, GTaskSheet-eore) without calling
+ * (e.g. for Import's per-action Team Id join, gts-eore) without calling
  * _readDocDataRow once per ActionSheet row.
  *
  * @param {Spreadsheet} ss
@@ -1413,7 +1413,7 @@ function _getOrUpsertDocDataRow(ss, fileId, docName, lastSyncTime, teamId, syncS
   var docUpdated = new Date();
 
   // Doc Name is a HYPERLINK formula, not a plain string, so clicking it opens
-  // the document (GTaskSheet-46qv) -- same pattern as the Actions sheet's
+  // the document (gts-46qv) -- same pattern as the Actions sheet's
   // document_formula column. fileId is the Drive doc ID already required by
   // every caller, so the edit URL needs no extra plumbing. Read side is
   // unaffected: getValues() returns a HYPERLINK formula's computed display
@@ -1483,7 +1483,7 @@ function _syncTeamScope(ss, docId, token, docName) {
   // so in the steady state (no override pending, already resolved) they're
   // provably identical. Trusting the mirror skips a Drive REST round trip on
   // every sync of an already-resolved doc -- the common case, ~2-4s saved per
-  // sync (GTaskSheet-j8cn perf pass). The narrow risk this introduces (a crashed
+  // sync (gts-j8cn perf pass). The narrow risk this introduces (a crashed
   // execution leaving Drive and DocData out of sync) is no longer self-healed
   // here on the next sync as it was before; verify_consistency(scope=DOC) is
   // the deliberate place to catch that drift instead, not paid on every sync.
@@ -1608,7 +1608,7 @@ function _updateSyncState(syncStateSheet, docId, syncedAt, docTitle, stateMap) {
 
 
 // ---------------------------------------------------------------------------
-// Shared chip styling — configurable via configFormat() (GTaskSheet-d99c)
+// Shared chip styling — configurable via configFormat() (gts-d99c)
 // ---------------------------------------------------------------------------
 
 // Style applied to the 'AI-N:' token when the Config sheet has no 'ai_token'
@@ -1627,7 +1627,7 @@ var _actionFormatConfigCache = null;
  * so this never serves stale data across separate requests). Falls back to
  * _DEFAULT_AI_TOKEN_STYLE for ai_token and null for action_text (meaning "no
  * override, inherit whatever the doc already has") when the Config sheet or
- * a given row doesn't exist yet — configFormat() is opt-in (GTaskSheet-d99c).
+ * a given row doesn't exist yet — configFormat() is opt-in (gts-d99c).
  *
  * @returns {{aiToken: Object, actionText: ?Object}}
  */
@@ -1690,7 +1690,7 @@ function _hexToRgbColor(hex) {
 /**
  * Returns the updateTextStyle request that applies the AI-N chip badge style
  * (font/size/color/bold/italic/underline, sourced from the Config sheet's
- * 'ai_token' row — GTaskSheet-d99c) over [startIndex, endIndex).
+ * 'ai_token' row — gts-d99c) over [startIndex, endIndex).
  *
  * Shared by _flushActionParagraph (sync flush), _applyActionFragment
  * (creation/import), and _insertTrackerIdLinks (tracker ID column) so the
@@ -1718,7 +1718,7 @@ function _chipBadgeStyleRequest(startIndex, endIndex) {
 /**
  * Returns the updateTextStyle request that applies the action-text style
  * (font/size/color/bold/italic/underline, sourced from the Config sheet's
- * 'action_text' row — GTaskSheet-d99c) over [startIndex, endIndex), or null
+ * 'action_text' row — gts-d99c) over [startIndex, endIndex), or null
  * when no 'action_text' row exists yet — callers must skip pushing a null
  * result, leaving the doc's default/inherited formatting untouched (opt-in,
  * no behavior change until configFormat() is run).
@@ -1744,7 +1744,7 @@ function _actionTextStyleRequest(startIndex, endIndex) {
 }
 
 // ---------------------------------------------------------------------------
-// configFormat — samples action-item style from a reference doc (GTaskSheet-d99c)
+// configFormat — samples action-item style from a reference doc (gts-d99c)
 // ---------------------------------------------------------------------------
 
 /**
@@ -2025,10 +2025,10 @@ function _buildFlushRequests(occurrence, item) {
   // actionText sourced from a live doc rescan (sidebar/preview-card status
   // taps) carries the document's raw soft-return characters, unlike actionText
   // sourced from the sheet (already collapsed by WebApp.js's
-  // _normalizeActionText at every sheet-write site, GTaskSheet-2eui/755o). A
+  // _normalizeActionText at every sheet-write site, gts-2eui/755o). A
   // bare \n here would create a hard paragraph break via insertText below; an
   // unrecognized \r/\v is silently dropped, concatenating lines with no
-  // separator (GTaskSheet-kkm7.5). Normalizing here, the one place every flush
+  // separator (gts-kkm7.5). Normalizing here, the one place every flush
   // call site funnels through, makes the sheet-side normalization redundant
   // but harmless (idempotent) rather than load-bearing for this path.
   var actionText = _normalizeActionText(item.actionText);
@@ -2061,7 +2061,7 @@ function _buildFlushRequests(occurrence, item) {
   }});
   requests.push(_chipBadgeStyleRequest(insertAt + 1, insertAt + 1 + tokenLen));
 
-  // Action-text style (GTaskSheet-d99c) — final layout left-to-right is
+  // Action-text style (gts-d99c) — final layout left-to-right is
   // [image][token][optional person chip][' '?actionText (status)]; only push
   // when a Config 'action_text' row exists, else leave today's inherited
   // default formatting untouched.
@@ -2076,7 +2076,7 @@ function _buildFlushRequests(occurrence, item) {
 /**
  * Rewrites the content of every item's AI-N: paragraph via ONE Docs REST GET
  * + ONE batchUpdate for the whole doc, regardless of how many action items
- * are being flushed (GTaskSheet-kkm7.3) — replaces what was previously one
+ * are being flushed (gts-kkm7.3) — replaces what was previously one
  * GET + one batchUpdate per item. Preserves each paragraph node (does not
  * delete its trailing \n). Caller must have called doc.saveAndClose() before
  * invoking this.

@@ -142,7 +142,7 @@ function _submitCreateAction(e) {
 }
 
 /**
- * Handles the Import tab's "Import selected" button (AC-2, GTaskSheet-fgh4).
+ * Handles the Import tab's "Import selected" button (AC-2, gts-fgh4).
  *
  * Collects the union of e.formInput values for every 'importSelection::'+docId
  * field (AC-1 renders one CHECK_BOX SelectionInput per source-doc group; each
@@ -153,7 +153,7 @@ function _submitCreateAction(e) {
  * _getNextActionN, then incremented locally per epic-d-import-contract-seams
  * #4). After doc inserts succeed, writes the new rows to the ActionSheet
  * (upsert_action_rows) and marks each source row Forwarded (AC-3,
- * GTaskSheet-st24, forward_action_rows).
+ * gts-st24, forward_action_rows).
  *
  * @param {GoogleAppsScript.Addons.EventObject} e
  * @returns {GoogleAppsScript.Card_Service.ActionResponse}
@@ -784,7 +784,7 @@ function _resolveCursorIndex(doc, cursor, token) {
 /**
  * Resolves the Docs REST API character index for the end of the document body
  * (just before the body's trailing newline) — the insertion point used by the
- * import_selected_for_test route (GTaskSheet-8qe5), which has no cursor.
+ * import_selected_for_test route (gts-8qe5), which has no cursor.
  *
  * @param {string} docId
  * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
@@ -812,7 +812,7 @@ function _resolveEndIndex(docId, token) {
  * each source row Forwarded (AC-3, forward_action_rows).
  *
  * Shared core extracted from _submitImport (epic-d-import-contract-seams #4,
- * GTaskSheet-8qe5) — reused by the production CardService handler (cursor-
+ * gts-8qe5) — reused by the production CardService handler (cursor-
  * resolved index) and the import_selected_for_test route (end-of-body index,
  * explicit globalIds selection instead of CardService form-collected
  * checkboxes).
@@ -968,7 +968,7 @@ function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
   });
   requests.push(_chipBadgeStyleRequest(fragIndex + 1, fragIndex + 1 + tokenLen));
 
-  // Action-text style (GTaskSheet-d99c) — same Config-sourced style and range
+  // Action-text style (gts-d99c) — same Config-sourced style and range
   // math as SyncManager.js's _buildFlushRequests; null when no 'action_text'
   // Config row exists yet, leaving today's inherited default formatting.
   var trailingTextOnly  = (validEmail ? ' ' : '') + actionText + ' (' + status + ')';

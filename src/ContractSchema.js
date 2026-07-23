@@ -44,7 +44,7 @@ var CONTRACT_SCHEMA = Object.freeze({
   // configFormat() (MenuHandler.js -> SyncManager.js) writes one row per
   // Key ('ai_token' | 'action_text') sampled from a reference document's
   // first floating action; _getActionFormatConfig() reads it back to style
-  // every subsequent doc write (GTaskSheet-d99c). Value is a JSON-encoded
+  // every subsequent doc write (gts-d99c). Value is a JSON-encoded
   // {fontFamily, fontSize, color, bold, italic, underline} object rather than
   // one column per field, so adding a new style property never requires a
   // schema/column change.
@@ -120,15 +120,15 @@ var CONTRACT_SCHEMA = Object.freeze({
     // Routes that run in the WebApp but exist to support the ATDD harness — they
     // operate on production data/behaviour yet have no production caller. Kept out
     // of routeNames so production route enumeration stays clean. Gated to the test
-    // token. Pre-code contract for GTaskSheet-5vwu.2; implemented by .9.
+    // token. Pre-code contract for gts-5vwu.2; implemented by .9.
     testRouteNames: Object.freeze([
       'edit_action_row',          // the §16.9 `edit_sheet` act
       'find_sheet_actions',       // the §16.9 `find_sheet_actions` read query
       'verify_chip_integrity',    // post-sync doc chip assertion (6ov.8)
-      'import_selected_for_test', // GTaskSheet-8qe5: interactive-test-entry-point for
+      'import_selected_for_test', // gts-8qe5: interactive-test-entry-point for
                                    // AC-2/AC-3 (Import tab CHECK_BOX selection cannot be
-                                   // driven via Playwright — EPIC GTaskSheet-pw5x)
-      'forward_action_rows_test'  // GTaskSheet-apcu: drives _handleForwardActionRows'
+                                   // driven via Playwright — EPIC gts-pw5x)
+      'forward_action_rows_test'  // gts-apcu: drives _handleForwardActionRows'
                                    // core loop directly with an explicit forwards[]
                                    // payload, bypassing _listImportableActionsData's
                                    // resolved/Forwarded filter — the only way to reach
@@ -197,7 +197,7 @@ var CONTRACT_SCHEMA = Object.freeze({
         completionSignal: 'synchronous response; rows scoped to docId'
       }),
 
-      // list_importable_actions — Import tab AC-1 (GTaskSheet-eore). Read-only;
+      // list_importable_actions — Import tab AC-1 (gts-eore). Read-only;
       // returns OPEN actions from OTHER documents in the current doc's team
       // scope (DocData join on docId -> Team Id), gated by assertTeamAccess.
       // Access failure or unknown team -> { ok:true, teamId, rows:[] }, never
@@ -211,7 +211,7 @@ var CONTRACT_SCHEMA = Object.freeze({
         completionSignal: "synchronous response; rows scoped to current doc's team, excluding current doc"
       }),
 
-      // forward_action_rows — Import tab AC-3 (GTaskSheet-st24). Marks each
+      // forward_action_rows — Import tab AC-3 (gts-st24). Marks each
       // imported SOURCE action as 'Forwarded' (already counted as resolved
       // via isDelegated's 'forwarded' word), appends a
       // ' [Forward:<targetDocName> AI-<n>]' suffix to its Action text, and
@@ -224,8 +224,8 @@ var CONTRACT_SCHEMA = Object.freeze({
         completionSignal: "synchronous response; source rows stamped Status='Forwarded' + Sync Status='Dirty'"
       }),
 
-      // import_selected_for_test — GTaskSheet-8qe5 interactive-test-entry-point
-      // (EPIC GTaskSheet-pw5x). Drives the same core logic as _submitImport's
+      // import_selected_for_test — gts-8qe5 interactive-test-entry-point
+      // (EPIC gts-pw5x). Drives the same core logic as _submitImport's
       // AC-2/AC-3 loop (_importSelectedRows: insert chip fragment, upsert
       // ActionSheet rows, forward source rows) with an explicit globalIds
       // selection instead of CardService form-collected checkboxes. Inserts at
@@ -237,7 +237,7 @@ var CONTRACT_SCHEMA = Object.freeze({
         completionSignal: "synchronous response; same as _submitImport's IMPORT_SELECTED.done"
       }),
 
-      // forward_action_rows_test — GTaskSheet-apcu test-only route. Same
+      // forward_action_rows_test — gts-apcu test-only route. Same
       // forwards[]/targetDocName shape and seen[]/isResolved guard as the
       // production forward_action_rows, testToken-gated instead of
       // secret-gated so a test can pass an explicit duplicate/already-

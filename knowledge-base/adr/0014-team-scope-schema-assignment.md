@@ -4,7 +4,7 @@ Status: Accepted
 Date: 2026-06-05
 Accepted: 2026-06-08
 
-> Accepted at the EPIC-A freeze gate (`GTaskSheet-5r4l.3`). Schema slice validated the
+> Accepted at the EPIC-A freeze gate (`gts-5r4l.3`). Schema slice validated the
 > column set, round-trip invariant, and single resolved-count authority. Working contract
 > `knowledge-base/staging/epic-a-schema-adoption.md` retired on acceptance.
 
@@ -69,6 +69,6 @@ override:
 - DocWins + `UpdateDoc` is a two-way precedence rule — the one place reconciliation bugs can hide;
   flagged for `model:opus` at harden.
 
-**Open question (resolved at Accept):** does the schema slice (`GTaskSheet-5r4l.2`) confirm the
+**Open question (resolved at Accept):** does the schema slice (`gts-5r4l.2`) confirm the
 column set and the resolved-count single-authority round-trip before this ADR is Accepted? Pending
 the freeze gate per ADR-0013.

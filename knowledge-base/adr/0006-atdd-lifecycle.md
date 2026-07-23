@@ -30,7 +30,7 @@ This supersedes the reactive green-phase creation model in ADR-0003. The label c
 Before either track starts coding, both owners document in the issue (or a shared note): (a) the GAS entry-point function signature, (b) the exact log tag GAS emits on completion, (c) the output schema the Python test will assert against (XLSX column names and order, or DOCX XML structure). No coding begins until the contract is written.
 
 **4. Named clone fixture isolation.**
-Each test run clones the master template Google Drive file rather than mutating a shared static fixture. Clone naming format: `{project}-Test-{scenario-slug}-{YYYYMMDD}-{4-char-hex}` (e.g., `GActionSheet-Test-UC-B-doc-wins-20260525-c12e`). The clone ID is passed to GAS as a parameter. Clones are destroyed at teardown. Implementation tracked in GTaskSheet-cby.
+Each test run clones the master template Google Drive file rather than mutating a shared static fixture. Clone naming format: `{project}-Test-{scenario-slug}-{YYYYMMDD}-{4-char-hex}` (e.g., `GActionSheet-Test-UC-B-doc-wins-20260525-c12e`). The clone ID is passed to GAS as a parameter. Clones are destroyed at teardown. Implementation tracked in gts-cby.
 
 ## Consequences
 

@@ -416,7 +416,7 @@ function doPost(e) {
 
   // This execution's own op id, carrying the addon caller's op id (if any) as
   // parentOp on every entry made while handling this request -- the HTTP-
-  // boundary leg of GTaskSheet-65g1's correlation (GTaskSheet-j8cn). Never
+  // boundary leg of gts-65g1's correlation (gts-j8cn). Never
   // adopts payload.opId as this execution's own op (see GasLogger.startOp doc).
   GasLogger.startOp(payload.opId);
 
@@ -441,7 +441,7 @@ function doPost(e) {
     return _jsonResponse({ probe: 'ok', version: BUILD_INFO.version }, 200);
   }
 
-  // [SPIKE] GTaskSheet-79dw.2 — gated on SPIKE_ENABLED, bypasses the secret gate
+  // [SPIKE] gts-79dw.2 — gated on SPIKE_ENABLED, bypasses the secret gate
   // intentionally (mirrors the probe route above). See src/SPIKE.js.
   if (payload.action === 'spike_check_access' && SPIKE_ENABLED) {
     return _handleSpikeCheckAccess(payload);
@@ -626,7 +626,7 @@ function _handleSetAxiomConfig(payload) {
  * Logs a 'test.axiom_probe' entry carrying a caller-supplied sentinel id, then
  * flushes immediately. Exercises the real WebApp -> GAS -> GasLogger.flush() ->
  * UrlFetchApp -> Axiom path -- not a Python-direct-to-Axiom shortcut, which
- * would understate real latency by skipping the GAS/WebApp hop (GTaskSheet-ishz.5).
+ * would understate real latency by skipping the GAS/WebApp hop (gts-ishz.5).
  *
  * The caller measures latency by polling Axiom for data.sentinel == sentinel
  * after this responds; this route does not itself wait on Axiom.
@@ -986,7 +986,7 @@ function _handleSyncActionRows(payload) {
     }
 
     // Refresh DocData.action_count / resolved_count from the just-reconciled
-    // Actions sheet (GTaskSheet-zc21) — counts exclude rows orphaned from this
+    // Actions sheet (gts-zc21) — counts exclude rows orphaned from this
     // doc (Deleted/Doc Not Found) so they track the document's live floating
     // actions, preserving doc_name/last_sync_time/team_id/sync_status.
     if (docId) {
@@ -1023,7 +1023,7 @@ function _handleSyncActionRows(payload) {
 /**
  * Returns ActionSheet rows for a single document without mutating any data.
  * Also checks DocData.teamId against the live Drive teamScope appProperty —
- * the one place that pays for ground truth, now that _syncTeamScope (GTaskSheet-
+ * the one place that pays for ground truth, now that _syncTeamScope (gts-
  * j8cn) trusts the DocData mirror on every sync instead of re-reading Drive.
  * A mismatch means a prior sync's Drive write and DocData write fell out of
  * step (e.g. a crashed execution between the two) — surfaced as a violation
@@ -1207,7 +1207,7 @@ function _loadRowsForDocUrl(actionsSheet, docUrl) {
 /**
  * Marks all Actions rows whose Document formula references any of docIds as
  * 'Doc Not Found' in the Sync Status column. One sheet read + one batched
- * write regardless of how many docIds are passed (GTaskSheet-kkm7.1) — a
+ * write regardless of how many docIds are passed (gts-kkm7.1) — a
  * syncAll() sweep that finds N missing docs sends them all in a single call
  * instead of N separate ones, each of which used to re-read the whole Actions
  * sheet and write matched rows one cell at a time.
@@ -1255,7 +1255,7 @@ function _handleMarkDocNotFound(payload) {
   WriteGuard.wrapPersistent(function () {
     // Stamp the same detection-time timestamp on every row across every docId
     // in this batch so they age out of ArchiveManager's 24h Doc Not Found
-    // threshold together, not independently (GTaskSheet-4tnr) — a doc going
+    // threshold together, not independently (gts-4tnr) — a doc going
     // missing is a per-doc event, not a per-row one. Only stamp on the actual
     // transition into Doc Not Found: syncAll() already keeps a permanently-
     // missing docId out of this path on later sweeps (its own
@@ -1278,7 +1278,7 @@ function _handleMarkDocNotFound(payload) {
       actionsSheet.getRangeList(modifiedA1s).setValue(now);
     }
 
-    // Mirror the Doc Not Found status to DocData (GTaskSheet-zc21) for every
+    // Mirror the Doc Not Found status to DocData (gts-zc21) for every
     // affected docId, preserving any existing Team Id / counts so the row
     // stays a consistent record of the document even after it becomes
     // unreachable. Still one upsert per docId (a sheet op, not a network
@@ -1385,7 +1385,7 @@ function _handlePatchActionStatus(payload) {
 
 // ---------------------------------------------------------------------------
 // list_importable_actions handler  (production route, WEBAPP_SECRET-gated,
-// GTaskSheet-eore — EPIC-D AC-1 import list)
+// gts-eore — EPIC-D AC-1 import list)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1397,7 +1397,7 @@ function _handlePatchActionStatus(payload) {
  * the security gate (TeamNotFound:/TeamAccessDenied: -> zero rows, never a
  * leak); isResolved(status) for the open-actions filter.
  *
- * Excludes rows whose source is gone (GTaskSheet-wdh0): an ActionSheet row
+ * Excludes rows whose source is gone (gts-wdh0): an ActionSheet row
  * with sync_status 'Deleted' (action removed from its doc) or 'Doc Not
  * Found', or whose source doc's DocData row has sync_status 'Deleted'/'Doc
  * Not Found' (doc trashed/inaccessible).
@@ -1418,7 +1418,7 @@ function _handleListImportableActions(payload) {
 }
 
 /**
- * Core row-building for list_importable_actions (GTaskSheet-8qe5) — extracted
+ * Core row-building for list_importable_actions (gts-8qe5) — extracted
  * so the import_selected_for_test route can re-derive the same team-scoped
  * importable rows without going through a second HTTP round trip / response
  * wrapper. No behaviour change versus the inlined version.
@@ -1499,15 +1499,15 @@ function _listImportableActionsData(docId) {
 }
 
 // ---------------------------------------------------------------------------
-// import_selected_for_test handler  (testToken-gated, GTaskSheet-8qe5 —
-// interactive-test-entry-point, EPIC GTaskSheet-pw5x)
+// import_selected_for_test handler  (testToken-gated, gts-8qe5 —
+// interactive-test-entry-point, EPIC gts-pw5x)
 // ---------------------------------------------------------------------------
 
 /**
  * Drives _importSelectedRows (the same AC-2/AC-3 core as _submitImport) with
  * an explicit globalIds selection, inserting new floating actions at the end
  * of testDocId's body instead of at a CardService cursor. Unblocks
- * GTaskSheet-4gsx: the Import tab's CHECK_BOX SelectionInput cannot be driven
+ * gts-4gsx: the Import tab's CHECK_BOX SelectionInput cannot be driven
  * via Playwright (clicking the widget toggles the underlying <input>'s
  * checked state, but the add-on host iframe's form-state bridge to
  * e.formInputs does not pick it up).
@@ -1559,7 +1559,7 @@ function _handleImportSelectedForTest(payload) {
 
 // ---------------------------------------------------------------------------
 // forward_action_rows handler  (production route, WEBAPP_SECRET-gated,
-// GTaskSheet-st24 — EPIC-D AC-3 forward source actions)
+// gts-st24 — EPIC-D AC-3 forward source actions)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1572,14 +1572,14 @@ function _handleImportSelectedForTest(payload) {
  * to the Action text (newAiToken parsed from newGlobalId); sync_status =
  * 'Dirty' so the source document reflects 'Forwarded' on the next
  * sync_action_rows. The Dirty stamp is written in the same WriteGuard batch
- * as the other field writes (GTaskSheet-wdh0) rather than via a separate
+ * as the other field writes (gts-wdh0) rather than via a separate
  * post-loop _remarkRowDirty pass, so an error between the two passes can't
  * leave a forwarded row un-flagged.
  *
  * Rows already resolved (e.g. status already 'Forwarded' — a duplicate
  * forward from a stale Import-tab selection or a repeated sourceGlobalId in
  * the same payload) are skipped and omitted from the response's `forwarded`
- * list (GTaskSheet-wdh0) — re-forwarding would append a second
+ * list (gts-wdh0) — re-forwarding would append a second
  * '[Forward:...]' suffix to the action text.
  *
  * Payload shape (ContractSchema.js messages.forward_action_rows):
@@ -1839,7 +1839,7 @@ function _handlePatchActionStatusAtdd(payload) {
 /**
  * ATDD-path forward_action_rows_test: same seen[]/isResolved(entry.status)
  * guard loop as the production _handleForwardActionRows, testToken-gated
- * instead of secret-gated (GTaskSheet-apcu, UC-E AC4). Lets a test pass an
+ * instead of secret-gated (gts-apcu, UC-E AC4). Lets a test pass an
  * explicit forwards[] entry whose sourceGlobalId is already Forwarded/
  * resolved — a state the production import flow's own
  * _listImportableActionsData filter would never let through, so the guard

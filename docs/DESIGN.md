@@ -271,7 +271,7 @@ Grouped by execution context (see §Runtime Architecture).
 |-----------|---------------|
 | onActionSheetEdit | Installable `onEdit`; on a user edit to cols 3–6 it stamps `Date Modified` (col 9) and `Sync Status = 'Dirty'` (col 10), then flushes the row to the doc and re-syncs. Returns immediately if `WriteGuard.isActive()` (a programmatic write is in progress) |
 | Sweep (`syncAll`) | Time-based (30 min); enumerates unique doc IDs from the column-7 hyperlink formulas and calls the **same** `syncDocument` the sidebar uses — no separate reconcile code |
-| Archive Manager | Moves rows with `Status = Closed` and `Date Modified > 30 days`, or `Sync Status = Doc Not Found` and `Date Modified > 24 hours`, to the Archive sheet without altering timestamps; bottom-to-top deletion; writes wrapped by `WriteGuard` (GTaskSheet-0f0s) |
+| Archive Manager | Moves rows with `Status = Closed` and `Date Modified > 30 days`, or `Sync Status = Doc Not Found` and `Date Modified > 24 hours`, to the Archive sheet without altering timestamps; bottom-to-top deletion; writes wrapped by `WriteGuard` (gts-0f0s) |
 | Write Guard | In-process flag (`WriteGuard._active`) set around every programmatic sheet write and read by `onActionSheetEdit` to skip re-stamping. The cross-execution variant is disabled — see §Programmatic Write Suppression |
 
 ---
@@ -487,10 +487,10 @@ proposal. It has been moved out of this as-built design to `knowledge-base/ROADM
 §"Future design: per-document tracker-sheet resolution". The related multi-tenant chip URL
 (`…/action/{sheetId}/{globalId}`) is tracked there too.
 
-**Homepage tab-navigation model** (implemented, `GTaskSheet-0r0s`): the homepage card has a
+**Homepage tab-navigation model** (implemented, `gts-0r0s`): the homepage card has a
 DocStatus/Import/Notify tab bar — see §Building Block View → "Tab navigation" above. Decision
 recorded in `knowledge-base/adr/0015-cardservice-tab-navigation-model.md`. The open seam for a
-future Settings tab (Phase 2, `GTaskSheet-5fha`) is a `_TABS` registry entry plus a body builder —
+future Settings tab (Phase 2, `gts-5fha`) is a `_TABS` registry entry plus a body builder —
 no navigation restructuring required.
 
 ---
@@ -648,7 +648,7 @@ Focused tests isolate root causes that would otherwise cascade through the slow 
 
 ## ATDD Journey Pre-Code Contract
 
-_Durable design record for the §16.10 canonical journey (GTaskSheet-5vwu). Authoritative shapes live in `src/ContractSchema.js` and `src/AtddContracts.js`._
+_Durable design record for the §16.10 canonical journey (gts-5vwu). Authoritative shapes live in `src/ContractSchema.js` and `src/AtddContracts.js`._
 
 ### Three-tier route ownership
 

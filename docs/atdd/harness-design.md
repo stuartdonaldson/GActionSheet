@@ -20,7 +20,7 @@ repeated.
 
 ## 1. Scope
 
-- **Scenario-author model this harness implements:** the Act/Expect/Checkpoint vocabulary, `docs/atdd/archive/atdd-lifecycle.md` §16.1–§16.10 (canonicalized in `tests/test_journey.py`, bead GTaskSheet-5vwu.13).
+- **Scenario-author model this harness implements:** the Act/Expect/Checkpoint vocabulary, `docs/atdd/archive/atdd-lifecycle.md` §16.1–§16.10 (canonicalized in `tests/test_journey.py`, bead gts-5vwu.13).
 - **What this spec produces:** module layout (§2), typed signatures for every support-function the author calls (§4–§7), and the engine drain algorithm (§8).
 - **What this spec does not contain:** how a journey reads (the author model, §16 / `test_journey.py`), and any universal principle (referenced by ID only).
 
@@ -28,7 +28,7 @@ repeated.
 
 | Module | Responsibility | Realizes | Build unit |
 |--------|----------------|----------|------------|
-| `scn/ai.py` | The `ai` domain-noun object: action fields, `as_text()` self-rendering. | `T15` | GTaskSheet-5vwu (built) |
+| `scn/ai.py` | The `ai` domain-noun object: action fields, `as_text()` self-rendering. | `T15` | gts-5vwu (built) |
 | `scn/contacts.py` | Static `TEST_CONTACTS` directory stand-in; `expected_name(email)` derivation. | — | built |
 | `scn/engine.py` | `CheckpointEngine` — expectation queue + checkpoint drain; `Surface`/`CheckpointKind`/`Severity` enums; `Expectation` dataclass. | `T11`, `T13`, `T15` | built |
 | `scn/surfaces.py` | Per-surface readers: `DocReader`, `SheetReader`, `TrackerReader`. | `T5`, `T19` | built |
@@ -142,7 +142,7 @@ Traced through `tests/test_journey.py` Act 1–2 (testing-guide §6 journey tabl
 | # | Observation | Route to |
 |---|-------------|----------|
 | 1 | `doc_id`/`doc_name` are derived fields resolved from the Document-column formula (col 7), not stored columns — `scn/contract.DERIVED_FIELDS = frozenset(["doc_id", "doc_name"])`; any contract consumer treating them as plain stored fields will read stale/absent values. | `src/ContractSchema.js` (already modeled — flagging for any future contract consumer that assumes all `SHEET_ACTION_FIELDS` are stored columns). |
-| 2 | `test_sync_all`'s `[nv6g]` archive assertion assumed a 24h Doc-Not-Found eviction threshold; `ArchiveManager.js` actually uses a flat 30-day threshold for everything — found during Batch 3 execution (2026-06-18), not yet resolved. | `GTaskSheet-0f0s` (product decision pending). |
+| 2 | `test_sync_all`'s `[nv6g]` archive assertion assumed a 24h Doc-Not-Found eviction threshold; `ArchiveManager.js` actually uses a flat 30-day threshold for everything — found during Batch 3 execution (2026-06-18), not yet resolved. | `gts-0f0s` (product decision pending). |
 
 ---
-_Filled 2026-06-18 (GTaskSheet-ruoa) from `docs/atdd/archive/atdd-lifecycle.md` §16.8–§16.10 and the as-built `scn/` package._
+_Filled 2026-06-18 (gts-ruoa) from `docs/atdd/archive/atdd-lifecycle.md` §16.8–§16.10 and the as-built `scn/` package._

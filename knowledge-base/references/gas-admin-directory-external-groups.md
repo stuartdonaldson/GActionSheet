@@ -3,7 +3,7 @@
 Reusable reference: resolving whether an arbitrary email — including one **external**
 to the Workspace domain — has Drive access to a folder/file **via a domain-managed
 Google Group**, not just direct sharing. Captured during Spike S2
-(`GTaskSheet-79dw.2`, `docs/verified-board-portal-plan.md` §6) against a real Shared
+(`gts-79dw.2`, `docs/verified-board-portal-plan.md` §6) against a real Shared
 Drive folder, 2026-07-23.
 
 **Candidate for elevation to `GAS-Core/best-practices/`** once a second project needs

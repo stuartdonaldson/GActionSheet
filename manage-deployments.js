@@ -263,7 +263,7 @@ async function registerTestToken(deploymentId) {
  * Pushes the Axiom ingest config (axiomToken/axiomDataset from local.settings.json)
  * to the GAS WebApp via set_axiom_config — protected by WEBAPP_SECRET, same pattern
  * as registerTestToken() — so GasLogger.flush() can POST server-side events there
- * (docs/atdd/journey-logging-design.md §4.3, GTaskSheet-ishz.1).
+ * (docs/atdd/journey-logging-design.md §4.3, gts-ishz.1).
  *
  * No-op (warns only) if axiomToken/axiomDataset aren't set in local.settings.json --
  * Axiom is optional, not required for a deploy to succeed.

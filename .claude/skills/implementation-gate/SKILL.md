@@ -69,7 +69,7 @@ Each step enforces a named principle and adds the gate-specific fail condition t
    Then declare the current phase (red / green / refactor, or slice / hardening) and comply with its read restriction. The internal unit loop within Green is implementation-track TDD (I8).
 
    **Ordering is negotiable; coverage-before-merge is not** — whichever path, the durable invariants and every state-modifying entry point (T17) are tested before merge. When implement-first (Slice) is chosen, three guardrails keep that invariant honest: (1) harden the durable invariant, not the volatile surface still under review (T23 durable-invariant rule); (2) a blocking hardening `[TST]` bead exists and the slice is not done until it is green (ADR-0013); (3) the hardening assertion is proven to fail against the frozen contract (Step 3 proof-of-effectiveness). *Diagnostic:* if the test is dramatically harder to write than the implementation, that asymmetry names the regime — immature harness (invest and amortize), perceptual oracle (use review, harden only the invariant), or a churning contract (slice first). | **Fail:** if no oracle/phase can be declared, the work is not ready — return to Step 3.
-   *(Lever under test — GTaskSheet-m65t; pending DevStandard T23 promotion.)*
+   *(Lever under test — gts-m65t; pending DevStandard T23 promotion.)*
 
 5. **Test-before-commit** (enforces I5, T5) → before staging, run the narrowest test covering the current AC; in red, confirm the test exists and is listed failing; in green/refactor, it must pass. | **Fail:** if no test exists, write one first — staging is blocked until a test runs; if the runner is unavailable, record the block on the issue before staging.
 
@@ -132,4 +132,4 @@ Hooks are OPTIONAL — use them only after repeated gate-bypass incidents; skip 
 **Prevented by:** Step 7 (I10) — done is "AC tests pass," not "no crash."
 
 ---
-_Document generated 2026-06-08; updated 2026-06-18 (GTaskSheet-mpi9: proof-of-effectiveness sub-step, test-infra compatibility check, full-suite close gate); updated 2026-07-01 (GTaskSheet-m65t: oracle & phase declaration — lever under test, pending DevStandard T23 promotion)._
+_Document generated 2026-06-08; updated 2026-06-18 (gts-mpi9: proof-of-effectiveness sub-step, test-infra compatibility check, full-suite close gate); updated 2026-07-01 (gts-m65t: oracle & phase declaration — lever under test, pending DevStandard T23 promotion)._

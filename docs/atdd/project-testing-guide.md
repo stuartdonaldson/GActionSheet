@@ -78,11 +78,11 @@ Realizes `T1`, `T15`, `T21`, `T22`. The canonical journey and its narrower/paral
 | `test_sync_all` (`syncAll` sweep, Scenario D) | Time-based sweep entry point as its own call-site; `DocData` integrity-pass reconciliation (counts, `doc_name`); archive eviction | P0 (reconciliation gap class, T22) | built |
 | `test_b7_write_routes` | Direct write-route coverage (`upsert_action_rows`, `edit_action_row`) including the no-op/Dirty-stamp boundary | P1 | built |
 | `test_import` | `forward_action_rows`/duplicate-forward guard (UC-E AC4), import-list/select flows | P0 (reconciliation — duplicate-forward guards against actual data duplication, T22) | built |
-| `test_floating_action_scanner` | Scanner detection across paragraph/table-cell/list placements; tracker-table exclusion | P1 | built (AC-7/AC-8 caret-in-table-cell split to `GTaskSheet-4hqn`) |
+| `test_floating_action_scanner` | Scanner detection across paragraph/table-cell/list placements; tracker-table exclusion | P1 | built (AC-7/AC-8 caret-in-table-cell split to `gts-4hqn`) |
 | `test_menu_entry_points` | Sheets/Docs menu wrapper entry points (`menuSync*`, `menuInsertTracker*`) as their own call-sites | P2 (entry-point-coverage technicality, T17) | built |
 | `test_sidebar`, `test_team_scope` | Sidebar header/team-view rendering, team-scoped read security gate (`assertTeamAccess`) | P1 | built |
 | `test_link_preview`, `test_chip_preview` | Editor add-on link-preview card status-change path (Scenario A, async chip-tap) | P1 | built |
-| `test_archive` | Archive sweep eviction thresholds | P2 | built (known gap: `[nv6g]` assumed a 24h Doc-Not-Found threshold that doesn't match the shipped flat 30-day threshold — `GTaskSheet-0f0s`) |
+| `test_archive` | Archive sweep eviction thresholds | P2 | built (known gap: `[nv6g]` assumed a 24h Doc-Not-Found threshold that doesn't match the shipped flat 30-day threshold — `gts-0f0s`) |
 
 Per-journey invariants (T18) are asserted at `INTEGRITY` via `scn.verify_consistency(scope=DOC)` — the single SERVER-class consistency check (§16.7 of the archived lifecycle doc):
 
@@ -100,11 +100,11 @@ Realizes `T17`. The authoritative, machine-readable list of all 32 state-modifyi
 | Workspace add-on card | `onSyncNow`, `onSetActionStatus`, `onDeleteAction`, `onInsertTrackerTable`, `importSelectedSubmit` | partial | `importSelectedSubmit` (CHECK_BOX SelectionInput not Playwright-drivable; `importSelectedForTest` is the interim surrogate route) |
 | Editor add-on card | `_submitCreateAction`, `_setStatusFromPreview` | yes | — |
 | Installable triggers | `syncAll`, `onActionSheetEdit`, `_processPendingSheetUpdates` | yes | — |
-| Sheets menu items | `menuSync`, `menuEnsureSheetStructure`, `menuInitializeTriggers`, `menuBootstrap`, `menuRunArchive` | partial | several Setup-submenu items, tracked under EPIC `GTaskSheet-rz4k.4` |
+| Sheets menu items | `menuSync`, `menuEnsureSheetStructure`, `menuInitializeTriggers`, `menuBootstrap`, `menuRunArchive` | partial | several Setup-submenu items, tracked under EPIC `gts-rz4k.4` |
 | HTTP routes (production) | `patch_action_status`, `edit_action_row`, `upsert_action_rows`, `sync_action_rows`, `mark_doc_not_found`, `delete_action_row`, `forward_action_rows`, `importList`, `menuSyncActiveDoc`, `menuInsertTrackerActiveDoc` | yes | — |
 | Test-support routes | `run_fixture`, `set_test_token`, `bootstrap`, `begin_journey_session`, `end_journey_session`, `setup_team_scope_fixture`, `importSelectedForTest` | n/a (harness-only) | — |
 
-10 of 32 entries have a real tagged scenario call-site; the remaining 22 are explicitly enumerated as **deferred** (not silently uncovered) in `scn/contract.ENTRY_POINT_DEFERRED`, each with a tracking bead, so `scripts/check_coverage.py`'s `ep.*` gap-diff is green by design rather than by omission. Converting deferred entries to real call-sites is tracked under EPIC `GTaskSheet-rz4k` (children `.1` triggers, `.2` routes, `.3` cards, `.4` menu, `.5` test-support).
+10 of 32 entries have a real tagged scenario call-site; the remaining 22 are explicitly enumerated as **deferred** (not silently uncovered) in `scn/contract.ENTRY_POINT_DEFERRED`, each with a tracking bead, so `scripts/check_coverage.py`'s `ep.*` gap-diff is green by design rather than by omission. Converting deferred entries to real call-sites is tracked under EPIC `gts-rz4k` (children `.1` triggers, `.2` routes, `.3` cards, `.4` menu, `.5` test-support).
 
 ## 8. AC-validation fidelity log
 
@@ -115,4 +115,4 @@ Realizes `T23`, `I11`. No feature in this project has used the Slice fidelity ti
 | _(none yet — see note above)_ | | | |
 
 ---
-_Filled 2026-06-18 (GTaskSheet-ruoa) from `docs/atdd/archive/atdd-lifecycle.md` §15–§16 and the `scn/` module map in `docs/atdd/ID-map.md`._
+_Filled 2026-06-18 (gts-ruoa) from `docs/atdd/archive/atdd-lifecycle.md` §15–§16 and the `scn/` module map in `docs/atdd/ID-map.md`._

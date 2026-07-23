@@ -3,7 +3,7 @@
 Status: Accepted
 Date: 2026-06-19
 Relates to: `src/GasLogger.js`, ADR-0019 (GasLogger tag-naming standard),
-GTaskSheet-9dss
+gts-9dss
 
 ## Context
 

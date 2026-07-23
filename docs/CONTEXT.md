@@ -234,7 +234,7 @@ Acceptance Criteria:
 - AC1: The Import tab lists only open actions from other same-team docs; actions already `Forwarded`, `Closed`, or otherwise resolved are excluded, as are rows whose source doc or row is `Deleted`/`Doc Not Found`.
 - AC2: After **Import selected**, each chosen action appears as a new floating action in the active doc and a new ActionSheet row, with a fresh sequential `AI-N`/`globalId`, the source's action text/assignee/status carried over, and `Assigned Date` equal to the source row's `Assigned Date` (not the import timestamp).
 - AC3: Each source row's `Status` becomes `Forwarded`, its `Action` text gains a `[Forward:<target doc name> AI-<new N>]` suffix, and it is marked dirty so the source doc's own floating action reflects `Forwarded` on its next Sync.
-- AC4: Re-running Import against an already-`Forwarded` source row is a no-op — no duplicate `[Forward:...]` suffix is appended and no second clone is created. (Guarded in code by `_handleForwardActionRows`; not yet reachable from a regression test — see `GTaskSheet-apcu`.)
+- AC4: Re-running Import against an already-`Forwarded` source row is a no-op — no duplicate `[Forward:...]` suffix is appended and no second clone is created. (Guarded in code by `_handleForwardActionRows`; not yet reachable from a regression test — see `gts-apcu`.)
 
 ---
 

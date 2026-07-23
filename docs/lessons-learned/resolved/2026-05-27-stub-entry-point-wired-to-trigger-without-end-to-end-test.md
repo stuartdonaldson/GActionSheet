@@ -6,7 +6,7 @@ Domain: testing
 ## Observation
 `syncAll()` in `SyncManager.js` was a stub (only logged; returned immediately) from the first commit
 (`feat(menu+stubs)`) through to 2026-05-27. It was wired to the "Action Sync → Sync" menu item and
-the 30-minute time-based trigger. When Sync Status was shipped (GTaskSheet-ly5, commit de00336),
+the 30-minute time-based trigger. When Sync Status was shipped (gts-ly5, commit de00336),
 `_markDocNotFound` was correctly implemented inside `syncDocument`, and `test_sync_status_doc_not_found`
 in `test_uc_c.py` verified that calling `syncDocument(fakeDocId)` stamped `'Doc Not Found'` on the
 ActionSheet row. The test passed. `syncAll()` remained a stub. User reported in production that a
@@ -82,7 +82,7 @@ remain in place — confirmed present in project CLAUDE.md and `.claude/skills/c
 v1.1. `merge-gate` v1.1 (resolved separately, 2026-06-02-scanner-change-did-not-audit-fixture-producers.md
 and 2026-06-02-test-failures-observed-but-not-elevated-to-blocker.md) extends the set with a
 merge-time test-infrastructure check and debt gate. Formal scoring/archive of this LL is tracked
-as item 3 of `GTaskSheet-mpi9` (open) — cross-referenced there. Archiving this file now per
+as item 3 of `gts-mpi9` (open) — cross-referenced there. Archiving this file now per
 that tracking; mpi9 remains the open issue for any further refinement.
 
 Verify: the lever set (Path A pre-code check + Path B retroactive CLAUDE.md rule + Path C

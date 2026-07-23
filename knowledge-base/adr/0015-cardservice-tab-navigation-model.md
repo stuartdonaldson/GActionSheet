@@ -4,13 +4,13 @@ Status: Accepted
 Date: 2026-06-11
 Relates to: ADR-0010 (add-on surface files by UI technology). Resolves the conflict between
 `knowledge-base/ROADMAP.md`'s "tabbed sidebar" (DocStatus/Import/Notify) and the
-`html-sidebar-card-pivot` decision (2026-05-27, `GTaskSheet-cw5`) that committed the project to a
+`html-sidebar-card-pivot` decision (2026-05-27, `gts-cw5`) that committed the project to a
 CardService-only UI.
 
 ## Context
 
 ROADMAP EPIC-D/E specify a **tabbed sidebar** with DocStatus, Import, and Notify tabs. That wording
-predates the `html-sidebar-card-pivot` decision (`GTaskSheet-cw5`), which removed HtmlService and
+predates the `html-sidebar-card-pivot` decision (`gts-cw5`), which removed HtmlService and
 committed the add-on to a **CardService-only** UI (ADR-0010). CardService has **no native tab
 widget**: a "tab" is simulated by swapping the rendered card. So "tabbed sidebar" must be realised
 as card navigation, not as an HtmlService tab control.
@@ -24,7 +24,7 @@ duplicate the DocStatus rendering — the exact maintenance hazard this design m
 also requires the model to stay extensible for a future Settings tab (Phase 2) without
 re-architecting.
 
-This ADR fixes the navigation model so the slice (`GTaskSheet-0r0s`) implements one agreed design;
+This ADR fixes the navigation model so the slice (`gts-0r0s`) implements one agreed design;
 it specifies no business logic for the Import/Notify tabs (those land in EPIC-D/E).
 
 ## Decision
@@ -72,7 +72,7 @@ existing DocStatus error-fallback card is retained.
   `updateCard(_buildTabbedHomepageCard(tab))`. Tab switching adds exactly one handler regardless of
   tab count — no per-tab handlers.
 - The Import and Notify tab bodies are `_buildImportTabSection()` / `_buildNotifyTabSection()`,
-  **placeholders** in the slice (`GTaskSheet-0r0s`); real content arrives in EPIC-D/E.
+  **placeholders** in the slice (`gts-0r0s`); real content arrives in EPIC-D/E.
 
 ### Lazy body building
 
@@ -100,7 +100,7 @@ Adding a tab is one registry entry plus one body builder.
 
 - Delegation keeps `buildHomepageCard()` — the universal production entry point — as the single,
   unchanged seam, so existing handlers and tests need no edits and the regression surface is the one
-  thing the EPIC-D-PRE gate already proves out (`GTaskSheet-gdll`).
+  thing the EPIC-D-PRE gate already proves out (`gts-gdll`).
 - Reusing the DocStatus sections verbatim removes any risk of two divergent DocStatus renderings,
   the most likely source of future drift in a card that every user sees.
 - A single parameterised `onShowTab` handler plus a registry keeps tab growth O(1) in handlers and
@@ -110,15 +110,15 @@ Adding a tab is one registry entry plus one body builder.
 
 ## Consequences
 
-- **Easier:** the slice (`GTaskSheet-0r0s`) implements one named helper and two placeholder body
+- **Easier:** the slice (`gts-0r0s`) implements one named helper and two placeholder body
   builders; Import/Notify content (EPIC-D/E) plugs in as a body builder without touching navigation;
   a future Settings tab is a registry entry.
 - **Harder / constrains:** CardService has no persistent tab state — each switch is a full
   `updateCard`, so tab bodies must be (re)buildable from event context alone; long-running per-tab
   state is disallowed. Tab bodies must not assume another tab's data was fetched (lazy build).
-- **Open seam (registered at gate `GTaskSheet-5fha`):** *Settings tab (Phase 2)* — the `_TABS`
+- **Open seam (registered at gate `gts-5fha`):** *Settings tab (Phase 2)* — the `_TABS`
   registry must absorb a `settings` entry with no navigation restructuring; the slice smoke
-  (`GTaskSheet-gdll`) carries a tab-set parameter so this is asserted, not assumed.
+  (`gts-gdll`) carries a tab-set parameter so this is asserted, not assumed.
 - This decision is recorded here; the homepage-card delegation is cross-referenced in
   `docs/DESIGN.md` (UI surface / Module Map). The slice smoke is re-run at the EPIC-D and EPIC-E
   sign-off gates to confirm no navigation drift.

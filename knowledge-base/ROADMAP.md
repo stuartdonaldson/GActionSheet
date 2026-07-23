@@ -58,12 +58,12 @@ completion log tag, output schema) is the only shared artifact between them.
 
 ### EPIC-A — Adopt TeamData/DocData schema and keep regression green — DELIVERED
 
-Closed as `GTaskSheet-5r4l`. TeamData/DocData schema, `File Id` column, and ADR-0014 are
+Closed as `gts-5r4l`. TeamData/DocData schema, `File Id` column, and ADR-0014 are
 as-built. See `docs/DESIGN.md` §Team Scope Schema (ADR-0014).
 
 ### EPIC-B — Add Team Scope document property and bidirectional sync to sheet — DELIVERED
 
-Closed as `GTaskSheet-me6w` (children `.1`-`.7`). `teamScope` document property,
+Closed as `gts-me6w` (children `.1`-`.7`). `teamScope` document property,
 folder-walk auto-assignment, DocWins sync, `assertTeamAccess` security gate, and
 `UpdateDoc` write-back are all as-built and covered by `tests/test_team_scope.py`
 (scenarios S0-S8). These primitives are the reuse foundation for EPIC-D/E below —
@@ -73,17 +73,17 @@ do not reimplement.
 
 The full EPIC-C acceptance scenario (DocData row set to `SyncStatus='UpdateDoc'` with a
 new Team Id → sync applies the change, clears `SyncStatus`, idempotent on re-sync) was
-implemented as part of `GTaskSheet-me6w.4` (DocWins + UpdateDoc write-back,
+implemented as part of `gts-me6w.4` (DocWins + UpdateDoc write-back,
 `src/SyncManager.js` `_syncTeamScope`) and is covered by `tests/test_team_scope.py`
 S3 (UpdateDoc override) and S4 (idempotency). No new `[IMP]`/`[TST]` twin is needed.
 
 The operator-facing runbook for this workflow is in `docs/OPERATIONS.md`
-§Team Reassignment Runbook (`GTaskSheet-fk98`). EPIC-C is fully delivered.
+§Team Reassignment Runbook (`gts-fk98`). EPIC-C is fully delivered.
 
-### EPIC-D-PRE — Tabbed-shell architecture slice + J-ACCESS-FILTER — `GTaskSheet-uz7h`
+### EPIC-D-PRE — Tabbed-shell architecture slice + J-ACCESS-FILTER — `gts-uz7h`
 
 EPIC-D/E's "tabbed sidebar" (below) was specified before the `html-sidebar-card-pivot`
-decision (2026-05-27, `GTaskSheet-cw5`) which committed the project to a CardService-only
+decision (2026-05-27, `gts-cw5`) which committed the project to a CardService-only
 UI (no HtmlService sidebar). This prerequisite epic resolves that conflict (navigation model:
 `knowledge-base/adr/0015-cardservice-tab-navigation-model.md`) and authors the
 shared `J-ACCESS-FILTER` journey, with a regression-proof-out gate before any EPIC-D/E
@@ -98,17 +98,17 @@ Depends on: EPIC-B (closed).
 
 Beads (all created):
 - `[INF] Design: CardService tab-navigation model for DocStatus/Import/Notify` —
-  `model:opus` — `GTaskSheet-fi0w`
+  `model:opus` — `gts-fi0w`
 - `[INF] Design: J-ACCESS-FILTER shared journey + two-account fixture matrix` —
-  `model:opus` — `GTaskSheet-z1fr`
+  `model:opus` — `gts-z1fr`
 - `[IMP] Slice: render placeholder Import/Notify tab cards via shared navigation shell` —
-  `model:sonnet` — `GTaskSheet-0r0s`
+  `model:sonnet` — `gts-0r0s`
 - `[TST] Slice smoke: tab navigation round-trip + DocStatus regression check` —
-  `model:sonnet` — `GTaskSheet-gdll` (re-run at EPIC-D and EPIC-E gates)
+  `model:sonnet` — `gts-gdll` (re-run at EPIC-D and EPIC-E gates)
 - `[GATE] Freeze EPIC-D-PRE slice — accept nav design, register open seams` —
-  `GTaskSheet-5fha`
+  `gts-5fha`
 
-### EPIC-D — Add Import tab and action forwarding workflow — `GTaskSheet-yb2w` — DELIVERED
+### EPIC-D — Add Import tab and action forwarding workflow — `gts-yb2w` — DELIVERED
 
 Closed 2026-06-15. Import is shipped: production routes `list_importable_actions` and
 `forward_action_rows` (`src/WebApp.js`), Import tab in the homepage card
@@ -120,7 +120,7 @@ historical decomposition record.
 Goal: add Import capability to pull open team-scoped actions into the current document and
 forward source actions safely.
 
-Review fidelity: **Slice** (ADR-0013). Depends on: EPIC-D-PRE gate (`GTaskSheet-5fha`).
+Review fidelity: **Slice** (ADR-0013). Depends on: EPIC-D-PRE gate (`gts-5fha`).
 
 Access rule: Import must only list and import actions whose source documents are readable
 by the current user (J-ACCESS-FILTER).
@@ -131,18 +131,18 @@ and the Token Manager / `_insertActionChip` AI-N insertion path in
 `src/EditorAddonCard.js`.
 
 Beads (all created):
-- `[IMP] Team-scoped Import list grouped by source document` — `model:sonnet` — `GTaskSheet-eore`
-- `[IMP] Import selected actions at cursor with new AI-N numbering` — `model:opus` — `GTaskSheet-fgh4`
-- `[IMP] Forward source actions (Status=Forwarded, suffix, dirty flag)` — `model:sonnet` — `GTaskSheet-st24`
-- `[TST] Bind Import assertions to J-ACCESS-FILTER (P1-P4)` — `model:sonnet` — `GTaskSheet-1dxz`
-- `[TST] Functional coverage: import flow, forwarded status, post-import sync` — `model:sonnet` — `GTaskSheet-4gsx`
-- `[FIX] Import edge cases (duplicate forwarding, numbering drift, dirty-flag miss)` — `model:sonnet` (escalate to `model:opus` for numbering-drift) — `GTaskSheet-wdh0`
-- `[GATE] Final sign-off for EPIC-D` (re-runs EPIC-D-PRE DocStatus regression smoke) — `GTaskSheet-fnvq`
+- `[IMP] Team-scoped Import list grouped by source document` — `model:sonnet` — `gts-eore`
+- `[IMP] Import selected actions at cursor with new AI-N numbering` — `model:opus` — `gts-fgh4`
+- `[IMP] Forward source actions (Status=Forwarded, suffix, dirty flag)` — `model:sonnet` — `gts-st24`
+- `[TST] Bind Import assertions to J-ACCESS-FILTER (P1-P4)` — `model:sonnet` — `gts-1dxz`
+- `[TST] Functional coverage: import flow, forwarded status, post-import sync` — `model:sonnet` — `gts-4gsx`
+- `[FIX] Import edge cases (duplicate forwarding, numbering drift, dirty-flag miss)` — `model:sonnet` (escalate to `model:opus` for numbering-drift) — `gts-wdh0`
+- `[GATE] Final sign-off for EPIC-D` (re-runs EPIC-D-PRE DocStatus regression smoke) — `gts-fnvq`
 
 Acceptance test scenario:
 - Given two open team-scoped actions selected in Import from documents readable by the current user, when Import is executed at the current paragraph, then both actions are inserted as new floating actions with new AI-N values, source rows are set to `Forwarded` with `[Forward:<DocName> AI-N]` suffixes, rows are marked dirty, and a post-import sync updates the document action table; actions from unreadable source documents are never listed.
 
-### EPIC-E — Add Notify tab and assignee reminder email flow — `GTaskSheet-gc43` — INDEFINITE BACKLOG
+### EPIC-E — Add Notify tab and assignee reminder email flow — `gts-gc43` — INDEFINITE BACKLOG
 
 **Status (2026-06-22): closed, not delivered.** Paused 2026-06-15 immediately after EPIC-D
 closed, never resumed, and closed out 2026-06-22 rather than left open/deferred so it stops
@@ -158,22 +158,22 @@ Review fidelity: **Slice** (ADR-0013). Depends on: EPIC-D (reuses its tabbed she
 J-ACCESS-FILTER bindings, not rebuilt).
 Open seam: email-template contract must be reusable for the Assignee Reminder funnel entry
 when it is promoted — resolved by the email-sending standard in **ADR-0016** (shared
-template/renderer/sender; `GTaskSheet-tv54`).
+template/renderer/sender; `gts-tv54`).
 
 Access rule: Notify must only aggregate and present actions from source documents readable
 by the current user.
 
 Beads (all closed 2026-06-22 as indefinite-backlog; kept here as reference for reactivation,
 not as a to-do list):
-- `[INF] Align email-template approach with Funnel "Assignee reminder" entry` — `GTaskSheet-tv54` (closed earlier, delivered)
-- `[IMP] Notify tab: assignee aggregation with unresolved counts` — `GTaskSheet-xiv8`
-- `[IMP] Send reminder emails (HtmlService template + GmailApp, XSS escaping)` — `GTaskSheet-f3v9`
-- `[IMP] Reuse team-scope security gate + access filter on Notify reads` — `GTaskSheet-ajns`
-- `[TST] Bind Notify assertions to J-ACCESS-FILTER (P1-P4)` — `GTaskSheet-ay5w`
-- `[TST] Cross-feature parity assertion (Import document set == Notify document set)` — `GTaskSheet-7fng`
-- `[TST] Template rendering and escaping checks for notification emails` — `GTaskSheet-twwo`
-- `[FIX] Notification count drift and send failures` — `GTaskSheet-1xpj`
-- `[GATE] Final sign-off for EPIC-E` (re-runs EPIC-D-PRE DocStatus regression smoke) — `GTaskSheet-s3ga`
+- `[INF] Align email-template approach with Funnel "Assignee reminder" entry` — `gts-tv54` (closed earlier, delivered)
+- `[IMP] Notify tab: assignee aggregation with unresolved counts` — `gts-xiv8`
+- `[IMP] Send reminder emails (HtmlService template + GmailApp, XSS escaping)` — `gts-f3v9`
+- `[IMP] Reuse team-scope security gate + access filter on Notify reads` — `gts-ajns`
+- `[TST] Bind Notify assertions to J-ACCESS-FILTER (P1-P4)` — `gts-ay5w`
+- `[TST] Cross-feature parity assertion (Import document set == Notify document set)` — `gts-7fng`
+- `[TST] Template rendering and escaping checks for notification emails` — `gts-twwo`
+- `[FIX] Notification count drift and send failures` — `gts-1xpj`
+- `[GATE] Final sign-off for EPIC-E` (re-runs EPIC-D-PRE DocStatus regression smoke) — `gts-s3ga`
 
 Acceptance test scenario (as originally scoped — re-validate against current J-ACCESS-FILTER
 and email-sending standards before reusing):
@@ -186,14 +186,14 @@ Access-control validation for Import/Notify requires at least two authenticated 
 - Primary account: has read access to the full baseline test set.
 - Secondary restricted account: the additional auth account used in prior Probe tests; has read access to only a subset of source team documents.
 
-`GTaskSheet-z1fr` ([INF] Design: J-ACCESS-FILTER) is responsible for documenting this in
+`gts-z1fr` ([INF] Design: J-ACCESS-FILTER) is responsible for documenting this in
 `docs/OPERATIONS.md` (account roles, minimum permissions, setup steps) before EPIC-D/E
 `[IMP]` beads start.
 
 ### J-ACCESS-FILTER shared journey (P1-P4)
 
 Single source of truth for visibility/authorization across Import and Notify, authored by
-`GTaskSheet-z1fr` and bound by `GTaskSheet-1dxz` (Import) / `GTaskSheet-ay5w` (Notify).
+`gts-z1fr` and bound by `gts-1dxz` (Import) / `gts-ay5w` (Notify).
 Full spec (scenario list, two-account fixture matrix, entry-point call-site table, shared
 `tests/helpers/access_filter.py` assertion contract): `knowledge-base/staging/j-access-filter-journey.md`.
 
@@ -201,7 +201,7 @@ Full spec (scenario list, two-account fixture matrix, entry-point call-site tabl
 2. `P2-SecondaryRestrictedAccess`: restricted account sees only permitted documents.
 3. `P3-NoTeamFolderAccess`: read denied path returns no rows + explicit error.
 4. `P4-FeatureParity`: same visibility set drives both Import list and Notify aggregation
-   (`GTaskSheet-7fng`).
+   (`gts-7fng`).
 
 Packaging guidance:
 - Integration package includes full journey (`P1`..`P4`) plus feature-specific assertions.
@@ -211,10 +211,10 @@ Packaging guidance:
 Sequencing:
 1. ~~EPIC-A~~ — done
 2. ~~EPIC-B~~ — done (also delivers EPIC-C's acceptance scenario)
-3. EPIC-C closure doc (`GTaskSheet-fk98`)
-4. EPIC-D-PRE (`GTaskSheet-uz7h`) — nav-architecture design + regression-proof-out gate
-5. EPIC-D (`GTaskSheet-yb2w`) — Import tab and forwarding workflow
-6. EPIC-E (`GTaskSheet-gc43`) — Notify tab and reminder flow
+3. EPIC-C closure doc (`gts-fk98`)
+4. EPIC-D-PRE (`gts-uz7h`) — nav-architecture design + regression-proof-out gate
+5. EPIC-D (`gts-yb2w`) — Import tab and forwarding workflow
+6. EPIC-E (`gts-gc43`) — Notify tab and reminder flow
 
 ---
 
@@ -245,7 +245,7 @@ Verify the full DAG with `bd graph <epic-id> --compact`.
 > Updated 2026-06-04. This is an **unimplemented proposal**, not as-built behaviour.
 > Today every document syncs to the single container-bound ActionSheet (the master sheet).
 > Related: the multi-tenant chip URL (`…/action/{sheetId}/{globalId}`) is also future work.
-> Open bead GTaskSheet-knup tracks a prerequisite documentation fix (identity terminology
+> Open bead gts-knup tracks a prerequisite documentation fix (identity terminology
 > in docs/ must be updated to match the current AI-N / globalId model before this design can
 > be decomposed into delivery issues).
 
@@ -483,9 +483,9 @@ as the authoritative source). Do not conflate with the action-identity ADR (ADR-
 ## Future design: sidebar tabs — Import and Notify
 
 > Updated 2026-06-22. The tabbed sidebar shell and the **Import** tab below are
-> **delivered** — see EPIC-D-PRE (`GTaskSheet-uz7h`) and EPIC-D (`GTaskSheet-yb2w`) above,
+> **delivered** — see EPIC-D-PRE (`gts-uz7h`) and EPIC-D (`gts-yb2w`) above,
 > and `docs/CONTEXT.md` UC-E for the as-built description. The **Notify** tab
-> (EPIC-E, `GTaskSheet-gc43`) is an indefinite-backlog proposal, not delivered — see the
+> (EPIC-E, `gts-gc43`) is an indefinite-backlog proposal, not delivered — see the
 > EPIC-E section above for status and the bead list kept as a reactivation reference.
 > Related funnel entry: Assignee reminder (§Funnel) covers similar email mechanics;
 > if either is reactivated, align on a shared email-template approach.

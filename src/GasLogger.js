@@ -8,7 +8,7 @@
  * Axiom is optional: set AXIOM_TOKEN + AXIOM_DATASET script properties (via the
  * set_axiom_config route, same pattern as set_test_token) to enable it. Once
  * configured, Axiom is the sole sink -- flush() does not also write the Drive
- * file, even if the POST fails (GTaskSheet-ishz.2/ishz.3). A broken Axiom pipe
+ * file, even if the POST fails (gts-ishz.2/ishz.3). A broken Axiom pipe
  * is meant to surface as a test timeout (polling Axiom for an entry that never
  * lands), not be silently absorbed by a Drive-file fallback. The Drive file
  * remains the path used only when Axiom isn't configured at all.
@@ -28,7 +28,7 @@
  * Correlation: startOp()/endOp() stamp an `op` field (a uuid) onto every log()
  * entry made between the two calls, so a single top-level invocation's
  * sub-events (e.g. syncAll()'s per-doc sync.scanned/sync.complete) share one
- * queryable id instead of relying on time-proximity (GTaskSheet-65g1). Module-
+ * queryable id instead of relying on time-proximity (gts-65g1). Module-
  * level state is safe here because each GAS execution gets its own isolated
  * global scope -- concurrent invocations never share this variable.
  *
@@ -38,7 +38,7 @@
  * op, and (if a receivedOpId was passed in) stamps it onto every entry as a
  * separate `parentOp` field. getCurrentOp() lets a caller read its own op id
  * before issuing a UrlFetchApp call so it can pass it along as opId in the
- * request payload (GTaskSheet-j8cn).
+ * request payload (gts-j8cn).
  */
 var GasLogger = (function () {
   var _folder = null;
@@ -107,7 +107,7 @@ var GasLogger = (function () {
         // Visible in `clasp logs` (Stackdriver) only -- never recurse through
         // GasLogger.log() itself. Intentionally NOT written to Drive either --
         // a broken Axiom pipe is meant to surface as a test timeout, not be
-        // silently absorbed by a file fallback (GTaskSheet-ishz.2/ishz.3).
+        // silently absorbed by a file fallback (gts-ishz.2/ishz.3).
         Logger.log('GasLogger: Axiom ingest non-2xx ' + resp.getResponseCode() + ': ' + resp.getContentText());
       }
     } catch (err) {

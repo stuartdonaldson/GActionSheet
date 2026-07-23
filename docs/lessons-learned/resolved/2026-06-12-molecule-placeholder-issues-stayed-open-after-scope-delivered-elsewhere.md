@@ -5,7 +5,7 @@ Domain: process
 
 ## Observation
 
-- `GTaskSheet-mol-dhd` (mol-feature-delivery molecule for "UC-D archive closed actions",
+- `gts-moldhd` (mol-feature-delivery molecule for "UC-D archive closed actions",
   created 2026-05-22) had 11 children mapping to the formula's linear steps (draft UC/AC,
   UC/AC gate, develop-tests, implement, verify, independent review, review gate,
   address-findings, update-docs, final gate).
@@ -14,23 +14,23 @@ Domain: process
   implemented, tested, and documented between 2026-06-01 and 2026-06-08 under a separate
   set of beads (`d33z`, `r3d`, `grxl`, `5u2v`, `nv6g`, `eg8x`, `hnes`, `vx91`, `elnv`,
   `sma8`, `por0`, `hie7`, `cwm0` — all closed), created through an organic syncAll-epic
-  decomposition rather than through `mol-dhd`.
-- 8 of `mol-dhd`'s children (`mol-87e` develop-tests, `mol-o5f` implement, `mol-7vm` verify,
-  `mol-ddz` independent review, `mol-bm9` review gate, `mol-380` address-findings,
-  `mol-4r5` update-docs, `mol-no8` final gate) remained OPEN with empty descriptions
+  decomposition rather than through `moldhd`.
+- 8 of `moldhd`'s children (`mol87e` develop-tests, `molo5f` implement, `mol7vm` verify,
+  `molddz` independent review, `molbm9` review gate, `mol380` address-findings,
+  `mol4r5` update-docs, `molno8` final gate) remained OPEN with empty descriptions
   (`DESCRIPTION (none)`) and `Updated: 2026-05-22` — never touched again — until closed in
   this session (2026-06-12) as superseded.
 - `bd stale` (run 2026-06-12) returned "No stale issues found" despite these 8 issues having
   zero activity for 21 days while their entire planned scope had already been delivered.
-- A sibling molecule, `GTaskSheet-mol-66r` (UC-C insert/refresh in-doc tracker table, also
+- A sibling molecule, `gts-mol66r` (UC-C insert/refresh in-doc tracker table, also
   created 2026-05-22, also a core already-shipped feature), shows the same pattern:
-  `mol-4d0`, `mol-4nt`, `mol-87z`, `mol-eal` remain open and unreviewed.
+  `mol4d0`, `mol4nt`, `mol87z`, `moleal` remain open and unreviewed.
 - An existing staged LL (`2026-06-02-no-aggregate-technical-debt-surface.md`) already
   identified "implicitly-resolved issues remain open in the backlog" as a debt category and
   proposed a `/technical-debt` skill. That skill now exists
   (`DevStandard/dot-claude/skills/technical-debt/SKILL.md`) and its "implicit-resolve
   candidates" check works by matching recent commit messages against open-issue
-  *descriptions*. `mol-dhd`'s open children all have empty descriptions, so this check has
+  *descriptions*. `moldhd`'s open children all have empty descriptions, so this check has
   no text to match against — the existing lever cannot catch this specific instance even
   when run.
 
@@ -38,7 +38,7 @@ Domain: process
 
 Branch A — empty descriptions defeat the implicit-resolve check
 Why 1 — The technical-debt skill's implicit-resolve check matches commit text against issue
-        *descriptions*; `mol-dhd`'s children have no description.
+        *descriptions*; `moldhd`'s children have no description.
 Why 2 — The `mol-feature-delivery` formula generates step *titles* only (e.g. "Implement
         {{feature}}"); it does not populate a description linking the step to the
         use-case/feature identity in a way later text searches can match.
@@ -66,7 +66,7 @@ Why 1 — When `d33z`/`eg8x`/etc. closed (2026-06-01 to 2026-06-08), nothing che
         their scope corresponded to an existing planned molecule step.
 Why 2 — The session that created `d33z`/`eg8x` etc. (per work-log 2026-06-02) explicitly
         reasoned about syncAll/archive scope but was not framed as "does this satisfy any
-        open `mol-dhd` step?" — the two planning tracks (`mol-kqr` v1-ship molecules vs.
+        open `moldhd` step?" — the two planning tracks (`molkqr` v1-ship molecules vs.
         the syncAll-epic ad hoc decomposition) were never cross-referenced.
 Why 3 — There is no convention requiring a check, when closing a `[TST]`/`[IMP]`/`[FIX]`
         bead, for sibling/overlapping open issues describing the same capability —
@@ -76,14 +76,14 @@ open molecule/epic children describing the same capability under a different ide
 
 ## Initial Candidates
 
-- f: audit `GTaskSheet-mol-66r` (UC-C) open children (`mol-4d0`, `mol-4nt`, `mol-87z`,
-  `mol-eal`) for the same superseded-by-organic-work pattern and close if confirmed — same
-  action as this session's `mol-dhd` cleanup, immediate.
+- f: audit `gts-mol66r` (UC-C) open children (`mol4d0`, `mol4nt`, `mol87z`,
+  `moleal`) for the same superseded-by-organic-work pattern and close if confirmed — same
+  action as this session's `moldhd` cleanup, immediate.
 - c: update `/technical-debt` skill's implicit-resolve check — in addition to
   commit↔description matching, also match recently-closed bead titles/close-reasons against
   the *titles* of open molecule-formula step children sharing a parent epic (titles encode
   the feature name even when descriptions are empty), e.g. "UC-D archive closed actions"
-  appears in `mol-dhd`'s children titles and could be matched against `d33z`'s title
+  appears in `moldhd`'s children titles and could be matched against `d33z`'s title
   "Archive scenario coverage — rows moving Actions→Archive sheet".
 - b: update `mol-feature-delivery.formula.yaml` (or add a CLAUDE.md note on `bd cook` usage)
   — require each generated step's description to be populated with the use-case ID and a
@@ -107,26 +107,26 @@ both files to `resolved/`.
 Per candidate **f**, audited every open issue created before 2026-06-04 for the same
 superseded-but-never-closed pattern, plus a related but distinct variant.
 
-### Confirmed same pattern — `GTaskSheet-mol-66r` (UC-C tracker table)
+### Confirmed same pattern — `gts-mol66r` (UC-C tracker table)
 
-Sibling molecule to `mol-dhd`, created the same day (2026-05-22), same formula. 5 of 9
-children (`mol-6dl` verify, `mol-7ui` UC/AC gate, `mol-bgq` develop-tests, `mol-crb` draft-AC,
-`mol-hzj` independent review) were already closed; the same 4 step-types as `mol-dhd`
-(`mol-4d0` address-findings, `mol-4nt` gate-review-findings, `mol-87z` gate-final-signoff,
-`mol-eal` update-docs) sat open with empty descriptions since 2026-05-22. Evidence of organic
-delivery: `mol-vzk` (commit `c40f14c`, implement `insertTrackerTable`), `mol-bgq`
+Sibling molecule to `moldhd`, created the same day (2026-05-22), same formula. 5 of 9
+children (`mol6dl` verify, `mol7ui` UC/AC gate, `molbgq` develop-tests, `molcrb` draft-AC,
+`molhzj` independent review) were already closed; the same 4 step-types as `moldhd`
+(`mol4d0` address-findings, `mol4nt` gate-review-findings, `mol87z` gate-final-signoff,
+`moleal` update-docs) sat open with empty descriptions since 2026-05-22. Evidence of organic
+delivery: `molvzk` (commit `c40f14c`, implement `insertTrackerTable`), `molbgq`
 (`4ec70ee`, UC-C fixtures), `gxot` (`a859c21`/`47d4ae7`/`2864daf`, tracker Playwright coverage,
 all green), `docs/CONTEXT.md` §UC-C + §In-Doc Action Tracker Table, `docs/DESIGN.md`
-TrackerTable/Tracker Table Renderer sections. **Action taken this session:** closed `mol-4d0`, `mol-4nt`, `mol-eal`, `mol-87z`, and (after
+TrackerTable/Tracker Table Renderer sections. **Action taken this session:** closed `mol4d0`, `mol4nt`, `moleal`, `mol87z`, and (after
 explicit human confirmation — the auto-mode permission classifier initially blocked closing
-`mol-66r` as "beyond the explicit 'evaluate and add to LL' request") `mol-66r` itself, all
-as superseded (same reasoning as `mol-dhd`'s children). This is a second independent
+`mol66r` as "beyond the explicit 'evaluate and add to LL' request") `mol66r` itself, all
+as superseded (same reasoning as `moldhd`'s children). This is a second independent
 confirmation of root causes A/B/C, not a new root cause. Note for candidate g/Branch D:
-closing `mol-66r` unblocks `mol-29y` (its dependency on `mol-66r`, `mol-dhd`, `mol-vea` are
-now all closed) — but `mol-29y` is reviewed below as genuinely still-open work, not a further
+closing `mol66r` unblocks `mol29y` (its dependency on `mol66r`, `moldhd`, `molvea` are
+now all closed) — but `mol29y` is reviewed below as genuinely still-open work, not a further
 instance of this pattern.
 
-### New variant — `GTaskSheet-cw5` (closed this session)
+### New variant — `gts-cw5` (closed this session)
 
 `cw5` ("[IMP] Deliver rich sidebar for Docs add-on", epic, created 2026-05-27) had **10/10
 children closed** and `bd show` itself displayed "✓ 10/10 complete (100%) — eligible for
@@ -148,28 +148,28 @@ or session-start check, so it only fires when a human happens to inspect that ex
 
 ### Reviewed, NOT superseded — still valid, no action taken
 
-- **`GTaskSheet-mol-kqr`** (v1 Ship epic) and its remaining open children (`mol-29y`
-  independent review, `mol-7gg` update OPERATIONS.md, `mol-b4e`/`mol-e9j` gates, `mol-isu`
+- **`gts-molkqr`** (v1 Ship epic) and its remaining open children (`mol29y`
+  independent review, `mol7gg` update OPERATIONS.md, `molb4e`/`mole9j` gates, `molisu`
   address-findings) for "All-UC verification and test suite sign-off" — genuinely blocked on
-  `GTaskSheet-erc` (production deployment), which work-log line 1027 explicitly confirms is
-  "not yet done" (pre-production). `mol-vea` (the implement step) was already closed
+  `gts-erc` (production deployment), which work-log line 1027 explicitly confirms is
+  "not yet done" (pre-production). `molvea` (the implement step) was already closed
   2026-05-20 as "already complete", but the surrounding review/gate/docs steps legitimately
   await production rollout. No closure action.
-- **`GTaskSheet-erc`** + `erc.1`-`.3` (production deployment) — depends on `mol-kqr`;
+- **`gts-erc`** + `erc.1`-`.3` (production deployment) — depends on `molkqr`;
   production has not been configured. Still valid backlog.
-- **`GTaskSheet-6ov.9`** ("Update gas-addon-guide.md: restructure as general Google ecosystem
+- **`gts-6ov.9`** ("Update gas-addon-guide.md: restructure as general Google ecosystem
   add-on guide") — `gas-addon-guide.md` does not exist anywhere in the repo; work not done.
   Still valid (parent `6ov` correctly stays open because of this one child).
-- **`GTaskSheet-egl9`** (evaluate `/dev` vs versioned `/exec` deployment for test cycle) —
+- **`gts-egl9`** (evaluate `/dev` vs versioned `/exec` deployment for test cycle) —
   recorded in work-log 2026-06-01 but no decision/evaluation recorded since. Still valid,
   undecided.
-- **`GTaskSheet-w6vg`** (test_b7/test_uc_scenarios/test_uc_sidebar failures) — already
+- **`gts-w6vg`** (test_b7/test_uc_scenarios/test_uc_sidebar failures) — already
   re-scoped 2026-06-02 with its own verification steps. Step 1 (re-run current suite) appears
   satisfied — work-log 1530 shows `test_b7_write_routes` now PASSED and 1817 shows a 230-test
   full-suite green run (commit `cb88d91`). Step 3 (session-scoped teardown in
   `tests/conftest.py` marking journey-clone rows `mark_doc_not_found`+archive) was checked
   and is **not present** in `tests/conftest.py`. Still valid — narrowed to step 3 only.
-- **`GTaskSheet-mpi9`** (LL resolve: CLAUDE.md pytest-x backstop rules + implementation-gate
+- **`gts-mpi9`** (LL resolve: CLAUDE.md pytest-x backstop rules + implementation-gate
   v1.3 additions, created 2026-06-03) — checked project `CLAUDE.md` and
   `.claude/skills/implementation-gate/SKILL.md` for the four described rules (pytest -x
   before [IMP] close, known-failure escalation, verify_consistency/verify_all_expectations
@@ -178,13 +178,13 @@ or session-start check, so it only fires when a human happens to inspect that ex
 
 ### Updated Initial Candidates
 
-- f: **done** — `mol-66r` and its 4 step children all closed this session (human-confirmed).
+- f: **done** — `mol66r` and its 4 step children all closed this session (human-confirmed).
 - g (new): add a session-start or `bd doctor` check for Branch D — epics where all children
   are closed (bd's own "eligible for close") but the epic remains open. Lower-cost than
   Branch A/B/C's title-matching since it needs no text search, just child-status aggregation.
 - c, b, e: unchanged from original capture.
 
 ## Resolution (2026-07-01)
-Immediate actions (mol-66r/mol-dhd child closures) taken 2026-06-12. Residual tool refinements
+Immediate actions (mol66r/moldhd child closures) taken 2026-06-12. Residual tool refinements
 (Branch A title-matching, Branch B `bd stale` tuning, Branch D "100%-children-closed-parent-open"
-check) handed to GTaskSheet-mcji. Moved to resolved/.
+check) handed to gts-mcji. Moved to resolved/.

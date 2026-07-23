@@ -51,7 +51,7 @@ async function axiomQuery(afterMs) {
 }
 
 // POST a sentinel through the real WebApp -> GAS -> GasLogger.flush() -> Axiom
-// path (GTaskSheet-ishz.5's axiom_probe route) -- not a JS-direct-to-Axiom
+// path (gts-ishz.5's axiom_probe route) -- not a JS-direct-to-Axiom
 // shortcut, which would skip the GAS/WebApp hop entirely.
 async function postAxiomProbe(sentinel) {
   const resp = await fetch(settings.webappTestUrl, {

@@ -2,7 +2,7 @@
 
 **Status:** Draft — proposal, not yet implemented.
 **Related:** `docs/atdd/harness-design.md` §3 (`scn/reporter.py` row), `scn/reporter.py`, `scn/session.py`, `scn/ui.py`.
-**Motivating case:** GTaskSheet-y8a0 / GTaskSheet-3sgr follow-up — diagnosing `test_import_access_filter`'s intermittent `show_tab("Import")` timeout required ~40 minutes of manual reconstruction (cross-referencing 4 separate trace files, reading test/helper source to label generic `run_fixture` events, inferring an un-logged step's duration from gaps between files). That reconstruction should be a single command.
+**Motivating case:** gts-y8a0 / gts-3sgr follow-up — diagnosing `test_import_access_filter`'s intermittent `show_tab("Import")` timeout required ~40 minutes of manual reconstruction (cross-referencing 4 separate trace files, reading test/helper source to label generic `run_fixture` events, inferring an un-logged step's duration from gaps between files). That reconstruction should be a single command.
 
 ## 1. Problem
 
@@ -100,7 +100,7 @@ Not a code change. If the standalone logging webapp's own deployment is itself s
 - A merge/report tool reading the log sheet produces one chronologically-sorted, human-readable table — Python steps and GAS-side events interleaved by real timestamp — without requiring the operator to read test source to label any event, written to `test-results/JOURNEY-<slug>-<utc>.log`.
 - No existing AC-drain / JUnit / Allure reporting behavior changes (this is additive to `Reporter`, not a replacement).
 
-## 8. Current state: GAS-side vs Python-side event naming (GTaskSheet-ecs1)
+## 8. Current state: GAS-side vs Python-side event naming (gts-ecs1)
 
 Until §4.3's unified sink ships (still an open decision, §6), GAS-side and Python-side
 events are logged through two separate systems with two different naming schemes, and
@@ -145,7 +145,7 @@ vocabularies manually. §4.3's unified-sink design remains the architectural fix
 needing this table at all, and remains an explicit open decision (§6) — not implemented
 as a side effect of writing this section.
 
-## 9. GAS-side call-tree correlation: `op`/`parentOp` (GTaskSheet-65g1, GTaskSheet-j8cn)
+## 9. GAS-side call-tree correlation: `op`/`parentOp` (gts-65g1, gts-j8cn)
 
 Before this, a multi-step GAS execution's own sub-events (e.g. `syncAll()`'s
 `sync.all.start` then per-doc `sync.scanned`/`sync.complete` ×N then
@@ -173,7 +173,7 @@ fresh `op`, and if a `receivedOpId` was passed in, stamps it onto every entry as
 separate `parentOp` field — the trace-id/span-id shape from distributed tracing (`op`
 = this execution's own span, `parentOp` = the caller's span). `getCurrentOp()` lets a
 caller read its own op id before issuing a `UrlFetchApp` call so it can pass it along
-as `opId` in the request payload. This is what GTaskSheet-j8cn wired across the
+as `opId` in the request payload. This is what gts-j8cn wired across the
 addon→WebApp HTTP boundary: `WebApp.js`'s `doPost` reads `payload.opId` and passes it
 into `startOp()`; `WorkspaceAddonCard.js`/`EditorAddonCard.js`/`SyncManager.js` outbound
 calls read `GasLogger.getCurrentOp()` and set it as `opId` on the way out.
@@ -195,7 +195,7 @@ exactly one `op` id, and the two sweeps get different ids — proved to actually
 redeploying TEST before restoring.
 
 **Related follow-ups (both closed, kept here as the historical pointer):**
-GTaskSheet-j8cn (cross-invocation `parentOp` propagation, addon→WebApp — described
-above) and GTaskSheet-x94a (`GasLogger` tag-naming taxonomy cleanup, unrelated to
+gts-j8cn (cross-invocation `parentOp` propagation, addon→WebApp — described
+above) and gts-x94a (`GasLogger` tag-naming taxonomy cleanup, unrelated to
 correlation but touched the same call sites around the same time;
 `knowledge-base/adr/0019-gaslogger-naming-standard.md`).

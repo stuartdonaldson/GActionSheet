@@ -1,5 +1,5 @@
 /**
- * SPIKE.js — Spike S2 (GTaskSheet-79dw.2): folder/doc access verification for
+ * SPIKE.js — Spike S2 (gts-79dw.2): folder/doc access verification for
  * an external, GIS-verified email, including access conferred only through a
  * domain-managed Google Group.
  *
