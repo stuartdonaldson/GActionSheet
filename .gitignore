@@ -53,3 +53,6 @@ __pycache__/
 .claude/worktrees/
 .deploy-metadata.json
 .bd-run-beads
+
+# Beads / Dolt files (added by bd init)
+.beads/proxieddb/
