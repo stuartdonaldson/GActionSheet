@@ -88,7 +88,7 @@ var GasLogger = (function () {
     if (!token || !dataset) return;
     try {
       var rows = entries.map(function (e) {
-        var row = Object.assign({ _time: e.ts, name: e.tag, side: 'gas', version: e.version }, e.data || {});
+        var row = Object.assign({ _time: e.ts, name: e.tag, side: 'gas', app: 'gactionsheet', version: e.version }, e.data || {});
         if (e.op) row.op = e.op;
         if (e.parentOp) row.parentOp = e.parentOp;
         return row;
