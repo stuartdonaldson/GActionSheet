@@ -450,6 +450,14 @@ function doPost(e) {
     return _handleSpikeSeedAccess(payload);
   }
 
+  // gts-79dw.4.1 — verified-board-portal identity + access-tier route.
+  // Bypasses WEBAPP_SECRET intentionally: callers are external GIS-verified
+  // identities that don't (and shouldn't) hold our internal secret. The ID
+  // token itself is the authentication; see src/AccessControl.js.
+  if (payload.action === 'verify_and_resolve_access') {
+    return _handleVerifyAndResolveAccess(payload);
+  }
+
   // Test-token-gated routes — authenticated by per-deployment TEST_TOKEN, not WEBAPP_SECRET.
   // Checked before the WEBAPP_SECRET gate. Includes run_fixture (fixture dispatcher) and
   // ATDD test-support routes from ContractSchema.js webApp.testRouteNames (bead .9) and

@@ -20,11 +20,9 @@ AC under test (gts-79dw.4.1):
   (negative case).
 
 Ordering: specifiable oracle (docs/methodology/oracle-ordering-lever.md,
-gts-m65t) — test-first, red until gts-79dw.4.1 lands. The whole module is
-xfail(strict=True) for that reason: 'verify_and_resolve_access' is not yet a
-routed doPost action (see src/WebApp.js), so every case below currently fails
-closed on a missing route rather than on the access-tier logic it specifies.
-Remove this module-level xfail once gts-79dw.4.1 closes.
+gts-m65t) — test-first, red until gts-79dw.4.1 lands. gts-79dw.4.1 has landed:
+'verify_and_resolve_access' is now a routed doPost action (src/WebApp.js /
+src/AccessControl.js), so the module-level xfail has been removed.
 
 Tier-resolution cases additionally require a real board folder with seeded
 access states and a real, currently-valid GIS ID token per identity (Spike S2
@@ -38,14 +36,6 @@ of the module xfail.
 import pytest
 
 from scn.session import _http_post
-
-pytestmark = pytest.mark.xfail(
-    reason=(
-        "gts-79dw.4.1 (IMP) not yet implemented -- 'verify_and_resolve_access' "
-        "is not a routed doPost action in src/WebApp.js"
-    ),
-    strict=True,
-)
 
 
 def _verify_and_resolve(settings: dict, id_token: str, board_folder_id: str) -> dict:
