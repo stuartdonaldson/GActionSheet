@@ -458,6 +458,13 @@ function doPost(e) {
     return _handleVerifyAndResolveAccess(payload);
   }
 
+  // gts-79dw.4.3 — verified-board-portal read-only listing route. Same
+  // bypass rationale as verify_and_resolve_access above: the ID token is the
+  // authentication, and the tier is re-verified on every call (R8).
+  if (payload.action === 'list_board_actions') {
+    return _handleListBoardActions(payload);
+  }
+
   // Test-token-gated routes — authenticated by per-deployment TEST_TOKEN, not WEBAPP_SECRET.
   // Checked before the WEBAPP_SECRET gate. Includes run_fixture (fixture dispatcher) and
   // ATDD test-support routes from ContractSchema.js webApp.testRouteNames (bead .9) and

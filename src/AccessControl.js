@@ -27,9 +27,36 @@ function _handleVerifyAndResolveAccess(payload) {
   var idToken       = payload.idToken       || '';
   var boardFolderId = payload.boardFolderId || '';
 
+  var resolved = _resolveIdentityAndAccessTier(idToken, boardFolderId);
+
+  GasLogger.log('webapp.board.access', { sub: resolved.sub, tier: resolved.tier, method: resolved.method });
+  GasLogger.flush();
+
+  return _jsonResponse({
+    verified: resolved.verified,
+    sub:      resolved.sub,
+    email:    resolved.email,
+    tier:     resolved.tier
+  }, 200);
+}
+
+/**
+ * Shared resolver behind 'verify_and_resolve_access' and every other route
+ * that must re-verify a caller's tier (e.g. gts-79dw.4.3's board-listing
+ * route) rather than trust a client-supplied tier from a prior call.
+ * Verifies the GIS ID token, then resolves the caller's effective access
+ * tier against boardFolderId via DriveApp.getAccess() first, falling back to
+ * the Admin SDK group-membership walk (Spike S2). Fails closed (R6): a
+ * bad/expired token or no resolvable folder access both yield tier NONE.
+ *
+ * @param {string} idToken
+ * @param {string} boardFolderId
+ * @returns {{verified: boolean, sub: string, email: string, tier: 'NONE'|'VIEW'|'EDIT', method: string}}
+ */
+function _resolveIdentityAndAccessTier(idToken, boardFolderId) {
   var identity = _verifyGisIdToken(idToken);
   if (!identity.verified) {
-    return _jsonResponse({ verified: false, sub: '', email: '', tier: 'NONE' }, 200);
+    return { verified: false, sub: '', email: '', tier: 'NONE', method: 'getAccess' };
   }
 
   var tier   = 'NONE';
@@ -53,15 +80,7 @@ function _handleVerifyAndResolveAccess(payload) {
     }
   }
 
-  GasLogger.log('webapp.board.access', { sub: identity.sub, tier: tier, method: method });
-  GasLogger.flush();
-
-  return _jsonResponse({
-    verified: true,
-    sub:      identity.sub,
-    email:    identity.email,
-    tier:     tier
-  }, 200);
+  return { verified: true, sub: identity.sub, email: identity.email, tier: tier, method: method };
 }
 
 /**
