@@ -223,9 +223,25 @@ point at least once with observable state verification. The entry point itself m
 call-site — testing only the mechanism it delegates to is not sufficient. Standalone or sequential
 test structure is not required; the entry point may be exercised as part of any scenario.
 
-**Backstop rules (LL resolve, gts-mpi9):**
-- `pytest -x` (full suite, not just the touched files) is required before any `[IMP]` issue is
-  closed or merged.
+**Backstop rules (LL resolve, gts-mpi9; scope narrowed 2026-07-24 — see below):**
+- `pytest -x` (full suite, not just the touched files) is required at **merge-gate**, and always
+  before a hardening `[TST]` (gts-79dw.4.8-style) is itself closed. This is the enforcement point
+  both source incidents actually pointed at (`2026-06-02-scanner-change-did-not-audit-fixture-
+  producers.md`, `2026-06-02-test-failures-observed-but-not-elevated-to-blocker.md` — both
+  resolutions say the fix belongs in `merge-gate`, not at `[IMP]`-close).
+- An `[IMP]` bead may **close** on a fast, targeted-subset gate (touched-file/related tests —
+  practically, whatever runs in well under a couple minutes) instead of the full suite. This is
+  the normal path for a Slice-phase bead (Review-fidelity phasing, ADR-0013 above): implement,
+  get the fast gate green, close, and get to a reviewable working experience without paying full
+  regression cost before the AC is even frozen. Track the gap explicitly rather than silently: on
+  close, set `bd set-state <id> regression=pending --reason "<what actually ran>"`; flip it to
+  `regression=verified` once `pytest -x` is run clean against that bead's changes. `bd-run-beads.py`
+  does this automatically (`--partial-gate` marks `regression=pending`; a full unrestricted
+  `test_cmd` marks `regression=verified`; `-t ''` always implies `pending`).
+- Merge-gate (or manual merge to master) still requires every bead in scope to be
+  `regression=verified` — i.e. full `pytest -x` clean — before it passes. A bead closed with
+  `regression=pending` is not itself blocking further implementation work in the same tree; it
+  blocks that tree's merge.
 - Known test failures are not a basis for proceeding autonomously: present the debt state (which
   tests fail, why) and wait for an explicit human decision rather than working around or ignoring
   the failure.
