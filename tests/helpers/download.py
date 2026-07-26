@@ -1,11 +1,13 @@
 """Download Google Sheet (.xlsx) and Google Doc (.docx) for local inspection."""
 import json
 import pathlib
+import re
 import time
 import requests
 
 _OOXML_MAGIC = b"PK\x03\x04"
 _AUTH_PATH = pathlib.Path(__file__).parent.parent.parent / ".auth" / "user.json"
+_DOC_TITLE_RE = re.compile(r"<title>(.*?)\s*-\s*Google Docs</title>", re.IGNORECASE | re.DOTALL)
 
 
 class DownloadError(Exception):
@@ -44,3 +46,21 @@ def download_docx(doc_id: str, timeout: int = 60) -> bytes:
     if not resp.content.startswith(_OOXML_MAGIC):
         raise DownloadError(f"Response is not docx (got {resp.content[:20]!r})")
     return resp.content
+
+
+def fetch_doc_title(doc_id: str, timeout: int = 30) -> str:
+    """Return the document's real, current Drive title (gts-jnsf).
+
+    Reads the <title> tag off the doc's edit page ("<Name> - Google Docs") via
+    the same cookie-authed session used for xlsx/docx downloads -- unlike the
+    .docx export's core_properties.title, which Google Docs always writes as
+    the literal placeholder "Word Document", this reflects the live Drive
+    filename and observes renames.
+    """
+    url = f"https://docs.google.com/document/d/{doc_id}/edit"
+    resp = _authed_session().get(url, timeout=timeout, allow_redirects=True)
+    resp.raise_for_status()
+    m = _DOC_TITLE_RE.search(resp.text)
+    if not m:
+        raise DownloadError(f"Could not find doc title in edit-page response for {doc_id!r}")
+    return m.group(1)

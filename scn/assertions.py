@@ -7,12 +7,44 @@ Design: docs/atdd/scenario-harness-design.md §3.7, §5
 Returns None on pass, an error string on failure.
 Consumed by engine.py's drain procedure and importable standalone by session.py (.7).
 """
+import datetime
 import re
+import zoneinfo
 
 from scn.contacts import TEST_CONTACTS, expected_name
 from scn.engine import Surface
 
 _AI_N_RE = re.compile(r"^AI-\d+$")
+
+# Test ActionSheet's spreadsheet timezone (confirmed empirically: xlsx-exported
+# created_date/modified_date cells run exactly 7h behind the webapp's ISO-8601
+# UTC value for every row checked, matching PDT). Sheets/xlsx datetime cells
+# carry no zone info of their own -- this is the one fact needed to interpret
+# them (gts-cges).
+_SHEET_TZ = zoneinfo.ZoneInfo("America/Los_Angeles")
+
+
+def _normalize_date(value):
+    """Coerce a date/datetime value (str or datetime, tz-aware or naive) to UTC.
+
+    - Naive datetime (e.g. from SheetReader's xlsx cell): assumed to be in the
+      ActionSheet's spreadsheet timezone (_SHEET_TZ).
+    - ISO-8601 string (e.g. webapp JSON, trailing 'Z'): parsed directly.
+    - Anything else (already tz-aware datetime, unparseable string): returned
+      as-is so the caller falls back to plain equality.
+    """
+    if isinstance(value, datetime.datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=_SHEET_TZ)
+        return value.astimezone(datetime.timezone.utc)
+    if isinstance(value, str):
+        try:
+            return datetime.datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            ).astimezone(datetime.timezone.utc)
+        except ValueError:
+            return value
+    return value
 
 
 def _find_matches(expected: dict, actuals: list) -> list:
@@ -141,7 +173,11 @@ def check_present_consistent(
         if field_name in expected and hasattr(actual, field_name):
             exp_val = expected[field_name]
             act_val = getattr(actual, field_name)
-            if act_val != exp_val:
+            if field_name in ("created_date", "modified_date"):
+                mismatch = _normalize_date(act_val) != _normalize_date(exp_val)
+            else:
+                mismatch = act_val != exp_val
+            if mismatch:
                 return (
                     f"[{tag}] {surface.value}: {field_name} mismatch: "
                     f"expected={exp_val!r}, actual={act_val!r}"
