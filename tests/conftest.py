@@ -1,4 +1,5 @@
 """Pytest configuration and shared fixtures."""
+import datetime
 import json
 import os
 import pathlib
@@ -8,6 +9,39 @@ import pytest
 
 _SETTINGS_PATH = pathlib.Path(__file__).parent.parent / "local.settings.json"
 _TEST_RESULTS = pathlib.Path(__file__).parent.parent / "test-results"
+
+_pytest_config = None
+
+
+def pytest_configure(config):
+    global _pytest_config
+    _pytest_config = config
+
+
+def _timestamp() -> str:
+    return datetime.datetime.now().strftime("%H:%M:%S")
+
+
+def _terminal_writeline(line: str) -> None:
+    """Write directly via the terminal reporter (gts-jukj).
+
+    Bypasses pytest's per-test stdout capture (same mechanism the built-in
+    PASSED/FAILED progress line uses), so the timestamp lands in a captured
+    run log (e.g. test-full-run.txt) even without -s.
+    """
+    if _pytest_config is None:
+        return
+    tr = _pytest_config.pluginmanager.get_plugin("terminalreporter")
+    if tr is not None:
+        tr.write_line(line)
+
+
+def pytest_runtest_logstart(nodeid, location):
+    _terminal_writeline(f"[{_timestamp()}] START  {nodeid}")
+
+
+def pytest_runtest_logfinish(nodeid, location):
+    _terminal_writeline(f"[{_timestamp()}] FINISH {nodeid}")
 
 
 def _find_page(item):
