@@ -1844,8 +1844,11 @@ function setupTestFixtures(scenario, data) {
       case 'sidebar_set_status': {
         // Mutation: change an action from "Open" to "Done" using sidebarSetStatus.
         // Resolves globalId by scanning floating actions for the target text.
-        var sssTargetText = 'AC1: Review the project budget';
-        var sssNewStatus  = 'Done';
+        // data.targetText / data.newStatus override the journey defaults so a
+        // scenario can drive the sidebar flush path against its own seeded
+        // action (gts-dr8j) rather than the canonical journey's.
+        var sssTargetText = data.targetText || 'AC1: Review the project budget';
+        var sssNewStatus  = data.newStatus  || 'Done';
         var sssFloating   = _scanFloatingActions(doc);
         var sssNrId       = '';
         for (var ssi = 0; ssi < sssFloating.length; ssi++) {

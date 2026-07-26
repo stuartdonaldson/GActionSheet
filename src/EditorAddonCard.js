@@ -918,7 +918,12 @@ function _importSelectedRows(doc, docId, token, index, importRows) {
 function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
   var N             = fields.N;
   var globalId      = fields.globalId;
-  var actionText    = fields.actionText;
+  // Same \n -> U+000B conversion _buildFlushRequests applies (gts-dr8j): sheet
+  // action text may carry soft-return line breaks, and a bare \n handed to
+  // insertText below would split the fragment onto a new paragraph instead of
+  // producing a soft return. \v is one character wide, so insertedLength and
+  // the style ranges below stay correct.
+  var actionText    = _toSoftReturnText(fields.actionText);
   var assigneeEmail = fields.assigneeEmail;
   var status        = fields.status;
 

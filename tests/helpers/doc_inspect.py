@@ -113,6 +113,34 @@ def floating_actions(document: docx.Document) -> list[dict]:
     return result
 
 
+def paragraph_texts_with_breaks(document: docx.Document) -> list[str]:
+    """Return one string per body paragraph, with soft line breaks kept as '\\n'.
+
+    python-docx's ``para.text`` concatenates only ``w:t`` runs, so it silently
+    drops the ``<w:br/>`` element a Shift+Enter soft return exports as — which
+    makes a genuine soft return indistinguishable from no separator at all,
+    exactly the failure mode under test (gts-dr8j). A hard paragraph break
+    stays distinguishable because it produces a separate list entry, and a
+    space-collapsed line shows up as a literal space.
+
+    A vertical tab that survives into a ``w:t`` run is folded to '\\n' too, so
+    the caller does not have to care which of the two spellings the exporter
+    chose for the same soft break. Page breaks (``w:br w:type="page"``) are
+    ignored.
+    """
+    texts = []
+    for para in document.paragraphs:
+        parts = []
+        for node in para._element.iter():
+            tag = node.tag.split('}')[-1] if '}' in node.tag else node.tag
+            if tag == 't' and node.text:
+                parts.append(node.text)
+            elif tag == 'br' and node.get(qn('w:type')) != 'page':
+                parts.append('\n')
+        texts.append(''.join(parts).replace('\v', '\n'))
+    return texts
+
+
 def tracked_actions_table(document: docx.Document) -> list[dict] | None:
     """Return tracked-actions table rows as dicts, or None if section not found."""
     in_section = False

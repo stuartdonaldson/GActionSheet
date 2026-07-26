@@ -185,7 +185,13 @@ function _trackerRowsMatch(renderedRows, desiredRows) {
     var rendered = renderedRows[i];
     var desired  = desiredRows[i];
     if (String(rendered.id || '') !== String(desired.id || '')) return false;
-    if ((rendered.action || '') !== (desired.action || '')) return false;
+    // Compare action text through _normalizeLineEndings: action text may now
+    // carry soft-return line breaks (gts-dou2/dr8j), and the rendered cell
+    // text read back via getText() need not spell that break the same way the
+    // desired string does. Comparing raw would report a spurious mismatch and
+    // re-render the whole tracker on every single sync.
+    if (_normalizeLineEndings(rendered.action || '') !==
+        _normalizeLineEndings(desired.action || '')) return false;
     if ((rendered.status || 'Open') !== (desired.status || 'Open')) return false;
   }
   return true;
