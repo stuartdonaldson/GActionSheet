@@ -811,13 +811,19 @@ function _extractActionId(globalId) {
   return parseGlobalId(globalId).actionId;
 }
 
-// Collapse soft-return (\v), hard-return (\n), and carriage-return (\r)
-// characters to a single space so the sheet value is always single-line.
-// Flush reads action text from the sheet and passes it to insertText; a \n
-// there creates a new paragraph rather than a soft return.
+// Normalizes the soft-return spelling of action text on its way into the
+// sheet: \r, \r\n, and \v all become \n, so a sheet cell holds the same line
+// breaks the author typed with Shift+Enter (gts-dou2). Previously these were
+// collapsed to a single space, because flush could not reinsert a soft return
+// into the doc and a round-tripped \n would have split the paragraph. Flush
+// now converts \n back to U+000B via SyncManager.js's _toSoftReturnText
+// (gts-dr8j), so preserving the break here is round-trip safe.
+// Built on the same _normalizeLineEndings core (SyncManager.js) the scanner
+// uses, so the doc-side and sheet-side notion of a line break stay identical
+// — action text compared across the two surfaces still matches.
 function _normalizeActionText(text) {
   if (!text) return text;
-  return text.replace(/[\v\n\r]+/g, ' ').replace(/  +/g, ' ').trim();
+  return _normalizeLineEndings(text).trim();
 }
 
 function _rowIdentityKey(assigneeEmail, action, status) {

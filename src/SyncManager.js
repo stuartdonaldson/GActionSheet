@@ -596,7 +596,12 @@ function _syncSheetRowToDoc(sheet, row) {
  * @param {Object} seenN   mutable duplicate-tracking map
  */
 function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
-  var fullText   = para.getText().replace(/\n$/, '');
+  // Normalize here too, not just in the soft-return parser: this fast path
+  // owns single-token paragraphs, whose action text may still carry \r/\v
+  // continuation breaks. Without it the two parsers would hand back the same
+  // action with different line-break spellings, and doc-vs-sheet action-text
+  // comparisons would spuriously differ (gts-dou2).
+  var fullText   = _normalizeLineEndings(para.getText()).replace(/\n$/, '');
   var tokenMatch = fullText.match(/^AI-(\d+):\s*/);
   if (!tokenMatch) return null;
 
@@ -665,6 +670,36 @@ function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
 }
 
 /**
+ * Normalizes soft-return line-ending variants (\r, \r\n, \v — DocumentApp
+ * represents Shift+Enter differently across GAS runtime versions) to a plain
+ * \n. Shared core used by every paragraph scanner and by the sheet-write
+ * normalizers in WebApp.js, so the doc-side and sheet-side notion of "one
+ * line break" never drifts apart (gts-dou2).
+ */
+function _normalizeLineEndings(text) {
+  return (text || '').replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n');
+}
+
+/**
+ * Inverse of _normalizeLineEndings for the flush (sheet -> doc) direction:
+ * turns each normalized \n into the one character the Docs REST API's
+ * insertText accepts as a genuine soft line break inside a single paragraph,
+ * U+000B (vertical tab) — the same break Shift+Enter produces in the editor.
+ *
+ * Why U+000B specifically (gts-dr8j): InsertTextRequest documents that
+ * "some control characters (U+0000-U+0008, U+000C-U+001F) ... will be stripped
+ * out of the inserted text". That is exactly why the earlier \r-based attempt
+ * concatenated the lines with no separator at all (gts-kkm7.5) — \r is U+000D,
+ * inside the stripped range. \n (U+000A) survives but is documented to
+ * "implicitly create a new Paragraph", i.e. a hard return. U+000B is the only
+ * line-break character that is neither stripped nor paragraph-splitting.
+ */
+function _toSoftReturnText(text) {
+  if (!text) return text;
+  return _normalizeLineEndings(text).replace(/\n/g, '\v').trim();
+}
+
+/**
  * Scans all paragraphs in a table's cells for AI-N: tokens, appending any
  * found to `actions`.  Only call this for non-tracker tables.
  */
@@ -697,9 +732,7 @@ function _collectTableCellActions(table, tableBodyIdx, docId, actions, seenN) {
  * single-token fast path in _collectActionsFromParagraph.
  */
 function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText) {
-  // Normalize all line-separator variants (soft returns in DocumentApp may be
-  // \r, \r\n, or \v depending on the GAS runtime version).
-  var normalized = fullText.replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n');
+  var normalized = _normalizeLineEndings(fullText);
   var lines   = normalized.split('\n');
   var results = [];
   var curN    = null;
@@ -765,10 +798,8 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
  * Appends any found actions to the `actions` array in place.
  */
 function _collectActionsFromParagraph(para, bodyIdx, docId, seenN, actions) {
-  // Normalize line endings before scanning so \r, \r\n, and \v (soft return
-  // variants across GAS runtime versions) all work.
   var raw  = para.getText();
-  var text = raw.replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n').replace(/\n$/, '');
+  var text = _normalizeLineEndings(raw).replace(/\n$/, '');
   var tokenCount = (text.match(/(?:^|\n)AI-\d+:/g) || []).length;
   if (tokenCount === 0) return;
 
@@ -860,7 +891,7 @@ function _collectTokenParagraphs(body) {
 
   function scanPara(para) {
     var raw   = para.getText();
-    var text  = raw.replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n').replace(/\n$/, '');
+    var text  = _normalizeLineEndings(raw).replace(/\n$/, '');
     var lines = text.split('\n');
     var lineOffset = 0;
     for (var li = 0; li < lines.length; li++) {
@@ -2022,16 +2053,16 @@ function _buildFlushRequests(occurrence, item) {
   var validEmail = item.assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.assigneeEmail);
   var tokenLen   = ('AI-' + item.N + ': ').length;
   var pEnd       = occurrence.pEnd;
-  // actionText sourced from a live doc rescan (sidebar/preview-card status
-  // taps) carries the document's raw soft-return characters, unlike actionText
-  // sourced from the sheet (already collapsed by WebApp.js's
-  // _normalizeActionText at every sheet-write site, gts-2eui/755o). A
-  // bare \n here would create a hard paragraph break via insertText below; an
-  // unrecognized \r/\v is silently dropped, concatenating lines with no
-  // separator (gts-kkm7.5). Normalizing here, the one place every flush
-  // call site funnels through, makes the sheet-side normalization redundant
-  // but harmless (idempotent) rather than load-bearing for this path.
-  var actionText = _normalizeActionText(item.actionText);
+  // actionText arrives with two different line-break spellings depending on
+  // its source: the document's raw soft-return character (\r or \v) on a live
+  // doc rescan (sidebar/preview-card status taps), or a plain \n from the
+  // sheet (WebApp.js's _normalizeActionText). _toSoftReturnText folds both to
+  // the single spelling insertText below reproduces as a real soft return,
+  // U+000B — a bare \n would split the paragraph and a bare \r would be
+  // stripped outright (gts-dr8j, superseding the space-collapse of
+  // gts-kkm7.5). This is the one place every flush call site funnels through,
+  // so no caller has to know which spelling it holds.
+  var actionText = _toSoftReturnText(item.actionText);
   // insertAt: for simple paragraphs this equals pStart; for soft-return
   // paragraphs it is the document index right after the preceding \n, which
   // also clears any image placed there by a previous flush.
