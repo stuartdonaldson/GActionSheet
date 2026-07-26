@@ -350,6 +350,23 @@ class UiDriver:
         self._page.reload()
         self._page.wait_for_selector(".docs-title-outer", timeout=30000)
 
+    def _wait_card_body_populated(self, card_frame: _PwFrameLocator, timeout_ms: int) -> None:
+        """Wait until the card iframe body is visible AND has rendered text.
+
+        GTaskSheet-4d50: a stale or mid-render card iframe body can satisfy
+        state="visible" before its content has actually painted (dismissed
+        card's frame lingering, or the replacement card's content not yet
+        flushed) — polling callers that treat "visible" alone as "ready"
+        return a card whose body reads as empty. Require non-empty text too.
+        """
+        body = card_frame.locator(_CARD_BODY).first
+        body.wait_for(state="visible", timeout=timeout_ms)
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        while not body.inner_text().strip():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("card body visible but empty")
+            time.sleep(0.1)
+
     # ------------------------------------------------------------------
     # locate — builds a Playwright locator (lazy, no DOM touch)
     # ------------------------------------------------------------------
@@ -455,9 +472,7 @@ class UiDriver:
         last_err: Exception | None = None
         while time.monotonic() < deadline:
             try:
-                card_frame.locator(_CARD_BODY).first.wait_for(
-                    state="visible", timeout=1000
-                )
+                self._wait_card_body_populated(card_frame, 1000)
                 card = Card(card_frame)
                 self._current_card = card
                 return card
@@ -540,7 +555,7 @@ class UiDriver:
         _place_cursor_on_link()
         while time.monotonic() < deadline:
             try:
-                card_frame.locator(_CARD_BODY).first.wait_for(state="visible", timeout=8000)
+                self._wait_card_body_populated(card_frame, 8000)
                 card = Card(card_frame)
                 self._current_card = card
                 return card
