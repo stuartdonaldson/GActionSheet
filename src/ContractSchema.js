@@ -124,6 +124,12 @@ var CONTRACT_SCHEMA = Object.freeze({
     testRouteNames: Object.freeze([
       'edit_action_row',          // the §16.9 `edit_sheet` act
       'find_sheet_actions',       // the §16.9 `find_sheet_actions` read query
+      'dump_doc_paragraphs',      // read-only Docs structural dump for paragraph-
+                                   // boundary diagnosis (flush merge defects)
+      'read_team_actions',        // gts-79dw.4.11: the team-scoped reader's full
+                                   // filter surface, for capturing the View A
+                                   // (gts-79dw.4.7) review fixture — kept off the
+                                   // production list_importable_actions contract
       'verify_chip_integrity',    // post-sync doc chip assertion (6ov.8)
       'import_selected_for_test', // gts-8qe5: interactive-test-entry-point for
                                    // AC-2/AC-3 (Import tab CHECK_BOX selection cannot be
@@ -235,6 +241,25 @@ var CONTRACT_SCHEMA = Object.freeze({
         request:  Object.freeze(['action', 'testToken', 'testDocId', 'globalIds']),
         response: Object.freeze(['ok', 'inserted', 'baseN']),
         completionSignal: "synchronous response; same as _submitImport's IMPORT_SELECTED.done"
+      }),
+
+      // read_team_actions — gts-79dw.4.11 test-only route over the shared
+      // team-scoped reader (_readTeamActions). Read-only; testToken-gated with
+      // no team-access gate of its own. `teamId` or `docId` (resolved to a team
+      // via its DocData row) selects the scope; statusFilter 'open'|'closed'|
+      // 'all', windowDays (age limit on resolved rows), excludeDocId and
+      // assigneeEmail are the narrowings. Rows carry the full reader projection
+      // (list_importable_actions' fields plus modified_date and the status_*
+      // display fields), sorted doc_name ASC then AI-N ASC. Each row carries
+      // getStatusDisplay()'s bucket/resolved/icon for its status so no consumer
+      // re-derives the bucketing; `statusOptions` is getStatusIconButtons(),
+      // the same canonical picker list the sidebar offers.
+      //   Completion signal: synchronous response; GasLogger 'teamActions.read'.
+      read_team_actions: Object.freeze({
+        request:  Object.freeze(['action', 'testToken', 'teamId', 'docId', 'statusFilter',
+                                 'windowDays', 'excludeDocId', 'assigneeEmail']),
+        response: Object.freeze(['ok', 'teamId', 'rows', 'statusOptions']),
+        completionSignal: 'synchronous response; rows scoped to teamId under the requested filters'
       }),
 
       // forward_action_rows_test — gts-apcu test-only route. Same

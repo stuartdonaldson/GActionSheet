@@ -14,7 +14,7 @@
  * Admin SDK fallback see whatever the deployer can see, same as any other
  * WebApp route in this project.
  *
- * See ../docs/verified-board-portal-plan.md §6 for the full spike contract,
+ * See ../docs/verified-team-portal-plan.md §6 for the full spike contract,
  * assumptions (A4/A5/A6), and the test matrix.
  */
 

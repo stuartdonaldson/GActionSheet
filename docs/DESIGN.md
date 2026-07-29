@@ -348,11 +348,14 @@ interaction; the synchronisation behaviour is implemented in EPIC-B.
 
 | Column | Purpose |
 |--------|---------|
-| Team Id | Stable team identifier; equals the Team's Folder Id (e.g. `Board`, `Membership`). Display name and identity are currently the same field; a separate `Team Name` display field is a future addition. |
+| Team Id | Stable team identifier — a short name (e.g. `Board`, `Membership`), **not** a folder ID. Display name and identity are currently the same field; a separate `Team Name` display field is a future addition. |
 | Folder Id | Drive folder ID owned by this team; the folder-walk match key |
 | Contact | Team contact for coordination/notifications |
 
-Multiple rows may share a Team Id (a team may own several folders).
+Multiple rows may share a Team Id (a team may own several folders). A Folder Id therefore
+identifies at most a *fraction* of a team, never a team — any lookup that resolves a team by
+taking the first matching row is wrong for a multi-folder team. Team is the unit of scope;
+`Board` is one example Team Id, not a distinct concept.
 
 ### DocData tab (per-document sync state)
 

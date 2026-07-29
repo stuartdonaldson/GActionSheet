@@ -22,6 +22,10 @@ Ideas not yet evaluated. One-liners only. To advance: evaluate at planning revie
 - Status preset view — sheet view hiding Closed actions for daily triage
 - Document health indicator — warn when a document in scope is missing `=== Tracked Actions ===`
 - Bulk re-sync — on-demand full scan ignoring the 7-day discovery window (for initial migration of older documents)
+- Team portal: filter state in the URL — status/scope/window/team encoded so a view is shareable and bookmarkable (gate delta, gts-79dw.4.7 review 2026-07-27)
+- Team portal: "last synced" timestamp on each document header, next to the sync control (gate delta, same review)
+- Team portal: sync every document in the team from View A, as one action (gate delta, same review)
+- Off-vocabulary status digest — surface to a team lead which free-text statuses people are actually typing, since bucketing hides them (gate delta, same review)
 
 ## Review
 Initiatives with a lean business case under value/risk evaluation.

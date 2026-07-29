@@ -81,11 +81,46 @@ var GasLogger = (function () {
     );
   }
 
+  // Script-property flag name (gts-pfyx). Deliberately NOT another GasLogger.log()
+  // call -- a self-report event would flow back through this same _postToAxiom
+  // path (flattened into new `data` columns) and could itself be rejected by the
+  // same column-limit problem it's reporting. Script properties have no such
+  // limit, so this is the one channel guaranteed to work even when Axiom ingest
+  // is fully wedged. Logger.log (Stackdriver, via `clasp logs`) remains the other.
+  var AXIOM_DEGRADED_PROP = 'AXIOM_INGEST_DEGRADED';
+
+  function _setAxiomDegraded(status, bodyText, entries) {
+    var tags = [];
+    for (var i = 0; i < entries.length && tags.length < 5; i++) {
+      if (tags.indexOf(entries[i].tag) === -1) tags.push(entries[i].tag);
+    }
+    var info = {
+      ts: new Date().toISOString(),
+      status: status,
+      body: (bodyText || '').slice(0, 300),
+      sampleTags: tags,
+    };
+    try {
+      PropertiesService.getScriptProperties().setProperty(AXIOM_DEGRADED_PROP, JSON.stringify(info));
+    } catch (err) {
+      Logger.log('GasLogger: failed to set ' + AXIOM_DEGRADED_PROP + ': ' + err);
+    }
+  }
+
+  function _clearAxiomDegraded() {
+    try {
+      var props = PropertiesService.getScriptProperties();
+      if (props.getProperty(AXIOM_DEGRADED_PROP)) props.deleteProperty(AXIOM_DEGRADED_PROP);
+    } catch (err) {
+      Logger.log('GasLogger: failed to clear ' + AXIOM_DEGRADED_PROP + ': ' + err);
+    }
+  }
+
   function _postToAxiom(entries) {
     var config = _getAxiomConfig();
     var token = config.token;
     var dataset = config.dataset;
-    if (!token || !dataset) return;
+    if (!token || !dataset) return true;
     try {
       var rows = entries.map(function (e) {
         var row = Object.assign({ _time: e.ts, name: e.tag, side: 'gas', app: 'gactionsheet', version: e.version }, e.data || {});
@@ -107,11 +142,21 @@ var GasLogger = (function () {
         // Visible in `clasp logs` (Stackdriver) only -- never recurse through
         // GasLogger.log() itself. Intentionally NOT written to Drive either --
         // a broken Axiom pipe is meant to surface as a test timeout, not be
-        // silently absorbed by a file fallback (gts-ishz.2/ishz.3).
-        Logger.log('GasLogger: Axiom ingest non-2xx ' + resp.getResponseCode() + ': ' + resp.getContentText());
+        // silently absorbed by a file fallback (gts-ishz.2/ishz.3). It IS,
+        // however, surfaced via AXIOM_DEGRADED_PROP (gts-pfyx) so a human or
+        // test harness can cheaply check "is Axiom ingest currently broken"
+        // instead of only discovering it as an unexplained 60s test timeout.
+        var bodyText = resp.getContentText();
+        Logger.log('GasLogger: Axiom ingest non-2xx ' + resp.getResponseCode() + ': ' + bodyText);
+        _setAxiomDegraded(resp.getResponseCode(), bodyText, entries);
+        return false;
       }
+      _clearAxiomDegraded();
+      return true;
     } catch (err) {
       Logger.log('GasLogger: Axiom POST threw: ' + err);
+      _setAxiomDegraded('exception', String(err), entries);
+      return false;
     }
   }
 
@@ -149,15 +194,33 @@ var GasLogger = (function () {
       if (_entries.length >= FLUSH_THRESHOLD) this.flush();
     },
 
+    // Returns true if the flush's sink write succeeded (or there was nothing to
+    // flush), false if the Axiom POST came back non-2xx / threw (gts-pfyx --
+    // previously this was never surfaced to the caller at all).
     flush: function () {
-      if (_entries.length === 0) return;
+      if (_entries.length === 0) return true;
       var axiom = _getAxiomConfig();
+      var ok = true;
       if (axiom.token && axiom.dataset) {
-        _postToAxiom(_entries);
+        ok = _postToAxiom(_entries);
       } else {
         _writeToFile(_entries);
       }
       _entries = [];
+      return ok;
+    },
+
+    // Cheap health check for a human or test harness: null if Axiom ingest is
+    // (as far as we know) fine, else { ts, status, body, sampleTags } describing
+    // the most recent ingest failure (gts-pfyx). Does not itself call Axiom.
+    getAxiomHealth: function () {
+      var raw = PropertiesService.getScriptProperties().getProperty(AXIOM_DEGRADED_PROP);
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch (err) {
+        return { ts: null, status: 'unparseable', body: raw, sampleTags: [] };
+      }
     },
   };
 })();

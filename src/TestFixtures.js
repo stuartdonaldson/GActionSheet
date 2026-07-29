@@ -441,6 +441,79 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
 }
 
 /**
+ * Test-harness signer for gts-79dw.4.18's assertion verifier
+ * (_verifySignedAssertion, src/AccessControl.js). Mirrors NUUC-Dispatch's
+ * own Assertion_issue (../NUUC-Dispatch/src/Assertion.js) exactly on the
+ * happy path, but exposes every claim as an override so negative tests can
+ * construct a deliberately-wrong assertion (bad aud, unknown kid, expired
+ * exp, wrong alg, tampered signature) -- all signed with the REAL Script
+ * Property secret so a positive-path test proves the verifier actually
+ * accepts a correctly-signed token, not just rejects everything.
+ *
+ * Reads the secret from Script Properties (never accepts one from the
+ * caller, never returns it) -- if the named `kid` property doesn't exist
+ * yet, returns {ok:false, error:'missing_secret'} so the caller can report
+ * that as a blocking provisioning gap rather than silently signing with a
+ * fabricated key.
+ *
+ * @param {Object} opts
+ * @param {string}  [opts.sub]
+ * @param {string}  [opts.email]
+ * @param {boolean} [opts.emailVerified]
+ * @param {string}  [opts.aud]              default 'gactionsheet'
+ * @param {string}  [opts.iss]              default 'nuuc-dispatch'
+ * @param {string}  [opts.kid]              default 'ASSERTION_KEY_GACTIONSHEET_1'
+ * @param {string}  [opts.alg]              default 'HS256'
+ * @param {number}  [opts.exp]              default now+3600 (Unix seconds)
+ * @param {boolean} [opts.tamperSignature]  flips one signature char if true
+ * @returns {{ok: true, assertion: string} | {ok: false, error: string, kid: string}}
+ */
+function _tfMintAssertion(opts) {
+  opts = opts || {};
+  var kid = opts.kid || 'ASSERTION_KEY_GACTIONSHEET_1';
+  var secret = PropertiesService.getScriptProperties().getProperty(kid);
+  if (!secret) {
+    return { ok: false, error: 'missing_secret', kid: kid };
+  }
+
+  var now = Math.floor(Date.now() / 1000);
+  var header = {
+    alg: opts.alg || 'HS256',
+    typ: 'JWT',
+    kid: kid
+  };
+  var payload = {
+    iss:            opts.iss !== undefined ? opts.iss : 'nuuc-dispatch',
+    sub:            opts.sub || 'test-sub-001',
+    email:          opts.email || 'test-assertion@example.com',
+    email_verified: opts.emailVerified !== false,
+    aud:            opts.aud !== undefined ? opts.aud : 'gactionsheet',
+    iat:            now,
+    exp:            opts.exp !== undefined ? opts.exp : (now + 3600)
+  };
+
+  function b64urlFromString(str) {
+    return Utilities.base64EncodeWebSafe(str).replace(/=+$/, '');
+  }
+
+  var headerSeg  = b64urlFromString(JSON.stringify(header));
+  var payloadSeg = b64urlFromString(JSON.stringify(payload));
+  var signingInput = headerSeg + '.' + payloadSeg;
+  var sigBytes = Utilities.computeHmacSha256Signature(signingInput, secret);
+  var sigSeg = Utilities.base64EncodeWebSafe(sigBytes).replace(/=+$/, '');
+
+  if (opts.tamperSignature) {
+    // Flip the first character so the signature provably no longer matches
+    // -- exercises the bad-signature negative path without ever needing to
+    // know (or guess) the real secret client-side.
+    var flipped = sigSeg.charAt(0) === 'A' ? 'B' : 'A';
+    sigSeg = flipped + sigSeg.substring(1);
+  }
+
+  return { ok: true, assertion: signingInput + '.' + sigSeg };
+}
+
+/**
  * Builds a sheet row array in SHEET_HEADERS order.
  *
  * SHEET_HEADERS = [globalId, ID, Assignee Email, Assignee Name, Action,
@@ -1971,6 +2044,42 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'edit_cell_via_trigger': {
+        // Writes a cell on the Actions tab and then invokes onActionSheetEdit
+        // with a real Range, driving the SAME entry point a user's spreadsheet
+        // edit fires. Distinct from the edit_action_row route, which only
+        // stamps Dirty and never runs the trigger (doPost writes cannot fire an
+        // installable trigger), so it cannot exercise _syncSheetRowToDoc.
+        // data: { globalId, field: 'action_text'|'status'|'assignee_email'|'assignee_name', value }
+        var ecGid    = data.globalId || '';
+        var ecField  = data.field    || 'action_text';
+        var ecValue  = data.value    || '';
+        var ecSheet  = ss.getSheetByName('Actions');
+        var ecCol    = CONTRACT_SCHEMA.sheetAction.columnsByField[ecField];
+        var ecRow    = -1;
+        if (ecSheet && ecCol) {
+          var ecLast = ecSheet.getLastRow();
+          if (ecLast >= 2) {
+            var ecIds = ecSheet.getRange(2, CONTRACT_SCHEMA.sheetAction.columnsByField.global_id, ecLast - 1, 1).getValues();
+            for (var eci = 0; eci < ecIds.length; eci++) {
+              if (String(ecIds[eci][0] || '') === ecGid) { ecRow = eci + 2; break; }
+            }
+          }
+        }
+        if (ecRow > 0) {
+          var ecRange = ecSheet.getRange(ecRow, ecCol);
+          ecRange.setValue(ecValue);
+          SpreadsheetApp.flush();
+          onActionSheetEdit({ range: ecRange });
+        }
+        _TF_RESULT = {
+          tag:  'fixture.edit_cell_via_trigger',
+          data: { globalId: ecGid, field: ecField, row: ecRow, applied: ecRow > 0 }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'get_docdata_row': {
         // Returns the DocData row for fileId (default testDocId), or null (gts-me6w.6).
         var gddFileId = data.fileId || testDocId;
@@ -2061,42 +2170,56 @@ function setupTestFixtures(scenario, data) {
         // (gts-me6w.6). Folder IDs are persisted in script properties so
         // repeat runs reuse the same Drive folders.
         //
-        //   testTeamA (parent, registered TestTeamA)
-        //   |- testTeamAChild (child, registered TestTeamAChild)
+        //   testTeamA (parent, registered TestTeamScopeA)
+        //   |- testTeamAChild (child, registered TestTeamScopeAChild)
         //   `- testTeamAMid (unregistered)
         //      `- testTeamADeep (unregistered, no TeamData row)
         //
         //   testTeamNoTeam (sibling of testTeamA, unregistered, no TeamData
         //   row) — used by S2/S6 for the folder-walk no-match path
         //   (gts-u2np).
+        //
+        // NOTE (gts-vc3m): this fixture's own teamId literals are
+        // 'TestTeamScopeA'/'TestTeamScopeAChild' -- distinct from the
+        // separately-provisioned live multi-folder ACL fixture (gts-79dw.4.16,
+        // docs/verified-team-portal-plan.md §6a), which independently uses
+        // teamId 'TestTeamA' for its own two folder rows. The script-property
+        // keys below (TEAMSCOPE_FOLDER_SCOPE_*) are deliberately distinct from
+        // the legacy TEAMSCOPE_FOLDER_* keys this fixture used to write, which
+        // had come to point at the exact same Drive folder the .4.16 ACL
+        // fixture reuses (folder 1) -- reusing that folder here would leave
+        // two TeamData rows with different teamIds pointing at the same
+        // Folder Id, making _walkFolderForTeam's folder-walk match
+        // order-dependent. Using fresh property keys forces this fixture onto
+        // its own, non-shared Drive folders.
         var stsfProps = PropertiesService.getScriptProperties();
 
         var stsfRootIter = DriveApp.getFileById(testSheetId).getParents();
         var stsfRoot = stsfRootIter.hasNext() ? stsfRootIter.next() : DriveApp.getRootFolder();
 
-        var stsfParentId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A');
+        var stsfParentId = stsfProps.getProperty('TEAMSCOPE_FOLDER_SCOPE_A');
         var stsfParent = stsfParentId ? DriveApp.getFolderById(stsfParentId)
                                        : stsfRoot.createFolder('GActionSheet Test - TeamScope A');
         stsfParentId = stsfParent.getId();
-        stsfProps.setProperty('TEAMSCOPE_FOLDER_A', stsfParentId);
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_SCOPE_A', stsfParentId);
 
-        var stsfChildId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A_CHILD');
+        var stsfChildId = stsfProps.getProperty('TEAMSCOPE_FOLDER_SCOPE_A_CHILD');
         var stsfChild = stsfChildId ? DriveApp.getFolderById(stsfChildId)
                                      : stsfParent.createFolder('GActionSheet Test - TeamScope A Child');
         stsfChildId = stsfChild.getId();
-        stsfProps.setProperty('TEAMSCOPE_FOLDER_A_CHILD', stsfChildId);
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_SCOPE_A_CHILD', stsfChildId);
 
-        var stsfMidId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A_MID');
+        var stsfMidId = stsfProps.getProperty('TEAMSCOPE_FOLDER_SCOPE_A_MID');
         var stsfMid = stsfMidId ? DriveApp.getFolderById(stsfMidId)
                                  : stsfParent.createFolder('GActionSheet Test - TeamScope A Mid');
         stsfMidId = stsfMid.getId();
-        stsfProps.setProperty('TEAMSCOPE_FOLDER_A_MID', stsfMidId);
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_SCOPE_A_MID', stsfMidId);
 
-        var stsfDeepId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A_DEEP');
+        var stsfDeepId = stsfProps.getProperty('TEAMSCOPE_FOLDER_SCOPE_A_DEEP');
         var stsfDeep = stsfDeepId ? DriveApp.getFolderById(stsfDeepId)
                                    : stsfMid.createFolder('GActionSheet Test - TeamScope A Deep');
         stsfDeepId = stsfDeep.getId();
-        stsfProps.setProperty('TEAMSCOPE_FOLDER_A_DEEP', stsfDeepId);
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_SCOPE_A_DEEP', stsfDeepId);
 
         // No-team folder (gts-u2np): the live TeamData row
         // 'TestGActionSheet' registers stsfRoot itself (testSheetId's parent
@@ -2109,7 +2232,7 @@ function setupTestFixtures(scenario, data) {
         stsfNoTeamId = stsfNoTeam.getId();
         stsfProps.setProperty('TEAMSCOPE_FOLDER_NOTEAM_ROOT', stsfNoTeamId);
 
-        // Idempotent TeamData rows: TestTeamA -> A, TestTeamAChild -> Child
+        // Idempotent TeamData rows: TestTeamScopeA -> A, TestTeamScopeAChild -> Child
         var stsfTeamSheet = _getOrCreateSheet(ss, 'TeamData');
         if (stsfTeamSheet.getLastRow() < 1) {
           stsfTeamSheet.getRange(1, 1, 1, 3).setValues([['Team Id', 'Folder Id', 'Contact']]).setFontWeight('bold');
@@ -2117,12 +2240,12 @@ function setupTestFixtures(scenario, data) {
         var stsfRows = _readTeamDataRows(ss);
         var stsfHasA = false, stsfHasChild = false;
         for (var stsfI = 0; stsfI < stsfRows.length; stsfI++) {
-          if (stsfRows[stsfI].teamId === 'TestTeamA') stsfHasA = true;
-          if (stsfRows[stsfI].teamId === 'TestTeamAChild') stsfHasChild = true;
+          if (stsfRows[stsfI].teamId === 'TestTeamScopeA') stsfHasA = true;
+          if (stsfRows[stsfI].teamId === 'TestTeamScopeAChild') stsfHasChild = true;
         }
         var stsfNewRows = [];
-        if (!stsfHasA) stsfNewRows.push(['TestTeamA', stsfParentId, '']);
-        if (!stsfHasChild) stsfNewRows.push(['TestTeamAChild', stsfChildId, '']);
+        if (!stsfHasA) stsfNewRows.push(['TestTeamScopeA', stsfParentId, '']);
+        if (!stsfHasChild) stsfNewRows.push(['TestTeamScopeAChild', stsfChildId, '']);
         if (stsfNewRows.length > 0) {
           var stsfLastRow = stsfTeamSheet.getLastRow();
           stsfTeamSheet.getRange(stsfLastRow + 1, 1, stsfNewRows.length, 3).setValues(stsfNewRows);
@@ -2266,6 +2389,33 @@ function setupTestFixtures(scenario, data) {
         var ppsuE = { triggerUid: null };
         _processPendingSheetUpdates(ppsuE);
         _TF_RESULT = { tag: 'fixture.process_pending_sheet_updates', data: { ok: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'mint_test_assertion': {
+        // gts-79dw.4.18 test harness: mints an HS256 signed identity
+        // assertion using the SAME Script Property secret
+        // _verifySignedAssertion (src/AccessControl.js) reads at verify time,
+        // so tests/test_*.py can construct real positive AND deliberately
+        // broken negative assertions without a live NUUC-Dispatch round
+        // trip. Gated the same way as every other fixture (run_fixture's
+        // TEST_TOKEN check, _handleRunFixture in TestWebApp.js) -- no new
+        // gating mechanism. Never returns the secret itself, only the
+        // finished signed token; a missing Script Property is reported back
+        // as {ok:false, error:'missing_secret'} rather than fabricated.
+        var mtaResult = _tfMintAssertion({
+          sub:             data.sub,
+          email:           data.email,
+          emailVerified:   data.emailVerified,
+          aud:             data.aud,
+          iss:             data.iss,
+          kid:             data.kid,
+          alg:             data.alg,
+          exp:             data.exp,
+          tamperSignature: data.tamperSignature
+        });
+        _TF_RESULT = { tag: 'fixture.mint_test_assertion', data: mtaResult };
         docAlreadyClosed = true;
         break;
       }
