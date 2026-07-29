@@ -1108,7 +1108,12 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
       docTitle:           docTitle,
       docId:              docId || '',
       docState:           docState,
-      allDocGlobalIds: allDocGlobalIds || []
+      allDocGlobalIds: allDocGlobalIds || [],
+      // Explicit "the document was actually scanned" assertion (gts-aiaz).
+      // Distinguishes a legitimate empty-document sync (docState=[],
+      // allDocGlobalIds=[], scanned=true) from a payload that simply omits
+      // both fields — which must NOT be read as "delete everything".
+      scanned:            true
     })
   });
 

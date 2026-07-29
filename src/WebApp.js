@@ -911,8 +911,17 @@ function _rowIdentityKey(assigneeEmail, action, status) {
  * current ActionSheet rows using the last-sync timestamp as the conflict anchor.
  *
  * Payload shape:
- *   { secret, action: 'sync_action_rows', docUrl, docTitle,
+ *   { secret, action: 'sync_action_rows', docUrl, docTitle, scanned,
  *     docState: [{ globalId, assigneeEmail, assigneeName, actionText, status }] }
+ *
+ * `scanned: true` is the caller's explicit assertion that the document was
+ * actually scanned and docState/allDocGlobalIds reflect its real contents
+ * (SyncManager.js's _syncActionRows always sets it, including for a
+ * legitimately empty document). Without it, orphan detection — which marks
+ * every row missing from docState 'Deleted' — is skipped, so a payload that
+ * simply omits docState/allDocGlobalIds (e.g. a hand-made maintenance call
+ * sending only {action, docId, secret}) cannot be misread as "document is
+ * empty, delete everything" (gts-aiaz).
  *
  * Response shape:
  *   { upserted, updated, sheetWins: [{ globalId, action, status, assigneeEmail }] }
@@ -957,6 +966,7 @@ function _handleSyncActionRows(payload) {
   var docId               = payload.docId    || '';
   var docState            = payload.docState || [];
   var allDocGlobalIds = payload.allDocGlobalIds || [];
+  var scanned              = payload.scanned === true;
 
   // Build a set for O(1) membership checks.
   var activeGlobalIdSet = {};
@@ -1050,7 +1060,16 @@ function _handleSyncActionRows(payload) {
     }
 
     // Detect orphaned rows: rows for this doc whose globalId is gone from the doc.
-    if (docId) {
+    // Gated on `scanned` (gts-aiaz) — without an explicit assertion that the
+    // document was actually scanned, docState=[]/allDocGlobalIds=[] is
+    // indistinguishable from "caller omitted these fields" and must NOT be
+    // read as "every row is orphaned".
+    if (docId && !scanned) {
+      GasLogger.log('sync.orphanDetection.skipped', {
+        msg: 'sync_action_rows payload missing scanned:true; orphan detection skipped', docId: docId
+      });
+    }
+    if (docId && scanned) {
       for (var gId in existingMap) {
         if (docStateByGlobalId[gId]) continue;
         var entry = existingMap[gId];
