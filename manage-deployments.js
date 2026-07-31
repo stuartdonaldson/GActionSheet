@@ -62,6 +62,11 @@ function stampVersionInfo(target, url) {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  // env is the source of truth (a real BUILD_INFO field, read by GasLogger.js
+  // into a top-level Axiom 'env' column); the (TEST)/(DEV) version-string
+  // suffix is a human-readable derivative of it, not the other way around --
+  // Axiom queries should filter on env=='test', not substring-match version.
+  const env = target === 'test' ? 'test' : target === 'dev' ? 'dev' : 'production';
   const suffix = target === 'test' ? ' (TEST)' : target === 'dev' ? ' (DEV)' : '';
   const versionStr = `${appVersion} (Rev. ${dateStr} ${timeStr})${suffix}`;
 
@@ -70,6 +75,7 @@ function stampVersionInfo(target, url) {
   data = data.replace(/version: "[^"]*"/, `version: "${versionStr}"`);
   data = data.replace(/buildDate: "[^"]*"/, `buildDate: "${now.toISOString()}"`);
   data = data.replace(/webappUrl: "[^"]*"/, `webappUrl: "${url}"`);
+  data = data.replace(/env: "[^"]*"/, `env: "${env}"`);
   fs.writeFileSync(versionPath, data, 'utf8');
 
   console.log(`\n📝 Version stamped: ${versionStr}`);

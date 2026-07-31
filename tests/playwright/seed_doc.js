@@ -19,11 +19,12 @@
 const { chromium } = require('@playwright/test');
 const path = require('path');
 const fs = require('fs');
+const { resolveAuthFile } = require('../../scripts/playwright-auth');
 
 const settings = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', '..', 'local.settings.json'), 'utf8')
 );
-const storageState = path.join(__dirname, '..', '..', '.auth', 'user.json');
+const storageState = resolveAuthFile('primary', { projectRoot: path.join(__dirname, '..', '..') });
 
 // ---------------------------------------------------------------------------
 

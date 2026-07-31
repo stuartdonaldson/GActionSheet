@@ -122,10 +122,53 @@ var GasLogger = (function () {
     var dataset = config.dataset;
     if (!token || !dataset) return true;
     try {
+      // Every event's payload nests under one 'data' field rather than being
+      // spread as top-level keys (gts-pfyx follow-up). The 'nuuts' dataset hit
+      // its 256-field schema limit because each distinct e.data key, across
+      // ~100+ call sites, minted a permanent new column -- and a dynamic-key
+      // payload (e.g. WebApp.js markedByDocId, one key per docId ever seen)
+      // grows that count without bound. Configure 'data' as an Axiom map
+      // field (dataset settings, once) so its many sub-keys count as a single
+      // field regardless of how many distinct event shapes flow through it.
+      // Query with data.foo / data['foo'] (see scripts/query_axiom.py).
+      //
+      // A handful of fields stay real top-level columns instead of nesting,
+      // because they're exactly what queries filter/group by, and a single
+      // column with many distinct VALUES is fine -- unlike markedByDocId,
+      // this never mints a new COLUMN per value:
+      //   - env: 'test'/'dev'/'production' (BUILD_INFO.env, Version.js) --
+      //     previously only readable by substring-matching the free-text
+      //     'version' field ("... (TEST)"); now a clean equality filter.
+      //   - docId / docIds: hoisted out of e.data when present, since "every
+      //     event touching document X" is the single most common cross-
+      //     event query shape. Removed from the nested 'data' copy so there
+      //     is one source of truth per event, not two copies that could
+      //     drift.
+      //   - eu: acting-user email (WebApp.js's _getIdentity().eu), hoisted
+      //     for the same reason -- "every event by user X" is a common
+      //     cross-event query shape, and a single column with many distinct
+      //     VALUES is fine here too.
+      var _HOISTED_KEYS = ['docId', 'docIds', 'eu'];
       var rows = entries.map(function (e) {
-        var row = Object.assign({ _time: e.ts, name: e.tag, side: 'gas', app: 'gactionsheet', version: e.version }, e.data || {});
+        var payload = e.data || {};
+        var row = {
+          _time: e.ts, name: e.tag, side: 'gas', app: 'gactionsheet',
+          version: e.version,
+          env: (typeof BUILD_INFO !== 'undefined' && BUILD_INFO.env) || 'unknown',
+        };
         if (e.op) row.op = e.op;
         if (e.parentOp) row.parentOp = e.parentOp;
+        var rest = {};
+        var hoistedAny = false;
+        for (var k in payload) {
+          if (_HOISTED_KEYS.indexOf(k) !== -1) {
+            row[k] = payload[k];
+            hoistedAny = true;
+          } else {
+            rest[k] = payload[k];
+          }
+        }
+        row.data = hoistedAny ? rest : payload;
         return row;
       });
       var resp = UrlFetchApp.fetch(

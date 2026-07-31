@@ -13,6 +13,18 @@ The same script also hosts the **automation feature set** (timed sweep trigger, 
 
 No server infrastructure. No separate projects. One push updates both deployment modes.
 
+### Test vs. Prod: what's actually isolated
+
+`pnpm run deploy:test` and `pnpm run deploy:prod` repoint two different **Web App deployments** (`TEST-WEB-APP` / production), each with its own deployment ID and URL, each serving whatever code was pushed to HEAD at the moment that deployment was last repointed. That per-deployment pinning is real for Web App (`doGet`/`doPost`) traffic — a caller hitting the TEST URL keeps getting the code snapshot from the last `deploy:test`, even after a later `clasp push`, until TEST is repointed again.
+
+**Installable triggers do not have this isolation.** Time-based triggers (`syncAll`) and the `onEdit` trigger always execute against the script's HEAD — the single most-recently-pushed version of the code — regardless of which Web App deployment (test or prod) is currently pinned to which version. There is exactly one script project (`scriptId` above) and one HEAD; a trigger created via `ScriptApp.newTrigger()` (as `TriggerManager.js` does) is not bound to a specific deployment ID. So a `clasp push` made while iterating on TEST immediately changes what code the trigger runs in production too — there is no trigger-level separation between "test" and "prod" today.
+
+Practically, the real difference between the TEST and production deployments is **which population of users is calling which URL**, not which code is running in the background:
+- **TEST** — the URL/version used during active development and by `pytest`; also what add-on users enrolled in the test program are pointed at.
+- **Production** — the URL/version tied to the production, user-installable add-on listing in the Google Workspace Marketplace / GCP project; the population that installed the real add-on.
+
+Consequence for anyone touching `TriggerManager.js` or reasoning about trigger behavior: don't assume "test" and "prod" trigger executions can be told apart or gated independently without a genuinely separate script/deployment. See `gts-li3g` for a concrete bug this caused (the 30-min `syncAll` trigger racing an in-flight sync) and why disabling the trigger was rejected as a fix.
+
 ---
 
 ## Prerequisites
@@ -161,6 +173,33 @@ Apps Script editor → Run → initializeTriggers
 - `Action Sync` menu present in the ActionSheet = triggers initialized
 - Archive sheet tab exists = archiving has run at least once
 - `WEBAPP_URL` script property is set = Web App has been visited at least once
+
+### Axiom (`nuuts` dataset)
+
+Structured logs from both sides (GAS via `GasLogger.js`, Python tests via
+`scn/reporter.py`) are also shipped to Axiom dataset `nuuts` — see
+`scripts/query_axiom.py` to query it and `scripts/call_webapp.py` for the
+manual-probe path. Config lives in `local.settings.json`
+(`axiomDataset`/`axiomToken`/`axiomQueryToken`), written by `pnpm run
+deploy:test`.
+
+**Account owner (as of 2026-07-30):** `stuart.donaldson@gmail.com`. This is
+a placeholder owner, not the intended long-term one — expect this to move to
+an org-owned account later. Only the Axiom web console (login as the owner
+above) can manage org/dataset-admin operations (map fields, vacuum, member
+access); neither API token in `local.settings.json` has that permission
+(both are scoped to ingest/query only — confirmed via 403 on `PUT
+/v2/datasets/nuuts/mapfields`).
+
+**Known issue:** `nuuts` is at Axiom's 256/257-field-per-dataset cap (bead
+`gts-pfyx`). GAS-side events now nest their payload under one `data` field
+(`GasLogger.js`) instead of spreading it flat, but that alone doesn't free
+existing columns — `data` still needs to be marked as an Axiom **map field**
+(console: Datasets → nuuts → mark `data` as map field) *before* it can
+absorb new sub-keys without growing the column count further, and a
+**vacuum** (console: Datasets → nuuts → Vacuum fields; once/day limit) is
+needed to reclaim the ~257 already-registered legacy columns. Data is not
+lost by either operation — only unused field *definitions* are dropped.
 
 ---
 

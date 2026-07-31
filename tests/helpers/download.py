@@ -5,8 +5,9 @@ import re
 import time
 import requests
 
+from scn.session import resolve_auth_file
+
 _OOXML_MAGIC = b"PK\x03\x04"
-_AUTH_PATH = pathlib.Path(__file__).parent.parent.parent / ".auth" / "user.json"
 _DOC_TITLE_RE = re.compile(r"<title>(.*?)\s*-\s*Google Docs</title>", re.IGNORECASE | re.DOTALL)
 
 
@@ -15,11 +16,17 @@ class DownloadError(Exception):
 
 
 def _authed_session() -> requests.Session:
-    """Build a requests.Session using cookies from the Playwright storage state."""
+    """Build a requests.Session using cookies from the Playwright storage state.
+
+    Resolves the "primary" role via scn.session.resolve_auth_file (shared
+    $PLAYWRIGHT_AUTH_DIR location, falling back to the project-local
+    .auth/user.json) rather than a hardcoded path -- see .auth/README.md.
+    """
     s = requests.Session()
-    if not _AUTH_PATH.exists():
+    auth_path = resolve_auth_file("primary")
+    if not auth_path.exists():
         return s
-    data = json.loads(_AUTH_PATH.read_text())
+    data = json.loads(auth_path.read_text())
     for c in data.get("cookies", []):
         s.cookies.set(c["name"], c["value"], domain=c["domain"], path=c.get("path", "/"))
     return s
