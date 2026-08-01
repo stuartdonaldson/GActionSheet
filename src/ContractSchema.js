@@ -153,6 +153,17 @@ var CONTRACT_SCHEMA = Object.freeze({
       // drained, so the harness's convergence primitive is simply "await the
       // response" — no log polling (§16.11 #4).
       //   Completion signal: the synchronous JSON response, returned only post-drain.
+      // gts-zocq (2026-08-01): each docState row MAY additionally carry
+      // `runs: [{start, end, bold, italic}]` — character-offset spans (into
+      // that row's own actionText, end-exclusive) of inline bold/italic
+      // formatting sampled from the doc at scan time. ADDITIVE and OPTIONAL:
+      // omitted or empty means "no inline formatting" (the pre-gts-zocq
+      // behavior, unchanged) — an older caller that never sends `runs` keeps
+      // working exactly as before. Row identity/consistency comparisons
+      // (_rowIdentityKey, VerifySync.js, TrackerTable.js._trackerRowsMatch)
+      // deliberately compare actionText/action only — `runs` never
+      // participates in identity, so a formatting-only change does not
+      // orphan a row, mark it Dirty, or force a tracker re-render.
       sync_action_rows: Object.freeze({
         request:  Object.freeze(['action', 'testToken', 'docId']),
         response: Object.freeze(['ok', 'sheetWins', 'docWins', 'queueDrained']),

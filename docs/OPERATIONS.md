@@ -42,6 +42,20 @@ Before the first deployment, complete these one-time setup steps:
 - **Access:** "Anyone" (not "Anyone within org") — org SSO enforces auth on `UrlFetchApp` regardless of headers when restricted to org.
 - **Execute as:** "USER_DEPLOYING" — required for sheet-write authority.
 
+### Verified Team Portal Identity (GIS / NUUC-Dispatch) — no OAuth client needed here
+The verified team portal's identity (GIS sign-in, signed assertion, `_verifySignedAssertion`
+in `src/AccessControl.js`) is provisioned entirely on the **NUUC-Dispatch** project, not
+this one (ADR-0021, `../../NUUC-Dispatch/knowledge-base/adr/0002-signed-identity-assertion.md`).
+GActionSheet only needs the shared per-target HMAC secret (the Script Property named by
+the assertion's `kid` claim) — **no OAuth 2.0 Web client, no Authorized redirect URI, and
+no `GIS_CLIENT_ID`/`GIS_CLIENT_SECRET` are required on this project's GCP project.**
+`gts-hc6v` tracked provisioning such a client here under ADR-0017 Phase 2's now-superseded
+auth-code-redirect design; it was closed as superseded once confirmed that the live
+verification path never reads `GIS_CLIENT_ID` (the one function that did,
+`_verifyGisIdToken`, is dead code — see its in-source comment). See
+`docs/verified-team-portal-plan.md` for the NUUC-Dispatch-side provisioning steps that
+*are* required (on that project, not this one).
+
 ### `urlFetchWhitelist`
 Declared in `src/appsscript.json`. Covers northlakeuu.org URL format variants:
 ```json
@@ -240,27 +254,40 @@ Most tests run as a single primary account. The access-filter journey (`J-ACCESS
 used by the Import and Notify features) additionally requires one or more **restricted**
 accounts so the read-denied path is genuinely exercised rather than simulated.
 
-| Account | Auth artifact | Role | Minimum Drive permissions |
-|---------|---------------|------|---------------------------|
-| Primary | `.auth/user.json` | Full-access baseline (currently also the dev deployer) | Reader (or owner) on **all** team folders registered in `TeamData` |
-| `test.u1` | `.auth/test.u1.json` *(not yet captured)* | Primary end user, non-deployer — target taxonomy | Same Drive access as Primary, but a separate account from the deployer (see `docs/security-architecture.md` §5) |
-| `test.u2` | `.auth/test.u2.json` | Restricted — single-team subset | Reader on a **strict subset** of team folders only — must have **no** access to at least one team folder the primary can read |
-| `test.u3` | `.auth/test.u3.json` *(not yet captured)* | Restricted — other-team subset (J-ACCESS-FILTER's `TeamA-only`) | Reader on a *different* single team than `test.u2`, no access to the rest |
-| `nuuts.service` | `.auth/nuuts.service.json` *(future)* | Production service/deployer account | Reader/Editor on team folders + the ActionSheet only |
+Auth files are account-identity files shared across projects under
+`$PLAYWRIGHT_AUTH_DIR` (`.envrc`, default `~/.playwright`), named by the real
+Google account they hold. This project maps each role below to a specific
+account file via `local.settings.json`'s `"playwrightAccounts"` map (e.g.
+`{"primary": "sdonaldson.json"}`); a role with no entry there falls back to
+`.auth/<role>.json`. Mechanics are the reusable
+`/mnt/c/dev/DevStandard/docs/standards/playwright-shared-auth.md` standard;
+this project's own role taxonomy is in this project's `.auth/README.md` and
+`docs/security-architecture.md` §5.
+
+| Account role | `playwrightAccounts` key | Minimum Drive permissions |
+|--------------|--------------------------|----------------------------|
+| Primary | `primary` | Full-access baseline (currently also the dev deployer). Reader (or owner) on **all** team folders registered in `TeamData`. |
+| `test.u1` | `test.u1` *(not yet captured)* | Same Drive access as Primary, but a separate account from the deployer — primary end user, non-deployer, target taxonomy (see `docs/security-architecture.md` §5). |
+| `test.u2` | `test.u2` | Restricted — single-team subset. Reader on a **strict subset** of team folders only — must have **no** access to at least one team folder the primary can read. |
+| `test.u3` | `test.u3` *(not yet captured)* | Restricted — other-team subset (J-ACCESS-FILTER's `TeamA-only`). Reader on a *different* single team than `test.u2`, no access to the rest. |
+| `nuuts.service` | `nuuts.service` *(future)* | Production service/deployer account. Reader/Editor on team folders + the ActionSheet only. |
 
 `test.u2` is the same second Google account used by the Probe tests
 (`pnpm run probe:test.u2`). Setup for a restricted account:
 
-1. Capture its storage state: `node tests/playwright/auth.setup.js --account=test.u2`
-   (sign in as the restricted account when prompted). Or `pnpm run auth:test.u2`.
-2. In Drive, share the intended team folder with the restricted account as **Reader**.
+1. Capture its storage state: `node tests/playwright/auth.setup.js --account=<slug>`
+   (sign in as the restricted account when prompted; pick a slug that names
+   the real account, e.g. `sanctuary`). Or `pnpm run auth:test.u2` for a
+   generic default slug.
+2. Add `"test.u2": "<slug>.json"` to `local.settings.json`'s `playwrightAccounts`.
+3. In Drive, share the intended team folder with the restricted account as **Reader**.
    Do **not** share the other team folders — that asymmetry is what produces the deny path.
-3. Seed one source document with ≥1 team-scoped action in each relevant team folder
+4. Seed one source document with ≥1 team-scoped action in each relevant team folder
    (the access-filter fixture; idempotent check-exists-or-create).
 
-The harness selects the account per run via `PROBE_AUTH_STATE` (defaults to
-`.auth/user.json`). Tests that assert a restricted view set `PROBE_AUTH_STATE=.auth/test.u2.json`
-(or `.auth/test.u3.json`).
+The harness selects the account per run via `PROBE_AUTH_STATE` (an explicit
+file path, defaults to the primary account's file). Tests that assert a
+restricted view point it directly at the `test.u2`/`test.u3` account file.
 
 > This is a **shared test asset** for EPIC-D (Import) and EPIC-E (Notify). The account
 > fixture matrix and the journey it backs are specified in
@@ -365,6 +392,26 @@ copy-pasted capture logic:
   `test-results/FAIL-<nodeid>.png`, echoing the path + frame URLs into the
   failure report, and attaching the PNG to Allure. It is a no-op for non-UI
   (mock-based) tests.
+
+**DOM-derived state over OCR/screenshot-reading (gts-3tkf follow-up,
+gts-3sgr).** Both capture layers above also embed `scn.ui.describe_visible_buttons(frames)`
+output ("Visible buttons: ...") — each frame's currently-visible interactive
+button accessible names, read via the same `get_by_role("button")` signature
+the bounded waits themselves query, not a screenshot a human (or model) has
+to visually parse. This is now the project's default convention for any new
+UI-failure diagnostic: prefer a DOM-derived list of what's actually
+present/visible over asking anyone to read it off a PNG. Validated
+(gts-3sgr) against real failures: the original `test_import_access_filter`
+"Import" locator bug (gts-y8a0) took several screenshot reads, a headed
+re-run, and multiple exploratory passes to diagnose before this diagnostic
+existed. After it shipped, three separate follow-up reports
+(gts-70wo, gts-t6hx, gts-1o7g) each ruled out "missing/broken button" as the
+cause in a single read of the "Visible buttons" list (the button was present
+every time — pointing instead at a render-timing race or backend-load
+symptom, not a selector defect) — exactly the diagnosis-time reduction the
+diagnostic was built for. Use `describe_visible_buttons()` (or extend it) for
+any future custom UI-failure capture point rather than reinventing a
+screenshot-only diagnostic.
 
 #### onLinkPreview card rendering — `tests/test_link_preview.py`
 

@@ -374,6 +374,10 @@ function _buildPreviewCard(url, statusOverride, docOverride) {
   var action = match ? { action: match.actionText, status: statusOverride || match.status, assigneeEmail: match.assigneeEmail, assigneeName: match.assigneeName } : null;
   GasLogger.log('previewCard.result', { found: !!action, action: action ? action.action : null, status: action ? action.status : null });
 
+  // gts-zocq rendering decision: inline bold/italic is DELIBERATELY
+  // FLATTENED on this preview-card surface (same decision + rationale as
+  // WorkspaceAddonCard.js's sidebar list — see that file's comment for the
+  // full writeup; not repeated per call site).
   var actionText = (action && action.action)        || '';
   var status     = (action && action.status)         || '';
   var assignee   = (action && action.assigneeEmail)  || '';
@@ -470,8 +474,9 @@ function _setStatusFromPreview(e, docOverride) { // eslint-disable-line no-unuse
   var actionText    = (match && match.actionText)    || '';
   var assigneeEmail = (match && match.assigneeEmail) || '';
   var assigneeName  = (match && match.assigneeName)  || '';
+  var runs          = (match && match.runs)          || []; // gts-zocq
 
-  var flushed = _flushActionParagraph(docId, token, N, globalId, actionText, newStatus, assigneeEmail, assigneeName);
+  var flushed = _flushActionParagraph(docId, token, N, globalId, actionText, newStatus, assigneeEmail, assigneeName, runs);
 
   if (!flushed) {
     GasLogger.log('pocEditAction.flush_failed', { globalId: globalId });

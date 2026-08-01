@@ -568,6 +568,133 @@ function _tfAppendSheetRow(ss, rowData) {
 }
 
 // ---------------------------------------------------------------------------
+// configFormat test support (gts-d99c / gts-1pk)
+// ---------------------------------------------------------------------------
+
+// Fixed reference style applied by the 'seed_styled_action' fixture case —
+// deliberately distinct per-range (token vs action text) so a sampling bug
+// that reads the wrong offset, or a fixed default that never changes, is
+// visible as a mismatch rather than a coincidental pass. Mirrored (not
+// re-derived from _sampleActionItemStyle/_configFormatForDoc) in
+// tests/test_journey.py's Act 6 assertions — per the no-shared-context rule,
+// the Python side hardcodes these same literal values rather than reading
+// this file, so a fixture/test drift here would break the assertion instead
+// of silently trivializing it.
+var _TF_STYLED_AI_TOKEN = Object.freeze({
+  fontFamily: 'Georgia', fontSize: 16, color: '#1B5E20',
+  bold: true, italic: false, underline: true
+});
+var _TF_STYLED_ACTION_TEXT = Object.freeze({
+  fontFamily: 'Courier New', fontSize: 13, color: '#B71C1C',
+  bold: false, italic: true, underline: false
+});
+
+/**
+ * Converts a Docs REST rgbColor ({red,green,blue} 0..1 floats) back to a
+ * '#rrggbb' hex string, for comparing a debug_action_text_style read-back
+ * against _TF_STYLED_AI_TOKEN/_TF_STYLED_ACTION_TEXT's literal hex values.
+ *
+ * @param {{red:number,green:number,blue:number}} rgb
+ * @returns {string}
+ */
+function _tfRgbToHex(rgb) {
+  function ch(v) {
+    var n = Math.round((v || 0) * 255);
+    var s = n.toString(16);
+    return s.length === 1 ? '0' + s : s;
+  }
+  return '#' + ch(rgb.red) + ch(rgb.green) + ch(rgb.blue);
+}
+
+/**
+ * Simplifies one Docs REST textStyle object down to the same
+ * {fontFamily,fontSize,color,bold,italic,underline} shape
+ * _sampleActionItemStyle/_readActionFormatConfig use, for direct comparison
+ * in a run_fixture response.
+ *
+ * @param {Object} textStyle
+ * @returns {{fontFamily:?string, fontSize:?number, color:?string, bold:boolean, italic:boolean, underline:boolean}}
+ */
+function _tfSimplifyTextStyle(textStyle) {
+  var ts = textStyle || {};
+  var fg = ts.foregroundColor && ts.foregroundColor.color && ts.foregroundColor.color.rgbColor;
+  return {
+    fontFamily: (ts.weightedFontFamily || {}).fontFamily || null,
+    fontSize:   ts.fontSize ? ts.fontSize.magnitude : null,
+    color:      fg ? _tfRgbToHex(fg) : null,
+    bold:       !!ts.bold,
+    italic:     !!ts.italic,
+    underline:  !!ts.underline
+  };
+}
+
+/**
+ * Finds the 'AI-N:' token paragraph within a Docs REST body.content tree
+ * (top-level paragraphs only — the configFormat/flush-styled action items
+ * this fixture verifies are never inside a table) and returns the applied
+ * textStyle for the token's own text run and for the text run immediately
+ * following it (the action-text + status range) — mirrors
+ * _collectFlushOccurrences's token-location logic (SyncManager.js) but reads
+ * textStyle instead of computing document-index offsets, since this is a
+ * read-only verification fixture, not a flush.
+ *
+ * @param {Array} content  body.content
+ * @param {number} N
+ * @returns {{ok:boolean, aiToken:?Object, actionText:?Object, error:?string}}
+ */
+function _tfExtractActionTextStyle(content, N) {
+  var prefix = 'AI-' + N + ':';
+  for (var ii = 0; ii < content.length; ii++) {
+    var item = content[ii];
+    if (!item.paragraph) continue;
+    var elements = item.paragraph.elements || [];
+    var fullText = '';
+    var runs = []; // {startTextIdx, len, textStyle}
+    for (var jj = 0; jj < elements.length; jj++) {
+      var el = elements[jj];
+      if (!el.textRun || el.textRun.content === undefined) continue;
+      var tc = el.textRun.content || '';
+      runs.push({ startTextIdx: fullText.length, len: tc.length, textStyle: el.textRun.textStyle || {} });
+      fullText += tc;
+    }
+    var tokenTextIdx = -1;
+    if (fullText.substr(0, prefix.length) === prefix) {
+      tokenTextIdx = 0;
+    } else {
+      for (var si = 0; si < fullText.length - prefix.length; si++) {
+        var ch = fullText[si];
+        if ((ch === '\n' || ch === '\r' || ch === '\v') && fullText.substr(si + 1, prefix.length) === prefix) {
+          tokenTextIdx = si + 1;
+          break;
+        }
+      }
+    }
+    if (tokenTextIdx < 0) continue;
+
+    var prefixEndTextIdx = tokenTextIdx + prefix.length;
+    var tokenRun  = null;
+    var actionRun = null;
+    for (var ri = 0; ri < runs.length; ri++) {
+      var run    = runs[ri];
+      var runEnd = run.startTextIdx + run.len;
+      if (!tokenRun && tokenTextIdx >= run.startTextIdx && tokenTextIdx < runEnd) {
+        tokenRun = run;
+      }
+      if (!actionRun && run.startTextIdx >= prefixEndTextIdx) {
+        actionRun = run;
+      }
+    }
+    if (!tokenRun) continue;
+    return {
+      ok: true,
+      aiToken:    _tfSimplifyTextStyle(tokenRun.textStyle),
+      actionText: actionRun ? _tfSimplifyTextStyle(actionRun.textStyle) : null
+    };
+  }
+  return { ok: false, error: 'AI-' + N + ': token paragraph not found' };
+}
+
+// ---------------------------------------------------------------------------
 // Public entry-point
 // ---------------------------------------------------------------------------
 
@@ -974,6 +1101,9 @@ function setupTestFixtures(scenario, data) {
       case 'force_homepage_error':
         // gts-rvwu AC-5: trip buildHomepageCard's catch branch on the
         // next homepage render. Caller must clear via 'clear_homepage_error_force'.
+        // This is a transient toggle (not a memoized cache) — it lives under the
+        // '_TEST_' prefix so 'reset_test_state' sweeps it up if a test crashes
+        // before reaching its own cleanup. See 'reset_test_state' below.
         PropertiesService.getScriptProperties().setProperty('_TEST_FORCE_HOMEPAGE_ERROR', 'true');
         break;
 
@@ -981,7 +1111,41 @@ function setupTestFixtures(scenario, data) {
         PropertiesService.getScriptProperties().deleteProperty('_TEST_FORCE_HOMEPAGE_ERROR');
         break;
 
+      case 'reset_test_state':
+        // Safety net for interrupted test runs (gts-rvwu follow-up): deletes every
+        // script property under the '_TEST_' prefix — transient per-test toggles
+        // like '_TEST_FORCE_HOMEPAGE_ERROR' that a crashed test can leave set,
+        // silently corrupting every later test that shares this GAS deployment.
+        // Invoked as a pytest session-start autouse fixture (tests/conftest.py) and
+        // available standalone via `call_webapp.py run_fixture reset_test_state`.
+        //
+        // Deliberately does NOT touch:
+        //   - Durable deployment config (no '_' prefix): TEST_DOC_ID, TEST_SHEET_ID,
+        //     TEST_TOKEN, WEBAPP_URL, ADMIN_SECRET, AXIOM_TOKEN, DOC_FOLDER_ID, ...
+        //   - Memoized fixture caches (DISCOVERY_*, TEAMSCOPE_FOLDER_*): these
+        //     create-once Drive folders/docs are meant to persist across sessions —
+        //     DISCOVERY_STALE_DOC_ID in particular only becomes useful once its doc
+        //     is 8+ days old, so clearing it on every run would defeat the fixture.
+        // Add new transient (crash-unsafe) toggles under '_TEST_' so this sweep
+        // covers them automatically; add new cross-session caches under their own
+        // distinct prefix so they're excluded by construction.
+        var _rtsProps = PropertiesService.getScriptProperties();
+        var _rtsAll = _rtsProps.getProperties();
+        var _rtsCleared = [];
+        for (var _rtsKey in _rtsAll) {
+          if (_rtsKey.indexOf('_TEST_') === 0) {
+            _rtsProps.deleteProperty(_rtsKey);
+            _rtsCleared.push(_rtsKey);
+          }
+        }
+        GasLogger.log('fixture.reset_test_state', { cleared: _rtsCleared });
+        break;
+
       case 'discovery':
+        // Memoized cross-session cache, not a transient toggle — deliberately
+        // outside the '_TEST_' prefix so 'reset_test_state' never clears it.
+        // DISCOVERY_STALE_DOC_ID only becomes useful once its doc is 8+ days
+        // old, so wiping it every pytest session would defeat the fixture.
         var discProps = PropertiesService.getScriptProperties();
         var recentId = discProps.getProperty('DISCOVERY_RECENT_DOC_ID');
         var staleId  = discProps.getProperty('DISCOVERY_STALE_DOC_ID');
@@ -1718,6 +1882,36 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'sync_lock_race': {
+        // gts-li3g: deterministically proves syncDocument()'s per-docId lock
+        // serializes two overlapping executions for the SAME docId, per the
+        // AC's "or proves the lock serializes two overlapping syncDocument
+        // calls for the same docId" alternative — genuine cross-execution
+        // OS-level concurrency cannot be reliably timed from a Python test
+        // harness (network jitter dwarfs GAS's own scheduling).
+        //
+        // Simulates a first, still in-flight execution (e.g. the 30-min
+        // trigger) holding the per-doc lock, then drives the REAL
+        // syncDocument() entry point a second time (e.g. sidebar Sync Now,
+        // or another trigger firing mid-sync) while that lock is held. The
+        // second call must skip outright — not read/reconcile/flush
+        // anything — so a sheet row already marked Dirty by a concurrent
+        // write is left completely untouched rather than being read against
+        // a stale pre-lock snapshot and reverted.
+        var raceLockAcquired = _acquireDocSyncLock(testDocId);
+        try {
+          syncDocument(testDocId); // the "second" overlapping execution
+        } finally {
+          if (raceLockAcquired) _releaseDocSyncLock(testDocId);
+        }
+        _TF_RESULT = {
+          tag: 'fixture.sync_lock_race',
+          data: { lockHeldByFirst: raceLockAcquired, docId: testDocId }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'begin_journey_session': {
         // Empty-create a fresh journey doc (§16.11 #1 — never a template clone).
         // Does NOT update TEST_DOC_ID or TEST_DOC_TEMPLATE_ID — safe to run
@@ -2102,6 +2296,226 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'seed_styled_action': {
+        // gts-1pk step 1: seeds this invocation's doc (testDocId — the
+        // caller's own isolated reference doc, set via the run_fixture
+        // testDocId override) with a first floating action, AI-1:, whose
+        // token and action-text ranges carry two deliberately DIFFERENT
+        // fixed styles (_TF_STYLED_AI_TOKEN / _TF_STYLED_ACTION_TEXT above),
+        // so configFormat/_configFormatForDoc sampling the wrong offset (or
+        // not sampling at all) is visible as a mismatch, not a coincidence.
+        var ssaText   = 'AI-1: Sample styled reference action';
+        var ssaPara   = body.appendParagraph(ssaText);
+        var ssaText2  = ssaPara.editAsText();
+        var ssaTokEnd = 4; // "AI-1:" occupies offsets 0-4 inclusive
+        var ssaActEnd = ssaText.length - 1;
+        var ssaActStart = 6; // offset 5 is the single space after "AI-1:"
+        ssaText2.setFontFamily(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.fontFamily);
+        ssaText2.setFontSize(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.fontSize);
+        ssaText2.setForegroundColor(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.color);
+        ssaText2.setBold(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.bold);
+        ssaText2.setItalic(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.italic);
+        ssaText2.setUnderline(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.underline);
+        ssaText2.setFontFamily(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.fontFamily);
+        ssaText2.setFontSize(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.fontSize);
+        ssaText2.setForegroundColor(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.color);
+        ssaText2.setBold(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.bold);
+        ssaText2.setItalic(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.italic);
+        ssaText2.setUnderline(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.underline);
+        _TF_RESULT = { tag: 'fixture.seed_styled_action', data: { ok: true } };
+        break;
+      }
+
+      case 'seed_formatted_action': {
+        // gts-zocq: seeds this invocation's doc (testDocId, or data.docId
+        // when provided) with a floating action whose actionText carries a
+        // bold span over one word and a separate italic span over another —
+        // deliberately non-adjacent and non-overlapping so a scan bug that
+        // reads the wrong offset range, merges the two runs, or drops one
+        // entirely is visible as a mismatch rather than a coincidental pass.
+        // No status token (so the sync's "materialize missing explicit
+        // status" flush path exercises the new per-run bold/italic requests
+        // in _buildFlushRequests on the very first sync).
+        var sfaN        = (data && data.n) || 1;
+        var sfaText     = 'AI-' + sfaN + ': Please bold this and italic that today';
+        var sfaPara     = body.appendParagraph(sfaText);
+        var sfaTextEl   = sfaPara.editAsText();
+        var sfaBoldWord   = 'bold this';
+        var sfaItalicWord = 'italic that';
+        var sfaBoldStart   = sfaText.indexOf(sfaBoldWord);
+        var sfaBoldEnd     = sfaBoldStart + sfaBoldWord.length - 1;
+        var sfaItalicStart = sfaText.indexOf(sfaItalicWord);
+        var sfaItalicEnd   = sfaItalicStart + sfaItalicWord.length - 1;
+        sfaTextEl.setBold(sfaBoldStart, sfaBoldEnd, true);
+        sfaTextEl.setItalic(sfaItalicStart, sfaItalicEnd, true);
+        _TF_RESULT = { tag: 'fixture.seed_formatted_action', data: {
+          ok: true, n: sfaN, text: sfaText,
+          boldWord: sfaBoldWord, italicWord: sfaItalicWord
+        } };
+        break;
+      }
+
+      case 'debug_action_runs': {
+        // gts-zocq round-trip verification fixture. Accepts {docId, n}
+        // (docId defaults to testDocId). Returns three independently-sourced
+        // views of the SAME action's inline formatting so a test can compare
+        // them without trusting any one source:
+        //   scanRuns  — _scanFloatingActions' own runs[] for AI-n, read via a
+        //               FRESH DocumentApp.openById (not the dispatcher's own
+        //               already-open `doc`, so this also proves the doc on
+        //               disk — not an in-memory handle — carries the format).
+        //   sheetRuns — the Actions sheet's action_text cell RichTextValue
+        //               for that globalId, read via the same
+        //               _richTextRunsForCell helper the product uses.
+        var darDocId = (data && data.docId) || testDocId;
+        var darN     = (data && data.n) || 1;
+        if (darDocId === testDocId) { doc.saveAndClose(); docAlreadyClosed = true; }
+        else { docAlreadyClosed = true; }
+
+        var darDoc = DocumentApp.openById(darDocId);
+        var darActions = _scanFloatingActions(darDoc);
+        darDoc.saveAndClose();
+        var darScan = null;
+        for (var dai = 0; dai < darActions.length; dai++) {
+          if (darActions[dai].N === darN) { darScan = darActions[dai]; break; }
+        }
+
+        var darGlobalId = darDocId + '/AI-' + darN;
+        var darSheet = ss.getSheetByName('Actions');
+        var darSheetRuns = [];
+        var darSheetText = null;
+        if (darSheet) {
+          var darLastRow = darSheet.getLastRow();
+          if (darLastRow >= 2) {
+            var darGidCol = darSheet.getRange(2, _ACOL.global_id, darLastRow - 1, 1).getValues();
+            for (var dri = 0; dri < darGidCol.length; dri++) {
+              if (darGidCol[dri][0] === darGlobalId) {
+                var darRow = dri + 2;
+                darSheetText = darSheet.getRange(darRow, _ACOL.action_text).getValue();
+                darSheetRuns = _richTextRunsForCell(darSheet.getRange(darRow, _ACOL.action_text));
+                break;
+              }
+            }
+          }
+        }
+
+        _TF_RESULT = { tag: 'fixture.debug_action_runs', data: {
+          ok: true,
+          globalId: darGlobalId,
+          scanActionText: darScan ? darScan.actionText : null,
+          scanRuns:       darScan ? darScan.runs : null,
+          sheetActionText: darSheetText,
+          sheetRuns:       darSheetRuns
+        } };
+        break;
+      }
+
+      case 'config_format': {
+        // gts-d99c/gts-1pk: headless entry point for _configFormatForDoc(docId)
+        // (SyncManager.js), extracted from the interactive configFormat()
+        // menu shell. Accepts {docId}; falls back to this invocation's own
+        // testDocId (the run_fixture testDocId override) when omitted, same
+        // convention as the other fileId/docId-parameterized fixtures above.
+        var cfgDocId = data.docId || testDocId;
+        var cfgResult = _configFormatForDoc(cfgDocId);
+        _TF_RESULT = { tag: 'fixture.config_format', data: cfgResult };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'get_config_rows': {
+        // gts-1pk step 3/6: reads the Config sheet's raw rows back (durable-
+        // state assertion target — exactly one 'ai_token' + one 'action_text'
+        // row after sampling; zero rows after 'clear_config_rows').
+        var gcrSheet = ss.getSheetByName('Config');
+        var gcrRows  = [];
+        if (gcrSheet) {
+          var gcrLastRow = gcrSheet.getLastRow();
+          if (gcrLastRow >= 2) {
+            var gcrCols   = CONTRACT_SCHEMA.sheetConfig.columnsByField;
+            var gcrValues = gcrSheet.getRange(2, 1, gcrLastRow - 1, CONTRACT_SCHEMA.sheetConfig.headers.length).getValues();
+            for (var gcrI = 0; gcrI < gcrValues.length; gcrI++) {
+              var gcrKey = gcrValues[gcrI][gcrCols.key - 1];
+              if (!gcrKey) continue;
+              var gcrParsed = null;
+              try { gcrParsed = JSON.parse(gcrValues[gcrI][gcrCols.value - 1] || '{}'); } catch (gcrErr) { gcrParsed = null; }
+              gcrRows.push({ key: gcrKey, value: gcrParsed });
+            }
+          }
+        }
+        _TF_RESULT = { tag: 'fixture.get_config_rows', data: { rows: gcrRows } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'clear_config_rows': {
+        // gts-1pk step 5: clears the Config sheet's data rows (keeps the
+        // header) — an explicit reset, not an undo/revert-to-prior-style
+        // (_configFormatForDoc has no stack semantics). The next
+        // _getActionFormatConfig() read (any execution, including the same
+        // one via the cache-invalidate below) falls back to
+        // _DEFAULT_AI_TOKEN_STYLE / actionText:null.
+        var ccrSheet = ss.getSheetByName('Config');
+        if (ccrSheet) {
+          var ccrLastRow = ccrSheet.getLastRow();
+          if (ccrLastRow > 1) {
+            WriteGuard.wrap(function () {
+              ccrSheet.getRange(2, 1, ccrLastRow - 1, CONTRACT_SCHEMA.sheetConfig.headers.length).clearContent();
+            });
+          }
+        }
+        _actionFormatConfigCache = null;
+        _TF_RESULT = { tag: 'fixture.clear_config_rows', data: { cleared: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'debug_action_text_style': {
+        // gts-1pk steps 4/6: verifies an already-flushed AI-N chip's applied
+        // style via the SAME Docs REST GET mechanism the real flush uses
+        // (docs.googleapis.com/v1/documents/{docId}, textStyle fields) —
+        // not a DocumentApp visual read, per the AC's "not just visually"
+        // requirement. Accepts {docId, n}; docId defaults to testDocId.
+        var datsDocId = data.docId || testDocId;
+        var datsN     = data.n || data.N || 1;
+        if (datsDocId === testDocId) {
+          doc.saveAndClose(); // release this dispatcher's own handle first
+          docAlreadyClosed = true;
+        } else {
+          docAlreadyClosed = true;
+        }
+        var datsToken  = ScriptApp.getOAuthToken();
+        var datsFields = 'body.content(paragraph/elements(textRun(content,textStyle(weightedFontFamily,fontSize,foregroundColor,bold,italic,underline))))';
+        var datsResp = UrlFetchApp.fetch(
+          'https://docs.googleapis.com/v1/documents/' + datsDocId + '?fields=' + encodeURIComponent(datsFields),
+          { headers: { Authorization: 'Bearer ' + datsToken }, muteHttpExceptions: true }
+        );
+        var datsResult;
+        if (datsResp.getResponseCode() === 200) {
+          var datsBody    = JSON.parse(datsResp.getContentText());
+          var datsContent = (datsBody.body || {}).content || [];
+          datsResult = _tfExtractActionTextStyle(datsContent, datsN);
+        } else {
+          datsResult = { ok: false, error: 'GET failed: HTTP ' + datsResp.getResponseCode() };
+        }
+        _TF_RESULT = { tag: 'fixture.debug_action_text_style', data: datsResult };
+        break;
+      }
+
+      case 'debug_bulk_drive_metadata': {
+        // Diagnostic (gts-sl64 investigation): returns what syncAll's own
+        // bulk _fetchDriveDocMetadata() call currently reports for fileId,
+        // to compare against the live per-doc debug_drive_ancestors walk.
+        var dbdmFileId = data.fileId || testDocId;
+        var dbdmMap = _fetchDriveDocMetadata();
+        _TF_RESULT = {
+          tag: 'fixture.debug_bulk_drive_metadata',
+          data: { fileId: dbdmFileId, entry: dbdmMap[dbdmFileId] || null }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'debug_drive_ancestors': {
         // Diagnostic: returns the chain of ancestor folders ({id, name}) from
         // fileId's immediate parent up to My Drive root (gts-u2np).
@@ -2192,6 +2606,10 @@ function setupTestFixtures(scenario, data) {
         // Folder Id, making _walkFolderForTeam's folder-walk match
         // order-dependent. Using fresh property keys forces this fixture onto
         // its own, non-shared Drive folders.
+        //
+        // Also memoized cross-session, like DISCOVERY_* above: TEAMSCOPE_FOLDER_*
+        // sits outside the '_TEST_' prefix so 'reset_test_state' leaves these
+        // Drive folder IDs alone rather than forcing re-creation every run.
         var stsfProps = PropertiesService.getScriptProperties();
 
         var stsfRootIter = DriveApp.getFileById(testSheetId).getParents();
@@ -2273,6 +2691,64 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'sync_all_force_listing_miss': {
+        // gts-m33k: simulates the Shared-Drive-listing-omission symptom
+        // (gts-rskf) for a specific, otherwise perfectly live and reachable
+        // doc, without requiring a real Shared Drive to be provisioned in
+        // this test environment — no test Shared Drive folder id exists in
+        // local.settings.json (see plan-context.md). Monkey-patches the
+        // global _fetchDriveDocMetadata for the duration of exactly one
+        // syncAll() call so the target doc is absent from the bulk listing
+        // map exactly as a Shared-Drive-hosted doc would have been pre-fix,
+        // while still being fully reachable via the per-doc
+        // _fetchSingleDocMetadata fallback syncAll now calls before marking
+        // anything Doc Not Found. Restored in a finally block so the patch
+        // never leaks past this single request.
+        var flmDocId   = data.docId || testDocId;
+        var flmRealFetch = _fetchDriveDocMetadata;
+        _fetchDriveDocMetadata = function () {
+          var map = flmRealFetch();
+          delete map[flmDocId];
+          return map;
+        };
+        try {
+          syncAll();
+          SpreadsheetApp.flush();
+        } finally {
+          _fetchDriveDocMetadata = flmRealFetch;
+        }
+        _TF_RESULT = { tag: 'fixture.sync_all_force_listing_miss', data: { docId: flmDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'sync_all_force_team_walk_error': {
+        // gts-sl64 AC4: simulates a transient Drive folder-parent lookup
+        // failure for one specific doc during syncAll's team-reconciliation
+        // pass, without depending on a real, timing-sensitive Drive outage.
+        // Monkey-patches the global _walkFolderForTeam so it returns the
+        // walk's own "could not complete" sentinel (false) for the target
+        // doc only, for the duration of exactly one syncAll() call, proving
+        // the pass leaves that doc's existing DocData.teamId untouched
+        // rather than clobbering it with a blank. Restored in a finally
+        // block so the patch never leaks past this single request.
+        var fweDocId    = data.docId || testDocId;
+        var fweRealWalk = _walkFolderForTeam;
+        _walkFolderForTeam = function (docId, teamDataRows, folderTeamCache) {
+          if (docId === fweDocId) return false;
+          return fweRealWalk(docId, teamDataRows, folderTeamCache);
+        };
+        try {
+          syncAll();
+          SpreadsheetApp.flush();
+        } finally {
+          _walkFolderForTeam = fweRealWalk;
+        }
+        _TF_RESULT = { tag: 'fixture.sync_all_force_team_walk_error', data: { docId: fweDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
       // ── rz4k.4: Sheets-menu entry points driven via their own MenuHandler.js ──
       // wrappers. Each case invokes the menu function itself — the call-site the
       // entry-point-coverage invariant scopes to — NOT the core function it
@@ -2333,6 +2809,17 @@ function setupTestFixtures(scenario, data) {
         var trashDocId = data.docId || testDocId;
         DriveApp.getFileById(trashDocId).setTrashed(true);
         _TF_RESULT = { tag: 'fixture.trash_doc', data: { trashed: trashDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'untrash_doc': {
+        // gts-m33k: 24h aging-window guard — makes a previously-trashed doc
+        // reachable again so a subsequent sync_all fixture call can prove it
+        // gets revived (sync.docNotFound.revived) rather than archived.
+        var untrashDocId = data.docId || testDocId;
+        DriveApp.getFileById(untrashDocId).setTrashed(false);
+        _TF_RESULT = { tag: 'fixture.untrash_doc', data: { untrashed: untrashDocId } };
         docAlreadyClosed = true;
         break;
       }
