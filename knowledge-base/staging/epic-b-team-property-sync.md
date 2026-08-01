@@ -72,7 +72,7 @@ local.settings.testTeamA            — parent folder, registered as TeamData [T
 > **local.settings.json gap**: today `testTeamA` and `testTeamAChild` point to the *same* folder
 > ID and `testTeamADeep` does not exist. These three keys must be set to distinct real Drive
 > folder IDs forming the hierarchy above before this fixture can run. This is a setup task for
-> the `[TST]` bead (`GTaskSheet-me6w.6`).
+> the `[TST]` bead (`gts-me6w.6`).
 
 TeamData rows for this fixture (idempotent setup — check-exists-or-create, **no cleanup**):
 

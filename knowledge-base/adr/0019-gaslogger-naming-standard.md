@@ -3,8 +3,8 @@
 Status: Accepted
 Date: 2026-06-19
 Relates to: `src/GasLogger.js`, ADR-0020 (GasLogger data-parameter-key standard),
-GTaskSheet-x94a, GTaskSheet-aa7j (deferred — overloaded `sync.warn` split, not part
-of this ADR), GTaskSheet-ecs1 (deferred — GAS/Python naming bridge, not part of
+gts-x94a, gts-aa7j (deferred — overloaded `sync.warn` split, not part
+of this ADR), gts-ecs1 (deferred — GAS/Python naming bridge, not part of
 this ADR)
 
 ## Context
@@ -54,8 +54,8 @@ already satisfied the rule once lowercased.
   query; a glance at any neighboring call site shows the convention to follow.
 - **Constrains:** code review should flag a new SCREAMING_SNAKE or snake_case-domain
   tag as a regression against this standard.
-- **Deferred, not part of this ADR:** GTaskSheet-aa7j (splitting the overloaded
+- **Deferred, not part of this ADR:** gts-aa7j (splitting the overloaded
   `sync.warn` tag into distinct doc-not-found sub-events, and the `Doc not found` /
-  `Doc Not Found` msg-casing split) and GTaskSheet-ecs1 (documenting/bridging this
+  `Doc Not Found` msg-casing split) and gts-ecs1 (documenting/bridging this
   `domain.event` taxonomy against the Python side's raw action/fixture names) are
   separate, larger-blast-radius decisions that need their own pass.

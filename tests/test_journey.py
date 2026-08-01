@@ -24,6 +24,12 @@ Deviations from §16.10 (mechanical, not design):
        with a message naming the install/redeploy step -- instead of Acts
        3/3b/4/5 silently warning and continuing against a missing or stale
        add-on.
+
+Act 6 (configFormat, gts-d99c/gts-1pk): a journey-embedded step group, not a
+dedicated file -- test-organization decision recorded in gts-1pk/gts-28p.
+Authored from gts-1pk's frozen contract text (Description/AC/Design), not by
+reading _configFormatForDoc's implementation diff, per CLAUDE.md's
+no-shared-context twin-ticket rule.
 """
 import pathlib
 import time
@@ -33,7 +39,7 @@ import pytest
 from scn.ai import ai
 from scn.engine import CheckpointKind, Severity, Surface
 from scn.reporter import emit_standalone_event
-from scn.session import ScenarioSession
+from scn.session import ScenarioSession, resolve_auth_file
 from scn.ui import UiDriver
 from tests.helpers.gas_log import assert_log, clear_logs
 
@@ -60,7 +66,7 @@ def browser_page(settings):
     """
     from playwright.sync_api import sync_playwright
 
-    auth = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+    auth = resolve_auth_file()
     run_id = pathlib.Path(__file__).stem  # module-scoped: no per-test request.node here
     t0 = time.monotonic()
     with sync_playwright() as pw:
@@ -96,7 +102,7 @@ def scn(settings, browser_page, request):
 # Journey
 # ---------------------------------------------------------------------------
 
-def test_journey(scn, expected_version, gas_log_dir):
+def test_journey(scn, expected_version, gas_log_dir, settings):
     # ── Act 0 — pre-flight: confirm the add-on test deployment is installed
     # and serving the build just deployed ────────────────────────────────────
     try:
@@ -247,7 +253,7 @@ def test_journey(scn, expected_version, gas_log_dir):
         assignee="sdonaldson@northlakeuu.org",
     )
     scn.mark("act4.pre-create-action")
-    _fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+    _fence = clear_logs(gas_log_dir)
     scn.ui.create_action(created)      # fills @-menu form; autocomplete (in TEST_CONTACTS)
     # GTaskSheet-5vr6: cursor lands on an empty paragraph (Ctrl+End+Enter before
     # @create) — the chip-insertion path that used to throw on an empty
@@ -312,3 +318,173 @@ def test_journey(scn, expected_version, gas_log_dir):
     # doc_formula (col7) and sync_status (col10) must be set on every row;
     # verify_consistency(scope=SHEET) raises AssertionError if either is missing.
     scn.verify_consistency(scope=SHEET)
+
+    # ── Act 6 — configFormat: sample a styled reference doc's action-item ────
+    # style, apply it to a chip write in a DIFFERENT document, then verify a
+    # Config-clear restores the exact prior hardcoded default (gts-d99c/
+    # gts-1pk twin ticket). See module docstring for the test-placement note.
+    #
+    # The two style dicts below are fixed fixture constants mirrored in
+    # TestFixtures.js's 'seed_styled_action' case (_TF_STYLED_AI_TOKEN /
+    # _TF_STYLED_ACTION_TEXT) -- hardcoded here rather than re-derived from
+    # that file, so a fixture/assertion drift surfaces as a failure instead
+    # of a vacuous pass. `default_ai_token` mirrors SyncManager.js's
+    # _DEFAULT_AI_TOKEN_STYLE (Comic Sans MS bold purple #4C1D95) per
+    # gts-1pk's frozen AC text, not by reading that file.
+    styled_ai_token = {
+        "fontFamily": "Georgia", "bold": True, "italic": False, "underline": True,
+        "color": "#1b5e20",
+    }
+    styled_action_text = {
+        "fontFamily": "Courier New", "bold": False, "italic": True, "underline": False,
+        "color": "#b71c1c",
+    }
+    default_ai_token = {"fontFamily": "Comic Sans MS", "bold": True, "color": "#4c1d95"}
+
+    ref_scn = ScenarioSession.new_doc(settings)
+    try:
+        # Step 1 — seed a reference doc, distinct from the journey's own doc,
+        # with a styled first AI-1: action.
+        ref_scn._post_fixture("seed_styled_action")
+
+        # Step 2 — sample its style into the Config sheet.
+        cfg_data = ref_scn._post_fixture(
+            "config_format", {"docId": ref_scn.doc_id}
+        ).get("data") or {}
+        assert cfg_data.get("ok") is True, (
+            f"[gts-d99c] config_format fixture did not report success: {cfg_data!r}"
+        )
+
+        # Step 3 — Config sheet has exactly one 'ai_token' + one 'action_text'
+        # row, matching the sampled style (durable-state assertion).
+        def _config_sampled_correctly():
+            rows = (scn._post_fixture("get_config_rows").get("data") or {}).get("rows") or []
+            by_key = {r["key"]: r["value"] for r in rows}
+            if set(by_key.keys()) != {"ai_token", "action_text"}:
+                return (
+                    f"expected exactly one 'ai_token' + one 'action_text' Config row "
+                    f"after sampling, got keys {list(by_key.keys())}: {rows!r}"
+                )
+            for field in ("fontFamily", "bold", "italic", "underline"):
+                if by_key["ai_token"].get(field) != styled_ai_token[field]:
+                    return f"Config 'ai_token'.{field}={by_key['ai_token'].get(field)!r} != sampled {styled_ai_token[field]!r}"
+                if by_key["action_text"].get(field) != styled_action_text[field]:
+                    return f"Config 'action_text'.{field}={by_key['action_text'].get(field)!r} != sampled {styled_action_text[field]!r}"
+            if (by_key["ai_token"].get("color") or "").lower() != styled_ai_token["color"]:
+                return f"Config 'ai_token'.color={by_key['ai_token'].get('color')!r} != sampled {styled_ai_token['color']!r}"
+            if (by_key["action_text"].get("color") or "").lower() != styled_action_text["color"]:
+                return f"Config 'action_text'.color={by_key['action_text'].get('color')!r} != sampled {styled_action_text['color']!r}"
+            return None
+
+        scn.expect_callable(
+            _config_sampled_correctly, on=SHEET,
+            tag="[journey configFormat-sample]", entry_point="configFormat",
+        )
+        scn.checkpoint(STEP)
+
+        # Step 4 — a DIFFERENT document's (the journey's own doc) subsequent
+        # chip write reflects the sampled style, verified via the Docs REST
+        # GET the flush itself uses (not visually).
+        marker_styled = "configFormat sampled-style smoke check"
+        scn.append_paragraph(f"AI: {marker_styled}")
+        scn.sync()
+
+        def _different_doc_picks_up_sampled_style():
+            rows = [r for r in scn.find_sheet_actions() if marker_styled in (r.action or "")]
+            if not rows:
+                return f"marker action {marker_styled!r} not found on sheet after sync"
+            try:
+                n = int(rows[0].action_id.split("-")[1])
+            except Exception as exc:
+                return f"could not parse action_id {rows[0].action_id!r}: {exc}"
+            style = scn._post_fixture("debug_action_text_style", {"n": n}).get("data") or {}
+            if not style.get("ok"):
+                return f"debug_action_text_style failed: {style!r}"
+            tok, act = style.get("aiToken") or {}, style.get("actionText") or {}
+            for field in ("fontFamily", "bold", "italic", "underline"):
+                if tok.get(field) != styled_ai_token[field]:
+                    return f"chip aiToken.{field}={tok.get(field)!r} != sampled {styled_ai_token[field]!r}"
+                if act.get(field) != styled_action_text[field]:
+                    return f"chip actionText.{field}={act.get(field)!r} != sampled {styled_action_text[field]!r}"
+            if (tok.get("color") or "").lower() != styled_ai_token["color"]:
+                return f"chip aiToken.color={tok.get('color')!r} != sampled {styled_ai_token['color']!r}"
+            if (act.get("color") or "").lower() != styled_action_text["color"]:
+                return f"chip actionText.color={act.get('color')!r} != sampled {styled_action_text['color']!r}"
+            return None
+
+        scn.expect_callable(
+            _different_doc_picks_up_sampled_style, on=DOC,
+            tag="[journey configFormat-cross-doc]", entry_point="configFormat",
+        )
+        scn.checkpoint(STEP)
+
+        # Step 5 — clear Config rows. Explicitly a reset, NOT an undo to a
+        # prior style (_configFormatForDoc has no stack/undo semantics).
+        scn._post_fixture("clear_config_rows")
+        cleared_rows = (scn._post_fixture("get_config_rows").get("data") or {}).get("rows") or []
+        assert cleared_rows == [], f"[gts-1pk] Config rows not cleared: {cleared_rows!r}"
+
+        # Step 6 — sync again (a new chip write): the exact pre-existing
+        # hardcoded default (Comic Sans MS bold purple token, inherited-
+        # default action text) is restored -- the fallback-path regression
+        # guard.
+        #
+        # Uses a THIRD, pristine doc (not scn's own journey doc, which
+        # already carries the Step 4 custom-styled chip) -- confirmed via
+        # manual probe during this session that Google Docs' insertText
+        # inherits the AMBIENT style of nearby text when no explicit
+        # updateTextStyle request is pushed (exactly what happens once
+        # Config's 'action_text' row is cleared): reusing scn's own doc made
+        # the new action text inherit the still-present Step-4 custom style
+        # from the adjacent paragraph, which would make a "does NOT carry the
+        # custom style" assertion pass or fail by accident of doc layout
+        # rather than by what _actionTextStyleRequest actually did. A fresh
+        # doc has no such neighbor to inherit from, so its action-text style
+        # is the genuine Google Docs blank-paragraph default.
+        reset_scn = ScenarioSession.new_doc(settings)
+        try:
+            marker_reset = "configFormat reset-to-default smoke check"
+            reset_scn.append_paragraph(f"AI: {marker_reset}")
+            reset_scn.sync()
+
+            def _reset_to_hardcoded_default():
+                rows = [r for r in reset_scn.find_sheet_actions() if marker_reset in (r.action or "")]
+                if not rows:
+                    return f"marker action {marker_reset!r} not found on sheet after sync"
+                try:
+                    n2 = int(rows[0].action_id.split("-")[1])
+                except Exception as exc:
+                    return f"could not parse action_id {rows[0].action_id!r}: {exc}"
+                style = reset_scn._post_fixture("debug_action_text_style", {"n": n2}).get("data") or {}
+                if not style.get("ok"):
+                    return f"debug_action_text_style failed: {style!r}"
+                tok = style.get("aiToken") or {}
+                if tok.get("fontFamily") != default_ai_token["fontFamily"]:
+                    return f"AI-N token font not reset to hardcoded default: {tok!r}"
+                if tok.get("bold") != default_ai_token["bold"]:
+                    return f"AI-N token bold not reset to hardcoded default: {tok!r}"
+                if (tok.get("color") or "").lower() != default_ai_token["color"]:
+                    return f"AI-N token color not reset to hardcoded default: {tok!r}"
+                act = style.get("actionText") or {}
+                if act.get("fontFamily") == styled_action_text["fontFamily"] and act.get("italic") == styled_action_text["italic"]:
+                    return (
+                        f"action text on a pristine doc still carries the custom sampled "
+                        f"style (fontFamily+italic) after Config clear: {act!r}"
+                    )
+                return None
+
+            scn.expect_callable(
+                _reset_to_hardcoded_default, on=DOC,
+                tag="[journey configFormat-reset-default]", entry_point="configFormat",
+            )
+            scn.checkpoint(STEP)
+        finally:
+            try:
+                reset_scn._post_route("end_journey_session", {"docId": reset_scn.doc_id})
+            except Exception:
+                pass
+    finally:
+        try:
+            ref_scn._post_route("end_journey_session", {"docId": ref_scn.doc_id})
+        except Exception:
+            pass

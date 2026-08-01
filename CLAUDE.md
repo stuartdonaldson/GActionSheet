@@ -58,7 +58,7 @@ without explicit instruction.
 Do not use MEMORY.md for project rationale. Do not use `bd remember` for user preferences. When in doubt: if the insight is about a specific codebase or project decision, use `bd remember`; if it applies regardless of repo, use MEMORY.md.
 
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:970c3bf2 -->
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -66,7 +66,7 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full 
 ### Quick Reference
 
 ```bash
-bdls --ready          # Find available work (preferred — one call, richer output)
+bd ready              # Find available work
 bd show <id>          # View issue details
 bd update <id> --claim  # Claim work
 bd close <id>         # Complete work
@@ -80,30 +80,38 @@ bd close <id>         # Complete work
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 
+## Agent Context Profiles
+
+The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
+
+- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
+- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
+- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
+
 ## Session Completion
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
 
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
+1. **File issues for remaining work** - Create beads for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+4. **Handle git/sync by active profile**:
    ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+   # Conservative/minimal/default: report status and proposed commands; wait for approval.
+   git status
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+   # Team-maintainer opt-in only, unless current instructions forbid it:
+   git pull --rebase
+   bd dolt push
+   git push
+   git status
+   ```
+5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
+
+**Critical rules:**
+- Explicit user or orchestrator instructions override this Beads block.
+- Do not commit or push without clear authority from the active profile or the current user request.
+- If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
 
 ## python
@@ -160,7 +168,7 @@ references are mapped in `docs/atdd/ID-map.md` — start there):
 
 For long running tests, always route test output to a fail rather than pipe to tail so we have the file for later analysis and to use to monitor progress of the test.
 
-Every Playwright/UI test failure must, as a matter of course, capture a screenshot + diagnostics (screenshot path, frame URLs, and for locator waits the per-frame match-count / is_visible / bbox). This is automated (GTaskSheet-3tkf): bounded driver waits call `UiDriver.capture_failure(...)` before raising, and a `pytest_runtest_makereport` hook in `tests/conftest.py` screenshots the active page on any UI-test failure. Add a new bounded wait? Route its failure through `capture_failure` — never copy-paste a capture block. For interactions Playwright cannot drive with a direct mouse gesture (e.g. the `onLinkPreview` link-preview card), try the `Ctrl+F` -> type -> `Enter` -> `Escape` cursor-placement technique (GTaskSheet-39jk/cug8, `UiDriver.open_link_preview`, `tests/test_link_preview.py`) before falling back to a non-UI route-fallback method — see epic GTaskSheet-pw5x.
+Every Playwright/UI test failure must, as a matter of course, capture a screenshot + diagnostics (screenshot path, frame URLs, and for locator waits the per-frame match-count / is_visible / bbox). This is automated (gts-3tkf): bounded driver waits call `UiDriver.capture_failure(...)` before raising, and a `pytest_runtest_makereport` hook in `tests/conftest.py` screenshots the active page on any UI-test failure. Add a new bounded wait? Route its failure through `capture_failure` — never copy-paste a capture block. For interactions Playwright cannot drive with a direct mouse gesture (e.g. the `onLinkPreview` link-preview card), try the `Ctrl+F` -> type -> `Enter` -> `Escape` cursor-placement technique (gts-39jk/cug8, `UiDriver.open_link_preview`, `tests/test_link_preview.py`) before falling back to a non-UI route-fallback method — see epic gts-pw5x.
 
 Methodology declaration — Testing: `atdd-bdd` — DevStandard `knowledge-base/methodology/testing/bdd/README.md`. Key rules for every session:
 
@@ -194,7 +202,7 @@ Rules when choosing Slice:
 - **No-shared-context preserved at hardening.** The slice implementation is throwaway, or the hardening `[TST]` is authored by a fresh-context agent against the frozen contract only — never reading slice code.
 - **Blocking hardening bead required.** The gate produces a *created, blocking* hardening bead. Slice is not done until its hardening `[TST]` is green; the entry-point coverage invariant still holds.
 
-**Ordering is oracle-driven; coverage-before-merge is the invariant _(lever under test — GTaskSheet-m65t; candidate for DevStandard T23 promotion, see `docs/methodology/oracle-ordering-lever.md`)_.**
+**Ordering is oracle-driven; coverage-before-merge is the invariant _(lever under test — gts-m65t; candidate for DevStandard T23 promotion, see `docs/methodology/oracle-ordering-lever.md`)_.**
 "Test-first" bundles two claims; only one is load-bearing. **Coverage-before-merge** — durable invariants and every state-modifying entry point (T17) are tested before merge — is non-negotiable. **Ordering** — whether the test is written before the implementation — is chosen by the *oracle*:
 - **Specifiable oracle** (correct answer is a precise value/state you can write down before coding — parsed value, row status, contract shape): **test-first** (red → green). Debugging the test *is* debugging the contract.
 - **Perceptual oracle** (you recognize "correct" on sight but cannot cheaply pre-specify it — most UI/UX, rendered output, layout/feel): **Slice** (implement-first → human review → freeze AC → author hardening `[TST]` against the frozen contract). A pre-written assertion here is both expensive *and* blind to the emergent anomaly the human eye catches. State why an assertion cannot cheaply pre-specify "correct."
@@ -215,9 +223,25 @@ point at least once with observable state verification. The entry point itself m
 call-site — testing only the mechanism it delegates to is not sufficient. Standalone or sequential
 test structure is not required; the entry point may be exercised as part of any scenario.
 
-**Backstop rules (LL resolve, GTaskSheet-mpi9):**
-- `pytest -x` (full suite, not just the touched files) is required before any `[IMP]` issue is
-  closed or merged.
+**Backstop rules (LL resolve, gts-mpi9; scope narrowed 2026-07-24 — see below):**
+- `pytest -x` (full suite, not just the touched files) is required at **merge-gate**, and always
+  before a hardening `[TST]` (gts-79dw.4.8-style) is itself closed. This is the enforcement point
+  both source incidents actually pointed at (`2026-06-02-scanner-change-did-not-audit-fixture-
+  producers.md`, `2026-06-02-test-failures-observed-but-not-elevated-to-blocker.md` — both
+  resolutions say the fix belongs in `merge-gate`, not at `[IMP]`-close).
+- An `[IMP]` bead may **close** on a fast, targeted-subset gate (touched-file/related tests —
+  practically, whatever runs in well under a couple minutes) instead of the full suite. This is
+  the normal path for a Slice-phase bead (Review-fidelity phasing, ADR-0013 above): implement,
+  get the fast gate green, close, and get to a reviewable working experience without paying full
+  regression cost before the AC is even frozen. Track the gap explicitly rather than silently: on
+  close, set `bd set-state <id> regression=pending --reason "<what actually ran>"`; flip it to
+  `regression=verified` once `pytest -x` is run clean against that bead's changes. `bd-run-beads.py`
+  does this automatically (`--partial-gate` marks `regression=pending`; a full unrestricted
+  `test_cmd` marks `regression=verified`; `-t ''` always implies `pending`).
+- Merge-gate (or manual merge to master) still requires every bead in scope to be
+  `regression=verified` — i.e. full `pytest -x` clean — before it passes. A bead closed with
+  `regression=pending` is not itself blocking further implementation work in the same tree; it
+  blocks that tree's merge.
 - Known test failures are not a basis for proceeding autonomously: present the debt state (which
   tests fail, why) and wait for an explicit human decision rather than working around or ignoring
   the failure.

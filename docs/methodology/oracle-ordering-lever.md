@@ -1,7 +1,7 @@
 # Candidate methodology lever: oracle-driven ordering
 
 > **STATUS: CANDIDATE / LEVER UNDER TEST — not ratified.**
-> Trial owner: GActionSheet · Tracking: `GTaskSheet-m65t` · Opened: 2026-07-01
+> Trial owner: GActionSheet · Tracking: `gts-m65t` · Opened: 2026-07-01
 > Promotion target: DevStandard `sdlc-testing-principles.md` **T23** (amend, not a new ID) + project ADR-0013.
 > This file is the single portable artifact: it is what you copy to trial the lever on
 > another project, and what you review for DevStandard integration once proven.
@@ -70,7 +70,7 @@ the diagnostic. Add a Success-Criteria checkbox for the oracle declaration. (See
 
 ### 3. Record the trial
 
-Add the deploying project as a trial site on `GTaskSheet-m65t` (or its successor tracker) so
+Add the deploying project as a trial site on `gts-m65t` (or its successor tracker) so
 evidence aggregates across projects toward the promotion criteria.
 
 ## Promotion criteria (when to ratify into DevStandard)

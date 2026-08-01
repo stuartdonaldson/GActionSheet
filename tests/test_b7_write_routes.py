@@ -410,7 +410,14 @@ def test_wpe1_url_format_agnostic_matching(scn_wpe1, settings):
 
 
 # ---------------------------------------------------------------------------
-# [2eui] action_text normalization — soft/hard-return chars stripped at write
+# [2eui] action_text normalization — line-break SPELLING normalized at write
+#
+# Superseded by gts-dr8j: these two tests originally asserted that \v/\n/\r
+# were collapsed to a single space, because flush could not reinsert a soft
+# return and a round-tripped \n would have split the doc paragraph. Flush now
+# converts \n back to U+000B (SyncManager.js _toSoftReturnText), so the write
+# path preserves the line BREAK and normalizes only its SPELLING (\v, \r,
+# \r\n -> \n). The call sites under test are unchanged; the invariant moved.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -421,11 +428,10 @@ def scn_2eui(settings, request):
 
 
 def test_2eui_soft_return_normalized_on_upsert_insert(scn_2eui, settings):
-    """GTaskSheet-2eui: upsert_action_rows INSERT path strips \\v / \\n from
-    action text before writing to the sheet so flush roundtrips never produce
-    a hard paragraph break."""
+    """GTaskSheet-2eui/dr8j: upsert_action_rows INSERT path normalizes the
+    line-break spelling (\\v -> \\n) while preserving the break itself."""
     raw_text    = "First line\vSecond line"
-    normal_text = "First line Second line"
+    normal_text = "First line\nSecond line"
     global_id   = f"{scn_2eui.doc_id}/AI-1"
     doc_url     = f"https://docs.google.com/document/d/{scn_2eui.doc_id}/edit"
 
@@ -450,14 +456,15 @@ def test_2eui_soft_return_normalized_on_upsert_insert(scn_2eui, settings):
         f"[2eui] INSERT: expected action_text={normal_text!r} in sheet; "
         f"found actions: {[r.action for r in rows]!r}"
     )
-    assert "\v" not in row.action and "\n" not in row.action, (
-        f"[2eui] INSERT: action_text still contains line-break chars: {row.action!r}"
+    assert "\v" not in row.action and "\r" not in row.action, (
+        f"[2eui] INSERT: action_text still carries a non-\\n line-break "
+        f"spelling: {row.action!r}"
     )
 
 
 def test_2eui_soft_return_normalized_on_upsert_update(scn_2eui, settings):
-    """GTaskSheet-2eui: upsert_action_rows UPDATE path strips \\v / \\n before
-    writing so existing rows are also cleaned up on the next write."""
+    """GTaskSheet-2eui/dr8j: upsert_action_rows UPDATE path applies the same
+    line-break spelling normalization as the INSERT path."""
     # Insert a clean row first via sync
     target = ai(action="2eui update-path action", assignee="")
     scn_2eui.append_paragraph(target.as_text())
@@ -468,8 +475,10 @@ def test_2eui_soft_return_normalized_on_upsert_update(scn_2eui, settings):
     assert match is not None, "[2eui] action not found after sync"
 
     global_id   = f"{scn_2eui.doc_id}/{match.action_id}"
-    raw_text    = "Updated\nwith newline"
-    normal_text = "Updated with newline"
+    # \r\n exercises both normalization branches at once (\r\n -> \n, and the
+    # bare-\r fallback) rather than passing through an already-\n string.
+    raw_text    = "Updated\r\nwith newline"
+    normal_text = "Updated\nwith newline"
     doc_url     = f"https://docs.google.com/document/d/{scn_2eui.doc_id}/edit"
 
     resp = scn_2eui._post({
@@ -493,6 +502,7 @@ def test_2eui_soft_return_normalized_on_upsert_update(scn_2eui, settings):
         f"[2eui] UPDATE: expected action_text={normal_text!r} in sheet; "
         f"found actions: {[r.action for r in rows]!r}"
     )
-    assert "\v" not in row.action and "\n" not in row.action, (
-        f"[2eui] UPDATE: action_text still contains line-break chars: {row.action!r}"
+    assert "\v" not in row.action and "\r" not in row.action, (
+        f"[2eui] UPDATE: action_text still carries a non-\\n line-break "
+        f"spelling: {row.action!r}"
     )

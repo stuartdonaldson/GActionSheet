@@ -47,13 +47,13 @@ Root cause B: Test design lacks a convention distinguishing "did this mutation a
 - c: Create or update gate skill to check that test AC operationalizes consistency invariants and that test code includes full-data reconciliation assertions (not just text/status) before marking test task complete.
 - d: Add to merge-gate or test-design-gate template: "For tests touching state mutation (sync, archive, reconciliation), verify that tests check all-field consistency (not just text/status) across all storage locations (floating action, ActionSheet, tracker table) with no orphaned rows."
 - e: No lever here — the fix is structural, not a memory.
-- f: Create implementation issues to retrofit UC-B, UC-A tests with full-data consistency verification; create test-design gate (GTaskSheet-qea) blocking UC-C/D until reconciliation strategy (including all-field consistency) is approved.
+- f: Create implementation issues to retrofit UC-B, UC-A tests with full-data consistency verification; create test-design gate (gts-qea) blocking UC-C/D until reconciliation strategy (including all-field consistency) is approved.
 
 [Developed fully at resolve phase]
 
 ## Resolution (2026-06-12)
 
-Tracked as item 4 of `GTaskSheet-mpi9` (open): CLAUDE.md reconciliation-discipline rule
+Tracked as item 4 of `gts-mpi9` (open): CLAUDE.md reconciliation-discipline rule
 (all-field consistency across floating action / ActionSheet / tracker table for sync/state-mutation
 UC tests) + implementation-gate Step 3 reconciliation-postcondition check. mpi9 records the
 explicit precondition: human approval of the UC-C/D reconciliation spec is required before
@@ -72,11 +72,11 @@ gap this LL identified.
 
 ## Update (2026-07-02)
 
-`GTaskSheet-mpi9` closed 2026-06-18 with item 4 deliberately deferred, not carried forward as
+`gts-mpi9` closed 2026-06-18 with item 4 deliberately deferred, not carried forward as
 a tracked issue — left only as a documented precondition. That left this item's decision point
 silently dangling for over a month (confirmed 2026-07-02: no reconciliation-discipline content
 in CLAUDE.md or implementation-gate SKILL.md). The other embedded item — the `docTitle`/`docName`
-staleness code defect — is separately fixed (`GTaskSheet-8in`, closed; verified in
+staleness code defect — is separately fixed (`gts-8in`, closed; verified in
 `src/WebApp.js:923-941`, the doc-wins branch unconditionally refreshes the `HYPERLINK` formula
 when it differs). Item 4 (the reconciliation-discipline lever) is now re-tracked as
-`GTaskSheet-bupd`, still gated on your approval of the UC-C/D reconciliation spec.
+`gts-bupd`, still gated on your approval of the UC-C/D reconciliation spec.

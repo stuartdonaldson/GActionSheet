@@ -25,7 +25,7 @@
     "headers": [
       "FileId",
       "Doc Name",
-      "Doc Modified",
+      "Last Sync Time",
       "Doc Updated",
       "SyncStatus",
       "Team Id",
@@ -35,12 +35,22 @@
     "columnsByField": {
       "file_id": 1,
       "doc_name": 2,
-      "doc_modified": 3,
+      "last_sync_time": 3,
       "doc_updated": 4,
       "sync_status": 5,
       "team_id": 6,
       "action_count": 7,
       "resolved_count": 8
+    }
+  },
+  "sheetConfig": {
+    "headers": [
+      "Key",
+      "Value"
+    ],
+    "columnsByField": {
+      "key": 1,
+      "value": 2
     }
   },
   "sheetAction": {
@@ -89,6 +99,7 @@
   "webApp": {
     "routeNames": [
       "set_test_token",
+      "set_axiom_config",
       "upsert_action_rows",
       "sync_action_rows",
       "verify_action_rows",
@@ -102,6 +113,8 @@
     "testRouteNames": [
       "edit_action_row",
       "find_sheet_actions",
+      "dump_doc_paragraphs",
+      "read_team_actions",
       "verify_chip_integrity",
       "import_selected_for_test",
       "forward_action_rows_test"
@@ -216,6 +229,24 @@
           "baseN"
         ],
         "completionSignal": "synchronous response; same as _submitImport's IMPORT_SELECTED.done"
+      },
+      "read_team_actions": {
+        "request": [
+          "action",
+          "testToken",
+          "teamId",
+          "docId",
+          "statusFilter",
+          "windowDays",
+          "excludeDocId",
+          "assigneeEmail"
+        ],
+        "response": [
+          "ok",
+          "teamId",
+          "rows"
+        ],
+        "completionSignal": "synchronous response; rows scoped to teamId under the requested filters"
       },
       "forward_action_rows_test": {
         "request": [

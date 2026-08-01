@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import contextlib
 import copy
-import io
 import json
 import os
 import pathlib
@@ -576,16 +575,15 @@ class ScenarioSession:
                       col7 doc_name present, matches the doc's actual current title
                       (GTaskSheet-k1g9), and col10 sync_status not an error state.
                       Does NOT call any GAS route (verify_action_rows/verify_chip_integrity
-                      untouched) -- the doc-name-correctness check downloads the .docx
-                      artifact (already-sanctioned download_docx path, same as DOC/TRACKER
-                      reads) and reads its core_properties.title, which Google Docs' docx
-                      export sets to the live Drive document name.  Equivalent to an
-                      artifact-side verify(on=SHEET) check; placed here for caller
-                      ergonomics only.
+                      untouched) -- the doc-name-correctness check reads the live Drive
+                      title off the doc's edit page (fetch_doc_title, gts-jnsf) rather
+                      than the .docx export's core_properties.title, which Google Docs
+                      always writes as the literal placeholder "Word Document" and so
+                      cannot observe a rename.  Equivalent to an artifact-side
+                      verify(on=SHEET) check; placed here for caller ergonomics only.
         """
         if scope == Surface.SHEET:
-            from tests.helpers.download import download_docx, download_xlsx
-            import docx as _docx_pkg
+            from tests.helpers.download import download_xlsx, fetch_doc_title
 
             xlsx = download_xlsx(self.sheet_id)
             rows = SheetReader().read(xlsx, self.doc_id)
@@ -593,12 +591,9 @@ class ScenarioSession:
 
             current_title = None
             if rows:
-                # Only fetch the docx (extra download) if there's a row to check the
+                # Only fetch the title (extra request) if there's a row to check the
                 # name against -- no rows means nothing to compare.
-                docx_bytes = download_docx(self.doc_id)
-                current_title = _docx_pkg.Document(
-                    io.BytesIO(docx_bytes)
-                ).core_properties.title or None
+                current_title = fetch_doc_title(self.doc_id)
 
             for row in rows:
                 # M2-guarded col 7: document_formula must resolve to a doc_id and doc_name

@@ -168,11 +168,11 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         # check — see _seed_import_candidate's docstring for why they skip
         # the real sync() round trip.
         scn_sibling = new_doc()
-        _seed_import_candidate(scn_sibling, "TestTeamA", "Import-filter sibling action")
+        _seed_import_candidate(scn_sibling, "TestTeamScopeA", "Import-filter sibling action")
 
         # ── Absent — different team (negative half of P1-P3) ────────────────
         scn_other = new_doc()
-        _seed_import_candidate(scn_other, "TestTeamAChild", "Import-filter other-team action")
+        _seed_import_candidate(scn_other, "TestTeamScopeAChild", "Import-filter other-team action")
 
         fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
         scn_target.ui.show_tab("Import")
@@ -214,7 +214,7 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         # of a real sync() followed by a separate _set_docdata override.
         scn_trashed = new_doc()
         _seed_import_candidate(
-            scn_trashed, "TestTeamA", "Import-filter trashed-doc action",
+            scn_trashed, "TestTeamScopeA", "Import-filter trashed-doc action",
             sync_status="Deleted",
         )
 
@@ -302,12 +302,12 @@ def test_team_view_page(settings, gas_log_dir, request):
         team_a_child = teams["testTeamAChild"]
 
         team_rows = {r.get("teamId"): r for r in scn_setup._post_fixture("get_team_data_rows").get("data", {}).get("rows", [])}
-        assert not (team_rows.get("TestTeamA") or {}).get("teamLink"), (
+        assert not (team_rows.get("TestTeamScopeA") or {}).get("teamLink"), (
             "testTeamA fixture row unexpectedly has a Team Link — this test exercises "
             "the no-link fallback case"
         )
 
-        # ── Doc with 1 open + 1 resolved action, in TestTeamA ────────────────
+        # ── Doc with 1 open + 1 resolved action, in TestTeamScopeA ────────────────
         scn_open = new_doc()
         _move_to_folder(scn_open, team_a)
         scn_open.sync()
@@ -332,7 +332,7 @@ def test_team_view_page(settings, gas_log_dir, request):
         _seed_open_action(scn_other_team, "Team-view other-team action")
 
         def check_team_view():
-            html = scn_setup.fetch_team_view_html("TestTeamA")
+            html = scn_setup.fetch_team_view_html("TestTeamScopeA")
             if open_doc_name not in html:
                 return f"team view missing open-action doc {open_doc_name!r}: {html!r}"
             if "Team-view open action" in html or "Team-view resolved action" in html:

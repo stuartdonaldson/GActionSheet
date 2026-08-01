@@ -9,11 +9,11 @@ correctly for one file: "uc_a_clear inserts chip-led items, invisible to AI-N sc
 Session ended with "Work will need to continue."
 
 Session 2026-06-01 00:15:41: 11 failures identified across test_uc_scenarios, test_b7_write_routes,
-test_uc_sidebar_mutations. Issue `GTaskSheet-w6vg` filed at P3 with a description of the failures
+test_uc_sidebar_mutations. Issue `gts-w6vg` filed at P3 with a description of the failures
 and a plausible explanation ("accumulated legacy rows without globalIds"). Session moved on.
 
 Session 2026-06-01 12:23:41: PR reviewed, two additional debt issues filed, PR squash-merged to
-master. The merge proceeded with GTaskSheet-w6vg open.
+master. The merge proceeded with gts-w6vg open.
 
 At no point was there an explicit conversation with the user: "we have 11 failing tests and here
 is the state of the test suite — do you want to address this before merging, or accept this as
@@ -26,7 +26,7 @@ diagnosis would have had the same outcome under the same process: file → proce
 ## Why Chain
 
 Why 1 — The PR merged to master with 11 known test failures.
-Why 2 — Filing GTaskSheet-w6vg was treated as discharging the obligation — the act of creating
+Why 2 — Filing gts-w6vg was treated as discharging the obligation — the act of creating
          the issue substituted for the conversation about whether to proceed.
 Why 3 — No step in the merge-gate process requires the AI to surface a debt summary to the human
          and explicitly request a proceed/address decision when known failures exist.
@@ -80,10 +80,10 @@ Already applied. `merge-gate` skill v1.1 Step 0 "Debt state check" requires synt
 known debt (test failures, stale issues, convention drift), presenting it to the human, and
 asking explicitly "address before merging, or proceed with it tracked?" — with the line
 "Filing a tracking issue does not constitute permission to proceed." This is the c option
-verbatim, including the anti-pattern entry citing this exact incident (GTaskSheet-w6vg).
+verbatim, including the anti-pattern entry citing this exact incident (gts-w6vg).
 No CLAUDE.md backstop or session-start-check addition needed — merge-gate is the enforcement
 point and it fires automatically.
 
 Verify: had Step 0 existed at the 2026-06-01 merge, the 11 known failures would have required
 an explicit human proceed/address decision before the squash-merge to master, rather than
-being discharged by filing GTaskSheet-w6vg.
+being discharged by filing gts-w6vg.

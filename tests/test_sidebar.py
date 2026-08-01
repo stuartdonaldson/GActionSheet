@@ -20,7 +20,7 @@ import pytest
 from scn.ai import ai
 from scn.engine import CheckpointKind, Surface
 from scn.reporter import emit_standalone_event
-from scn.session import ScenarioSession
+from scn.session import ScenarioSession, resolve_auth_file
 from scn.ui import UiDriver
 
 DOC = Surface.DOC
@@ -44,7 +44,7 @@ def browser_page(settings):
     """
     from playwright.sync_api import sync_playwright
 
-    auth = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+    auth = resolve_auth_file()
     run_id = pathlib.Path(__file__).stem
     t0 = time.monotonic()
     with sync_playwright() as pw:
@@ -210,18 +210,32 @@ def test_sidebar_shell_controls(settings, browser_page):
         s._post_fixture("uc_c_first_insert")
         card = s.ui.open_sidebar(timeout="45s")
 
-        # Present: all 4 top-level action buttons visible
+        # Present: all 4 top-level action buttons visible.
+        # gts-70wo/gts-t6hx: this assertion (specifically the Import button)
+        # intermittently timed out at 30s under heavy shared-TEST load
+        # (GAS cold-start variability), while capture_failure's post-timeout
+        # "Visible buttons" diagnostic showed Import WAS present in the frame
+        # — a render-timing race, not a missing/broken control or selector
+        # issue. Session 6 (2026-08-01) reran this test 3x in isolation under
+        # normal load and it passed clean every time (96.9s/56.3s/53.6s, no
+        # reproduction) — confirming the failure is load-correlated, not
+        # deterministic. Per gts-70wo's own AC ("if not [reproduced], extend
+        # the wait_for timeout slightly with a comment noting why"), bumped
+        # 30s -> 45s (matching open_sidebar's own cold-start budget above)
+        # rather than reworking the render-timing handshake for a failure
+        # mode that only manifests under load this harness can't reproduce
+        # on demand.
         card.frame.get_by_role("button", name=re.compile(r"^sync$", re.I)).wait_for(
-            state="visible", timeout=30000
+            state="visible", timeout=45000
         )
         card.frame.get_by_role("button", name=re.compile(r"^import$", re.I)).wait_for(
-            state="visible", timeout=30000
+            state="visible", timeout=45000
         )
         card.frame.get_by_role("button", name=re.compile(r"^notify$", re.I)).wait_for(
-            state="visible", timeout=30000
+            state="visible", timeout=45000
         )
         card.frame.get_by_role("button", name=re.compile(r"^insert tracker$", re.I)).wait_for(
-            state="visible", timeout=30000
+            state="visible", timeout=45000
         )
         # Absent: removed controls (VerifySync no longer in sidebar)
         assert card.frame.get_by_role(

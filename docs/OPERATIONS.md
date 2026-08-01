@@ -13,6 +13,18 @@ The same script also hosts the **automation feature set** (timed sweep trigger, 
 
 No server infrastructure. No separate projects. One push updates both deployment modes.
 
+### Test vs. Prod: what's actually isolated
+
+`pnpm run deploy:test` and `pnpm run deploy:prod` repoint two different **Web App deployments** (`TEST-WEB-APP` / production), each with its own deployment ID and URL, each serving whatever code was pushed to HEAD at the moment that deployment was last repointed. That per-deployment pinning is real for Web App (`doGet`/`doPost`) traffic — a caller hitting the TEST URL keeps getting the code snapshot from the last `deploy:test`, even after a later `clasp push`, until TEST is repointed again.
+
+**Installable triggers do not have this isolation.** Time-based triggers (`syncAll`) and the `onEdit` trigger always execute against the script's HEAD — the single most-recently-pushed version of the code — regardless of which Web App deployment (test or prod) is currently pinned to which version. There is exactly one script project (`scriptId` above) and one HEAD; a trigger created via `ScriptApp.newTrigger()` (as `TriggerManager.js` does) is not bound to a specific deployment ID. So a `clasp push` made while iterating on TEST immediately changes what code the trigger runs in production too — there is no trigger-level separation between "test" and "prod" today.
+
+Practically, the real difference between the TEST and production deployments is **which population of users is calling which URL**, not which code is running in the background:
+- **TEST** — the URL/version used during active development and by `pytest`; also what add-on users enrolled in the test program are pointed at.
+- **Production** — the URL/version tied to the production, user-installable add-on listing in the Google Workspace Marketplace / GCP project; the population that installed the real add-on.
+
+Consequence for anyone touching `TriggerManager.js` or reasoning about trigger behavior: don't assume "test" and "prod" trigger executions can be told apart or gated independently without a genuinely separate script/deployment. See `gts-li3g` for a concrete bug this caused (the 30-min `syncAll` trigger racing an in-flight sync) and why disabling the trigger was rejected as a fix.
+
 ---
 
 ## Prerequisites
@@ -29,6 +41,20 @@ Before the first deployment, complete these one-time setup steps:
 ### Web App Access
 - **Access:** "Anyone" (not "Anyone within org") — org SSO enforces auth on `UrlFetchApp` regardless of headers when restricted to org.
 - **Execute as:** "USER_DEPLOYING" — required for sheet-write authority.
+
+### Verified Team Portal Identity (GIS / NUUC-Dispatch) — no OAuth client needed here
+The verified team portal's identity (GIS sign-in, signed assertion, `_verifySignedAssertion`
+in `src/AccessControl.js`) is provisioned entirely on the **NUUC-Dispatch** project, not
+this one (ADR-0021, `../../NUUC-Dispatch/knowledge-base/adr/0002-signed-identity-assertion.md`).
+GActionSheet only needs the shared per-target HMAC secret (the Script Property named by
+the assertion's `kid` claim) — **no OAuth 2.0 Web client, no Authorized redirect URI, and
+no `GIS_CLIENT_ID`/`GIS_CLIENT_SECRET` are required on this project's GCP project.**
+`gts-hc6v` tracked provisioning such a client here under ADR-0017 Phase 2's now-superseded
+auth-code-redirect design; it was closed as superseded once confirmed that the live
+verification path never reads `GIS_CLIENT_ID` (the one function that did,
+`_verifyGisIdToken`, is dead code — see its in-source comment). See
+`docs/verified-team-portal-plan.md` for the NUUC-Dispatch-side provisioning steps that
+*are* required (on that project, not this one).
 
 ### `urlFetchWhitelist`
 Declared in `src/appsscript.json`. Covers northlakeuu.org URL format variants:
@@ -162,6 +188,33 @@ Apps Script editor → Run → initializeTriggers
 - Archive sheet tab exists = archiving has run at least once
 - `WEBAPP_URL` script property is set = Web App has been visited at least once
 
+### Axiom (`nuuts` dataset)
+
+Structured logs from both sides (GAS via `GasLogger.js`, Python tests via
+`scn/reporter.py`) are also shipped to Axiom dataset `nuuts` — see
+`scripts/query_axiom.py` to query it and `scripts/call_webapp.py` for the
+manual-probe path. Config lives in `local.settings.json`
+(`axiomDataset`/`axiomToken`/`axiomQueryToken`), written by `pnpm run
+deploy:test`.
+
+**Account owner (as of 2026-07-30):** `stuart.donaldson@gmail.com`. This is
+a placeholder owner, not the intended long-term one — expect this to move to
+an org-owned account later. Only the Axiom web console (login as the owner
+above) can manage org/dataset-admin operations (map fields, vacuum, member
+access); neither API token in `local.settings.json` has that permission
+(both are scoped to ingest/query only — confirmed via 403 on `PUT
+/v2/datasets/nuuts/mapfields`).
+
+**Known issue:** `nuuts` is at Axiom's 256/257-field-per-dataset cap (bead
+`gts-pfyx`). GAS-side events now nest their payload under one `data` field
+(`GasLogger.js`) instead of spreading it flat, but that alone doesn't free
+existing columns — `data` still needs to be marked as an Axiom **map field**
+(console: Datasets → nuuts → mark `data` as map field) *before* it can
+absorb new sub-keys without growing the column count further, and a
+**vacuum** (console: Datasets → nuuts → Vacuum fields; once/day limit) is
+needed to reclaim the ~257 already-registered legacy columns. Data is not
+lost by either operation — only unused field *definitions* are dropped.
+
 ---
 
 ## Failure Modes
@@ -201,27 +254,40 @@ Most tests run as a single primary account. The access-filter journey (`J-ACCESS
 used by the Import and Notify features) additionally requires one or more **restricted**
 accounts so the read-denied path is genuinely exercised rather than simulated.
 
-| Account | Auth artifact | Role | Minimum Drive permissions |
-|---------|---------------|------|---------------------------|
-| Primary | `.auth/user.json` | Full-access baseline (currently also the dev deployer) | Reader (or owner) on **all** team folders registered in `TeamData` |
-| `test.u1` | `.auth/test.u1.json` *(not yet captured)* | Primary end user, non-deployer — target taxonomy | Same Drive access as Primary, but a separate account from the deployer (see `docs/security-architecture.md` §5) |
-| `test.u2` | `.auth/test.u2.json` | Restricted — single-team subset | Reader on a **strict subset** of team folders only — must have **no** access to at least one team folder the primary can read |
-| `test.u3` | `.auth/test.u3.json` *(not yet captured)* | Restricted — other-team subset (J-ACCESS-FILTER's `TeamA-only`) | Reader on a *different* single team than `test.u2`, no access to the rest |
-| `nuuts.service` | `.auth/nuuts.service.json` *(future)* | Production service/deployer account | Reader/Editor on team folders + the ActionSheet only |
+Auth files are account-identity files shared across projects under
+`$PLAYWRIGHT_AUTH_DIR` (`.envrc`, default `~/.playwright`), named by the real
+Google account they hold. This project maps each role below to a specific
+account file via `local.settings.json`'s `"playwrightAccounts"` map (e.g.
+`{"primary": "sdonaldson.json"}`); a role with no entry there falls back to
+`.auth/<role>.json`. Mechanics are the reusable
+`/mnt/c/dev/DevStandard/docs/standards/playwright-shared-auth.md` standard;
+this project's own role taxonomy is in this project's `.auth/README.md` and
+`docs/security-architecture.md` §5.
+
+| Account role | `playwrightAccounts` key | Minimum Drive permissions |
+|--------------|--------------------------|----------------------------|
+| Primary | `primary` | Full-access baseline (currently also the dev deployer). Reader (or owner) on **all** team folders registered in `TeamData`. |
+| `test.u1` | `test.u1` *(not yet captured)* | Same Drive access as Primary, but a separate account from the deployer — primary end user, non-deployer, target taxonomy (see `docs/security-architecture.md` §5). |
+| `test.u2` | `test.u2` | Restricted — single-team subset. Reader on a **strict subset** of team folders only — must have **no** access to at least one team folder the primary can read. |
+| `test.u3` | `test.u3` *(not yet captured)* | Restricted — other-team subset (J-ACCESS-FILTER's `TeamA-only`). Reader on a *different* single team than `test.u2`, no access to the rest. |
+| `nuuts.service` | `nuuts.service` *(future)* | Production service/deployer account. Reader/Editor on team folders + the ActionSheet only. |
 
 `test.u2` is the same second Google account used by the Probe tests
 (`pnpm run probe:test.u2`). Setup for a restricted account:
 
-1. Capture its storage state: `node tests/playwright/auth.setup.js --account=test.u2`
-   (sign in as the restricted account when prompted). Or `pnpm run auth:test.u2`.
-2. In Drive, share the intended team folder with the restricted account as **Reader**.
+1. Capture its storage state: `node tests/playwright/auth.setup.js --account=<slug>`
+   (sign in as the restricted account when prompted; pick a slug that names
+   the real account, e.g. `sanctuary`). Or `pnpm run auth:test.u2` for a
+   generic default slug.
+2. Add `"test.u2": "<slug>.json"` to `local.settings.json`'s `playwrightAccounts`.
+3. In Drive, share the intended team folder with the restricted account as **Reader**.
    Do **not** share the other team folders — that asymmetry is what produces the deny path.
-3. Seed one source document with ≥1 team-scoped action in each relevant team folder
+4. Seed one source document with ≥1 team-scoped action in each relevant team folder
    (the access-filter fixture; idempotent check-exists-or-create).
 
-The harness selects the account per run via `PROBE_AUTH_STATE` (defaults to
-`.auth/user.json`). Tests that assert a restricted view set `PROBE_AUTH_STATE=.auth/test.u2.json`
-(or `.auth/test.u3.json`).
+The harness selects the account per run via `PROBE_AUTH_STATE` (an explicit
+file path, defaults to the primary account's file). Tests that assert a
+restricted view point it directly at the `test.u2`/`test.u3` account file.
 
 > This is a **shared test asset** for EPIC-D (Import) and EPIC-E (Notify). The account
 > fixture matrix and the journey it backs are specified in
@@ -308,7 +374,7 @@ drained it. On a `Surface.UI` FAIL-severity miss, a screenshot of the live
 page is attached to the report named `"<tag> UI FAIL"`. Both apply uniformly
 to every pytest scenario — no per-test opt-in.
 
-**Screenshot on every UI failure (GTaskSheet-3tkf).** Beyond drained-checkpoint
+**Screenshot on every UI failure (gts-3tkf).** Beyond drained-checkpoint
 misses, *any* failing UI test — timeout or assertion — automatically saves a
 full-page PNG and reports diagnostics, via two layers so there is no
 copy-pasted capture logic:
@@ -327,12 +393,32 @@ copy-pasted capture logic:
   failure report, and attaching the PNG to Allure. It is a no-op for non-UI
   (mock-based) tests.
 
+**DOM-derived state over OCR/screenshot-reading (gts-3tkf follow-up,
+gts-3sgr).** Both capture layers above also embed `scn.ui.describe_visible_buttons(frames)`
+output ("Visible buttons: ...") — each frame's currently-visible interactive
+button accessible names, read via the same `get_by_role("button")` signature
+the bounded waits themselves query, not a screenshot a human (or model) has
+to visually parse. This is now the project's default convention for any new
+UI-failure diagnostic: prefer a DOM-derived list of what's actually
+present/visible over asking anyone to read it off a PNG. Validated
+(gts-3sgr) against real failures: the original `test_import_access_filter`
+"Import" locator bug (gts-y8a0) took several screenshot reads, a headed
+re-run, and multiple exploratory passes to diagnose before this diagnostic
+existed. After it shipped, three separate follow-up reports
+(gts-70wo, gts-t6hx, gts-1o7g) each ruled out "missing/broken button" as the
+cause in a single read of the "Visible buttons" list (the button was present
+every time — pointing instead at a render-timing race or backend-load
+symptom, not a selector defect) — exactly the diagnosis-time reduction the
+diagnostic was built for. Use `describe_visible_buttons()` (or extend it) for
+any future custom UI-failure capture point rather than reinventing a
+screenshot-only diagnostic.
+
 #### onLinkPreview card rendering — `tests/test_link_preview.py`
 
 The `onLinkPreview` add-on card (rendered via `addons.gsuite.google.com`) was
-previously believed to require a real human mouse hover (GTaskSheet-s9so) and
-was covered only by a headed, human-instructed interactive test. GTaskSheet-39jk
-and GTaskSheet-cug8 found that placing the text cursor on the `AI-N:` chip link
+previously believed to require a real human mouse hover (gts-s9so) and
+was covered only by a headed, human-instructed interactive test. gts-39jk
+and gts-cug8 found that placing the text cursor on the `AI-N:` chip link
 via `Ctrl+F` -> type -> `Enter` -> `Escape` (no mouse) fires the add-on's
 `onLinkPreview` trigger, and re-placing the cursor after moving it away renders
 the card — reproducible headless. `tests/test_link_preview.py` drives this
@@ -357,7 +443,7 @@ of calling pytest directly:
 
 ```bash
 /mnt/c/dev/venvs/uv1/bin/python3 scripts/run_test_exec.py \
-  -q "Investigating GTaskSheet-XXXX: <question>" \
+  -q "Investigating gts-XXXX: <question>" \
   tests/test_journey.py -x -v < /dev/null
 ```
 
@@ -397,12 +483,12 @@ UC-E import/forward across docs) are covered by the following test files:
 | UC-E — import an open action from a teammate's doc (forward) | `tests/test_import.py` (`test_import_access_filter` AC1; `test_import_flow_forward_sync` AC2–AC4, incl. `created_date` carry-over) |
 | Timed sweep (`syncAll`) | `tests/test_sync_all.py` |
 
-**Sign-off (GTaskSheet-mol-06g, 2026-05-21):** all 8 UC scenarios pass — 14
-passed, 2 xfailed (pipe-delimited assignee, tracked under `GTaskSheet-tis`).
+**Sign-off (gts-mol06g, 2026-05-21):** all 8 UC scenarios pass — 14
+passed, 2 xfailed (pipe-delimited assignee, tracked under `gts-tis`).
 This is the last full-suite run across the UC matrix; later regression runs
-(e.g. `GTaskSheet-gdll`) are targeted spot-checks against specific surfaces,
+(e.g. `gts-gdll`) are targeted spot-checks against specific surfaces,
 not a re-run of the full UC matrix. UC-E (EPIC-D import/forward) was added
-later and is not part of the mol-06g 8-scenario sign-off baseline above.
+later and is not part of the mol06g 8-scenario sign-off baseline above.
 
 ---
 

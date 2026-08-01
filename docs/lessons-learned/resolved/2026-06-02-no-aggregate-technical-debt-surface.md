@@ -7,7 +7,7 @@ Domain: process
 Across this sprint, three distinct categories of invisible technical debt accumulated and were
 only discovered through unrelated downstream work:
 
-1. **Failing tests** (GTaskSheet-w6vg): 11 test failures filed after the 2026-05-31 session.
+1. **Failing tests** (gts-w6vg): 11 test failures filed after the 2026-05-31 session.
    Tracked individually, attributed to a plausible-but-unverified cause, classified P3, and
    the merge proceeded. Root cause (scanner regression) not identified until 6ov.8.
 

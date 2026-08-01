@@ -1,10 +1,10 @@
 # Staging — J-ACCESS-FILTER: shared access-filter journey (EPIC-D + EPIC-E)
 
-> **Transient working contract** (framework staging). Authored by `GTaskSheet-z1fr`.
-> Sole design input for the binding beads `GTaskSheet-1dxz` (Import), `GTaskSheet-ay5w`
-> (Notify), and `GTaskSheet-7fng` (parity). Deleted when EPIC-D **and** EPIC-E close and
+> **Transient working contract** (framework staging). Authored by `gts-z1fr`.
+> Sole design input for the binding beads `gts-1dxz` (Import), `gts-ay5w`
+> (Notify), and `gts-7fng` (parity). Deleted when EPIC-D **and** EPIC-E close and
 > the durable test-account note has graduated to `docs/OPERATIONS.md`.
-> Review fidelity: **Slice** (ADR-0013) — see parent epic `GTaskSheet-uz7h`.
+> Review fidelity: **Slice** (ADR-0013) — see parent epic `gts-uz7h`.
 > Reuses (no new logic): `assertTeamAccess(teamId, ss)` (`src/SyncManager.js:872`) and the
 > `ActionSheet.File Id` → `DocData.FileId` join (`_readDocDataRow`, `src/SyncManager.js:905`).
 
@@ -49,7 +49,7 @@ tab) costs one projection adapter, not a third access suite.
 | Third account `TeamA-only` (**new**, `.auth/test.u3.json`) | `npm run auth:test.u3` (same mechanism as `test.u2`) | `z1fr` → `1dxz` | P1/P2 mirror, §3 |
 
 `access_filter.py` is created **once** by whichever binding bead runs first (Import,
-`GTaskSheet-1dxz`); the second binding bead (Notify, `GTaskSheet-ay5w`) imports it
+`gts-1dxz`); the second binding bead (Notify, `gts-ay5w`) imports it
 unchanged and supplies only its projection adapter. The no-shared-context rule (CLAUDE.md
 §Testing) is preserved: both binding beads work from *this contract*, not from each other's
 test code; the helper's behaviour is fully specified here in §4.
@@ -108,7 +108,7 @@ assigned to the account that matches its team**, using the plain-email assignee 
 
 One fixture, one set of accounts, drives both the P1–P4 access assertions *and* gives
 Notify's per-assignee aggregation real, differentiated data — and incidentally sets up
-(without building) the future "Assignee reminder" funnel item (`GTaskSheet-tv54`), where
+(without building) the future "Assignee reminder" funnel item (`gts-tv54`), where
 the assignee is a real account whose own Drive access matches the team their action lives
 in.
 
@@ -122,7 +122,7 @@ in.
 
 ### Open item — AC-1's within-team grouping fixture (not covered here)
 
-AC-1 (`GTaskSheet-eore`) needs **≥2 source documents in the *same* team as the target/
+AC-1 (`gts-eore`) needs **≥2 source documents in the *same* team as the target/
 journey doc**, so its Import list renders ≥2 groups with AI-N sub-sorting inside at least
 one group. None of `docTeamA`/`docTeamB`/`docTeamAChild` are in the same team as each other
 by design (§3 above), so this matrix does not provide that fixture. That's a separate,
@@ -142,7 +142,7 @@ mechanism in isolation (entry-point coverage invariant, CLAUDE.md).
 | **P1-PrimaryFullAccess** | Primary | run feature's filtered read | `assert_visible_set(adapter(result), { docTeamA, docTeamB, docTeamAChild })` | `visible_doc_set`, join |
 | **P2-SecondaryRestrictedAccess** | Restricted | run feature's filtered read | `assert_visible_set(adapter(result), { docTeamAChild })` — `docTeamA`/`docTeamB` absent (never listed) | `visible_doc_set`, join, test.u2 auth |
 | **P3-NoTeamFolderAccess** | Restricted | request a read scoped to `TestTeamA` (a team the account cannot read) | zero rows returned **and** `TeamAccessDenied` surfaced to caller; **no partial data** | `assert_team_access`/`_team_access_check`, `assertTeamAccess` |
-| **P4-FeatureParity** | Primary, then Restricted | run **both** features' reads for the same account | `adapter_import(result) == adapter_notify(result) == visibleDocSet(account)` | both adapters; `GTaskSheet-7fng` |
+| **P4-FeatureParity** | Primary, then Restricted | run **both** features' reads for the same account | `adapter_import(result) == adapter_notify(result) == visibleDocSet(account)` | both adapters; `gts-7fng` |
 
 Notes:
 - **P3 is the phase that justifies the second account.** The existing single-account suite
@@ -150,7 +150,7 @@ Notes:
   produce a genuine `getFolderById`-denied path. The restricted account, denied on
   `testTeamA`, produces it. P3 asserts the deny path drops rows *and* surfaces the error —
   it must never leak `docTeamA`/`docTeamB` to the restricted account.
-- **P4 reuses, never rebuilds.** Parity (`GTaskSheet-7fng`) is `import_set == notify_set`,
+- **P4 reuses, never rebuilds.** Parity (`gts-7fng`) is `import_set == notify_set`,
   both compared to the same `visibleDocSet` already computed for P1/P2. No third expected
   set, no third fixture.
 - **Filtering vs. erroring.** For an *unscoped list* (P1/P2), teams the account cannot read
@@ -171,8 +171,8 @@ by each feature's own pre-code contract (no-shared-context).
 
 | `entry_point` key (to register) | Call-site (the feature read) | Projection adapter → `set[fileId]` | Bound by |
 |---------------------------------|------------------------------|------------------------------------|----------|
-| `importList` (name TBD by EPIC-D contract) | Import tab's team-scoped list-source-documents read | rows → distinct source `File Id` | `GTaskSheet-1dxz` |
-| `notifyAggregate` (name TBD by EPIC-E contract) | Notify tab's assignee-aggregation read | aggregated entries → distinct source `File Id` | `GTaskSheet-ay5w` |
+| `importList` (name TBD by EPIC-D contract) | Import tab's team-scoped list-source-documents read | rows → distinct source `File Id` | `gts-1dxz` |
+| `notifyAggregate` (name TBD by EPIC-E contract) | Notify tab's assignee-aggregation read | aggregated entries → distinct source `File Id` | `gts-ay5w` |
 
 Each registered entry point **must** call `assertTeamAccess(teamId, ss)` per candidate team
 before emitting rows — this is the reuse contract, asserted behaviourally by P3, not a new
@@ -192,7 +192,7 @@ check authored in the test.
   pass an explicit user identity rather than the active user. Express in the hardening
   `[TST]` as a one-liner + a test parameter `as_account=`; `visible_doc_set` already takes an
   `account` argument, so the seam is the *signature*, not the test shape. Do not build now.
-  (Carried from EPIC-B `me6w` open seams via `GTaskSheet-5fha`.)
+  (Carried from EPIC-B `me6w` open seams via `gts-5fha`.)
 - **Settings tab (Phase 2) as a third consumer.** It would add one projection adapter to
   `access_filter.py`, reusing P1–P4 unchanged — recorded to confirm the shared-helper design
   scales without a third access suite. Do not build now.

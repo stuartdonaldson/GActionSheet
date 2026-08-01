@@ -534,7 +534,7 @@ This document consumes those decisions; it is not where they are finalized.
 
 ## §16 — Scenario Definition Model (canonical)
 
-_This is the **canonical** definition of how a scenario is written. **Implemented in GTaskSheet-5vwu (2026-05-30).** The `scn/` package (`scn/ai.py`, `engine.py`, `session.py`, `surfaces.py`, `ui.py`, `contract.py`) implements this model; `tests/test_journey.py` is the canonical journey. §14 (prose example) and §15 (early Python architecture) are retained as background._
+_This is the **canonical** definition of how a scenario is written. **Implemented in gts-5vwu (2026-05-30).** The `scn/` package (`scn/ai.py`, `engine.py`, `session.py`, `surfaces.py`, `ui.py`, `contract.py`) implements this model; `tests/test_journey.py` is the canonical journey. §14 (prose example) and §15 (early Python architecture) are retained as background._
 
 §14 read as 23 imperative steps. That style does not scale: it bundles unrelated operations into single steps, leaves intent implicit, and makes under-assertion easy. This section replaces the *style* (not the goal) with a small, uniform vocabulary, defines the data object a scenario manipulates, states the level of detail to write at, and catalogs the support functions a scenario author calls.
 
@@ -777,7 +777,7 @@ The author writes against a thin driver (`ScenarioSession`, "scn") plus standalo
 
 ### 16.10 Clean worked example — the canonical journey
 
-This is the journey from the human-level notes, restructured. Each act maps to one entry point; each expectation states intent on the `ai`. It exercises Sync Scenarios C, B/A, and the editor UI; it is **representative, not exhaustive**. **Implemented as `tests/test_journey.py` (GTaskSheet-5vwu.13).** See test file header for documented deviations D1–D3.
+This is the journey from the human-level notes, restructured. Each act maps to one entry point; each expectation states intent on the `ai`. It exercises Sync Scenarios C, B/A, and the editor UI; it is **representative, not exhaustive**. **Implemented as `tests/test_journey.py` (gts-5vwu.13).** See test file header for documented deviations D1–D3.
 
 ```python
 @pytest.fixture(scope="module")
