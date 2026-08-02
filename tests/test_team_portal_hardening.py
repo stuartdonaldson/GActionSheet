@@ -621,6 +621,28 @@ def test_list_my_teams_includes_accessible_team(settings, caller_assertion):
     )
 
 
+def test_r3a_tier_resolves_from_partial_folder_access(settings, caller_assertion):
+    """[R3a] TestTeamA owns >=2 folders (plan §6a: folder 1 grants the fixture
+    caller access, folder 2 does not). R3a requires read tier to be the
+    HIGHEST tier held on ANY of the team's folders, i.e. resolution must be
+    a MAX over the whole folder set -- not gated on every folder, and not
+    keyed to a single 'primary' folder. The caller here has zero access on
+    folder 2, so if resolution incorrectly required unanimous access (or
+    incorrectly kept only the last-checked folder's result) TestTeamA would
+    drop out of list_my_teams entirely. It must still resolve via folder 1."""
+    resp = _list_my_teams(settings, caller_assertion)
+    teams = resp.get("teams", [])
+    entry = next((t for t in teams if t.get("teamId") == TEAM_A), None)
+    assert entry is not None, (
+        f"[R3a] TestTeamA must still resolve for a caller with access on only "
+        f"one of its two folders (MAX over the folder set, not unanimous "
+        f"access) -- got teams={teams!r}"
+    )
+    assert entry.get("tier") in ("VIEW", "EDIT"), (
+        f"[R3a] TestTeamA's MAX-resolved tier must be VIEW or EDIT, got {entry!r}"
+    )
+
+
 def test_list_my_teams_excludes_inaccessible_team(settings, no_access_assertion):
     """[R21 negative] A caller with no resolvable access to any team's
     folders must not see TestTeamA (or any team) in list_my_teams -- the R6

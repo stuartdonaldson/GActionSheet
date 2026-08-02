@@ -28,12 +28,14 @@ const { runViaSheetMenu }                  = require('./editor_helpers');
 
 const settingsPath = path.join(__dirname, '..', '..', 'local.settings.json');
 const settings     = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+const { resolveAuthFile } = require('../../scripts/playwright-auth');
 
 // Auth state file — override with PROBE_AUTH_STATE env var to run as a different account.
-// Default: .auth/user.json (deployer account). For second-user probes: .auth/test.u2.json
+// Default: the "primary" role's account file. For second-user probes: PROBE_AUTH_STATE
+// pointed at the test.u2 account file (see local.settings.json's playwrightAccounts).
 const storageState = process.env.PROBE_AUTH_STATE
   ? path.resolve(process.cwd(), process.env.PROBE_AUTH_STATE)
-  : path.join(__dirname, '..', '..', '.auth', 'user.json');
+  : resolveAuthFile('primary', { projectRoot: path.join(__dirname, '..', '..'), settingsPath });
 
 const DEV_URL  = settings.webappDevUrl;   // @HEAD — has PROBE.js after push
 const TEST_URL = settings.webappTestUrl;  // versioned — may or may not have PROBE.js

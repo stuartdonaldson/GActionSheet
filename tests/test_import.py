@@ -26,7 +26,7 @@ import pytest
 from scn.ai import ai
 from scn.engine import CheckpointKind, Surface
 from scn.reporter import emit_standalone_event
-from scn.session import ScenarioSession
+from scn.session import ScenarioSession, resolve_auth_file
 from scn.ui import UiDriver
 from tests.helpers.access_filter import assert_visible_set, import_adapter, visible_doc_set
 from tests.helpers.gas_log import assert_log, clear_logs
@@ -49,7 +49,7 @@ def browser_page(settings, request):
     """
     from playwright.sync_api import sync_playwright
 
-    auth = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+    auth = resolve_auth_file()
     run_id = request.node.name
     t0 = time.monotonic()
     with sync_playwright() as pw:
@@ -174,7 +174,7 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         scn_other = new_doc()
         _seed_import_candidate(scn_other, "TestTeamScopeAChild", "Import-filter other-team action")
 
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_target.ui.show_tab("Import")
         expected = visible_doc_set(scn_target, seeded={scn_sibling.doc_id})
         # testTeamA/testTeamAChild are shared fixture folders that accumulate
@@ -246,7 +246,7 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         _set_docdata(scn_p4, teamId="TestTeamNonexistent")
         scn_p4.ui = UiDriver(browser_page, doc_id=scn_p4.doc_id)
 
-        fence2 = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence2 = clear_logs(gas_log_dir)
         scn_p4.ui.show_tab("Import")
 
         def check_absent():
@@ -466,7 +466,7 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
         # (EPIC GTaskSheet-pw5x tracks migrating this back to a UI call-site).
         before_ids = {r.global_id for r in scn_target.find_sheet_actions()}
 
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         result = scn_target._post_route("import_selected_for_test", {
             "testDocId": scn_target.doc_id,
             "globalIds": [src1_action.global_id, src2_action.global_id],

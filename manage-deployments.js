@@ -30,6 +30,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { checkbox, confirm, select } = require('@inquirer/prompts');
+const { resolveAuthFile } = require('./scripts/playwright-auth');
+const { publish: publishStaticPortal } = require('./scripts/publish-static-portal');
 
 const SETTINGS_PATH = path.join(__dirname, 'local.settings.json');
 
@@ -176,6 +178,19 @@ async function deployToTarget(target, deployments, nonInteractive) {
     await registerAxiomConfig(match.deploymentId);
     await verifyConfig('test');
   }
+
+  // Static portal publish (gts-79dw.4.25) — always the last step of a deploy: it depends on
+  // Version.js's BUILD_INFO, which stampVersionInfo() above already wrote for this target.
+  // 'test' -> SIT (Static's pub/AS-sit/), 'production' -> PROD (pub/AS/). Failure here doesn't
+  // roll back the GAS deploy that already succeeded above — it's reported so the operator can
+  // retry with `node scripts/publish-static-portal.js --env <sit|prod>`.
+  const portalEnv = target === 'test' ? 'sit' : 'prod';
+  try {
+    await publishStaticPortal(portalEnv, { nonInteractive });
+  } catch (err) {
+    console.warn(`\n⚠️  Static portal publish failed: ${err.message}`);
+    console.warn(`   Retry with: node scripts/publish-static-portal.js --env ${portalEnv}\n`);
+  }
 }
 
 /**
@@ -320,11 +335,13 @@ async function registerAxiomConfig(deploymentId) {
  * Returns a Cookie header string, or null if the file is missing or unreadable.
  * Used to authenticate requests to the /dev endpoint, which requires editor access.
  *
- * @param {string} [authPath]  Path to storageState JSON. Defaults to .auth/user.json.
+ * @param {string} [authPath]  Path to storageState JSON. Defaults to the
+ *   "primary" role's file, resolved via scripts/playwright-auth.js
+ *   (local.settings.json's playwrightAccounts map, or .auth/user.json).
  * @returns {string|null}
  */
 function loadAuthCookies(authPath) {
-  const p = authPath || path.join(__dirname, '.auth', 'user.json');
+  const p = authPath || resolveAuthFile('primary', { projectRoot: __dirname, settingsPath: SETTINGS_PATH });
   if (!fs.existsSync(p)) return null;
   try {
     const state = JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -380,7 +397,7 @@ async function verifyConfig(target, opts = {}) {
   if (target === 'dev') {
     const cookies = loadAuthCookies();
     if (!cookies) {
-      console.log('  ⚠️  Skipped — no .auth/user.json  (run: node tests/playwright/auth.setup.js)');
+      console.log('  ⚠️  Skipped — no auth session found  (run: node tests/playwright/auth.setup.js)');
       _printSurfaceHint(target);
       return;
     }

@@ -23,6 +23,19 @@ _AI_N_RE = re.compile(r"^AI-\d+$")
 # them (gts-cges).
 _SHEET_TZ = zoneinfo.ZoneInfo("America/Los_Angeles")
 
+# created_date/modified_date are sourced from two independent serialization
+# paths -- the webapp's live JS Date.toISOString() (millisecond-precision) vs
+# the SHEET surface's .xlsx export (openpyxl-parsed from a Sheets datetime
+# cell). Both describe the same underlying write, but the xlsx export has been
+# observed to lose up to several hundred ms of sub-second precision on the
+# same row that another read of the identical cell reproduced exactly --
+# empirically a serialization artifact of the .xlsx date encoding, not a
+# genuine second write. Exact equality is therefore too strict; tolerate a
+# small delta so the check still catches a genuinely different timestamp
+# (e.g. a mistaken overwrite) without flaking on export rounding (gts-cges
+# follow-up).
+_DATE_TOLERANCE = datetime.timedelta(seconds=2)
+
 
 def _normalize_date(value):
     """Coerce a date/datetime value (str or datetime, tz-aware or naive) to UTC.
@@ -174,7 +187,12 @@ def check_present_consistent(
             exp_val = expected[field_name]
             act_val = getattr(actual, field_name)
             if field_name in ("created_date", "modified_date"):
-                mismatch = _normalize_date(act_val) != _normalize_date(exp_val)
+                norm_act = _normalize_date(act_val)
+                norm_exp = _normalize_date(exp_val)
+                if isinstance(norm_act, datetime.datetime) and isinstance(norm_exp, datetime.datetime):
+                    mismatch = abs(norm_act - norm_exp) > _DATE_TOLERANCE
+                else:
+                    mismatch = norm_act != norm_exp
             else:
                 mismatch = act_val != exp_val
             if mismatch:

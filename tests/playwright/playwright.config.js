@@ -3,6 +3,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { loadSettings } = require('./_helpers');
+const { resolveAuthFile } = require('../../scripts/playwright-auth');
 
 function getSheetUrl() {
   if (process.env.SHEET_ID) return sheetUrl(process.env.SHEET_ID);
@@ -34,7 +35,7 @@ module.exports = defineConfig({
     // Override with PROBE_AUTH_STATE env var to run as a different account.
     storageState: process.env.PROBE_AUTH_STATE
       ? path.resolve(process.cwd(), process.env.PROBE_AUTH_STATE)
-      : path.join(__dirname, '..', '..', '.auth', 'user.json'),
+      : resolveAuthFile('primary', { projectRoot: path.join(__dirname, '..', '..') }),
     viewport: { width: 1280, height: 900 },
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

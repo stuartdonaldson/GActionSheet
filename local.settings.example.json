@@ -23,5 +23,13 @@
   "_note_webappTestUrl": "Auto-written by pnpm run deploy:test from the TEST-WEB-APP deployment ID — do not set manually. deploy:test always overwrites this with the current derived URL so it cannot become stale.",
   "webappTestUrl": "",
   "testToken": "",
-  "testTokenExpiresAt": ""
+  "testTokenExpiresAt": "",
+
+  "_note_staticPortalRepoPath": "Sibling checkout of the Static repo (nuuc-it/Static) that GitHub Pages serves. Used by scripts/publish-static-portal.js (chained automatically into pnpm run deploy:test/deploy:prod, gts-79dw.4.25) to publish the built team-action portal to pub/AS-sit/ (SIT) or pub/AS/ (PROD).",
+  "staticPortalRepoPath": "../Static",
+
+  "_note_playwrightAccounts": "Maps this project's test-account roles (docs/security-architecture.md §5) to shared, cross-project auth-identity files under $PLAYWRIGHT_AUTH_DIR (.envrc, default ~/.playwright). Capture a file with: node tests/playwright/auth.setup.js --account=<slug>",
+  "playwrightAccounts": {
+    "primary": "YOUR_ACCOUNT_SLUG.json"
+  }
 }

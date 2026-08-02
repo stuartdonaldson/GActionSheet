@@ -39,10 +39,16 @@ import argparse
 import json
 import pathlib
 import sys
+import time
 import urllib.error
 import urllib.request
 
 _SETTINGS_PATH = pathlib.Path(__file__).parent.parent / "local.settings.json"
+
+# Mirrors scn.session._HTTP_POST_MAX_ATTEMPTS/_HTTP_POST_RETRY_DELAY_S — see
+# that module for why this is a bounded retry, not a fixed post-deploy delay.
+_CALL_MAX_ATTEMPTS = 3
+_CALL_RETRY_DELAY_S = 3
 
 _ENV_URL_KEY = {
     "test": "webappTestUrl",
@@ -75,48 +81,60 @@ def call(url: str, payload: dict, *, timeout: int = 360) -> dict:
     """POST payload to the WebApp and return the parsed JSON response.
 
     Mirrors scn.session.ScenarioSession._http_post's error handling (same
-    failure modes: HTTP errors, network errors, non-JSON/echo-page responses
-    from a stale or mid-propagation deployment) so a one-off manual call
-    fails with the same diagnosable messages a test run would produce.
+    failure modes: HTTP errors, network errors, non-JSON/echo-page responses)
+    so a one-off manual call fails with the same diagnosable messages a test
+    run would produce. The non-JSON case is retried a bounded number of times
+    before raising — see scn/session.py's _http_post docstring for why this
+    is a redirect-replayed-as-GET quirk (observed recurring long after any
+    deploy), not a fixed propagation window a single sleep could paper over.
     """
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}, method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-            final_url = resp.geturl()
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw[:500]!r}"
-        ) from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(
-            f"Network error (action={payload.get('action')!r}): {exc.reason}"
-        ) from exc
 
-    if raw in ("test-token-unauthorized", "test-token-expired"):
-        raise RuntimeError(
-            f"GAS rejected test token for action={payload.get('action')!r}: {raw}. "
-            "Re-register with: python scripts/refresh_test_token.py (or npm run deploy:test)."
+    for attempt in range(1, _CALL_MAX_ATTEMPTS + 1):
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}, method="POST",
         )
-    if raw == "unauthorized":
-        raise RuntimeError(
-            f"GAS rejected action={payload.get('action')!r}: missing/wrong 'secret'. "
-            "Production routes need --auth secret (default is testToken)."
-        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+                final_url = resp.geturl()
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 404 and attempt < _CALL_MAX_ATTEMPTS:
+                time.sleep(_CALL_RETRY_DELAY_S)
+                continue
+            raise RuntimeError(
+                f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw[:500]!r}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Network error (action={payload.get('action')!r}): {exc.reason}"
+            ) from exc
 
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        redir = f" (redirected to {final_url!r})" if final_url != url else ""
-        raise RuntimeError(
-            f"Non-JSON response (action={payload.get('action')!r}){redir}: {raw[:500]!r}. "
-            "This is usually GAS deployment propagation lag right after a redeploy — "
-            "wait a bit and retry, or run npm run deploy:test again."
-        ) from exc
+        if raw in ("test-token-unauthorized", "test-token-expired"):
+            raise RuntimeError(
+                f"GAS rejected test token for action={payload.get('action')!r}: {raw}. "
+                "Re-register with: python scripts/refresh_test_token.py (or npm run deploy:test)."
+            )
+        if raw == "unauthorized":
+            raise RuntimeError(
+                f"GAS rejected action={payload.get('action')!r}: missing/wrong 'secret'. "
+                "Production routes need --auth secret (default is testToken)."
+            )
+
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            redir = f" (redirected to {final_url!r})" if final_url != url else ""
+            if attempt < _CALL_MAX_ATTEMPTS:
+                time.sleep(_CALL_RETRY_DELAY_S)
+                continue
+            raise RuntimeError(
+                f"Non-JSON response (action={payload.get('action')!r}){redir}: {raw[:500]!r} "
+                f"(after {_CALL_MAX_ATTEMPTS} attempts). This is usually GAS deployment "
+                "propagation lag or a redirect-replayed-as-GET quirk — if it persists, "
+                "run npm run deploy:test again."
+            ) from exc
 
 
 def call_action(action: str, extra: dict | None = None, *,

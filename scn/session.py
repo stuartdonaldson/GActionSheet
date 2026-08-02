@@ -21,6 +21,7 @@ import json
 import os
 import pathlib
 import re
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -64,11 +65,57 @@ class FixtureError(RuntimeError):
 
 _AUTH_COOKIE_DOMAINS = {"script.google.com", ".google.com", "accounts.google.com"}
 
-_AUTH_FILE = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+
+_SETTINGS_PATH = pathlib.Path(__file__).parent.parent / "local.settings.json"
+_DEFAULT_PLAYWRIGHT_AUTH_DIR = pathlib.Path.home() / ".playwright"
+_warned_missing_roles: set[str] = set()
+
+
+def resolve_auth_file(role: str = "primary") -> pathlib.Path:
+    """Resolve a Playwright storageState file for a project role.
+
+    Account identity files are shared across projects under
+    $PLAYWRIGHT_AUTH_DIR (.envrc; default ~/.playwright), named by the real
+    Google account they hold (e.g. sdonaldson.json) rather than by role — see
+    tests/playwright/auth.setup.js and its accounts.json identity registry.
+    This project assigns accounts to roles via local.settings.json's
+    "playwrightAccounts" map, e.g. {"primary": "sdonaldson.json"}.
+
+    Falls back to the project-local .auth/<role>.json when unconfigured (with
+    a one-time-per-role stderr warning, so the fallback doesn't silently mask
+    that the shared-auth feature was never wired up), so the harness keeps
+    working before local.settings.json is updated.
+    """
+    auth_dir = pathlib.Path(
+        os.environ.get("PLAYWRIGHT_AUTH_DIR", str(_DEFAULT_PLAYWRIGHT_AUTH_DIR))
+    ).expanduser()
+    slug = None
+    try:
+        settings = json.loads(_SETTINGS_PATH.read_text())
+        slug = settings.get("playwrightAccounts", {}).get(role)
+    except Exception:
+        pass
+    if slug:
+        return auth_dir / slug
+    fallback_name = "user.json" if role == "primary" else f"{role}.json"
+    fallback = pathlib.Path(__file__).parent.parent / ".auth" / fallback_name
+    if role not in _warned_missing_roles:
+        _warned_missing_roles.add(role)
+        print(
+            f"⚠️  local.settings.json has no \"playwrightAccounts\" entry for role "
+            f"\"{role}\" — falling back to project-local {fallback}. See .auth/README.md "
+            f"and tests/playwright/auth.setup.js to migrate this role to the shared, "
+            f"cross-project auth location (DevStandard docs/standards/playwright-shared-auth.md).",
+            file=sys.stderr,
+        )
+    return fallback
+
+
+_AUTH_FILE = resolve_auth_file()
 
 
 def _load_auth_cookie_header() -> str | None:
-    """Load Playwright auth cookies from .auth/user.json and return a Cookie header string.
+    """Load Playwright auth cookies from the resolved auth file and return a Cookie header string.
 
     Only cookies whose domain matches Google's auth domains are included.
     Returns None if the auth file is absent (falls through to unauthenticated request).
@@ -87,8 +134,26 @@ def _load_auth_cookie_header() -> str | None:
     return "; ".join(parts) if parts else None
 
 
+_HTTP_POST_MAX_ATTEMPTS = 3
+_HTTP_POST_RETRY_DELAY_S = 3
+
+
 def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
-    """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors."""
+    """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors.
+
+    Retries a bounded number of times on two symptoms of the same underlying
+    flakiness: (1) the response is the GAS echo page instead of JSON, and (2)
+    a Drive "Page Not Found" error page arrives with HTTP 404. Neither is a
+    fixed deployment-propagation window (observed recurring 50+ minutes after
+    a deploy, and intermittently mid-run with no redeploy at all) — both are
+    the /exec -> script.googleusercontent.com/echo routing intermittently
+    failing to resolve (replayed as GET dropping the POST body for the first
+    case; a bare 404 instead of a redirect for the second). A fresh POST
+    attempt either lands on the real handler or hits the same routing quirk
+    again, so a short bounded retry is the fix, not a longer sleep. Every
+    other failure (non-404 HTTP error, token rejection, network error) raises
+    immediately — only these two routing symptoms are retried.
+    """
     if not url:
         raise RuntimeError(
             "webappTestUrl not set in local.settings.json"
@@ -101,50 +166,60 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
         cookie = _load_auth_cookie_header()
         if cookie:
             headers["Cookie"] = cookie
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers=headers,
-        method="POST",
-    )
 
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-            final_url = resp.geturl()
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw!r}"
-        ) from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(
-            f"Network error (action={payload.get('action')!r}): {exc.reason}"
-        ) from exc
-
-    if raw in ("test-token-unauthorized", "test-token-expired"):
-        raise FixtureTokenError(
-            f"GAS rejected test token for action={payload.get('action')!r}: {raw}. "
-            "Re-register with: python scripts/refresh_test_token.py (or npm run deploy:test)."
+    for attempt in range(1, _HTTP_POST_MAX_ATTEMPTS + 1):
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers,
+            method="POST",
         )
 
-    # GAS always redirects /exec → script.googleusercontent.com/macros/echo (normal).
-    # When the final URL differs from the request URL AND the body is non-JSON, include
-    # the redirect destination so the cause is unambiguous.
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        redir = f" (redirected to {final_url!r})" if final_url != url else ""
-        raise RuntimeError(
-            f"Non-JSON response (action={payload.get('action')!r}){redir}: {raw!r}"
-        ) from exc
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+                final_url = resp.geturl()
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 404 and attempt < _HTTP_POST_MAX_ATTEMPTS:
+                time.sleep(_HTTP_POST_RETRY_DELAY_S)
+                continue
+            raise RuntimeError(
+                f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw!r}"
+                + (f" (after {attempt} attempts)" if exc.code == 404 else "")
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Network error (action={payload.get('action')!r}): {exc.reason}"
+            ) from exc
 
-    if "error" in result:
-        raise FixtureError(
-            f"GAS returned error for action={payload.get('action')!r}: {result['error']}"
-        )
+        if raw in ("test-token-unauthorized", "test-token-expired"):
+            raise FixtureTokenError(
+                f"GAS rejected test token for action={payload.get('action')!r}: {raw}. "
+                "Re-register with: python scripts/refresh_test_token.py (or npm run deploy:test)."
+            )
 
-    return result
+        # GAS always redirects /exec → script.googleusercontent.com/macros/echo (normal).
+        # When the final URL differs from the request URL AND the body is non-JSON, include
+        # the redirect destination so the cause is unambiguous.
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            redir = f" (redirected to {final_url!r})" if final_url != url else ""
+            if attempt < _HTTP_POST_MAX_ATTEMPTS:
+                time.sleep(_HTTP_POST_RETRY_DELAY_S)
+                continue
+            raise RuntimeError(
+                f"Non-JSON response (action={payload.get('action')!r}){redir}: {raw!r} "
+                f"(after {_HTTP_POST_MAX_ATTEMPTS} attempts)"
+            ) from exc
+
+        if "error" in result:
+            raise FixtureError(
+                f"GAS returned error for action={payload.get('action')!r}: {result['error']}"
+            )
+
+        return result
 
 
 def _http_get(url: str, timeout: int = 60) -> str:

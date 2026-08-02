@@ -1,0 +1,175 @@
+#!/usr/bin/env node
+/**
+ * Builds static-portal/src/index.html into per-environment, publishable copies under
+ * static-portal/dist/<env>/index.html (gts-79dw.4.25 — F3Go30's tools/build-static-pages.js
+ * pattern, adapted to this project's single stamped Version.js instead of per-env deployment
+ * IDs looked up from local.settings.json).
+ *
+ * Two environments, matching the Static repo's hosting split (not this project's own
+ * deploy-target vocabulary — see ENV_MAP below):
+ *   sit  -> static-portal/dist/sit/index.html   (published to Static's pub/AS-sit/)
+ *   prod -> static-portal/dist/prod/index.html  (published to Static's pub/AS/)
+ *
+ * This build step stamps three placeholders in the source, all read directly from
+ * src/Version.js's BUILD_INFO (manage-deployments.js's stampVersionInfo() already wrote the
+ * current deploy target's version/webappUrl/env there, immediately before this script runs
+ * as the last step of that same deploy):
+ *
+ *   1. STATIC_BUILD_VERSION_ (`var STATIC_BUILD_VERSION_ = null;`) — BUILD_INFO.version verbatim
+ *      (already carries the "(TEST)"/"(DEV)" suffix pattern this project uses; PROD has no
+ *      suffix). Deliberately the *same* versioning source Version.js/package.json already use,
+ *      not a second one.
+ *   2. STATIC_WEBAPP_URL_ (`var STATIC_WEBAPP_URL_ = null;`) — BUILD_INFO.webappUrl, the GAS
+ *      /exec URL this deploy target just pushed to. This is the backend the page calls; SIT
+ *      always resolves to TEST-WEB-APP, PROD always to PROD-WEB-APP, no manual URL swap.
+ *   3. STATIC_ENV_LABEL_ (`var STATIC_ENV_LABEL_ = null;`) — 'SIT' or 'PROD', shown in the
+ *      page's build badge so a human (or a screenshot) can tell which copy they're on.
+ *
+ * buildOne() *requires* BUILD_INFO.env to match the requested portal env's expected deploy
+ * target (see ENV_MAP) — this guards against publishing stale content: if Version.js is
+ * currently stamped for a different target than the one being built, the build fails loudly
+ * instead of silently baking last deploy's URL/version into this one's dist/ output.
+ *
+ * Also copies every other file/directory under static-portal/src/ (icons, consent screen
+ * text, README, privacy/terms pages) into each env's dist/ folder unchanged — none of that
+ * content differs between SIT and PROD.
+ *
+ * Usage:
+ *   node scripts/build-static-portal.js --env sit|prod
+ */
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.resolve(__dirname, '..');
+const SRC_DIR = path.join(ROOT, 'static-portal', 'src');
+const DIST_ROOT = path.join(ROOT, 'static-portal', 'dist');
+const VERSION_PATH = path.join(ROOT, 'src', 'Version.js');
+
+const VERSION_PLACEHOLDER = 'var STATIC_BUILD_VERSION_ = null;';
+const WEBAPP_PLACEHOLDER = 'var STATIC_WEBAPP_URL_ = null;';
+const ENV_LABEL_PLACEHOLDER = 'var STATIC_ENV_LABEL_ = null;';
+
+// HTML pages under static-portal/src/ that carry the three build-time placeholders and must be
+// stamped (as opposed to copied unchanged). index.html = View A; doc.html = View B (Unit D,
+// gts-79dw.4.23) — added here rather than hardcoding a second stamping call site.
+const STAMPED_PAGES = ['index.html', 'doc.html'];
+
+// Portal env -> the src/Version.js BUILD_INFO.env it must currently be stamped with, and the
+// human-readable label the page displays. Kept distinct from manage-deployments.js's own
+// TARGETS ('test'/'production') because the two splits are drawn for different reasons: GAS
+// deployment identity vs. the Static repo's hosting-folder split (gts-79dw.4.25 item 2).
+const ENV_MAP = {
+  sit:  { buildInfoEnv: 'test',       label: 'SIT',  deployCmd: 'deploy:test' },
+  prod: { buildInfoEnv: 'production', label: 'PROD', deployCmd: 'deploy:prod' },
+};
+
+function readBuildInfo_() {
+  const content = fs.readFileSync(VERSION_PATH, 'utf8');
+  const version = content.match(/version:\s*"([^"]*)"/);
+  const webappUrl = content.match(/webappUrl:\s*"([^"]*)"/);
+  const env = content.match(/env:\s*"([^"]*)"/);
+  return {
+    version: version ? version[1] : '',
+    webappUrl: webappUrl ? webappUrl[1] : '',
+    env: env ? env[1] : '',
+  };
+}
+
+// Pure string transform, kept filesystem-free so it's unit-testable independent of
+// src/Version.js's real contents (mirrors F3Go30's build-static-pages.js stampSource_).
+function stampSource_(src, { versionString, webAppUrl, envLabel }) {
+  for (const [name, placeholder] of [
+    ['version', VERSION_PLACEHOLDER],
+    ['webapp url', WEBAPP_PLACEHOLDER],
+    ['env label', ENV_LABEL_PLACEHOLDER],
+  ]) {
+    if (!src.includes(placeholder)) {
+      throw new Error(`static-portal/src page: expected placeholder not found (${name}): ${placeholder}`);
+    }
+  }
+  return src
+    .replace(VERSION_PLACEHOLDER, `var STATIC_BUILD_VERSION_ = ${JSON.stringify(versionString)};`)
+    .replace(WEBAPP_PLACEHOLDER, `var STATIC_WEBAPP_URL_ = ${JSON.stringify(webAppUrl)};`)
+    .replace(ENV_LABEL_PLACEHOLDER, `var STATIC_ENV_LABEL_ = ${JSON.stringify(envLabel)};`);
+}
+
+function copyRecursive_(src, dest) {
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyRecursive_(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}
+
+function buildOne(env) {
+  const map = ENV_MAP[env];
+  if (!map) throw new Error(`build-static-portal: unknown env '${env}' (expected sit|prod)`);
+
+  const buildInfo = readBuildInfo_();
+  if (buildInfo.env !== map.buildInfoEnv) {
+    throw new Error(
+      `build-static-portal: src/Version.js is currently stamped for BUILD_INFO.env="${buildInfo.env}", ` +
+      `not "${map.buildInfoEnv}" (needed for --env ${env}). Run "pnpm run ${map.deployCmd}" first so ` +
+      `Version.js reflects the deployment this build is meant to publish.`
+    );
+  }
+  if (!buildInfo.webappUrl) {
+    throw new Error('build-static-portal: src/Version.js has no webappUrl stamped yet.');
+  }
+
+  const outDir = path.join(DIST_ROOT, env);
+  fs.rmSync(outDir, { recursive: true, force: true });
+  fs.mkdirSync(outDir, { recursive: true });
+
+  // Stamped HTML pages. index.html = View A (team list); doc.html = View B
+  // (gts-79dw.4.23, per-document verified view) — both carry the same three
+  // build-time placeholders, stamped identically.
+  for (const pageName of STAMPED_PAGES) {
+    const srcHtmlPath = path.join(SRC_DIR, pageName);
+    const src = fs.readFileSync(srcHtmlPath, 'utf8');
+    const out = stampSource_(src, {
+      versionString: buildInfo.version,
+      webAppUrl: buildInfo.webappUrl,
+      envLabel: map.label,
+    });
+    fs.writeFileSync(path.join(outDir, pageName), out, 'utf8');
+  }
+
+  // Everything else under static-portal/src/ ships unchanged (no stamping) — icons, consent
+  // screen text, README, privacy/terms pages.
+  for (const entry of fs.readdirSync(SRC_DIR, { withFileTypes: true })) {
+    if (STAMPED_PAGES.includes(entry.name)) continue;
+    const s = path.join(SRC_DIR, entry.name);
+    const d = path.join(outDir, entry.name);
+    if (entry.isDirectory()) copyRecursive_(s, d);
+    else fs.copyFileSync(s, d);
+  }
+
+  console.log(`built static-portal/dist/${env}/{${STAMPED_PAGES.join(',')}} (${buildInfo.version}, ${map.label}, webapp ${buildInfo.webappUrl})`);
+  return outDir;
+}
+
+function main() {
+  const args = process.argv.slice(2);
+  const envIdx = args.indexOf('--env');
+  const env = envIdx !== -1 ? args[envIdx + 1] : null;
+  if (!env || !ENV_MAP[env]) {
+    console.error('Usage: node scripts/build-static-portal.js --env sit|prod');
+    process.exit(1);
+  }
+  buildOne(env);
+}
+
+if (require.main === module) {
+  try {
+    main();
+  } catch (err) {
+    console.error(`❌  ${err.message}`);
+    process.exit(1);
+  }
+}
+
+module.exports = { stampSource_, readBuildInfo_, buildOne, ENV_MAP, STAMPED_PAGES };

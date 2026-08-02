@@ -17,14 +17,15 @@
 const { chromium } = require('@playwright/test');
 const path = require('path');
 const fs = require('fs');
+const { resolveAuthFile } = require('../../scripts/playwright-auth');
 
 const settings = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', '..', 'local.settings.json'), 'utf8')
 );
-// Override with PROBE_AUTH_STATE to run as a different account (e.g. test.u2.json).
+// Override with PROBE_AUTH_STATE to run as a different account (e.g. the test.u2 file).
 const storageState = process.env.PROBE_AUTH_STATE
   ? path.resolve(process.cwd(), process.env.PROBE_AUTH_STATE)
-  : path.join(__dirname, '..', '..', '.auth', 'user.json');
+  : resolveAuthFile('primary', { projectRoot: path.join(__dirname, '..', '..') });
 const gasLogDir = settings.gasLogDir;
 
 // Backend resolved once, mirrors tests/helpers/gas_log.py::_backend(). 'axiom' iff

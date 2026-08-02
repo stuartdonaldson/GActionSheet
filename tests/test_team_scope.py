@@ -166,7 +166,7 @@ def test_team_scope(settings, gas_log_dir, request):
         # ── S1a — direct-match: doc placed directly in testTeamA ────────────
         scn_a = new_doc()
         _move_to_folder(scn_a, settings["testTeamA"])
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_a.sync()
         _assert_log(
             gas_log_dir, fence,
@@ -184,7 +184,7 @@ def test_team_scope(settings, gas_log_dir, request):
         # ── S1b — subteam-match: doc placed directly in testTeamAChild ──────
         scn_b = new_doc()
         _move_to_folder(scn_b, settings["testTeamAChild"])
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_b.sync()
         _assert_log(
             gas_log_dir, fence,
@@ -203,7 +203,7 @@ def test_team_scope(settings, gas_log_dir, request):
         # below testTeamA, not under testTeamAChild, no intermediate TeamData.
         scn_c = new_doc()
         _move_to_folder(scn_c, settings["testTeamADeep"])
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_c.sync()
         _assert_log(
             gas_log_dir, fence,
@@ -221,7 +221,7 @@ def test_team_scope(settings, gas_log_dir, request):
         # ── S2 — no-match: doc in a folder not registered in TeamData ───────
         scn_2 = new_doc()
         _move_to_folder(scn_2, noteam_folder_id)
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_2.sync()
         _assert_log(
             gas_log_dir, fence,
@@ -241,7 +241,7 @@ def test_team_scope(settings, gas_log_dir, request):
         scn_3.sync()  # auto-assigns teamScope == 'TestTeamScopeA'
         assert _team_scope(scn_3) == "TestTeamScopeA"
         _set_docdata(scn_3, syncStatus="UpdateDoc", teamId="TestTeamScopeAChild")
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_3.sync()
         _assert_log(
             gas_log_dir, fence,
@@ -259,7 +259,7 @@ def test_team_scope(settings, gas_log_dir, request):
         scn_3.checkpoint(STEP)
 
         # ── S4 — idempotency: second sync makes no further teamScope writes ─
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_a.sync()
         _assert_no_log(
             gas_log_dir, fence,
@@ -284,7 +284,7 @@ def test_team_scope(settings, gas_log_dir, request):
         # See module docstring re: equivalence with S2's no-match path.
         scn_6 = new_doc()
         _move_to_folder(scn_6, noteam_folder_id)
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_6.sync()
         _assert_log(
             gas_log_dir, fence,
@@ -302,7 +302,7 @@ def test_team_scope(settings, gas_log_dir, request):
         scn_7 = new_doc()
         scn_7.sync()  # first sync: creates DocData row, no teamScope
         _set_docdata(scn_7, syncStatus="UpdateDoc", teamId="")
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_7.sync()
         _assert_log(
             gas_log_dir, fence,
@@ -320,7 +320,7 @@ def test_team_scope(settings, gas_log_dir, request):
 
         # ── S8 — sticky-after-move: re-syncing after a move keeps the team ──
         _move_to_folder(scn_a, settings["testTeamAChild"])
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_a.sync()
         _assert_no_log(
             gas_log_dir, fence,

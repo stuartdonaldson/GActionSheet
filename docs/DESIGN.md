@@ -611,7 +611,7 @@ sequenceDiagram
 
 | Scope | Established once per | What it provides |
 |---|---|---|
-| **Session** | Test run | Authenticated Playwright browser session (`.auth/user.json`); `local.settings.json` loaded (test doc ID, test ActionSheet ID, add-on script ID, automation script ID, log dir); journey doc created via `begin_journey_session` (test-support route) |
+| **Session** | Test run | Authenticated Playwright browser session (`resolve_auth_file()` — `$PLAYWRIGHT_AUTH_FILE` or `.auth/user.json`); `local.settings.json` loaded (test doc ID, test ActionSheet ID, add-on script ID, automation script ID, log dir); journey doc created via `begin_journey_session` (test-support route) |
 | **Journey** | Canonical end-to-end scenario | Single test document with a known initial state (empty or seeded with floating actions) used across all five acts of the §16.10 journey test; state reset via HTTP fixture routes (not a GAS setup function) |
 | **Atomic test** | Individual concern (chip extraction, token parsing, orphan reconciliation, etc.) | Specific floating actions or ActionSheet rows seeded to the exact precondition state via HTTP fixture routes; assertions on the scanned output without a full round-trip Sync |
 | **Function** | Individual assertion | Fresh `.xlsx` snapshot of the ActionSheet and `.docx` snapshot of the doc after the user action completes |
@@ -643,7 +643,7 @@ Focused tests isolate root causes that would otherwise cascade through the slow 
 - **Branch on visual checked state.** Checkbox state is not readable; code must never call `isChecked()` as a source of truth. The trailing `(Status)` token is the authoritative status.
 - **Assert on execution log alone.** The log proves the script ran; the `.docx` / `.xlsx` / sidebar contents prove the output is correct. Both are required.
 - **Hard-code IDs in tests.** All IDs come from `local.settings.json`; no IDs in committed test code.
-- **Re-authenticate per test.** Auth state is expensive; establish once per session via `.auth/user.json`.
+- **Re-authenticate per test.** Auth state is expensive; establish once per session via `resolve_auth_file()`.
 - **Skip the atomic tier before running the journey.** A root-cause failure in chip extraction will fail the journey; fix atomic tests first, then run the journey test.
 - **Use a GAS setup function to establish fixture state.** All test setup happens via HTTP fixture routes (HTTP calls to the Web App's test-support routes). This keeps setup transparent and auditable.
 

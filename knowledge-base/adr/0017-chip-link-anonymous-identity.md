@@ -1,6 +1,9 @@
 # ADR-0017: Verified identity for chip-link action editing
 
-**Status:** Proposed _(revised 2026-06-14 after validation — supersedes the original GIS-in-iframe draft; see `knowledge-base/adr/probes/0017-validation.md`)_
+**Status:** Superseded by ADR-0021 (Phase 2 only — the OAuth auth-code-redirect design,
+external-host rejection, and Phase 1/Phase 2 split are all reversed; Phase 1's
+anonymous chip-preview notice is retained unchanged, see ADR-0021 Decision §4)
+_(revised 2026-06-14 after validation — supersedes the original GIS-in-iframe draft; see `knowledge-base/adr/probes/0017-validation.md`)_
 **Date:** 2026-06-14
 **Relates to:** ADR-0012 (web app two-layer auth), `docs/security-architecture.md` §1-3
 (execution identity model, trust boundaries, `_getIdentity()`), F3 (globalId-keyed
