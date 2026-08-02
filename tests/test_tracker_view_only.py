@@ -69,7 +69,7 @@ def test_idempotent_refresh_skips_rewrite(settings, gas_log_dir):
     """
     s = ScenarioSession.new_doc(settings)
     try:
-        fence = clear_logs(gas_log_dir)
+        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
         s._post_fixture("uc_c_idempotent_refresh")
 
         assert_log(

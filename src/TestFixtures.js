@@ -981,6 +981,36 @@ function setupTestFixtures(scenario, data) {
         PropertiesService.getScriptProperties().deleteProperty('_TEST_FORCE_HOMEPAGE_ERROR');
         break;
 
+      case 'reset_test_state':
+        // Safety net for interrupted test runs (gts-rvwu follow-up): deletes every
+        // script property under the '_TEST_' prefix — transient per-test toggles
+        // like '_TEST_FORCE_HOMEPAGE_ERROR' that a crashed test can leave set,
+        // silently corrupting every later test that shares this GAS deployment.
+        // Invoked as a pytest session-start autouse fixture (tests/conftest.py) and
+        // available standalone via `call_webapp.py run_fixture reset_test_state`.
+        //
+        // Deliberately does NOT touch:
+        //   - Durable deployment config (no '_' prefix): TEST_DOC_ID, TEST_SHEET_ID,
+        //     TEST_TOKEN, WEBAPP_URL, ADMIN_SECRET, AXIOM_TOKEN, DOC_FOLDER_ID, ...
+        //   - Memoized fixture caches (DISCOVERY_*, TEAMSCOPE_FOLDER_*): these
+        //     create-once Drive folders/docs are meant to persist across sessions —
+        //     DISCOVERY_STALE_DOC_ID in particular only becomes useful once its doc
+        //     is 8+ days old, so clearing it on every run would defeat the fixture.
+        // Add new transient (crash-unsafe) toggles under '_TEST_' so this sweep
+        // covers them automatically; add new cross-session caches under their own
+        // distinct prefix so they're excluded by construction.
+        var _rtsProps = PropertiesService.getScriptProperties();
+        var _rtsAll = _rtsProps.getProperties();
+        var _rtsCleared = [];
+        for (var _rtsKey in _rtsAll) {
+          if (_rtsKey.indexOf('_TEST_') === 0) {
+            _rtsProps.deleteProperty(_rtsKey);
+            _rtsCleared.push(_rtsKey);
+          }
+        }
+        GasLogger.log('fixture.reset_test_state', { cleared: _rtsCleared });
+        break;
+
       case 'discovery':
         var discProps = PropertiesService.getScriptProperties();
         var recentId = discProps.getProperty('DISCOVERY_RECENT_DOC_ID');

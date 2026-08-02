@@ -52,7 +52,7 @@ def _list_my_teams(settings: dict, assertion: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def test_invalid_token_returns_empty_teams_non_leaking(settings):
-    """[R21 AC negative] A garbage/unparseable idToken must fail closed to an
+    """[R21 AC negative] A garbage/unparseable assertion must fail closed to an
     empty, non-leaking team list -- never an error, never any team data."""
     resp = _list_my_teams(settings, "not-a-real-jwt.garbage.token")
     assert resp.get("teams") == [], (
@@ -61,7 +61,7 @@ def test_invalid_token_returns_empty_teams_non_leaking(settings):
 
 
 def test_expired_token_returns_empty_teams(settings):
-    """[R21 AC negative] An expired-but-well-formed ID token must also fail
+    """[R21 AC negative] An expired-but-well-formed assertion must also fail
     closed to an empty team list -- exercises the `exp` check distinctly
     from the parse-failure case above (mirrors test_verify_access.py)."""
     expired_jwt = (
@@ -76,7 +76,7 @@ def test_expired_token_returns_empty_teams(settings):
 
 
 # ---------------------------------------------------------------------------
-# Live-identity matrix — requires a real, live-obtained GIS ID token per
+# Live-identity matrix — requires a real, live-obtained signed assertion per
 # identity; skipped individually until configured in local.settings.json.
 # ---------------------------------------------------------------------------
 
