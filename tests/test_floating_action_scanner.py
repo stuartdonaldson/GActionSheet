@@ -314,3 +314,129 @@ def test_soft_return_survives_sidebar_status_flush(settings, request):
         )
     finally:
         scn.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-jxrw — bare "AI-N: " token must not absorb a following soft-return
+# continuation line into action_text (twin [TST]: gts-jav4)
+# ---------------------------------------------------------------------------
+
+def _find_by_global_id(scn, global_id):
+    rows = scn.find_sheet_actions()
+    row = next((r for r in rows if r.global_id == global_id), None)
+    assert row is not None, (
+        f"global_id {global_id!r} not found after sync; "
+        f"rows={[(r.global_id, r.action) for r in rows]!r}"
+    )
+    return row
+
+
+def test_jxrw_bare_token_with_continuation_yields_empty_action_text(settings, request):
+    """gts-jxrw frozen AC: 'AI-N: ' (bare, trailing space, nothing else on that
+    line) followed by a soft-return continuation line yields action_text=''
+    for that action — the continuation line is NOT merged in. This is the
+    live-reported repro shape (a following line under a bare token got
+    absorbed and round-tripped back into the doc as one merged line)."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture(
+            "append_doc_soft_paragraph",
+            {"text": "AI-91: \nFollowing line item that must NOT be absorbed"},
+        )
+        scn.sync()
+
+        row = _find_by_global_id(scn, f"{scn.doc_id}/AI-91")
+        assert row.action == "", (
+            f"expected empty action_text for bare token, got {row.action!r}"
+        )
+        _assert_action_absent(scn, "Following line item that must NOT be absorbed")
+    finally:
+        scn.close()
+
+
+def test_jxrw_bare_token_alone_yields_empty_action_text(settings, request):
+    """gts-jxrw frozen AC: 'AI-N: ' with no continuation at all still yields
+    action_text=''. (Simplest instance of the same rule — no round trip
+    needed to demonstrate it, but included as the AC's literal example.)"""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture("append_doc_soft_paragraph", {"text": "AI-92: "})
+        scn.sync()
+
+        row = _find_by_global_id(scn, f"{scn.doc_id}/AI-92")
+        assert row.action == ""
+    finally:
+        scn.close()
+
+
+def test_jxrw_adjacent_separate_list_items_unaffected(settings, request):
+    """gts-jxrw negative test (from the bead's own investigation): two
+    SEPARATE list items, each with their own AI-N: token, are NOT merged —
+    the soft-return-continuation fix must not touch this case, which the bead
+    author already confirmed live was not the trigger."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture("append_doc_list_item", {"text": "AI-93: first separate item"})
+        scn._post_fixture("append_doc_list_item", {"text": "AI-94: second separate item"})
+        scn.sync()
+
+        row93 = _find_by_global_id(scn, f"{scn.doc_id}/AI-93")
+        row94 = _find_by_global_id(scn, f"{scn.doc_id}/AI-94")
+        assert row93.action == "first separate item"
+        assert row94.action == "second separate item"
+    finally:
+        scn.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-v0py — status token followed by trailing user text (twin [TST]: gts-jav4)
+# ---------------------------------------------------------------------------
+
+def test_v0py_status_token_with_trailing_text_parses_and_preserves_trailing(settings, request):
+    """gts-v0py frozen AC: 'AI-N: text (Status) trailing' parses
+    status='Status' and does not embed the literal '(Status)' token inside
+    action_text. Documented decision: trailing text is PRESERVED (joined with
+    the text before the token), not dropped."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture(
+            "append_doc_soft_paragraph",
+            {"text": "AI-95: Confirm Wednesdays work for Peter (Open) - done"},
+        )
+        scn.sync()
+
+        row = _find_by_global_id(scn, f"{scn.doc_id}/AI-95")
+        assert row.status == "Open"
+        assert "(Open)" not in row.action
+        assert row.action == "Confirm Wednesdays work for Peter - done", (
+            f"trailing text after the status token was not preserved: {row.action!r}"
+        )
+    finally:
+        scn.close()
+
+
+def test_v0py_flush_does_not_double_status_token(settings, request):
+    """gts-v0py frozen AC: a flush of a status-token-with-trailing-text action
+    does not append a second '(Status)' to the document. Before the fix, the
+    trailing-text case wasn't recognized as an explicit status at all, so the
+    flush appended a status token on top of the ALREADY-present literal one,
+    doubling it in the doc."""
+    from tests.helpers.doc_inspect import load_doc, paragraph_texts_with_breaks
+    from tests.helpers.download import download_docx
+
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture(
+            "append_doc_soft_paragraph",
+            {"text": "AI-96: Confirm Wednesdays work for Peter (Open) - done"},
+        )
+        scn.sync()  # scan, then syncDocument's batch flush rewrites the paragraph
+
+        paras = paragraph_texts_with_breaks(load_doc(download_docx(scn.doc_id)))
+        hits = [p for p in paras if "Confirm Wednesdays work for Peter" in p]
+        assert len(hits) == 1, f"expected exactly one matching paragraph, got {hits!r}"
+        assert hits[0].count("(Open)") == 1, (
+            f"expected exactly one '(Open)' token after flush, got: {hits[0]!r}"
+        )
+    finally:
+        scn.close()

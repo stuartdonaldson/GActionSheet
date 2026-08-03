@@ -322,6 +322,17 @@ function _insertTrackerSection(doc, dataRows, insertIndex, headingKept) {
   }
 
   // Build 2D cells array: header row + one data row per action
+  // gts-zocq rendering decision (per-surface, documented not silent): the
+  // tracker table is built via body.appendTable/insertTable(cells), which
+  // only accepts plain strings — there is no per-run-formatting path through
+  // this API short of inserting each cell's paragraph content manually and
+  // re-applying updateTextStyle-equivalent DocumentApp calls per run, a much
+  // larger change than this session's scope. DECISION: inline bold/italic is
+  // DELIBERATELY FLATTENED in the tracker table; the table remains a plain-
+  // text summary view. The Actions sheet (RichTextValue) and the source doc's
+  // own floating-action paragraph (flush-preserved) remain the two surfaces
+  // where formatting is authoritative and visible. Not filed as a gap bead —
+  // no user report has asked for tracker-table formatting fidelity.
   var cells = [_TRACKER_COL_HEADERS.slice()];
   for (var i = 0; i < dataRows.length; i++) {
     cells.push([

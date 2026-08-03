@@ -47,18 +47,33 @@ def _backend() -> str:
 # Axiom backend
 # ---------------------------------------------------------------------------
 
-def _axiom_query(after: float, limit: int = 500) -> list[dict]:
+def _axiom_query(after: float, limit: int = 500, order: str = "asc") -> list[dict]:
     """Query the configured Axiom dataset for GAS-side entries since `after`
     (epoch seconds). Returns entries reshaped to {ts, tag, version, op,
     parentOp, data} -- the same shape NDJSON entries always had -- so
     match_fn predicates written against file-backend entries work unchanged.
+
+    `order` ("asc" or "desc") controls which end of a since-`after` window
+    that exceeds `limit` rows gets cut off (gts-9a1m root cause). The
+    since-`after` window itself is never re-derived here -- callers that
+    need earliest-unseen-first semantics (the fail-fast error scanner, which
+    must advance its fence one error at a time without skipping any) keep
+    the "asc" default; a busy shared TEST environment can easily log >500
+    gas-side events within a single wait's fence window (confirmed via
+    `python scripts/query_axiom.py --side gas --since 5m`: ~44 events in 5
+    quiet minutes, far more under concurrent live-suite load), so an
+    ascending scan can get permanently stuck returning the same oldest
+    `limit` rows every poll and never reach a just-logged event -- see
+    `_scan_logs_axiom`/`_wait_for_log_axiom` below, which pass "desc"
+    instead: they only need to know whether a match exists *recently*, so
+    newest-first is the correct trade-off for them.
     """
     s = _settings()
     dataset = s["axiomDataset"]
     token = s["axiomQueryToken"]
     start = datetime.fromtimestamp(after, tz=timezone.utc)
     now = datetime.now(timezone.utc)
-    apl = f"['{dataset}'] | where side == 'gas' | order by _time asc | limit {limit}"
+    apl = f"['{dataset}'] | where side == 'gas' | order by _time {order} | limit {limit}"
     body = {
         "apl": apl,
         "startTime": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -127,7 +142,10 @@ def _post_axiom_probe(sentinel: str, timeout: int = 30) -> None:
 
 
 def _scan_logs_axiom(match_fn, after: float = 0.0):
-    for entry in _axiom_query(after):
+    # "desc" -- see _axiom_query's docstring (gts-9a1m): existence-of-a-
+    # recent-match scans must not get starved by older backlog under the
+    # shared limit.
+    for entry in _axiom_query(after, order="desc"):
         if match_fn(entry):
             return entry
     return None

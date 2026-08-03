@@ -105,6 +105,18 @@ function doGet(e) {
  * status, doc link) and never the action text. Unknown/missing globalId
  * renders a non-leaking not-found variant.
  *
+ * gts-79dw.4.9 — team handoff (implementation choice (a), see bd notes):
+ * when the chip's docId resolves to a DocData.teamId (_readDocDataRow, NOT
+ * _walkFolderForTeam -- that walk is only for assigning teamScope at sync
+ * time), the rendered page gains a "Sign in for the full view" CTA pointing
+ * at the verified per-document view (View B, gts-79dw.4.13) on the static
+ * portal frontend (_VERIFIED_TEAM_PORTAL_BASE, src/DocView.js), carrying
+ * both docId and the resolved teamId as query params (mirrors the
+ * ?team=<teamId> convention DocView.js already uses for View B's own
+ * teamPortalUrl/View-A link, R20). An untracked docId or a doc with no
+ * DocData.teamId degrades to the plain anonymous notice (no CTA) rather than
+ * erroring -- the existing Phase-1 rendering is unchanged in that case.
+ *
  * @param {Object} e doGet event; reads e.parameter.docId and e.parameter.ain.
  * @return {HtmlOutput}
  */
@@ -125,13 +137,30 @@ function _handlePreviewNotice(e) {
   }
 
   var docDataRow = _readDocDataRow(ss, docId);
+  var teamId     = (docDataRow && docDataRow.teamId) || '';
+  var docViewUrl = teamId
+    ? (_VERIFIED_TEAM_PORTAL_BASE + '?doc=' + encodeURIComponent(docId) + '&team=' + encodeURIComponent(teamId))
+    : '';
+
+  // webapp.team.handoff — completion log for the chip -> verified-portal
+  // handoff decision (gts-79dw.4.9 pre-code contract §3). route names which
+  // branch was taken: a resolved teamId offers the View B CTA; no teamId
+  // (untracked doc or no DocData.teamId) falls back to the plain preview.
+  GasLogger.log('webapp.team.handoff', {
+    docId:  docId,
+    teamId: teamId,
+    route:  teamId ? 'docview-cta' : 'anonymous-preview-fallback'
+  });
+  GasLogger.flush();
+
   return _renderPreviewNotice({
-    docName:  (docDataRow && docDataRow.docName) || '(unknown document)',
-    teamName: (docDataRow && docDataRow.teamId) || '',
-    actionId: ain,
-    status:   row.status || 'Open',
-    docLink:  'https://docs.google.com/document/d/' + encodeURIComponent(docId) + '/edit',
-    docId:    docId
+    docName:    (docDataRow && docDataRow.docName) || '(unknown document)',
+    teamName:   teamId,
+    actionId:   ain,
+    status:     row.status || 'Open',
+    docLink:    'https://docs.google.com/document/d/' + encodeURIComponent(docId) + '/edit',
+    docId:      docId,
+    docViewUrl: docViewUrl
   });
 }
 
@@ -139,7 +168,7 @@ function _handlePreviewNotice(e) {
  * Renders the ADR-0017 Phase 1 notice page HTML. `model === null` renders the
  * non-leaking not-found variant. `model` must never carry action text.
  *
- * @param {?{docName: string, teamName: string, actionId: string, status: string, docLink: string}} model
+ * @param {?{docName: string, teamName: string, actionId: string, status: string, docLink: string, docViewUrl: string}} model
  * @return {HtmlOutput}
  */
 function _renderPreviewNotice(model) {
@@ -153,11 +182,16 @@ function _renderPreviewNotice(model) {
       ? '<p><strong>Team:</strong> ' + _escapeHtml(model.teamName) + '</p>'
       : '';
     var syncLink = ACTION_CHIP_URL_BASE + '?cmd=register&docId=' + encodeURIComponent(model.docId);
+    // gts-79dw.4.9 — only rendered when a DocData.teamId resolved (R20).
+    var docViewRow = model.docViewUrl
+      ? '<p><a href="' + _escapeHtml(model.docViewUrl) + '" target="_top">Sign in for the full view</a></p>'
+      : '';
     body =
       '<h1>' + _escapeHtml(model.actionId) + '</h1>' +
       '<p><strong>Document:</strong> ' + _escapeHtml(model.docName) + '</p>' +
       teamRow +
       '<p><strong>Status:</strong> ' + _escapeHtml(model.status) + '</p>' +
+      docViewRow +
       '<p><a href="' + _escapeHtml(model.docLink) + '" target="_blank">' +
         'Open the document to view or edit this action</a></p>' +
       '<p><a href="' + _escapeHtml(syncLink) + '" target="_top">Sync this document</a></p>' +
@@ -517,6 +551,32 @@ function doPost(e) {
     return _handleTeamSyncDocument(payload);
   }
 
+  // gts-79dw.4.13 — View B: verified per-document action view (sidebar's
+  // document view, delivered over the web; distinct from the anonymous
+  // ?cmd=preview / ?cmd=teamview doGet routes). Same bypass rationale as the
+  // routes above: the signed assertion is the authentication, and the tier
+  // is re-verified on every call (R8). See src/DocView.js.
+  if (payload.action === 'get_document_actions') {
+    return _handleGetDocumentActions(payload);
+  }
+
+  // gts-79dw.4.14 — verified-team-portal edit + status-change routes (R16-R18).
+  // Same bypass rationale as the routes above: the signed assertion is the
+  // authentication, and the tier is re-verified on every call (R8). Two
+  // DIFFERENT authorizations (see src/TeamActionWrite.js): team_edit_action
+  // requires _authorizeDocWrite (EDIT tier on the target document's folder);
+  // team_patch_status accepts EITHER _authorizeDocWrite OR that the row's
+  // assignee_email matches the verified caller's email (R17). Both reuse the
+  // existing edit_action_row / patch_action_status mutation cores (now
+  // factored into _editActionRowCore / _patchActionStatusCore below) rather
+  // than re-implementing the Dirty/Date-Modified stamping or status write.
+  if (payload.action === 'team_edit_action') {
+    return _handleTeamEditAction(payload);
+  }
+  if (payload.action === 'team_patch_status') {
+    return _handleTeamPatchStatus(payload);
+  }
+
   // Admin routes (gts-79dw.4.18) — gated by their OWN ADMIN_SECRET, a
   // distinct, higher-privilege credential from both TEST_TOKEN and
   // WEBAPP_SECRET below; never reachable via either of those gates. See
@@ -840,8 +900,22 @@ function _handleUpsertActionRows(payload) {
 
 /**
  * Returns { globalId: { id, ... } } for every non-blank row in actionsSheet.
+ *
+ * When two or more physical rows share the same globalId (gts-binf — a race,
+ * manual sheet edit, or bug can leave duplicates behind), this keeps only the
+ * LAST-scanned row per globalId (top-to-bottom sheet order) as canonical —
+ * pre-existing last-write-wins behavior, unchanged for backward compatibility
+ * with every read-only/single-row-lookup caller.
+ *
+ * Callers that need to detect and collapse those duplicates (currently only
+ * the syncAll regular-sweep entry point, _handleSyncActionRows) pass an
+ * optional `duplicatesOut` object; this function populates
+ * `duplicatesOut[globalId] = [rowIndex, ...]` with every EARLIER-scanned
+ * rowIndex for a globalId that turned out to have more than one row, so the
+ * caller can collapse them. Omitted/undefined `duplicatesOut` is a no-op —
+ * every other call site is unaffected.
  */
-function _loadExistingRowsByGlobalId(actionsSheet) {
+function _loadExistingRowsByGlobalId(actionsSheet, duplicatesOut) {
   var lastRow = actionsSheet.getLastRow();
   if (lastRow < 2) return {};
 
@@ -851,6 +925,10 @@ function _loadExistingRowsByGlobalId(actionsSheet) {
   for (var i = 0; i < data.length; i++) {
     var globalId = data[i][0];
     if (!globalId) continue;
+    if (duplicatesOut && result[globalId]) {
+      if (!duplicatesOut[globalId]) duplicatesOut[globalId] = [];
+      duplicatesOut[globalId].push(result[globalId].rowIndex);
+    }
     result[globalId] = {
       rowIndex:      i + 2,
       fileId:        data[i][_ACOL.file_id        - 1],
@@ -974,7 +1052,8 @@ function _handleSyncActionRows(payload) {
     activeGlobalIdSet[allDocGlobalIds[ai]] = true;
   }
 
-  var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
+  var sameGlobalIdDuplicates = {};
+  var existingMap = _loadExistingRowsByGlobalId(actionsSheet, sameGlobalIdDuplicates);
   var now         = new Date();
   var upserted    = 0;
   var updated     = 0;
@@ -1000,6 +1079,13 @@ function _handleSyncActionRows(payload) {
       var row      = docState[i];
       var existing = existingMap[row.globalId];
 
+      // gts-zocq: normalize actionText and its inline bold/italic runs
+      // together (offsets must shift/clip in lockstep with the same
+      // normalize+trim _normalizeActionText applies) before any sheet write.
+      var shiftedForWrite = _shiftRunsForNormalize(row.actionText, row.runs);
+      var normalizedActionText = shiftedForWrite.text;
+      var richTextForWrite = _buildRichTextValueForActionText(normalizedActionText, shiftedForWrite.runs);
+
       if (!existing) {
         var syncFileId = parseGlobalId(row.globalId).docId;
         var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
@@ -1009,13 +1095,20 @@ function _handleSyncActionRows(payload) {
           _extractActionId(row.globalId),
           row.assigneeEmail || '',
           row.assigneeName  || '',
-          _normalizeActionText(row.actionText) || '',
+          normalizedActionText || '',
           row.status        || 'Open',
           docFormula,
           now,
           now,
           ''  // Sync Status — blank on insert
         ]);
+        // RichTextValue can't be passed through appendRow's plain-values array
+        // — apply it as a follow-up write to the just-appended row when the
+        // action carries inline formatting (gts-zocq). No-op (common case)
+        // when richTextForWrite is null.
+        if (richTextForWrite) {
+          actionsSheet.getRange(actionsSheet.getLastRow(), _ACOL.action_text).setRichTextValue(richTextForWrite);
+        }
         upserted++;
       } else if (existing.syncStatus === 'Dirty') {
         // Sheet was edited (onActionSheetEdit set Sync Status = 'Dirty') — sheet wins.
@@ -1025,7 +1118,11 @@ function _handleSyncActionRows(payload) {
           assigneeEmail: existing.assigneeEmail,
           assigneeName:  existing.assigneeName,
           action:        existing.action,
-          status:        existing.status
+          status:        existing.status,
+          // gts-zocq: read back from the cell's own RichTextValue so a
+          // sheet-authored bold/italic edit also survives the flush this
+          // sheetWins result drives.
+          runs:          _richTextRunsForCell(actionsSheet.getRange(existing.rowIndex, _ACOL.action_text))
         });
         // Row synced successfully — clear any prior Sync Status.
         actionsSheet.getRange(existing.rowIndex, _ACOL.sync_status).setValue('');
@@ -1043,7 +1140,11 @@ function _handleSyncActionRows(payload) {
             existing.status !== row.status) {
           actionsSheet.getRange(rowIdx, _ACOL.assignee_email).setValue(row.assigneeEmail || '');
           actionsSheet.getRange(rowIdx, _ACOL.assignee_name).setValue(row.assigneeName  || '');
-          actionsSheet.getRange(rowIdx, _ACOL.action_text).setValue(_normalizeActionText(row.actionText) || '');
+          if (richTextForWrite) {
+            actionsSheet.getRange(rowIdx, _ACOL.action_text).setRichTextValue(richTextForWrite);
+          } else {
+            actionsSheet.getRange(rowIdx, _ACOL.action_text).setValue(normalizedActionText || '');
+          }
           actionsSheet.getRange(rowIdx, _ACOL.status).setValue(row.status || 'Open');
           actionsSheet.getRange(rowIdx, _ACOL.modified_date).setValue(now);
           updated++;
@@ -1091,9 +1192,44 @@ function _handleSyncActionRows(payload) {
         GasLogger.log('sync.info', { msg: 'Sync Status — Deleted', row: entry.rowIndex, globalId: gId });
       }
 
-      duplicateRowIndexes.sort(function (a, b) { return b - a; });
-      for (var dri = 0; dri < duplicateRowIndexes.length; dri++) {
-        actionsSheet.deleteRow(duplicateRowIndexes[dri]);
+      // Collapse pre-existing duplicate-globalId rows (gts-binf): two or more
+      // physical rows sharing one globalId (race/manual edit/bug) are invisible
+      // to the update-in-place branch above, which always resolves
+      // existingMap[globalId] to the LAST-scanned physical row and silently
+      // ignores any earlier duplicate. _loadExistingRowsByGlobalId reports
+      // those earlier rowIndexes via sameGlobalIdDuplicates; collapse to the
+      // single canonical (last-scanned, already kept up to date above) row by
+      // removing the rest. Gated on `scanned` — same rationale as the orphan
+      // pass above: a destructive delete requires the explicit-scan assertion.
+      for (var dupGlobalId in sameGlobalIdDuplicates) {
+        if (parseGlobalId(dupGlobalId).docId !== docId) continue; // belongs to a different doc
+        var dupRows = sameGlobalIdDuplicates[dupGlobalId];
+        for (var dri2 = 0; dri2 < dupRows.length; dri2++) {
+          duplicateRowIndexes.push(dupRows[dri2]);
+        }
+        var keptEntry = existingMap[dupGlobalId];
+        GasLogger.log('sync.dedup', {
+          msg: 'Collapsed duplicate globalId rows', globalId: dupGlobalId, docId: docId,
+          removedCount: dupRows.length,
+          keptRowIndex: keptEntry ? keptEntry.rowIndex : null
+        });
+      }
+
+      // De-dupe rowIndexes (belt-and-suspenders — the orphan/identity pass
+      // above and the same-globalId pass above populate duplicateRowIndexes
+      // from disjoint sources, but deleteRow() on a repeated index would
+      // corrupt the sheet if that ever changed) before deleting descending.
+      var seenDupIdx = {};
+      var uniqueDupIndexes = [];
+      for (var udi = 0; udi < duplicateRowIndexes.length; udi++) {
+        var idx = duplicateRowIndexes[udi];
+        if (seenDupIdx[idx]) continue;
+        seenDupIdx[idx] = true;
+        uniqueDupIndexes.push(idx);
+      }
+      uniqueDupIndexes.sort(function (a, b) { return b - a; });
+      for (var dri = 0; dri < uniqueDupIndexes.length; dri++) {
+        actionsSheet.deleteRow(uniqueDupIndexes[dri]);
       }
     }
 
@@ -1410,7 +1546,12 @@ function _handleMarkDocNotFound(payload) {
     }
   });
 
-  GasLogger.log('sync.docNotFound.confirmed', { msg: 'Doc not found', docIds: docIds, markedByDocId: markedByDocId, totalMarked: totalMarked });
+  // Log aggregate counts only, not markedByDocId itself (still returned below,
+  // full detail, to the HTTP caller) -- a dict keyed by docId would mint a new
+  // Axiom column per document ever seen, unbounded (gts-pfyx follow-up).
+  GasLogger.log('sync.docNotFound.confirmed', {
+    msg: 'Doc not found', docIds: docIds, uniqueDocsMarked: Object.keys(markedByDocId).length, totalMarked: totalMarked
+  });
   return _jsonResponse({ marked: totalMarked, markedByDocId: markedByDocId });
 }
 
@@ -1466,22 +1607,48 @@ function _handleDeleteActionRow(payload) {
  *   { patched: 0|1 }
  */
 function _handlePatchActionStatus(payload) {
+  var globalId  = payload.globalId  || '';
+  var newStatus = payload.newStatus || '';
+
+  var result = _patchActionStatusCore(globalId, newStatus);
+  if (!result.ok) {
+    return _jsonResponse({ error: result.error, patched: 0 });
+  }
+  if (!result.found) {
+    return _jsonResponse({ patched: 0 });
+  }
+
+  GasLogger.log('sidebar.status.patched', { globalId: globalId, newStatus: newStatus, row: result.rowIndex });
+  return _jsonResponse({ patched: 1 });
+}
+
+/**
+ * Core mutation behind patch_action_status (sidebar fast path) and
+ * gts-79dw.4.14's GIS-tier-gated team_patch_status -- factored out so both
+ * routes write Status/Date-Modified/cleared-Sync-Status via the SAME path
+ * (plan §11 reuse constraint) instead of team_patch_status re-implementing
+ * the status write. Callers are responsible for their OWN authorization gate
+ * before calling this -- it performs the write unconditionally once a row is
+ * found.
+ *
+ * @param {string} globalId
+ * @param {string} newStatus
+ * @returns {{ok:boolean, error?:string, found?:boolean, rowIndex?:number}}
+ */
+function _patchActionStatusCore(globalId, newStatus) {
   var ss           = SpreadsheetApp.getActiveSpreadsheet();
   var actionsSheet = ss.getSheetByName('Actions');
   if (!actionsSheet) {
-    return _jsonResponse({ error: 'Actions sheet not found', patched: 0 });
+    return { ok: false, error: 'Actions sheet not found' };
   }
-
-  var globalId  = payload.globalId  || '';
-  var newStatus = payload.newStatus || '';
   if (!globalId || !newStatus) {
-    return _jsonResponse({ error: 'globalId and newStatus required', patched: 0 });
+    return { ok: false, error: 'globalId and newStatus required' };
   }
 
   var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
   var entry       = existingMap[globalId];
   if (!entry) {
-    return _jsonResponse({ patched: 0 });
+    return { ok: true, found: false };
   }
 
   var now = new Date();
@@ -1491,8 +1658,7 @@ function _handlePatchActionStatus(payload) {
     actionsSheet.getRange(entry.rowIndex, _ACOL.sync_status).setValue('');
   });
 
-  GasLogger.log('sidebar.status.patched', { globalId: globalId, newStatus: newStatus, row: entry.rowIndex });
-  return _jsonResponse({ patched: 1 });
+  return { ok: true, found: true, rowIndex: entry.rowIndex };
 }
 
 // ---------------------------------------------------------------------------
@@ -1904,25 +2070,52 @@ function _handleEditActionRow(payload) {
   var tokenError = _checkTestToken(payload.testToken || '');
   if (tokenError) return tokenError;
 
+  var globalId = payload.global_id || '';
+  var fields   = payload.fields    || {};
+
+  var result = _editActionRowCore(globalId, fields);
+
+  // Logged as globalId (camelCase), matching every other call site's Axiom
+  // field name -- payload.global_id (snake_case) is this route's own wire
+  // contract, unrelated and untouched; the divergence otherwise mints a
+  // duplicate near-identical column (gts-pfyx follow-up).
+  if (result.ok) {
+    GasLogger.log('test.edit_action_row', { globalId: globalId, fields: Object.keys(fields) });
+  }
+  GasLogger.flush();
+  return _jsonResponse(result);
+}
+
+/**
+ * Core mutation behind edit_action_row (bead .9) and gts-79dw.4.14's
+ * GIS-tier-gated team_edit_action -- factored out so both routes replicate
+ * onActionSheetEdit's Dirty + Date-Modified stamp via the SAME write path
+ * rather than each route re-implementing it (plan §11 reuse constraint).
+ * Callers are responsible for their OWN authorization gate before calling
+ * this -- it performs the write unconditionally once a row is found.
+ *
+ * @param {string} globalId
+ * @param {Object} fields { assignee_email?, assignee_name?, action_text?, status? }
+ * @returns {{ok:boolean, global_id?:string, error?:string, row?:Object}}
+ *   Same shape edit_action_row's HTTP response has always returned.
+ */
+function _editActionRowCore(globalId, fields) {
   var ss           = SpreadsheetApp.getActiveSpreadsheet();
   var actionsSheet = ss.getSheetByName('Actions');
   if (!actionsSheet) {
-    return _jsonResponse({ error: 'Actions sheet not found' });
+    return { ok: false, error: 'Actions sheet not found' };
   }
-
-  var globalId = payload.global_id || '';
-  var fields   = payload.fields    || {};
   if (!globalId) {
-    return _jsonResponse({ error: 'global_id required' });
+    return { ok: false, error: 'global_id required' };
   }
 
   var existingMap = _loadExistingRowsByGlobalId(actionsSheet);
   var entry       = existingMap[globalId];
   if (!entry) {
-    return _jsonResponse({ error: 'row not found', global_id: globalId });
+    return { ok: false, error: 'row not found', global_id: globalId };
   }
 
-  var now = new Date();
+  var now    = new Date();
   var rowIdx = entry.rowIndex;
 
   WriteGuard.wrapPersistent(function () {
@@ -1945,9 +2138,7 @@ function _handleEditActionRow(payload) {
 
   // Re-read the row to return authoritative post-write state.
   var updated = _loadExistingRowsByGlobalId(actionsSheet)[globalId] || {};
-  GasLogger.log('test.edit_action_row', { global_id: globalId, fields: Object.keys(fields) });
-  GasLogger.flush();
-  return _jsonResponse({
+  return {
     ok:        true,
     global_id: globalId,
     row: {
@@ -1960,7 +2151,7 @@ function _handleEditActionRow(payload) {
       modified_date:  updated.dateModified  ? updated.dateModified.toISOString() : '',
       sync_status:    updated.syncStatus    || ''
     }
-  });
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2125,11 +2316,37 @@ function _handleFindSheetActions(payload) {
     return _jsonResponse({ error: 'Actions sheet not found', rows: [] });
   }
 
-  var docId   = payload.docId || '';
+  var docId = payload.docId || '';
+  var rows  = _findSheetActionsForDoc(ss, docId);
+
+  GasLogger.log('test.find_sheet_actions', { docId: docId, count: rows.length });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, docId: docId, rows: rows });
+}
+
+/**
+ * Core docId-scoped Actions reader shared by _handleFindSheetActions
+ * (TEST_TOKEN-gated, bead .9) and _handleGetDocumentActions (GIS-assertion-
+ * gated View B, gts-79dw.4.13) -- the reuse constraint (plan §11) is that
+ * View B adds a THIRD gate over this SAME reader rather than a second
+ * implementation. Read-only, no mutation. doc_id / doc_name are DERIVED from
+ * the document_formula (col 7), not stored columns (Coordination Log .1 §7
+ * #1). Returns [] (never throws) when the Actions sheet has no header row
+ * yet -- callers needing to distinguish "sheet missing" from "no rows" must
+ * check sheet presence themselves before calling (see
+ * _handleFindSheetActions above).
+ *
+ * @param {Spreadsheet} ss
+ * @param {string} docId
+ * @returns {Array<Object>} SheetAction-shaped rows (ContractSchema.js
+ *   sheetAction.fields), filtered to docId when non-empty.
+ */
+function _findSheetActionsForDoc(ss, docId) {
+  var actionsSheet = ss.getSheetByName('Actions');
+  if (!actionsSheet) return [];
+
   var lastRow = actionsSheet.getLastRow();
-  if (lastRow < 2) {
-    return _jsonResponse({ ok: true, docId: docId, rows: [] });
-  }
+  if (lastRow < 2) return [];
 
   var numRows  = lastRow - 1;
   var data     = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
@@ -2163,9 +2380,7 @@ function _handleFindSheetActions(payload) {
     });
   }
 
-  GasLogger.log('test.find_sheet_actions', { docId: docId, count: rows.length });
-  GasLogger.flush();
-  return _jsonResponse({ ok: true, docId: docId, rows: rows });
+  return rows;
 }
 
 // ---------------------------------------------------------------------------
@@ -2210,7 +2425,7 @@ function _handlePatchActionStatusAtdd(payload) {
     actionsSheet.getRange(entry.rowIndex, _ACOL.sync_status).setValue('Dirty');
   });
 
-  GasLogger.log('test.patch_action_status', { global_id: globalId, status: newStatus });
+  GasLogger.log('test.patch_action_status', { globalId: globalId, status: newStatus });
   GasLogger.flush();
   return _jsonResponse({ ok: true, global_id: globalId });
 }
@@ -2315,7 +2530,7 @@ function _handleDeleteActionRowAtdd(payload) {
     actionsSheet.getRange(entry.rowIndex, _ACOL.sync_status).setValue('Deleted');
   });
 
-  GasLogger.log('test.delete_action_row', { global_id: globalId });
+  GasLogger.log('test.delete_action_row', { globalId: globalId });
   GasLogger.flush();
   return _jsonResponse({ ok: true, global_id: globalId });
 }

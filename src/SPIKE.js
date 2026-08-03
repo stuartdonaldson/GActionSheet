@@ -270,9 +270,19 @@ function _spikeAdminSdkFolderAccess(folderId, email) {
       isMember = true;
     } catch (e) {
       // Not-a-member and lookup-failed both land here — treat as "not
-      // confirmed," never as a grant.
-      GasLogger.log('webapp.spike.access.error', {
-        where: 'AdminDirectory.Members.get', group: p.emailAddress, message: String(e)
+      // confirmed," never as a grant. But only the *unexpected* failures
+      // (scope/permission/network — anything that isn't a plain "not a
+      // member" 404) get the .error-suffixed tag: 404 is the common,
+      // expected outcome for most groups on most folders, and tagging it
+      // .error trips the shared pytest fail-fast log scanner
+      // (scn/session.py::_check_gas_errors) for unrelated tests that never
+      // touch this code path (gts-q2sq).
+      var msg = String(e);
+      var tag = /not found/i.test(msg)
+        ? 'webapp.spike.access.notmember'
+        : 'webapp.spike.access.error';
+      GasLogger.log(tag, {
+        where: 'AdminDirectory.Members.get', group: p.emailAddress, message: msg
       });
       continue;
     }

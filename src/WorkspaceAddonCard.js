@@ -523,6 +523,17 @@ function _buildActionListSection(homepageState) {
     return aN - bN;
   });
 
+  // gts-zocq rendering decision (per-surface, documented not silent):
+  // CardService's DecoratedText.setText() DOES support a small inline-HTML
+  // subset (<b>/<i>/<u>/<font>/<a>), so this surface COULD honour bold/italic
+  // runs if they were plumbed through this reader — unlike the tracker table
+  // (genuine API ceiling, see TrackerTable.js). Not done this session: the
+  // read path here (homepageState.floatingActions, sourced from the doc scan
+  // directly) would need its own explicit decision on how <b>/<i> composes
+  // with _escapeAddonHtml's existing escaping (tags must be re-injected AFTER
+  // escaping the surrounding text, not before). DELIBERATELY FLATTENED for
+  // now; left as a follow-up candidate for ROADMAP §Funnel, not a filed gap
+  // bead (no user report asks for sidebar formatting fidelity today).
   for (var i = 0; i < sortedActions.length; i++) {
     var action = sortedActions[i];
     var assignee = action.assigneeName || action.assigneeEmail || 'Unassigned';
@@ -740,7 +751,8 @@ function sidebarSetStatus(globalId, newStatus, docId) {
     var N     = parseGlobalId(globalId).N;
     var token = ScriptApp.getOAuthToken();
     _flushActionParagraph(docId, token, N, globalId,
-      currentAction.actionText, newStatus, currentAction.assigneeEmail, currentAction.assigneeName);
+      currentAction.actionText, newStatus, currentAction.assigneeEmail, currentAction.assigneeName,
+      currentAction.runs); // gts-zocq: preserve the doc's own just-scanned inline runs
     var t3 = Date.now();
 
     _patchActionStatus(globalId, newStatus);

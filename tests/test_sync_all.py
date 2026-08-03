@@ -615,3 +615,456 @@ def test_docdata_integrity_pass(settings, gas_log_dir, request):
             )
     finally:
         scn.close()
+
+
+def _post_fixture_patient(scn, fixture_name: str, extra: dict | None = None, timeout: int = 600) -> dict:
+    """Like scn._post_fixture, but with a longer client-side read timeout.
+
+    A few of gts-m33k/gts-sl64's new fixtures re-run the REAL syncAll() over
+    the whole production Actions/DocData backlog (not a small per-test doc),
+    which has been independently observed (gts-b6dm comments) to take
+    anywhere from ~1 to ~12+ minutes depending on how many docs need
+    reconciliation/walking in that particular sweep. ScenarioSession's
+    default 360s client timeout occasionally trips on this specific
+    variance (a client-side socket read timeout, not a GAS-side failure —
+    the execution itself completes server-side either way).
+    """
+    payload = {
+        "action": "run_fixture",
+        "testToken": scn.settings.get("testToken") or "",
+        "fixture": fixture_name,
+        "testDocId": scn.doc_id,
+    }
+    if extra:
+        payload.update(extra)
+    return scn._post(payload, timeout=timeout)
+
+
+# ---------------------------------------------------------------------------
+# gts-m33k: Shared-Drive-listing-omission negative + 24h aging-window guard
+# ---------------------------------------------------------------------------
+#
+# gts-rskf's AC has two parts: (1) Drive REST calls carry the all-drives
+# flags so a Shared-Drive-hosted doc actually appears in the bulk files.list
+# listing, and (2) even if a live, reachable doc is EVER absent from that
+# listing (Shared Drive omission being the reported cause, but a paginated
+# listing miss is not guaranteed to have only one cause), a direct per-doc
+# lookup must confirm it is really gone before syncAll marks it Doc Not
+# Found. This environment has no test Shared Drive folder id provisioned
+# (local.settings.json has no such key — see plan-context.md), so part (1)
+# cannot be exercised end-to-end live. Part (2) — the actual mechanism that
+# stops a live doc's rows from being silently archived, regardless of why it
+# was missing from the listing — is fully testable via the
+# sync_all_force_listing_miss fixture, which monkey-patches
+# _fetchDriveDocMetadata for exactly one syncAll() call to omit a specific,
+# otherwise perfectly reachable doc from the bulk map. This is the Backstop
+# case: pre-fix, syncAll marked a listing-absent doc Doc Not Found
+# unconditionally (no per-doc lookup existed at all), so this assertion
+# fails against that build and passes against the current one.
+
+def test_sync_all_survives_drive_listing_miss(settings, request):
+    """[gts-m33k] A live, reachable doc that is absent from syncAll's bulk
+    Drive listing (the Shared-Drive-omission symptom, gts-rskf) survives a
+    full syncAll cycle: its Actions rows stay intact, sync_status is
+    unchanged, and it does not appear in the Archive tab."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: m33k listing-miss survival action")
+        scn.sync()
+
+        pre_rows = scn.find_sheet_actions()
+        assert pre_rows, "[m33k] expected ≥1 Actions row before the forced-miss sweep"
+        pre_statuses = {r.global_id: r.sync_status for r in pre_rows}
+
+        _post_fixture_patient(scn, "sync_all_force_listing_miss")
+
+        post_rows = scn.find_sheet_actions()
+        assert len(post_rows) == len(pre_rows), (
+            f"[m33k] Actions row count changed after a forced listing-miss sweep: "
+            f"before={len(pre_rows)} after={len(post_rows)}"
+        )
+        for row in post_rows:
+            assert row.sync_status != "Doc Not Found", (
+                f"[m33k] row {row.global_id!r} marked 'Doc Not Found' after a forced "
+                f"listing-miss sweep — per-doc lookup fallback did not save it"
+            )
+            prior = pre_statuses.get(row.global_id)
+            assert row.sync_status == (prior or ""), (
+                f"[m33k] row {row.global_id!r} sync_status changed: "
+                f"{prior!r} -> {row.sync_status!r}"
+            )
+
+        archived = _archive_rows_for(settings, scn.doc_id)
+        assert not archived, (
+            f"[m33k] doc's rows appeared in Archive after a single forced "
+            f"listing-miss sweep: {archived!r}"
+        )
+
+        def _durable_survival() -> str | None:
+            rows = scn.find_sheet_actions()
+            if not rows:
+                return "[m33k] Actions rows disappeared after forced listing-miss sweep"
+            for row in rows:
+                if row.sync_status == "Doc Not Found":
+                    return f"[m33k] row {row.global_id!r} marked Doc Not Found"
+            return None
+
+        scn.expect_callable(
+            _durable_survival, on=SHEET, tag="[m33k listing-miss survives]", entry_point="syncAll",
+        )
+        scn.checkpoint(STEP)
+    finally:
+        scn.close()
+
+
+def test_sync_all_revived_before_24h_not_archived(settings, request):
+    """[gts-m33k] AC4 — a doc marked Doc Not Found that becomes reachable
+    again before the 24h aging threshold must be revived (re-synced), not
+    archived. This is precisely the 07-23 -> 07-24 window that lost the
+    Communications-team data in gts-rskf's incident report: the doc was
+    reachable again well within 24h (07-27 02:43, but the underlying defect
+    meant it kept re-triggering) — the guard under test here is that revival
+    beats the aging clock when the doc is genuinely back."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: m33k aging-window revival action")
+        scn.sync()
+
+        scn._post_fixture("trash_doc")
+        _post_fixture_patient(scn, "sync_all")  # Sweep 1: doc trashed -> marked Doc Not Found
+
+        marked_rows = scn.find_sheet_actions()
+        assert marked_rows, "[m33k] Actions row disappeared after trash+sync_all"
+        for row in marked_rows:
+            assert row.sync_status == "Doc Not Found", (
+                f"[m33k] expected 'Doc Not Found' after Sweep 1, got {row.sync_status!r}"
+            )
+
+        # Reachable again well within the 24h threshold — no backdating.
+        scn._post_fixture("untrash_doc")
+        _post_fixture_patient(scn, "sync_all")  # Sweep 2: should revive, not archive
+
+        revived_rows = scn.find_sheet_actions()
+        assert revived_rows, (
+            "[m33k] Actions row(s) missing after revival sweep — doc was archived "
+            "despite becoming reachable before the 24h aging threshold"
+        )
+        for row in revived_rows:
+            assert row.sync_status != "Doc Not Found", (
+                f"[m33k] row {row.global_id!r} still 'Doc Not Found' after revival sweep"
+            )
+
+        archived = _archive_rows_for(settings, scn.doc_id)
+        assert not archived, (
+            f"[m33k] doc's rows were archived despite becoming reachable before "
+            f"the 24h aging threshold: {archived!r}"
+        )
+
+        def _durable_revival() -> str | None:
+            rows = scn.find_sheet_actions()
+            if not rows:
+                return "[m33k] revived doc's rows missing from Actions"
+            for row in rows:
+                if row.sync_status == "Doc Not Found":
+                    return f"[m33k] row {row.global_id!r} still marked Doc Not Found post-revival"
+            return None
+
+        scn.expect_callable(
+            _durable_revival, on=SHEET, tag="[m33k aging-window revival]", entry_point="syncAll",
+        )
+        scn.checkpoint(STEP)
+    finally:
+        scn.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-aiaz: missing docState/allDocGlobalIds must never mass-delete rows
+# ---------------------------------------------------------------------------
+#
+# _handleSyncActionRows (WebApp.js) is WEBAPP_SECRET-gated, not testToken-
+# gated -- a hand-made maintenance call sending only {action, docId, secret}
+# is exactly the incident scenario in gts-aiaz's bug report (observed:
+# one such call stamped all 7 rows of a live doc 'Deleted' while the document
+# still contained all 7 actions). This posts that payload directly (no
+# docState, no allDocGlobalIds, no scanned) and asserts no row's sync_status
+# changes. Backstop: pre-fix, the orphan-detection loop was gated on `docId`
+# alone -- docState=[] read as "the document is empty", and every existing
+# row for that doc was marked Deleted unconditionally. That destructive
+# branch (WebApp.js's `if (docId) { ... mark every row missing from docState
+# Deleted ... }`, before the `scanned` gate existed) is exactly what this
+# assertion would have failed against.
+
+def test_sync_action_rows_missing_docstate_is_noop(settings, gas_log_dir, request):
+    """[gts-aiaz] A docId-only sync_action_rows payload (no docState,
+    allDocGlobalIds, or scanned flag) must not alter any row's sync_status —
+    omission is a no-op for orphan detection, never a mandate to delete."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: aiaz missing-docstate noop action")
+        scn.sync()
+
+        pre_rows = scn.find_sheet_actions()
+        assert pre_rows, "[aiaz] expected >=1 Actions row before the bare maintenance call"
+        pre_statuses = {r.global_id: r.sync_status for r in pre_rows}
+
+        secret = settings.get("webappSecret") or ""
+        assert secret, (
+            "[aiaz] local.settings.json missing webappSecret — cannot exercise the "
+            "WEBAPP_SECRET-gated sync_action_rows route directly"
+        )
+
+        fence = 0.0
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs
+            fence = clear_logs(gas_log_dir)
+
+        resp = scn._post({"action": "sync_action_rows", "secret": secret, "docId": scn.doc_id})
+        assert "error" not in resp, f"[aiaz] bare maintenance call unexpectedly errored: {resp!r}"
+
+        post_rows = scn.find_sheet_actions()
+        assert len(post_rows) == len(pre_rows), (
+            f"[aiaz] Actions row count changed after a docId-only sync_action_rows call: "
+            f"before={len(pre_rows)} after={len(post_rows)}"
+        )
+        for row in post_rows:
+            assert row.sync_status != "Deleted", (
+                f"[aiaz] row {row.global_id!r} marked 'Deleted' by a sync_action_rows payload "
+                f"that omitted docState/allDocGlobalIds/scanned — the destructive branch fired "
+                f"with no explicit scan assertion"
+            )
+            prior = pre_statuses.get(row.global_id)
+            assert row.sync_status == (prior or ""), (
+                f"[aiaz] row {row.global_id!r} sync_status changed: {prior!r} -> {row.sync_status!r}"
+            )
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import wait_for_log
+            wait_for_log(
+                gas_log_dir,
+                lambda e: e.get("tag") == "sync.orphanDetection.skipped"
+                and (e.get("data") or {}).get("docId") == scn.doc_id,
+                timeout_s=60,
+                after=fence,
+            )
+
+        def _durable_noop() -> str | None:
+            rows = scn.find_sheet_actions()
+            if len(rows) != len(pre_rows):
+                return f"[aiaz] row count drifted: expected {len(pre_rows)}, got {len(rows)}"
+            for row in rows:
+                if row.sync_status == "Deleted":
+                    return f"[aiaz] row {row.global_id!r} marked Deleted"
+            return None
+
+        scn.expect_callable(
+            _durable_noop, on=SHEET, tag="[aiaz missing-docState noop]", entry_point="sync_action_rows",
+        )
+        scn.checkpoint(STEP)
+    finally:
+        scn.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-binf / gts-6hzy: duplicate-globalId Actions rows collapse on syncAll
+# ---------------------------------------------------------------------------
+#
+# _loadExistingRowsByGlobalId (WebApp.js) resolves existingMap[globalId] to
+# the LAST-scanned physical sheet row when N>1 rows share a globalId (silent
+# last-write-wins) -- pre-fix, earlier duplicate rows for that globalId were
+# invisible to the entire sync_action_rows upsert/orphan pass: never updated,
+# never flagged, never removed. They just sat in the sheet forever, showing
+# the same action twice (the user-reported symptom). This seeds a genuine
+# second physical row sharing an already-synced action's globalId and drives
+# the regular syncDocument()/sync_action_rows sweep -- the entry point named
+# in gts-binf's own pre-code contract -- rather than a synthetic direct call.
+# No-shared-context note (plan-context.md): authored against gts-binf's
+# frozen Description/AC text, not its implementation diff.
+#
+# Backstop: pre-fix, _handleSyncActionRows had no code path that ever
+# inspected more than the last-scanned row per globalId, so
+# `len(collapsed_rows)` would still be 2 (not 1) and no `sync.dedup` event
+# would ever fire -- both assertions below fail against that build.
+
+def test_sync_all_collapses_duplicate_globalid_rows(settings, gas_log_dir, request):
+    """[gts-binf/gts-6hzy case 1+3] N>1 sheet rows sharing a globalId collapse
+    to one canonical row on the regular sync sweep; a sync.dedup log event
+    fires on collapse; a second sync afterward is idempotent (no further
+    dedup event, no row-count change)."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: binf dedup canonical action")
+        scn.sync()
+
+        canonical_rows = scn.find_sheet_actions()
+        assert len(canonical_rows) == 1, (
+            f"[binf] expected exactly 1 row after initial sync, got {len(canonical_rows)}"
+        )
+        global_id = canonical_rows[0].global_id
+        assert global_id, "[binf] canonical row has no global_id"
+
+        doc_formula = (
+            f'=HYPERLINK("https://docs.google.com/document/d/{scn.doc_id}/edit","Dup Guard")'
+        )
+        scn._post_fixture("seed_row", {
+            "globalId": global_id,
+            "actionId": "AI-1",
+            "actionText": "STALE pre-existing duplicate row (should be collapsed)",
+            "status": "Open",
+            "documentFormula": doc_formula,
+        })
+
+        duped_rows = [r for r in scn.find_sheet_actions() if r.global_id == global_id]
+        assert len(duped_rows) == 2, (
+            f"[binf] seed_row did not produce a duplicate-globalId row: expected 2 rows "
+            f"for {global_id!r}, got {len(duped_rows)}"
+        )
+
+        fence = 0.0
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs
+            fence = clear_logs(gas_log_dir)
+
+        scn.sync()  # regular sweep entry point (syncDocument -> sync_action_rows)
+
+        collapsed_rows = [r for r in scn.find_sheet_actions() if r.global_id == global_id]
+        assert len(collapsed_rows) == 1, (
+            f"[binf] duplicate-globalId rows not collapsed by the regular sync sweep: "
+            f"expected 1 row for {global_id!r} after sync, got {len(collapsed_rows)}"
+        )
+        assert collapsed_rows[0].action == "binf dedup canonical action", (
+            f"[binf] surviving row's content is not the live doc content: "
+            f"{collapsed_rows[0].action!r}"
+        )
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import wait_for_log
+            wait_for_log(
+                gas_log_dir,
+                lambda e: e.get("tag") == "sync.dedup"
+                and (e.get("data") or {}).get("globalId") == global_id,
+                timeout_s=60,
+                after=fence,
+            )
+
+        def _durable_dedup() -> str | None:
+            rows = [r for r in scn.find_sheet_actions() if r.global_id == global_id]
+            if len(rows) != 1:
+                return f"[binf] {len(rows)} rows for {global_id!r}, expected 1"
+            return None
+
+        scn.expect_callable(
+            _durable_dedup, on=SHEET, tag="[binf duplicate-globalId collapse]", entry_point="syncAll",
+        )
+        scn.checkpoint(STEP)
+
+        # [gts-6hzy case 3] Idempotency: a second sync after the collapse is a
+        # no-op -- no further dedup event, no row-count change.
+        fence2 = 0.0
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs
+            fence2 = clear_logs(gas_log_dir)
+
+        scn.sync()
+
+        idempotent_rows = [r for r in scn.find_sheet_actions() if r.global_id == global_id]
+        assert len(idempotent_rows) == 1, (
+            f"[6hzy idempotency] row count for {global_id!r} changed on a second sync "
+            f"after collapse: {len(idempotent_rows)}"
+        )
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import assert_no_log
+            assert_no_log(
+                gas_log_dir, fence2,
+                lambda e: e.get("tag") == "sync.dedup" and (e.get("data") or {}).get("globalId") == global_id,
+                what="[6hzy idempotency] unexpected repeat sync.dedup after collapse already settled",
+            )
+    finally:
+        scn.close()
+
+
+def test_sync_all_duplicate_globalid_dedup_does_not_regress_reanchor_path(
+    settings, gas_log_dir, request
+):
+    """[gts-binf/gts-6hzy case 2] Regression guard: the pre-existing re-anchor
+    duplicate-IDENTITY path (WebApp.js's docStateIdentitySet check, distinct
+    from gts-binf's SAME-globalId collapse) must still fire correctly. Seeds
+    a stale row under a DIFFERENT globalId but the SAME identity (assignee +
+    action text + status) as a still-live action -- simulating the row a
+    re-anchor (AI-N renumber / named-range reset) leaves behind. This is a
+    no-change assertion by construction (the identity-duplicate code path is
+    untouched by gts-binf's same-globalId dedup pass, which only ever
+    inspects rows sharing an exact globalId) -- it is not expected to fail
+    pre-fix; its purpose is to prove the new same-globalId collapse pass does
+    not interfere with, duplicate, or suppress this older mechanism."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: binf reanchor-guard live action")
+        scn.sync()
+
+        live_rows = scn.find_sheet_actions()
+        assert len(live_rows) == 1, (
+            f"[binf reanchor-guard] expected exactly 1 row after initial sync, got {len(live_rows)}"
+        )
+        live_row = live_rows[0]
+        live_global_id = live_row.global_id
+        assert live_global_id, "[binf reanchor-guard] live row has no global_id"
+
+        # A stale row under a DIFFERENT (fabricated) globalId for the same doc,
+        # sharing the live row's identity (assignee/action/status) -- exactly
+        # what a re-anchor leaves behind per WebApp.js's own comment ("If the
+        # current doc still has the same action state under a different
+        # globalId, this row is a stale duplicate left behind by a re-anchor").
+        stale_global_id = f"{scn.doc_id}/AI-999"
+        doc_formula = (
+            f'=HYPERLINK("https://docs.google.com/document/d/{scn.doc_id}/edit","Reanchor Guard")'
+        )
+        scn._post_fixture("seed_row", {
+            "globalId": stale_global_id,
+            "actionId": "AI-999",
+            "actionText": live_row.action,
+            "assigneeEmail": live_row.assignee or "",
+            "status": live_row.status or "Open",
+            "documentFormula": doc_formula,
+        })
+
+        pre_sync_rows = scn.find_sheet_actions()
+        assert any(r.global_id == stale_global_id for r in pre_sync_rows), (
+            "[binf reanchor-guard] seed_row did not create the stale identity-duplicate row"
+        )
+        assert len(pre_sync_rows) == 2, (
+            f"[binf reanchor-guard] expected 2 rows (live + stale identity-duplicate) "
+            f"before sync, got {len(pre_sync_rows)}"
+        )
+
+        scn.sync()  # regular sweep entry point
+
+        post_sync_rows = scn.find_sheet_actions()
+        stale_still_present = [r for r in post_sync_rows if r.global_id == stale_global_id]
+        live_still_present = [r for r in post_sync_rows if r.global_id == live_global_id]
+
+        assert not stale_still_present, (
+            f"[binf reanchor-guard] stale identity-duplicate row {stale_global_id!r} "
+            f"survived a sync sweep — the pre-existing re-anchor duplicate-identity path "
+            f"(WebApp.js docStateIdentitySet check) regressed"
+        )
+        assert len(live_still_present) == 1, (
+            f"[binf reanchor-guard] the live action's own row {live_global_id!r} was "
+            f"affected by the identity-duplicate cleanup: {live_still_present!r}"
+        )
+
+        def _durable_reanchor_guard() -> str | None:
+            rows = scn.find_sheet_actions()
+            if any(r.global_id == stale_global_id for r in rows):
+                return f"[binf reanchor-guard] stale row {stale_global_id!r} reappeared"
+            if not any(r.global_id == live_global_id for r in rows):
+                return f"[binf reanchor-guard] live row {live_global_id!r} missing"
+            return None
+
+        scn.expect_callable(
+            _durable_reanchor_guard, on=SHEET,
+            tag="[binf reanchor duplicate-identity regression guard]", entry_point="syncAll",
+        )
+        scn.checkpoint(STEP)
+    finally:
+        scn.close()
