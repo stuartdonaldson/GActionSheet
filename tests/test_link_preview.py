@@ -24,7 +24,7 @@ import pytest
 from scn.ai import ai
 from scn.engine import CheckpointKind, Surface
 from scn.reporter import emit_standalone_event
-from scn.session import ScenarioSession
+from scn.session import ScenarioSession, resolve_auth_file
 from scn.ui import UiDriver
 
 SHEET = Surface.SHEET
@@ -41,7 +41,7 @@ def browser_page(settings):
     """
     from playwright.sync_api import sync_playwright
 
-    auth = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+    auth = resolve_auth_file()
     run_id = pathlib.Path(__file__).stem
     t0 = time.monotonic()
     with sync_playwright() as pw:

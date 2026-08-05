@@ -13,6 +13,18 @@ The same script also hosts the **automation feature set** (timed sweep trigger, 
 
 No server infrastructure. No separate projects. One push updates both deployment modes.
 
+### Test vs. Prod: what's actually isolated
+
+`pnpm run deploy:test` and `pnpm run deploy:prod` repoint two different **Web App deployments** (`TEST-WEB-APP` / production), each with its own deployment ID and URL, each serving whatever code was pushed to HEAD at the moment that deployment was last repointed. That per-deployment pinning is real for Web App (`doGet`/`doPost`) traffic — a caller hitting the TEST URL keeps getting the code snapshot from the last `deploy:test`, even after a later `clasp push`, until TEST is repointed again.
+
+**Installable triggers do not have this isolation.** Time-based triggers (`syncAll`) and the `onEdit` trigger always execute against the script's HEAD — the single most-recently-pushed version of the code — regardless of which Web App deployment (test or prod) is currently pinned to which version. There is exactly one script project (`scriptId` above) and one HEAD; a trigger created via `ScriptApp.newTrigger()` (as `TriggerManager.js` does) is not bound to a specific deployment ID. So a `clasp push` made while iterating on TEST immediately changes what code the trigger runs in production too — there is no trigger-level separation between "test" and "prod" today.
+
+Practically, the real difference between the TEST and production deployments is **which population of users is calling which URL**, not which code is running in the background:
+- **TEST** — the URL/version used during active development and by `pytest`; also what add-on users enrolled in the test program are pointed at.
+- **Production** — the URL/version tied to the production, user-installable add-on listing in the Google Workspace Marketplace / GCP project; the population that installed the real add-on.
+
+Consequence for anyone touching `TriggerManager.js` or reasoning about trigger behavior: don't assume "test" and "prod" trigger executions can be told apart or gated independently without a genuinely separate script/deployment. See `gts-li3g` for a concrete bug this caused (the 30-min `syncAll` trigger racing an in-flight sync) and why disabling the trigger was rejected as a fix.
+
 ---
 
 ## Prerequisites
@@ -162,6 +174,33 @@ Apps Script editor → Run → initializeTriggers
 - Archive sheet tab exists = archiving has run at least once
 - `WEBAPP_URL` script property is set = Web App has been visited at least once
 
+### Axiom (`nuuts` dataset)
+
+Structured logs from both sides (GAS via `GasLogger.js`, Python tests via
+`scn/reporter.py`) are also shipped to Axiom dataset `nuuts` — see
+`scripts/query_axiom.py` to query it and `scripts/call_webapp.py` for the
+manual-probe path. Config lives in `local.settings.json`
+(`axiomDataset`/`axiomToken`/`axiomQueryToken`), written by `pnpm run
+deploy:test`.
+
+**Account owner (as of 2026-07-30):** `stuart.donaldson@gmail.com`. This is
+a placeholder owner, not the intended long-term one — expect this to move to
+an org-owned account later. Only the Axiom web console (login as the owner
+above) can manage org/dataset-admin operations (map fields, vacuum, member
+access); neither API token in `local.settings.json` has that permission
+(both are scoped to ingest/query only — confirmed via 403 on `PUT
+/v2/datasets/nuuts/mapfields`).
+
+**Known issue:** `nuuts` is at Axiom's 256/257-field-per-dataset cap (bead
+`gts-pfyx`). GAS-side events now nest their payload under one `data` field
+(`GasLogger.js`) instead of spreading it flat, but that alone doesn't free
+existing columns — `data` still needs to be marked as an Axiom **map field**
+(console: Datasets → nuuts → mark `data` as map field) *before* it can
+absorb new sub-keys without growing the column count further, and a
+**vacuum** (console: Datasets → nuuts → Vacuum fields; once/day limit) is
+needed to reclaim the ~257 already-registered legacy columns. Data is not
+lost by either operation — only unused field *definitions* are dropped.
+
 ---
 
 ## Failure Modes
@@ -308,7 +347,7 @@ drained it. On a `Surface.UI` FAIL-severity miss, a screenshot of the live
 page is attached to the report named `"<tag> UI FAIL"`. Both apply uniformly
 to every pytest scenario — no per-test opt-in.
 
-**Screenshot on every UI failure (GTaskSheet-3tkf).** Beyond drained-checkpoint
+**Screenshot on every UI failure (gts-3tkf).** Beyond drained-checkpoint
 misses, *any* failing UI test — timeout or assertion — automatically saves a
 full-page PNG and reports diagnostics, via two layers so there is no
 copy-pasted capture logic:
@@ -330,9 +369,9 @@ copy-pasted capture logic:
 #### onLinkPreview card rendering — `tests/test_link_preview.py`
 
 The `onLinkPreview` add-on card (rendered via `addons.gsuite.google.com`) was
-previously believed to require a real human mouse hover (GTaskSheet-s9so) and
-was covered only by a headed, human-instructed interactive test. GTaskSheet-39jk
-and GTaskSheet-cug8 found that placing the text cursor on the `AI-N:` chip link
+previously believed to require a real human mouse hover (gts-s9so) and
+was covered only by a headed, human-instructed interactive test. gts-39jk
+and gts-cug8 found that placing the text cursor on the `AI-N:` chip link
 via `Ctrl+F` -> type -> `Enter` -> `Escape` (no mouse) fires the add-on's
 `onLinkPreview` trigger, and re-placing the cursor after moving it away renders
 the card — reproducible headless. `tests/test_link_preview.py` drives this
@@ -357,7 +396,7 @@ of calling pytest directly:
 
 ```bash
 /mnt/c/dev/venvs/uv1/bin/python3 scripts/run_test_exec.py \
-  -q "Investigating GTaskSheet-XXXX: <question>" \
+  -q "Investigating gts-XXXX: <question>" \
   tests/test_journey.py -x -v < /dev/null
 ```
 
@@ -397,12 +436,12 @@ UC-E import/forward across docs) are covered by the following test files:
 | UC-E — import an open action from a teammate's doc (forward) | `tests/test_import.py` (`test_import_access_filter` AC1; `test_import_flow_forward_sync` AC2–AC4, incl. `created_date` carry-over) |
 | Timed sweep (`syncAll`) | `tests/test_sync_all.py` |
 
-**Sign-off (GTaskSheet-mol-06g, 2026-05-21):** all 8 UC scenarios pass — 14
-passed, 2 xfailed (pipe-delimited assignee, tracked under `GTaskSheet-tis`).
+**Sign-off (gts-mol06g, 2026-05-21):** all 8 UC scenarios pass — 14
+passed, 2 xfailed (pipe-delimited assignee, tracked under `gts-tis`).
 This is the last full-suite run across the UC matrix; later regression runs
-(e.g. `GTaskSheet-gdll`) are targeted spot-checks against specific surfaces,
+(e.g. `gts-gdll`) are targeted spot-checks against specific surfaces,
 not a re-run of the full UC matrix. UC-E (EPIC-D import/forward) was added
-later and is not part of the mol-06g 8-scenario sign-off baseline above.
+later and is not part of the mol06g 8-scenario sign-off baseline above.
 
 ---
 

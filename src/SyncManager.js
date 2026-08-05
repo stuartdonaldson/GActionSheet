@@ -232,7 +232,7 @@ function syncDocument(docId) {
       var token = ScriptApp.getOAuthToken();
       // One GET + one batchUpdate for every action item needing a flush in
       // this doc, instead of one GET + one batchUpdate per item
-      // (GTaskSheet-kkm7.3).
+      // (gts-kkm7.3).
       var flushItems = flushIds.map(function (gid) {
         var f = toFlush[gid];
         return { N: f.N, globalId: f.globalId, actionText: f.action, status: f.status,
@@ -286,7 +286,7 @@ function syncDocument(docId) {
  */
 function syncAll() {
   // opId correlates this invocation's sub-events (per-doc sync.scanned/
-  // sync.complete) in Axiom -- see GasLogger.startOp() (GTaskSheet-65g1).
+  // sync.complete) in Axiom -- see GasLogger.startOp() (gts-65g1).
   GasLogger.startOp();
   var _syncId = _getIdentity();
   GasLogger.log('sync.all.start.identity', { eu: _syncId.eu, au: _syncId.au });
@@ -349,7 +349,7 @@ function syncAll() {
 
     // Single batched Drive call for trash/modified/name metadata across every
     // tracked doc, replacing what was previously one DriveApp.getFileById()
-    // round trip per doc (GTaskSheet-kkm7.2). Falls back to the old per-doc
+    // round trip per doc (gts-kkm7.2). Falls back to the old per-doc
     // DriveApp path if the batch fetch itself fails, so a transient Drive/
     // network error degrades to the slower-but-correct behavior rather than
     // misclassifying every doc as not-found.
@@ -365,21 +365,61 @@ function syncAll() {
     for (var j = 0; j < docIds.length; j++) {
       var docId = docIds[j];
 
-      // Skip docs already permanently marked Doc Not Found — no Drive call needed.
+      // Docs already marked 'Doc Not Found' stay skipped unless Drive now shows
+      // them ALIVE — present in the listing and not trashed. Skipping them
+      // unconditionally (the original behaviour) made the mark ONE-WAY: a doc
+      // wrongly marked could never recover, so gts-rskf's Shared Drive
+      // misclassification was permanent and the rows were archived 24h later.
+      // But falling through on mere presence is just as wrong: files.list
+      // returns TRASHED files too, so ~150 legitimately dead docs would be
+      // re-processed and re-marked on every sweep (measured: notFound 3 -> 154,
+      // 1053 trashed events in one window, and syncAll slow enough to time the
+      // harness out). Only a live document is worth the round trip.
       if (alreadyDocNotFound[docId]) {
-        skipped++;
-        continue;
+        var revivedMeta = driveMetadata ? driveMetadata[docId] : null;
+        if (!revivedMeta || revivedMeta.trashed) {
+          skipped++;
+          continue;
+        }
+        GasLogger.log('sync.docNotFound.revived', {
+          docId: docId, msg: 'Previously marked not-found but live in Drive; re-syncing'
+        });
       }
 
       var isTrashed, lastModified, docTitle;
       if (driveMetadata) {
         var meta = driveMetadata[docId];
         if (!meta) {
-          // Absent from the batch listing — genuinely gone or inaccessible,
-          // same end state as the old per-doc DriveApp.getFileById() throw.
-          GasLogger.log('sync.docNotFound.missing', { msg: 'Doc not found', docId: docId, err: 'Absent from Drive metadata listing' });
-          notFoundDocIds.push(docId);
-          continue;
+          // Absent from the batch listing. This is NOT proof the doc is gone
+          // (gts-rskf): a paginated files.list is not a consistent snapshot,
+          // and its observed size has swung by hundreds of docs between
+          // consecutive runs. Confirm with an authoritative per-doc lookup
+          // before marking anything not-found — the previous code marked on
+          // absence alone and silently archived live documents' actions.
+          var probe = _fetchSingleDocMetadata(docId);
+          if (probe.status === 'gone') {
+            GasLogger.log('sync.docNotFound.missing', {
+              msg: 'Doc not found', docId: docId,
+              err: 'Absent from Drive metadata listing; per-doc lookup confirms deleted'
+            });
+            notFoundDocIds.push(docId);
+            continue;
+          }
+          if (probe.status === 'unknown') {
+            // Drive could not answer either way (transient error, quota, or a
+            // permission blip). Leave the doc and its rows exactly as they
+            // are and retry next cycle — never archive on an inconclusive read.
+            GasLogger.log('sync.driveMetadata.indeterminate', {
+              msg: 'Doc reachability unknown; skipped without marking',
+              docId: docId, err: probe.err
+            });
+            skipped++;
+            continue;
+          }
+          meta = probe.meta;
+          GasLogger.log('sync.driveMetadata.listingMiss', {
+            msg: 'Doc absent from batch listing but reachable per-doc', docId: docId
+          });
         }
         isTrashed    = meta.trashed;
         lastModified = meta.lastModified;
@@ -419,14 +459,14 @@ function syncAll() {
     }
 
     // One webapp call for every not-found doc found this sweep, instead of one
-    // per doc (GTaskSheet-kkm7.1).
+    // per doc (gts-kkm7.1).
     if (notFoundDocIds.length > 0) {
       _markDocNotFound(notFoundDocIds);
     }
 
     GasLogger.log('sync.all.complete', { docCount: docIds.length, synced: synced, skipped: skipped, notFound: notFoundDocIds.length });
 
-    // ── DocData integrity pass (GTaskSheet-6ipb) ──────────────────────────
+    // ── DocData integrity pass (gts-6ipb) ──────────────────────────
     // Docs skipped above by the lastModified<=lastSynced optimization never
     // refresh their DocData row even if Actions rows changed state since the
     // last sync (e.g. closed via sheet edit). Recompute action_count/
@@ -572,6 +612,24 @@ function _syncSheetRowToDoc(sheet, row) {
       // stale cached view (status=pre-edit), and the doc-wins path overwrites the sheet
       // back to the old value. Chip-resolved assigneeName propagation is deferred to the
       // next scheduled syncAll sweep.
+      //
+      // Refresh the tracker table (gts-m2gf). Removing syncDocument() above also removed
+      // the only tracker refresh on the edit path, so a sheet edit updated the floating
+      // action while the Action Item Summary kept the old text — permanently, because a
+      // later syncDocument sees Dirty already cleared and doc==sheet, computes
+      // hadChanges=false, and skips the refresh too.
+      //
+      // This does NOT reintroduce the race above: that was syncDocument()'s doc->sheet
+      // reconciliation overwriting the sheet from a stale doc read. insertTrackerTable
+      // only READS the sheet (TrackerTable.js _readTrackerSheetRows) and writes the
+      // document's table, so it cannot clobber the row we just flushed. It is the same
+      // call syncDocument makes after its own flush, and it already no-ops via
+      // _trackerRowsMatch when nothing changed.
+      try {
+        insertTrackerTable(docId, { onlyIfExists: true });
+      } catch (trackerErr) {
+        GasLogger.log('sync.tracker-failed', { docId: docId, globalId: globalId, msg: trackerErr.message });
+      }
     } else {
       GasLogger.log('sync.sheet-to-doc.flush-failed', { globalId: globalId });
     }
@@ -596,7 +654,12 @@ function _syncSheetRowToDoc(sheet, row) {
  * @param {Object} seenN   mutable duplicate-tracking map
  */
 function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
-  var fullText   = para.getText().replace(/\n$/, '');
+  // Normalize here too, not just in the soft-return parser: this fast path
+  // owns single-token paragraphs, whose action text may still carry \r/\v
+  // continuation breaks. Without it the two parsers would hand back the same
+  // action with different line-break spellings, and doc-vs-sheet action-text
+  // comparisons would spuriously differ (gts-dou2).
+  var fullText   = _normalizeLineEndings(para.getText()).replace(/\n$/, '');
   var tokenMatch = fullText.match(/^AI-(\d+):\s*/);
   if (!tokenMatch) return null;
 
@@ -665,6 +728,36 @@ function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
 }
 
 /**
+ * Normalizes soft-return line-ending variants (\r, \r\n, \v — DocumentApp
+ * represents Shift+Enter differently across GAS runtime versions) to a plain
+ * \n. Shared core used by every paragraph scanner and by the sheet-write
+ * normalizers in WebApp.js, so the doc-side and sheet-side notion of "one
+ * line break" never drifts apart (gts-dou2).
+ */
+function _normalizeLineEndings(text) {
+  return (text || '').replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n');
+}
+
+/**
+ * Inverse of _normalizeLineEndings for the flush (sheet -> doc) direction:
+ * turns each normalized \n into the one character the Docs REST API's
+ * insertText accepts as a genuine soft line break inside a single paragraph,
+ * U+000B (vertical tab) — the same break Shift+Enter produces in the editor.
+ *
+ * Why U+000B specifically (gts-dr8j): InsertTextRequest documents that
+ * "some control characters (U+0000-U+0008, U+000C-U+001F) ... will be stripped
+ * out of the inserted text". That is exactly why the earlier \r-based attempt
+ * concatenated the lines with no separator at all (gts-kkm7.5) — \r is U+000D,
+ * inside the stripped range. \n (U+000A) survives but is documented to
+ * "implicitly create a new Paragraph", i.e. a hard return. U+000B is the only
+ * line-break character that is neither stripped nor paragraph-splitting.
+ */
+function _toSoftReturnText(text) {
+  if (!text) return text;
+  return _normalizeLineEndings(text).replace(/\n/g, '\v').trim();
+}
+
+/**
  * Scans all paragraphs in a table's cells for AI-N: tokens, appending any
  * found to `actions`.  Only call this for non-tracker tables.
  */
@@ -697,9 +790,7 @@ function _collectTableCellActions(table, tableBodyIdx, docId, actions, seenN) {
  * single-token fast path in _collectActionsFromParagraph.
  */
 function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText) {
-  // Normalize all line-separator variants (soft returns in DocumentApp may be
-  // \r, \r\n, or \v depending on the GAS runtime version).
-  var normalized = fullText.replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n');
+  var normalized = _normalizeLineEndings(fullText);
   var lines   = normalized.split('\n');
   var results = [];
   var curN    = null;
@@ -765,10 +856,8 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
  * Appends any found actions to the `actions` array in place.
  */
 function _collectActionsFromParagraph(para, bodyIdx, docId, seenN, actions) {
-  // Normalize line endings before scanning so \r, \r\n, and \v (soft return
-  // variants across GAS runtime versions) all work.
   var raw  = para.getText();
-  var text = raw.replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n').replace(/\n$/, '');
+  var text = _normalizeLineEndings(raw).replace(/\n$/, '');
   var tokenCount = (text.match(/(?:^|\n)AI-\d+:/g) || []).length;
   if (tokenCount === 0) return;
 
@@ -860,7 +949,7 @@ function _collectTokenParagraphs(body) {
 
   function scanPara(para) {
     var raw   = para.getText();
-    var text  = raw.replace(/\r\n/g, '\n').replace(/[\r\v]/g, '\n').replace(/\n$/, '');
+    var text  = _normalizeLineEndings(raw).replace(/\n$/, '');
     var lines = text.split('\n');
     var lineOffset = 0;
     for (var li = 0; li < lines.length; li++) {
@@ -1019,7 +1108,12 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
       docTitle:           docTitle,
       docId:              docId || '',
       docState:           docState,
-      allDocGlobalIds: allDocGlobalIds || []
+      allDocGlobalIds: allDocGlobalIds || [],
+      // Explicit "the document was actually scanned" assertion (gts-aiaz).
+      // Distinguishes a legitimate empty-document sync (docState=[],
+      // allDocGlobalIds=[], scanned=true) from a payload that simply omits
+      // both fields — which must NOT be read as "delete everything".
+      scanned:            true
     })
   });
 
@@ -1045,7 +1139,7 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
 /**
  * POSTs mark_doc_not_found to the WebApp so it can stamp 'Doc Not Found' on
  * all Actions rows whose Document formula references any of docIds. One HTTP
- * round trip regardless of how many docs are being marked (GTaskSheet-kkm7.1)
+ * round trip regardless of how many docs are being marked (gts-kkm7.1)
  * — callers (syncDocument's own-doc not-found paths, syncAll's sweep) collect
  * every not-found docId for this invocation and call this once.
  *
@@ -1074,11 +1168,44 @@ function _markDocNotFound(docIds) {
   GasLogger.flush();
 }
 
+// ---------------------------------------------------------------------------
+// Drive REST helpers (gts-rskf)
+// ---------------------------------------------------------------------------
+
+/**
+ * Drive v3 query parameters that make a request see Shared Drive ("all
+ * drives") content as well as My Drive. Omitting these is what caused
+ * gts-rskf: every document hosted on a Shared Drive was invisible to
+ * files.list, and syncAll read that invisibility as deletion, archiving the
+ * document's actions out of the sheet. Every Drive REST call in this file
+ * goes through _driveUrl so the flags cannot be forgotten at one call site.
+ *
+ * `corpora=allDrives` applies to files.list only; it is harmless on
+ * files.get/patch, which ignore unknown-but-valid query params, but we keep
+ * it list-only for clarity.
+ */
+var _DRIVE_ITEM_PARAMS = 'supportsAllDrives=true';
+var _DRIVE_LIST_PARAMS = 'supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives';
+
+/**
+ * Builds a Drive v3 files endpoint URL with the all-drives flags applied.
+ *
+ * @param {string} path   '' for the collection (files.list), or '/<fileId>'
+ * @param {string} params already-encoded query string, without leading '?'
+ * @param {boolean} isList true to add the list-only corpora/include flags
+ * @return {string}
+ */
+function _driveUrl(path, params, isList) {
+  return 'https://www.googleapis.com/drive/v3/files' + path +
+    '?' + params + '&' + (isList ? _DRIVE_LIST_PARAMS : _DRIVE_ITEM_PARAMS);
+}
+
 /**
  * Fetches trashed/modifiedTime/name metadata for every Google Doc visible to
- * the calling identity in a single (paginated) Drive REST call, replacing one
+ * the calling identity — across My Drive AND every Shared Drive it can reach
+ * — in a single (paginated) Drive REST call, replacing one
  * DriveApp.getFileById() call per tracked doc in syncAll()'s loop
- * (GTaskSheet-kkm7.2). Throws on any non-200 page so callers can fall back to
+ * (gts-kkm7.2). Throws on any non-200 page so callers can fall back to
  * the per-doc path rather than silently treating every doc as not-found.
  *
  * @return {Object<string, {trashed: boolean, lastModified: Date, name: string}>}
@@ -1086,7 +1213,6 @@ function _markDocNotFound(docIds) {
  */
 function _fetchDriveDocMetadata() {
   var token      = ScriptApp.getOAuthToken();
-  var baseUrl    = 'https://www.googleapis.com/drive/v3/files';
   var fields     = 'nextPageToken,files(id,trashed,modifiedTime,name)';
   var q          = "mimeType='application/vnd.google-apps.document'";
   var map        = {};
@@ -1094,10 +1220,10 @@ function _fetchDriveDocMetadata() {
   var pages      = 0;
 
   do {
-    var url = baseUrl + '?q=' + encodeURIComponent(q) +
+    var url = _driveUrl('', 'q=' + encodeURIComponent(q) +
       '&fields=' + encodeURIComponent(fields) +
       '&pageSize=1000' +
-      (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+      (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''), true);
     var resp = UrlFetchApp.fetch(url, {
       headers:            { Authorization: 'Bearer ' + token },
       muteHttpExceptions: true
@@ -1124,8 +1250,52 @@ function _fetchDriveDocMetadata() {
 
 // ---------------------------------------------------------------------------
 // Team Scope: Drive appProperty read/write and folder-walk auto-assignment
-// (GTaskSheet-me6w.3 — see knowledge-base/staging/epic-b-team-property-sync.md)
+// (gts-me6w.3 — see knowledge-base/staging/epic-b-team-property-sync.md)
 // ---------------------------------------------------------------------------
+
+/**
+ * Authoritative single-document reachability check (gts-rskf), used to
+ * confirm or refute a document's absence from _fetchDriveDocMetadata's bulk
+ * listing before syncAll marks it Doc Not Found.
+ *
+ * Deliberately distinguishes three outcomes, because only one of them may
+ * ever cost a user their rows:
+ *   'found'   — metadata in the same shape as _fetchDriveDocMetadata's entries
+ *   'gone'    — Drive positively reports the file does not exist (404)
+ *   'unknown' — any other failure; the caller must NOT mark the doc not-found
+ *
+ * @param {string} docId
+ * @return {{status: string, meta: ?Object, err: string}}
+ */
+function _fetchSingleDocMetadata(docId) {
+  var url = _driveUrl('/' + docId, 'fields=' + encodeURIComponent('id,trashed,modifiedTime,name'), false);
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      method:             'get',
+      headers:            { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true
+    });
+    var code = resp.getResponseCode();
+    if (code === 404) {
+      return { status: 'gone', meta: null, err: 'HTTP 404' };
+    }
+    if (code !== 200) {
+      return { status: 'unknown', meta: null, err: 'HTTP ' + code };
+    }
+    var file = JSON.parse(resp.getContentText());
+    return {
+      status: 'found',
+      meta: {
+        trashed:      !!file.trashed,
+        lastModified: new Date(file.modifiedTime),
+        name:         file.name
+      },
+      err: ''
+    };
+  } catch (e) {
+    return { status: 'unknown', meta: null, err: e.message };
+  }
+}
 
 /**
  * Reads a Drive file appProperty via the Drive REST API. Works in any
@@ -1138,7 +1308,7 @@ function _fetchDriveDocMetadata() {
  * @return {?string} the property value, or null if absent or on API error.
  */
 function _getDocAppProperty(docId, key, token) {
-  var url = 'https://www.googleapis.com/drive/v3/files/' + docId + '?fields=appProperties';
+  var url = _driveUrl('/' + docId, 'fields=appProperties', false);
   try {
     var resp = UrlFetchApp.fetch(url, {
       method:             'get',
@@ -1167,7 +1337,7 @@ function _getDocAppProperty(docId, key, token) {
  * @param {string} token  OAuth token from ScriptApp.getOAuthToken()
  */
 function _setDocAppProperty(docId, key, value, token) {
-  var url     = 'https://www.googleapis.com/drive/v3/files/' + docId + '?fields=appProperties';
+  var url     = _driveUrl('/' + docId, 'fields=appProperties', false);
   var payload = { appProperties: {} };
   payload.appProperties[key] = value;
   try {
@@ -1219,8 +1389,11 @@ function _readTeamDataRows(ss) {
  *
  * @param {string} docId
  * @param {Array<{teamId: string, folderId: string, teamLink: string}>} teamDataRows
- * @return {?{teamId: string, teamLink: string}} the matched team, or null if no
- *   ancestor matches (or on Drive error).
+ * @return {?{teamId: string, teamLink: string, folderId: string}} the matched
+ *   team (folderId is the specific TeamData folder the doc actually sits
+ *   under -- used by gts-79dw.4.12's _authorizeDocWrite for per-document
+ *   write re-authorization, R3b), or null if no ancestor matches (or on Drive
+ *   error).
  */
 function _walkFolderForTeam(docId, teamDataRows) {
   try {
@@ -1238,7 +1411,7 @@ function _walkFolderForTeam(docId, teamDataRows) {
       var folderId = folder.getId();
       for (var i = 0; i < teamDataRows.length; i++) {
         if (teamDataRows[i].folderId === folderId) {
-          return { teamId: teamDataRows[i].teamId, teamLink: teamDataRows[i].teamLink || '' };
+          return { teamId: teamDataRows[i].teamId, teamLink: teamDataRows[i].teamLink || '', folderId: folderId };
         }
       }
       var folderParents = folder.getParents();
@@ -1259,13 +1432,20 @@ function _walkFolderForTeam(docId, teamDataRows) {
 
 // ---------------------------------------------------------------------------
 // Team Scope: security gate
-// (GTaskSheet-me6w.5 — see knowledge-base/staging/epic-b-team-property-sync.md)
+// (gts-me6w.5 — see knowledge-base/staging/epic-b-team-property-sync.md)
 // ---------------------------------------------------------------------------
 
 /**
  * Verifies that the active user can access the given team's folder. Standalone
  * gate — not called from syncDocument(); intended for future team-scoped
  * filtered reads (Import/Notify, EPIC-D/E).
+ *
+ * A team can own more than one TeamData row (multiple folders, ADR-0014 §1).
+ * Grants access if the caller can reach ANY of teamId's matching folders —
+ * fixed by gts-79dw.4.11; previously this broke at the FIRST matching row, so
+ * a multi-folder team was authorized against an arbitrary single folder
+ * instead of considering all of them (plan §11 audit finding). Only denies
+ * once every matching folder has been tried and failed.
  *
  * Throws rather than returning a boolean: callers catch the error message
  * prefix ('TeamNotFound: ' or 'TeamAccessDenied: ') and respond with no rows
@@ -1275,34 +1455,38 @@ function _walkFolderForTeam(docId, teamDataRows) {
  * @param {Spreadsheet} ss
  * @throws {Error} 'TeamNotFound: <teamId>' if no TeamData row matches teamId.
  * @throws {Error} 'TeamAccessDenied: <teamId>' if the active user cannot
- *   access the team's folder (DriveApp.getFolderById throws).
+ *   access ANY of the team's folders (DriveApp.getFolderById throws for all
+ *   of them).
  */
 function assertTeamAccess(teamId, ss) {
   var teamDataRows = _readTeamDataRows(ss);
-  var match = null;
+  var matches = [];
   for (var i = 0; i < teamDataRows.length; i++) {
     if (teamDataRows[i].teamId === teamId) {
-      match = teamDataRows[i];
-      break;
+      matches.push(teamDataRows[i]);
     }
   }
-  if (!match) {
+  if (!matches.length) {
     throw new Error('TeamNotFound: ' + teamId);
   }
-  try {
-    DriveApp.getFolderById(match.folderId);
-  } catch (e) {
-    throw new Error('TeamAccessDenied: ' + teamId);
+  for (var m = 0; m < matches.length; m++) {
+    try {
+      DriveApp.getFolderById(matches[m].folderId);
+      return; // reachable via this folder -- grant
+    } catch (e) {
+      // try the next folder before giving up
+    }
   }
+  throw new Error('TeamAccessDenied: ' + teamId);
 }
 
 // ---------------------------------------------------------------------------
 // Team Scope: DocData sync (DocWins + UpdateDoc write-back)
-// (GTaskSheet-me6w.4 — see knowledge-base/staging/epic-b-team-property-sync.md)
+// (gts-me6w.4 — see knowledge-base/staging/epic-b-team-property-sync.md)
 // ---------------------------------------------------------------------------
 
 /**
- * DocData field contract (GTaskSheet-rename, was Doc Modified/Doc Updated):
+ * DocData field contract (gts-rename, was Doc Modified/Doc Updated):
  *
  * - lastSyncTime: timestamp of the last time a FULL document sync ran for
  *   this doc (_syncTeamScope, below). Set unconditionally on every full sync
@@ -1356,7 +1540,7 @@ function _readDocDataRow(ss, docId) {
 
 /**
  * Reads all DocData rows. Read-only. Used to build a fileId -> row lookup map
- * (e.g. for Import's per-action Team Id join, GTaskSheet-eore) without calling
+ * (e.g. for Import's per-action Team Id join, gts-eore) without calling
  * _readDocDataRow once per ActionSheet row.
  *
  * @param {Spreadsheet} ss
@@ -1413,7 +1597,7 @@ function _getOrUpsertDocDataRow(ss, fileId, docName, lastSyncTime, teamId, syncS
   var docUpdated = new Date();
 
   // Doc Name is a HYPERLINK formula, not a plain string, so clicking it opens
-  // the document (GTaskSheet-46qv) -- same pattern as the Actions sheet's
+  // the document (gts-46qv) -- same pattern as the Actions sheet's
   // document_formula column. fileId is the Drive doc ID already required by
   // every caller, so the edit URL needs no extra plumbing. Read side is
   // unaffected: getValues() returns a HYPERLINK formula's computed display
@@ -1478,12 +1662,25 @@ function _syncTeamScope(ss, docId, token, docName) {
   var docDataRow = _readDocDataRow(ss, docId);
   var newSyncStatus = docDataRow ? docDataRow.syncStatus : '';
 
+  // Self-heal a stale 'Doc Not Found' (gts-rskf). Reaching here means
+  // syncDocument already opened and read this document, so a not-found mark
+  // left by an earlier sweep is false by construction. Without this the mark
+  // is one-way: syncAll skips every doc already marked 'Doc Not Found'
+  // (alreadyDocNotFound), so a document wrongly marked can never recover on
+  // its own, and its rows are archived 24h later.
+  if (newSyncStatus === 'Doc Not Found') {
+    GasLogger.log('sync.docNotFound.cleared', {
+      docId: docId, msg: 'Document opened successfully; clearing stale not-found mark'
+    });
+    newSyncStatus = '';
+  }
+
   // DocData.teamId mirrors the Drive teamScope appProperty -- both are written
   // together, only by this function (the .overridden/.resolved branches below),
   // so in the steady state (no override pending, already resolved) they're
   // provably identical. Trusting the mirror skips a Drive REST round trip on
   // every sync of an already-resolved doc -- the common case, ~2-4s saved per
-  // sync (GTaskSheet-j8cn perf pass). The narrow risk this introduces (a crashed
+  // sync (gts-j8cn perf pass). The narrow risk this introduces (a crashed
   // execution leaving Drive and DocData out of sync) is no longer self-healed
   // here on the next sync as it was before; verify_consistency(scope=DOC) is
   // the deliberate place to catch that drift instead, not paid on every sync.
@@ -1608,7 +1805,7 @@ function _updateSyncState(syncStateSheet, docId, syncedAt, docTitle, stateMap) {
 
 
 // ---------------------------------------------------------------------------
-// Shared chip styling — configurable via configFormat() (GTaskSheet-d99c)
+// Shared chip styling — configurable via configFormat() (gts-d99c)
 // ---------------------------------------------------------------------------
 
 // Style applied to the 'AI-N:' token when the Config sheet has no 'ai_token'
@@ -1627,7 +1824,7 @@ var _actionFormatConfigCache = null;
  * so this never serves stale data across separate requests). Falls back to
  * _DEFAULT_AI_TOKEN_STYLE for ai_token and null for action_text (meaning "no
  * override, inherit whatever the doc already has") when the Config sheet or
- * a given row doesn't exist yet — configFormat() is opt-in (GTaskSheet-d99c).
+ * a given row doesn't exist yet — configFormat() is opt-in (gts-d99c).
  *
  * @returns {{aiToken: Object, actionText: ?Object}}
  */
@@ -1690,7 +1887,7 @@ function _hexToRgbColor(hex) {
 /**
  * Returns the updateTextStyle request that applies the AI-N chip badge style
  * (font/size/color/bold/italic/underline, sourced from the Config sheet's
- * 'ai_token' row — GTaskSheet-d99c) over [startIndex, endIndex).
+ * 'ai_token' row — gts-d99c) over [startIndex, endIndex).
  *
  * Shared by _flushActionParagraph (sync flush), _applyActionFragment
  * (creation/import), and _insertTrackerIdLinks (tracker ID column) so the
@@ -1718,7 +1915,7 @@ function _chipBadgeStyleRequest(startIndex, endIndex) {
 /**
  * Returns the updateTextStyle request that applies the action-text style
  * (font/size/color/bold/italic/underline, sourced from the Config sheet's
- * 'action_text' row — GTaskSheet-d99c) over [startIndex, endIndex), or null
+ * 'action_text' row — gts-d99c) over [startIndex, endIndex), or null
  * when no 'action_text' row exists yet — callers must skip pushing a null
  * result, leaving the doc's default/inherited formatting untouched (opt-in,
  * no behavior change until configFormat() is run).
@@ -1744,7 +1941,7 @@ function _actionTextStyleRequest(startIndex, endIndex) {
 }
 
 // ---------------------------------------------------------------------------
-// configFormat — samples action-item style from a reference doc (GTaskSheet-d99c)
+// configFormat — samples action-item style from a reference doc (gts-d99c)
 // ---------------------------------------------------------------------------
 
 /**
@@ -2022,16 +2219,16 @@ function _buildFlushRequests(occurrence, item) {
   var validEmail = item.assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.assigneeEmail);
   var tokenLen   = ('AI-' + item.N + ': ').length;
   var pEnd       = occurrence.pEnd;
-  // actionText sourced from a live doc rescan (sidebar/preview-card status
-  // taps) carries the document's raw soft-return characters, unlike actionText
-  // sourced from the sheet (already collapsed by WebApp.js's
-  // _normalizeActionText at every sheet-write site, GTaskSheet-2eui/755o). A
-  // bare \n here would create a hard paragraph break via insertText below; an
-  // unrecognized \r/\v is silently dropped, concatenating lines with no
-  // separator (GTaskSheet-kkm7.5). Normalizing here, the one place every flush
-  // call site funnels through, makes the sheet-side normalization redundant
-  // but harmless (idempotent) rather than load-bearing for this path.
-  var actionText = _normalizeActionText(item.actionText);
+  // actionText arrives with two different line-break spellings depending on
+  // its source: the document's raw soft-return character (\r or \v) on a live
+  // doc rescan (sidebar/preview-card status taps), or a plain \n from the
+  // sheet (WebApp.js's _normalizeActionText). _toSoftReturnText folds both to
+  // the single spelling insertText below reproduces as a real soft return,
+  // U+000B — a bare \n would split the paragraph and a bare \r would be
+  // stripped outright (gts-dr8j, superseding the space-collapse of
+  // gts-kkm7.5). This is the one place every flush call site funnels through,
+  // so no caller has to know which spelling it holds.
+  var actionText = _toSoftReturnText(item.actionText);
   // insertAt: for simple paragraphs this equals pStart; for soft-return
   // paragraphs it is the document index right after the preceding \n, which
   // also clears any image placed there by a previous flush.
@@ -2061,7 +2258,7 @@ function _buildFlushRequests(occurrence, item) {
   }});
   requests.push(_chipBadgeStyleRequest(insertAt + 1, insertAt + 1 + tokenLen));
 
-  // Action-text style (GTaskSheet-d99c) — final layout left-to-right is
+  // Action-text style (gts-d99c) — final layout left-to-right is
   // [image][token][optional person chip][' '?actionText (status)]; only push
   // when a Config 'action_text' row exists, else leave today's inherited
   // default formatting untouched.
@@ -2076,7 +2273,7 @@ function _buildFlushRequests(occurrence, item) {
 /**
  * Rewrites the content of every item's AI-N: paragraph via ONE Docs REST GET
  * + ONE batchUpdate for the whole doc, regardless of how many action items
- * are being flushed (GTaskSheet-kkm7.3) — replaces what was previously one
+ * are being flushed (gts-kkm7.3) — replaces what was previously one
  * GET + one batchUpdate per item. Preserves each paragraph node (does not
  * delete its trailing \n). Caller must have called doc.saveAndClose() before
  * invoking this.
@@ -2201,35 +2398,40 @@ function _flushActionParagraph(docId, token, N, globalId, actionText, status, as
  * @returns {boolean}
  */
 
-function isOpen(status) {
-  const words = ["open", "pending", "planned", "queued", "unstarted", "new"];
-  return typeof status === "string" &&
-    words.includes(status.trim().toLowerCase());
+/**
+ * The one table mapping each canonical state to the free-text values users
+ * actually type. Every is<State>() below reads it, and getStatusDisplay()
+ * resolves a status through it once, server-side — so a surface that has to
+ * bucket or display an arbitrary status string never restates these words nor
+ * re-implements the matching.
+ */
+var _STATUS_SYNONYMS = {
+  Open:       ["open", "pending", "planned", "queued", "unstarted", "new"],
+  InProgress: ["active", "in-progress", "working", "running", "executing", "processing"],
+  Waiting:    ["waiting", "blocked", "on-hold", "stalled", "paused"],
+  Delegated:  ["delegated", "routed", "forwarded", "escalated", "handed-off", "transferred"],
+  Closed:     ["done", "complete", "finished", "closed", "resolved", "finalized"]
+};
+
+/** Separator- and case-blind, so 'In Progress', 'in-progress' and 'in progress'
+ *  are one value. Canonical statuses are spelled with spaces and the synonym
+ *  lists with hyphens; without this the canonical value misses its own state. */
+function _normalizeStatus(status) {
+  return typeof status === "string" ? status.trim().toLowerCase().replace(/[^a-z0-9]/g, "") : "";
 }
 
-function isInProgress(status) {
-  const words = ["active", "in-progress", "working", "running", "executing", "processing"];
-  return typeof status === "string" &&
-    words.includes(status.trim().toLowerCase());
+function _matchesState(status, state) {
+  var key = _normalizeStatus(status);
+  return key !== "" && _STATUS_SYNONYMS[state].some(function (word) {
+    return _normalizeStatus(word) === key;
+  });
 }
 
-function isWaiting(status) {
-  const words = ["waiting", "blocked", "on-hold", "stalled", "paused"];
-  return typeof status === "string" &&
-    words.includes(status.trim().toLowerCase());
-}
-
-function isDelegated(status) {
-  const words = ["delegated", "routed", "forwarded", "escalated", "handed-off", "transferred"];
-  return typeof status === "string" &&
-    words.includes(status.trim().toLowerCase());
-}
-
-function isClosed(status) {
-  const words = ["done", "complete", "finished", "closed", "resolved", "finalized"];
-  return typeof status === "string" &&
-    words.includes(status.trim().toLowerCase());
-}
+function isOpen(status)       { return _matchesState(status, 'Open'); }
+function isInProgress(status) { return _matchesState(status, 'InProgress'); }
+function isWaiting(status)    { return _matchesState(status, 'Waiting'); }
+function isDelegated(status)  { return _matchesState(status, 'Delegated'); }
+function isClosed(status)     { return _matchesState(status, 'Closed'); }
 
 /**
  * Determines if an action is resolved (no longer tracked in this document).
@@ -2251,9 +2453,31 @@ function isResolved(status) {
  * @returns {string} Icon URL
  */
 function getStatusIconUrl(status) {
-  if (_ACTION_STATUS_IMAGES.hasOwnProperty(status)) return _ACTION_STATUS_IMAGES[status];
-  if (isResolved(status)) return _ACTION_STATUS_IMAGES['Closed'];
-  return _ACTION_DEFAULT_IMAGE;
+  return getStatusDisplay(status).icon;
+}
+
+/**
+ * Everything a surface needs to DISPLAY a free-text status: which canonical
+ * state it falls in, whether the Open/Closed filter treats it as resolved, and
+ * its icon. Computed here so a surface that cannot call these functions — the
+ * web portal — renders the server's answer instead of re-deriving one.
+ *
+ * @param {string} status
+ * @returns {{bucket: string, resolved: boolean, icon: string}}
+ *          bucket is a _STATUS_SYNONYMS key, or 'Other' for a value in no state.
+ */
+function getStatusDisplay(status) {
+  var bucket = 'Other';
+  for (var state in _STATUS_SYNONYMS) {
+    if (_matchesState(status, state)) { bucket = state; break; }
+  }
+  var resolved = isResolved(status);
+  // Exact canonical matches win; otherwise resolved statuses fall back to the
+  // Closed icon, and anything else to the unknown/default icon.
+  var icon = _ACTION_STATUS_IMAGES.hasOwnProperty(status) ? _ACTION_STATUS_IMAGES[status]
+           : resolved                                    ? _ACTION_STATUS_IMAGES['Closed']
+           : _ACTION_DEFAULT_IMAGE;
+  return { bucket: bucket, resolved: resolved, icon: icon };
 }
 
 /**
@@ -2266,3 +2490,4 @@ function getStatusIconButtons() {
     return { status: status, icon: _ACTION_STATUS_IMAGES[status], alt: 'Set ' + status };
   });
 }
+

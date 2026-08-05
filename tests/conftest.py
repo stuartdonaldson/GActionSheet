@@ -1,4 +1,5 @@
 """Pytest configuration and shared fixtures."""
+import datetime
 import json
 import os
 import pathlib
@@ -8,6 +9,39 @@ import pytest
 
 _SETTINGS_PATH = pathlib.Path(__file__).parent.parent / "local.settings.json"
 _TEST_RESULTS = pathlib.Path(__file__).parent.parent / "test-results"
+
+_pytest_config = None
+
+
+def pytest_configure(config):
+    global _pytest_config
+    _pytest_config = config
+
+
+def _timestamp() -> str:
+    return datetime.datetime.now().strftime("%H:%M:%S")
+
+
+def _terminal_writeline(line: str) -> None:
+    """Write directly via the terminal reporter (gts-jukj).
+
+    Bypasses pytest's per-test stdout capture (same mechanism the built-in
+    PASSED/FAILED progress line uses), so the timestamp lands in a captured
+    run log (e.g. test-full-run.txt) even without -s.
+    """
+    if _pytest_config is None:
+        return
+    tr = _pytest_config.pluginmanager.get_plugin("terminalreporter")
+    if tr is not None:
+        tr.write_line(line)
+
+
+def pytest_runtest_logstart(nodeid, location):
+    _terminal_writeline(f"[{_timestamp()}] START  {nodeid}")
+
+
+def pytest_runtest_logfinish(nodeid, location):
+    _terminal_writeline(f"[{_timestamp()}] FINISH {nodeid}")
 
 
 def _find_page(item):
@@ -81,12 +115,52 @@ def _load_settings() -> dict:
         raise FileNotFoundError(
             f"local.settings.json not found. Copy local.settings.example.json and fill in IDs."
         )
-    return json.loads(_SETTINGS_PATH.read_text())
+    settings = json.loads(_SETTINGS_PATH.read_text())
+    _warn_missing_playwright_accounts(settings)
+    return settings
+
+
+def _warn_missing_playwright_accounts(settings: dict) -> None:
+    """Surface a missing shared-auth mapping through the terminal reporter (GTaskSheet-jukj),
+    not just stderr — resolve_auth_file()'s own warning can get swallowed by pytest's
+    default capture, and this feature is easy to miss entirely if nothing points at it.
+
+    Only checks "primary": every browser_page fixture in this suite resolves that role.
+    """
+    if "primary" in settings.get("playwrightAccounts", {}):
+        return
+    _terminal_writeline(
+        '⚠️  local.settings.json has no "playwrightAccounts" entry for role "primary" — '
+        "tests are using the project-local .auth/user.json fallback instead of a shared, "
+        "cross-project auth session. See .auth/README.md and "
+        "node tests/playwright/auth.setup.js to migrate "
+        "(DevStandard docs/standards/playwright-shared-auth.md)."
+    )
 
 
 @pytest.fixture(scope="session")
 def settings():
     return _load_settings()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _reset_test_state(settings):
+    """Clear transient '_TEST_*' script-property toggles before this session's
+    first test runs (gts-rvwu follow-up).
+
+    A crashed or interrupted prior run can leave a toggle like
+    '_TEST_FORCE_HOMEPAGE_ERROR' set — every doc opened afterwards then hits
+    the add-on's error-fallback card, since these toggles are global to the
+    GAS deployment rather than scoped to one test's doc. Runs once per pytest
+    session, before any test executes.
+
+    Deliberately does not touch DISCOVERY_*/TEAMSCOPE_FOLDER_* — those are
+    memoized fixture caches meant to persist across sessions (see
+    'reset_test_state' in src/TestFixtures.js for the full rationale).
+    """
+    from tests.helpers.fixture_invoke import invoke_fixture
+
+    invoke_fixture("reset_test_state", "", settings, timeout=60)
 
 
 @pytest.fixture(scope="session")

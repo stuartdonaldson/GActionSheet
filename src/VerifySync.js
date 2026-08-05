@@ -302,7 +302,12 @@ function _compareVerificationState(result, floatingActions, tracker, sheetRows) 
       continue;
     }
 
-    if (floatingRow.action !== matchingSheetRow.action) {
+    // Action text is compared through _normalizeLineEndings on every surface
+    // below: it may carry soft-return line breaks (gts-dou2/dr8j), and the doc,
+    // tracker-cell, and sheet reads do not all spell that break the same way.
+    // Comparing raw would report a permanent, unfixable consistency issue.
+    if (_normalizeLineEndings(floatingRow.action) !==
+        _normalizeLineEndings(matchingSheetRow.action)) {
       _verifyIssue(
         result,
         'Action text mismatch for ID ' + matchingSheetRow.id + ': doc="' + floatingRow.action + '" sheet="' + matchingSheetRow.action + '"'
@@ -326,7 +331,8 @@ function _compareVerificationState(result, floatingActions, tracker, sheetRows) 
       if (!matchingTrackerRow) {
         _verifyIssue(result, 'Tracker table is missing action ID ' + matchingSheetRow.id);
       } else {
-        if (matchingTrackerRow.action !== matchingSheetRow.action) {
+        if (_normalizeLineEndings(matchingTrackerRow.action) !==
+            _normalizeLineEndings(matchingSheetRow.action)) {
           _verifyIssue(
             result,
             'Tracker action mismatch for ID ' + matchingSheetRow.id + ': tracker="' + matchingTrackerRow.action + '" sheet="' + matchingSheetRow.action + '"'

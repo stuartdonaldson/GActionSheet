@@ -13,8 +13,8 @@ expected value, tagged "teamscope <name>" with entry_point="syncDocument" or
 the single emission path for ac.*/ep.* JUnit properties (T24).
 
 Folder hierarchy (local.settings.json, set up via setup_team_scope_fixture):
-  testTeamA      — registered TeamData row TestTeamA
-  testTeamAChild — child of testTeamA, registered TeamData row TestTeamAChild
+  testTeamA      — registered TeamData row TestTeamScopeA
+  testTeamAChild — child of testTeamA, registered TeamData row TestTeamScopeAChild
   testTeamADeep  — multi-level descendant of testTeamA, NOT under
                    testTeamAChild, no intermediate TeamData registration
   testTeamNoTeam — sibling of testTeamA, unregistered, no TeamData row
@@ -23,7 +23,7 @@ Folder hierarchy (local.settings.json, set up via setup_team_scope_fixture):
 
 S2/S6 both exercise the folder-walk no-match path, by moving their docs into
 testTeamNoTeam. S6's design precondition ("TeamData tab is empty") cannot be
-created without disrupting the persistent, idempotent TestTeamA/TestTeamAChild
+created without disrupting the persistent, idempotent TestTeamScopeA/TestTeamScopeAChild
 rows required by S1a/S1b/S1c/S8 — so S6 uses the same no-team-folder setup as
 S2, which produces the same observable outcome (blank teamScope, no-match
 log).
@@ -45,7 +45,7 @@ STEP = CheckpointKind.STEP
 # Helpers
 # ---------------------------------------------------------------------------
 
-_TEAMDATA_TEST_MARKED_IDS = {"TestTeamA", "TestTeamAChild"}
+_TEAMDATA_TEST_MARKED_IDS = {"TestTeamScopeA", "TestTeamScopeAChild"}
 
 
 def _team_data_rows(scn):
@@ -166,16 +166,16 @@ def test_team_scope(settings, gas_log_dir, request):
         # ── S1a — direct-match: doc placed directly in testTeamA ────────────
         scn_a = new_doc()
         _move_to_folder(scn_a, settings["testTeamA"])
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_a.sync()
         _assert_log(
             gas_log_dir, fence,
             lambda e: e.get("tag") == "sync.teamScope.resolved"
             and e.get("data", {}).get("docId") == scn_a.doc_id
-            and e.get("data", {}).get("teamId") == "TestTeamA",
+            and e.get("data", {}).get("teamId") == "TestTeamScopeA",
             "S1a sync.teamScope.resolved",
         )
-        check_a = _consistency_check(scn_a, "TestTeamA")
+        check_a = _consistency_check(scn_a, "TestTeamScopeA")
         err = check_a()
         assert err is None, err
         scn_a.expect_callable(check_a, on=SHEET, tag="teamscope direct-match", entry_point="syncDocument")
@@ -184,16 +184,16 @@ def test_team_scope(settings, gas_log_dir, request):
         # ── S1b — subteam-match: doc placed directly in testTeamAChild ──────
         scn_b = new_doc()
         _move_to_folder(scn_b, settings["testTeamAChild"])
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_b.sync()
         _assert_log(
             gas_log_dir, fence,
             lambda e: e.get("tag") == "sync.teamScope.resolved"
             and e.get("data", {}).get("docId") == scn_b.doc_id
-            and e.get("data", {}).get("teamId") == "TestTeamAChild",
+            and e.get("data", {}).get("teamId") == "TestTeamScopeAChild",
             "S1b sync.teamScope.resolved",
         )
-        check_b = _consistency_check(scn_b, "TestTeamAChild")
+        check_b = _consistency_check(scn_b, "TestTeamScopeAChild")
         err = check_b()
         assert err is None, err
         scn_b.expect_callable(check_b, on=SHEET, tag="teamscope subteam-match", entry_point="syncDocument")
@@ -203,16 +203,16 @@ def test_team_scope(settings, gas_log_dir, request):
         # below testTeamA, not under testTeamAChild, no intermediate TeamData.
         scn_c = new_doc()
         _move_to_folder(scn_c, settings["testTeamADeep"])
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_c.sync()
         _assert_log(
             gas_log_dir, fence,
             lambda e: e.get("tag") == "sync.teamScope.resolved"
             and e.get("data", {}).get("docId") == scn_c.doc_id
-            and e.get("data", {}).get("teamId") == "TestTeamA",
+            and e.get("data", {}).get("teamId") == "TestTeamScopeA",
             "S1c sync.teamScope.resolved",
         )
-        check_c = _consistency_check(scn_c, "TestTeamA")
+        check_c = _consistency_check(scn_c, "TestTeamScopeA")
         err = check_c()
         assert err is None, err
         scn_c.expect_callable(check_c, on=SHEET, tag="teamscope deep-walk", entry_point="syncDocument")
@@ -221,7 +221,7 @@ def test_team_scope(settings, gas_log_dir, request):
         # ── S2 — no-match: doc in a folder not registered in TeamData ───────
         scn_2 = new_doc()
         _move_to_folder(scn_2, noteam_folder_id)
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_2.sync()
         _assert_log(
             gas_log_dir, fence,
@@ -238,19 +238,19 @@ def test_team_scope(settings, gas_log_dir, request):
         # ── S3 — UpdateDoc override: DocData.team_id wins over teamScope ────
         scn_3 = new_doc()
         _move_to_folder(scn_3, settings["testTeamA"])
-        scn_3.sync()  # auto-assigns teamScope == 'TestTeamA'
-        assert _team_scope(scn_3) == "TestTeamA"
-        _set_docdata(scn_3, syncStatus="UpdateDoc", teamId="TestTeamAChild")
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        scn_3.sync()  # auto-assigns teamScope == 'TestTeamScopeA'
+        assert _team_scope(scn_3) == "TestTeamScopeA"
+        _set_docdata(scn_3, syncStatus="UpdateDoc", teamId="TestTeamScopeAChild")
+        fence = clear_logs(gas_log_dir)
         scn_3.sync()
         _assert_log(
             gas_log_dir, fence,
             lambda e: e.get("tag") == "sync.teamScope.overridden"
             and e.get("data", {}).get("docId") == scn_3.doc_id
-            and e.get("data", {}).get("teamId") == "TestTeamAChild",
+            and e.get("data", {}).get("teamId") == "TestTeamScopeAChild",
             "S3 sync.teamScope.overridden",
         )
-        check_3 = _team_scope_check(scn_3, "TestTeamAChild")
+        check_3 = _team_scope_check(scn_3, "TestTeamScopeAChild")
         err = check_3()
         assert err is None, err
         row_3 = _docdata_row(scn_3) or {}
@@ -259,7 +259,7 @@ def test_team_scope(settings, gas_log_dir, request):
         scn_3.checkpoint(STEP)
 
         # ── S4 — idempotency: second sync makes no further teamScope writes ─
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_a.sync()
         _assert_no_log(
             gas_log_dir, fence,
@@ -267,14 +267,14 @@ def test_team_scope(settings, gas_log_dir, request):
             and e.get("data", {}).get("docId") == scn_a.doc_id,
             "S4 unexpected resolved/overridden on re-sync",
         )
-        check_4 = _team_scope_check(scn_a, "TestTeamA")
+        check_4 = _team_scope_check(scn_a, "TestTeamScopeA")
         err = check_4()
         assert err is None, err
         scn_a.expect_callable(check_4, on=SHEET, tag="teamscope idempotent", entry_point="syncDocument")
         scn_a.checkpoint(STEP)
 
         # ── S5 — security gate: assertTeamAccess allows valid team access ───
-        check_5 = _team_access_check(scn_a, "TestTeamA")
+        check_5 = _team_access_check(scn_a, "TestTeamScopeA")
         err = check_5()
         assert err is None, err
         scn_a.expect_callable(check_5, on=SHEET, tag="teamscope security-gate", entry_point="assertTeamAccess")
@@ -284,7 +284,7 @@ def test_team_scope(settings, gas_log_dir, request):
         # See module docstring re: equivalence with S2's no-match path.
         scn_6 = new_doc()
         _move_to_folder(scn_6, noteam_folder_id)
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_6.sync()
         _assert_log(
             gas_log_dir, fence,
@@ -302,7 +302,7 @@ def test_team_scope(settings, gas_log_dir, request):
         scn_7 = new_doc()
         scn_7.sync()  # first sync: creates DocData row, no teamScope
         _set_docdata(scn_7, syncStatus="UpdateDoc", teamId="")
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_7.sync()
         _assert_log(
             gas_log_dir, fence,
@@ -320,7 +320,7 @@ def test_team_scope(settings, gas_log_dir, request):
 
         # ── S8 — sticky-after-move: re-syncing after a move keeps the team ──
         _move_to_folder(scn_a, settings["testTeamAChild"])
-        fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        fence = clear_logs(gas_log_dir)
         scn_a.sync()
         _assert_no_log(
             gas_log_dir, fence,
@@ -328,7 +328,7 @@ def test_team_scope(settings, gas_log_dir, request):
             and e.get("data", {}).get("docId") == scn_a.doc_id,
             "S8 unexpected resolved/overridden after move",
         )
-        check_8 = _consistency_check(scn_a, "TestTeamA")
+        check_8 = _consistency_check(scn_a, "TestTeamScopeA")
         err = check_8()
         assert err is None, err
         scn_a.expect_callable(check_8, on=SHEET, tag="teamscope sticky-after-move", entry_point="syncDocument")
@@ -340,15 +340,15 @@ def test_team_scope(settings, gas_log_dir, request):
         # DocData mirror instead of re-reading Drive every sync, so this is
         # the one remaining place that catches the two falling out of step).
         # set_docdata_row touches DocData only — Drive's teamScope (still
-        # "TestTeamA" from S8) is left untouched, so this is a real mismatch,
+        # "TestTeamScopeA" from S8) is left untouched, so this is a real mismatch,
         # not a simulated one.
-        assert _team_scope(scn_a) == "TestTeamA", "S9 precondition: Drive teamScope should still be TestTeamA"
-        _set_docdata(scn_a, teamId="TestTeamAChild")
+        assert _team_scope(scn_a) == "TestTeamScopeA", "S9 precondition: Drive teamScope should still be TestTeamScopeA"
+        _set_docdata(scn_a, teamId="TestTeamScopeAChild")
         with pytest.raises(AssertionError, match="teamScope drift"):
             scn_a.verify_consistency(scope=DOC)
 
         # Proven non-vacuous: restoring agreement makes the same check pass.
-        _set_docdata(scn_a, teamId="TestTeamA")
+        _set_docdata(scn_a, teamId="TestTeamScopeA")
         scn_a.verify_consistency(scope=DOC)  # must not raise
 
     finally:

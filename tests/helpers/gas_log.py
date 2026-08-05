@@ -78,15 +78,34 @@ def _axiom_query(after: float, limit: int = 500) -> list[dict]:
 
     entries = []
     for m in result.get("matches", []):
-        data = dict(m.get("data", {}))
-        tag = data.pop("name", None)
+        raw = dict(m.get("data", {}))
+        tag = raw.pop("name", None)
+        version = raw.pop("version", None)
+        op = raw.pop("op", None)
+        parentOp = raw.pop("parentOp", None)
+        # GasLogger.js nests each event's payload under one 'data' field
+        # (gts-iwa0) -- Axiom returns it back out as a real nested dict here
+        # (dotted leaf columns re-nest automatically). A handful of fields
+        # (docId/docIds/eu/env) are hoisted to real top-level columns instead
+        # of living in that nested payload; merge them back in so match_fn
+        # predicates written against the pre-nesting flat shape still work.
+        # Everything else left in `raw` is dataset schema noise (side, app,
+        # and null-padded legacy/unrelated columns from other event shapes,
+        # e.g. a stale top-level 'count' from before the nesting change) --
+        # deliberately dropped rather than merged, since it would collide
+        # with and shadow same-named real fields inside the nested payload.
+        payload = dict(raw.pop("data", None) or {})
+        for k in ("docId", "docIds", "eu", "env"):
+            v = raw.get(k)
+            if v is not None:
+                payload[k] = v
         entries.append({
             "ts": m.get("_time"),
             "tag": tag,
-            "version": data.pop("version", None),
-            "op": data.pop("op", None),
-            "parentOp": data.pop("parentOp", None),
-            "data": {k: v for k, v in data.items() if k != "side"},
+            "version": version,
+            "op": op,
+            "parentOp": parentOp,
+            "data": payload,
         })
     return entries
 

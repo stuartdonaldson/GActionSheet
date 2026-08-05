@@ -27,7 +27,8 @@
     "https://script.google.com/macros/s/",
     "https://docs.googleapis.com/",
     "https://www.googleapis.com/drive/",
-    "https://api.axiom.co/"
+    "https://api.axiom.co/",
+    "https://oauth2.googleapis.com/"
   ],
   "webapp": {
     "access": "ANYONE_ANONYMOUS",

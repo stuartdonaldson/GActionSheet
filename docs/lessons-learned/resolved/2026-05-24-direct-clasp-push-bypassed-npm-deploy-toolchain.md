@@ -4,7 +4,7 @@ Date: 2026-05-24
 Domain: deployment | process
 
 ## Observation
-During green-phase implementation of GTaskSheet-mol-dyu (UC-B bidirectional sync),
+During green-phase implementation of gts-moldyu (UC-B bidirectional sync),
 Claude executed `clasp push` directly via Bash to deploy GAS source code.
 The correct path is `npm run deploy:test` (orchestrates `update-revision.js` +
 `manage-deployments.js --deploy-test`), which both pushes HEAD and updates the

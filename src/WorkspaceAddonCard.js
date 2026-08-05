@@ -22,7 +22,7 @@ function buildHomepageCard(opts) {
   var skipSheetFetch = !!(opts && opts.skipSheetFetch);
 
   try {
-    // Test-only error injection (GTaskSheet-rvwu AC-5 coverage) — never set
+    // Test-only error injection (gts-rvwu AC-5 coverage) — never set
     // outside the test harness; see TestFixtures.js 'force_homepage_error'.
     if (PropertiesService.getScriptProperties().getProperty('_TEST_FORCE_HOMEPAGE_ERROR')) {
       throw new Error('Forced error (test fixture)');
@@ -109,7 +109,6 @@ function _buildTopButtonsSection() {
       .addButton(
         CardService.newTextButton()
           .setText('Import')
-          .setAltText('View unresolved actions and import them')
           .setOnClickAction(_buildCardAction('onShowImport'))
       )
       .addButton(
@@ -185,7 +184,7 @@ function _buildNotifyCard() {
 
 /**
  * Card action handler for the Import card's "Select all" button (AC-2,
- * GTaskSheet-fgh4). Re-renders the Import card with every checklist item
+ * gts-fgh4). Re-renders the Import card with every checklist item
  * across ALL source-doc groups pre-selected — server-side, so the client
  * never needs to be trusted with the full selection set.
  */
@@ -198,13 +197,13 @@ function onImportSelectAll(e) { // eslint-disable-line no-unused-vars
 }
 
 /**
- * Import tab body — AC-1 read+render (GTaskSheet-eore). Calls
+ * Import tab body — AC-1 read+render (gts-eore). Calls
  * list_importable_actions for OPEN team-scoped actions from OTHER documents,
  * then renders one CardSection per source document: a header TextParagraph
  * linking to the document, followed by a CHECK_BOX SelectionInput (one item
  * per action, fieldName 'importSelection::'+doc_id, value=global_id) per the
  * frozen contract (epic-d-import-contract-seams). Also renders the "Select
- * all" / "Import selected" buttons (AC-2, GTaskSheet-fgh4): Select all
+ * all" / "Import selected" buttons (AC-2, gts-fgh4): Select all
  * re-renders this section with selectAll=true so every item across all
  * groups is pre-checked server-side; Import selected submits to _submitImport.
  *
@@ -310,7 +309,7 @@ function _buildImportTabSection(docId, selectAll) {
 }
 
 /**
- * Placeholder Notify tab body (GTaskSheet-0r0s). Business logic lands in EPIC-E.
+ * Placeholder Notify tab body (gts-0r0s). Business logic lands in EPIC-E.
  */
 function _buildNotifyTabSection() {
   return CardService.newCardSection().addWidget(
@@ -508,7 +507,7 @@ function _buildActionListSection(homepageState) {
     return section;
   }
 
-  // Render in AI-N order rather than document order (GTaskSheet-kkm7.6),
+  // Render in AI-N order rather than document order (gts-kkm7.6),
   // mirroring the Import tab's existing per-group AI-N sort above. Sort a
   // local copy only — homepageState.floatingActions stays in doc-scan order
   // for its other consumers (missing-anchor count, status summary, Tracker

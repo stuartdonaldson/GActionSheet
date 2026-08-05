@@ -93,13 +93,13 @@ Shared (improve the journey test convention):
 
 ## Resolution (2026-06-12)
 
-Branch B + Shared (process/convention levers) — tracked as items 1 & 2 of `GTaskSheet-mpi9`
+Branch B + Shared (process/convention levers) — tracked as items 1 & 2 of `gts-mpi9`
 (open): CLAUDE.md backstop rules (verify_consistency/verify_all_expectations pairing,
 proof-of-effectiveness for new assertions) and implementation-gate Step 3 addition. Archiving
 this file now per that tracking; mpi9 remains the open issue.
 
 Branch A (fix the check itself — GAS-level minimum-count guard) — split out as
-`GTaskSheet-bb66` ([FIX] verify_chip_integrity / verify_consistency vacuously pass when
+`gts-bb66` ([FIX] verify_chip_integrity / verify_consistency vacuously pass when
 scanner detects zero items), since it is implementation work distinct from mpi9's
 CLAUDE.md/skill policy scope.
 

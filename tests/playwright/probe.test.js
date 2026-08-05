@@ -28,12 +28,14 @@ const { runViaSheetMenu }                  = require('./editor_helpers');
 
 const settingsPath = path.join(__dirname, '..', '..', 'local.settings.json');
 const settings     = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+const { resolveAuthFile } = require('../../scripts/playwright-auth');
 
 // Auth state file — override with PROBE_AUTH_STATE env var to run as a different account.
-// Default: .auth/user.json (deployer account). For second-user probes: .auth/test.u2.json
+// Default: the "primary" role's account file. For second-user probes: PROBE_AUTH_STATE
+// pointed at the test.u2 account file (see local.settings.json's playwrightAccounts).
 const storageState = process.env.PROBE_AUTH_STATE
   ? path.resolve(process.cwd(), process.env.PROBE_AUTH_STATE)
-  : path.join(__dirname, '..', '..', '.auth', 'user.json');
+  : resolveAuthFile('primary', { projectRoot: path.join(__dirname, '..', '..'), settingsPath });
 
 const DEV_URL  = settings.webappDevUrl;   // @HEAD — has PROBE.js after push
 const TEST_URL = settings.webappTestUrl;  // versioned — may or may not have PROBE.js
@@ -250,7 +252,7 @@ test.describe('PROBE session', () => {
     }
   });
 
-  // ── 5. Chip hover — native Docs link-preview bubble (GTaskSheet-39jk) ─────
+  // ── 5. Chip hover — native Docs link-preview bubble (gts-39jk) ─────
   //
   // The AI-N: link text is rendered onto <canvas> with no DOM <a>/chip to
   // hover (the smoke-test soft-pass exists for this reason). But the
@@ -260,7 +262,7 @@ test.describe('PROBE session', () => {
   // #docs-link-bubble.appsElementsLinkPreview — WITHOUT any mouse hover.
   // Confirmed reproducible (2x) against a freshly-synced action: the
   // bubble's anchor href / [data-url] attributes carry the chip's
-  // ?cmd=preview&docId=<docId>&ain=AI-N URL (separate params, GTaskSheet-0v61;
+  // ?cmd=preview&docId=<docId>&ain=AI-N URL (separate params, gts-0v61;
   // older chips may still carry ?c=view&globalId=<docId>/AI-N), readable via
   // page.evaluate (no screenshot/hover-dwell needed).
 
@@ -275,7 +277,7 @@ test.describe('PROBE session', () => {
     };
   }`;
 
-  test('chipHover — native link-preview bubble via Ctrl+F (GTaskSheet-39jk)', async ({ page }) => {
+  test('chipHover — native link-preview bubble via Ctrl+F (gts-39jk)', async ({ page }) => {
     test.setTimeout(30000);
 
     if (!page.url().includes(DOC_ID)) {

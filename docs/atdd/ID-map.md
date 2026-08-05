@@ -118,7 +118,7 @@ homes. File these as `[TST]` beads tagged with the principle they discharge:
 
 ## Open follow-ups (not done by this re-base)
 
-Tracked under GTaskSheet-k22t. Status as of 2026-06-11:
+Tracked under gts-k22t. Status as of 2026-06-11:
 
 - ~~CLAUDE.md pointers still cite archived paths~~ — **resolved**: this
   project's CLAUDE.md §Testing Strategy now cites `T1`–`T24`/`I1`–`I11` and
@@ -140,7 +140,7 @@ Tracked under GTaskSheet-k22t. Status as of 2026-06-11:
     confirming the mechanism works end-to-end against real journey output.
   - ~~(b) the entry-point half of the gap-diff (`T17`) is built but only
     seeded (3 of the project's state-modifying entry points registered)~~ —
-    **resolved (GTaskSheet-z6f8)**: `scn/contract.ENTRY_POINT_REGISTRY` now
+    **resolved (gts-z6f8)**: `scn/contract.ENTRY_POINT_REGISTRY` now
     enumerates all 32 state-modifying entry points across the four call-site
     classes (menu items, time-based triggers, sidebar/add-on card actions, HTTP
     routes) plus state-modifying test-support routes — each description carries a
@@ -150,15 +150,15 @@ Tracked under GTaskSheet-k22t. Status as of 2026-06-11:
     `scn/contract.ENTRY_POINT_DEFERRED` (key → reason + tracking bead), which
     `scripts/check_coverage.py` treats as deferred (enumerated-but-not-yet-asserted)
     so the `ep.*` gap-diff is green (0 uncovered). Converting each deferred entry
-    to a real tagged call-site assertion is tracked under EPIC GTaskSheet-rz4k
+    to a real tagged call-site assertion is tracked under EPIC gts-rz4k
     (children rz4k.1 triggers, rz4k.2 routes, rz4k.3 cards, rz4k.4 menu, rz4k.5
-    test-support). GTaskSheet-yuvq delivered the narrower onSyncNow doc-context
+    test-support). gts-yuvq delivered the narrower onSyncNow doc-context
     slice first.
 - ~~Two `implementation-gate` skills exist~~ — **resolved 2026-06-09**: at that
   time this project's `.claude/skills/implementation-gate/SKILL.md` was
   identical (byte-for-byte) to DevStandard's
   `dot-claude/skills/implementation-gate/SKILL.md` (both `v2.0`,
-  `last_updated: 2026-06-08`). **Note (2026-06-18, GTaskSheet-mpi9):** the
+  `last_updated: 2026-06-08`). **Note (2026-06-18, gts-mpi9):** the
   project copy has since diverged intentionally — it is now `v2.1` with
   three project-local additions (proof-of-effectiveness sub-step, test-infra
   compatibility check, full-suite `[IMP]`-close gate). This is a deliberate
@@ -166,4 +166,4 @@ Tracked under GTaskSheet-k22t. Status as of 2026-06-11:
   drift to reconcile.
 - ~~Fill the two templates~~ — **resolved 2026-06-18**: `docs/atdd/project-testing-guide.md`
   and `docs/atdd/harness-design.md` filled from §15/§16 and the `scn/` module
-  map above. Tracked as GTaskSheet-ruoa.
+  map above. Tracked as gts-ruoa.

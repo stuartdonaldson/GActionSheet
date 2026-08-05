@@ -10,6 +10,14 @@
  * Installs exactly one onEdit trigger (handler: onActionSheetEdit) and one
  * 30-minute time-based trigger (handler: syncAll).
  * Running this function a second time will NOT create duplicate triggers.
+ *
+ * The 30-min syncAll trigger can collide with an in-flight test/user sync for
+ * the same doc (gts-li3g) and, less commonly, with GAS's execution quota
+ * during a heavy pytest run (observed 2026-07-30). Disabling the trigger was
+ * considered and rejected (gts-li3g DESIGN): a test run that dies before
+ * re-enabling it would leave scheduled sync permanently off in that
+ * environment (fails open). The real fix is a per-docId lock around
+ * syncDocument() (gts-li3g), not removing the trigger.
  */
 function initializeTriggers() {
   var installed = 0;

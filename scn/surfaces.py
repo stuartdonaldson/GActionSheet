@@ -252,8 +252,12 @@ class SheetReader:
             obj.sync_status = _cell_val("sync_status") or ""
             obj.doc_id = derived_doc_id
             obj.doc_name = derived_doc_name
-            obj.created_date = _cell_val("created_date")
-            obj.modified_date = _cell_val("modified_date")
+            # created_date/modified_date: keep the raw cell value (a naive datetime,
+            # spreadsheet-local wall clock — Sheets/xlsx datetimes carry no zone info)
+            # rather than stringifying, so assertions._normalize_date can convert it
+            # for comparison against the ISO-8601 UTC strings the webapp returns.
+            obj.created_date = row[col["created_date"] - 1].value
+            obj.modified_date = row[col["modified_date"] - 1].value
             results.append(obj)
 
         return results

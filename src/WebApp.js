@@ -197,11 +197,26 @@ function _renderBrandedPage(title, bodyHtml) {
 }
 
 /**
+ * Effectively unbounded age limit for _readTeamActions' 'closed'/'all'
+ * windowDays, so ?cmd=teamview's per-doc counts (below) reflect every
+ * resolved action ever recorded, not just a recent slice — matching the
+ * un-windowed DocData.actionCount/resolvedCount counters this replaced.
+ */
+var TEAM_VIEW_ALL_TIME_WINDOW_DAYS = 36500;
+
+/**
  * doGet ?cmd=teamview&team=<teamId> — branded team summary page. Sidebar Team
  * link fallback target when TeamData has no Team Link of its own
  * (_buildTeamViewUrl, SyncManager.js). Discloses the team's contact info and,
  * for every document with at least one open action, the document name (linked
  * to open the doc), open count, and resolved count — never action text.
+ *
+ * Since gts-79dw.4.11, per-doc counts are derived from the shared
+ * _readTeamActions reader (this file) rather than DocData's cached
+ * actionCount/resolvedCount columns, so a document whose DocData row is
+ * itself Deleted/Doc Not Found (R13b) — or whose action rows are individually
+ * orphaned — is excluded the same way list_importable_actions and
+ * list_team_actions already are.
  *
  * @param {Object} e doGet event; reads e.parameter.team.
  * @return {HtmlOutput}
@@ -223,11 +238,28 @@ function _handleTeamView(e) {
     return _renderTeamView(null);
   }
 
-  var docRows = _readDocDataRows(ss).filter(function (d) {
-    if (d.teamId !== teamId) return false;
-    var openCount = (Number(d.actionCount) || 0) - (Number(d.resolvedCount) || 0);
-    return openCount > 0;
+  var actionRows = _readTeamActions(teamId, {
+    statusFilter: 'all',
+    windowDays:   TEAM_VIEW_ALL_TIME_WINDOW_DAYS,
+    fields:       ['doc_id', 'doc_name', 'status_resolved'],
+    ss:           ss
   });
+
+  var countsByDoc = {};
+  for (var r = 0; r < actionRows.length; r++) {
+    var row = actionRows[r];
+    var entry = countsByDoc[row.doc_id];
+    if (!entry) {
+      entry = countsByDoc[row.doc_id] = { fileId: row.doc_id, docName: row.doc_name, openCount: 0, resolvedCount: 0 };
+    }
+    if (row.status_resolved) entry.resolvedCount++;
+    else entry.openCount++;
+  }
+
+  var docRows = Object.keys(countsByDoc)
+    .map(function (docId) { return countsByDoc[docId]; })
+    .filter(function (d) { return d.openCount > 0; });
+
   docRows.sort(function (a, b) {
     return String(a.docName) < String(b.docName) ? -1 : (String(a.docName) > String(b.docName) ? 1 : 0);
   });
@@ -239,8 +271,8 @@ function _handleTeamView(e) {
       return {
         docName:       d.docName || '(untitled document)',
         docLink:       'https://docs.google.com/document/d/' + encodeURIComponent(d.fileId) + '/edit',
-        openCount:     (Number(d.actionCount) || 0) - (Number(d.resolvedCount) || 0),
-        resolvedCount: Number(d.resolvedCount) || 0
+        openCount:     d.openCount,
+        resolvedCount: d.resolvedCount
       };
     })
   });
@@ -416,7 +448,7 @@ function doPost(e) {
 
   // This execution's own op id, carrying the addon caller's op id (if any) as
   // parentOp on every entry made while handling this request -- the HTTP-
-  // boundary leg of GTaskSheet-65g1's correlation (GTaskSheet-j8cn). Never
+  // boundary leg of gts-65g1's correlation (gts-j8cn). Never
   // adopts payload.opId as this execution's own op (see GasLogger.startOp doc).
   GasLogger.startOp(payload.opId);
 
@@ -441,13 +473,57 @@ function doPost(e) {
     return _jsonResponse({ probe: 'ok', version: BUILD_INFO.version }, 200);
   }
 
-  // [SPIKE] GTaskSheet-79dw.2 — gated on SPIKE_ENABLED, bypasses the secret gate
+  // [SPIKE] gts-79dw.2 — gated on SPIKE_ENABLED, bypasses the secret gate
   // intentionally (mirrors the probe route above). See src/SPIKE.js.
   if (payload.action === 'spike_check_access' && SPIKE_ENABLED) {
     return _handleSpikeCheckAccess(payload);
   }
   if (payload.action === 'spike_seed_access' && SPIKE_ENABLED) {
     return _handleSpikeSeedAccess(payload);
+  }
+
+  // gts-79dw.4.1 — verified-board-portal identity + access-tier route.
+  // Bypasses WEBAPP_SECRET intentionally: callers are external GIS-verified
+  // identities that don't (and shouldn't) hold our internal secret. The ID
+  // token itself is the authentication; see src/AccessControl.js.
+  if (payload.action === 'verify_and_resolve_access') {
+    return _handleVerifyAndResolveAccess(payload);
+  }
+
+  // gts-79dw.4.3 — verified-team-portal read-only listing route (renamed
+  // list_board_actions -> list_team_actions by gts-79dw.4.11). Same bypass
+  // rationale as verify_and_resolve_access above: the ID token is the
+  // authentication, and the tier is re-verified on every call (R8).
+  if (payload.action === 'list_team_actions') {
+    return _handleListTeamActions(payload);
+  }
+
+  // gts-79dw.4.17 — verified-team-portal team-switcher discovery route (R21).
+  // Same bypass rationale as the routes above: the ID token is the
+  // authentication. No teamId in the request -- the whole point is
+  // discovering every team the caller has ANY access to. See
+  // src/AccessControl.js's _handleListMyTeams.
+  if (payload.action === 'list_my_teams') {
+    return _handleListMyTeams(payload);
+  }
+
+  // gts-79dw.4.5 — verified-team-portal sync route (renamed
+  // board_sync_document -> team_sync_document by gts-79dw.4.11). Same bypass
+  // rationale as the routes above: the ID token is the authentication, and
+  // the tier is re-verified on every call (R8). EDIT tier required; rejected
+  // before the sync path runs otherwise (no partial execution). See
+  // src/TeamSync.js.
+  if (payload.action === 'team_sync_document') {
+    return _handleTeamSyncDocument(payload);
+  }
+
+  // Admin routes (gts-79dw.4.18) — gated by their OWN ADMIN_SECRET, a
+  // distinct, higher-privilege credential from both TEST_TOKEN and
+  // WEBAPP_SECRET below; never reachable via either of those gates. See
+  // src/Admin.js. Checked before the TEST_TOKEN routes so a testToken alone
+  // can never authorize an admin action.
+  if (payload.action === 'bootstrapSecret' || payload.action === 'setScriptProperties') {
+    return _handleAdminAction(payload);
   }
 
   // Test-token-gated routes — authenticated by per-deployment TEST_TOKEN, not WEBAPP_SECRET.
@@ -462,6 +538,12 @@ function doPost(e) {
   }
   if (payload.action === 'find_sheet_actions') {
     return _handleFindSheetActions(payload);
+  }
+  if (payload.action === 'read_team_actions') {
+    return _handleReadTeamActions(payload);
+  }
+  if (payload.action === 'dump_doc_paragraphs') {
+    return _handleDumpDocParagraphs(payload);
   }
   if (payload.action === 'begin_journey_session' ||
       payload.action === 'end_journey_session') {
@@ -521,7 +603,12 @@ function doPost(e) {
       testSheetId:      props.getProperty('TEST_SHEET_ID')        || '',
       gasLoggerFolderId: props.getProperty('GAS_LOGGER_FOLDER_ID') || '',
       webappUrl:        props.getProperty('WEBAPP_URL')           || '',
-      version:          BUILD_INFO.version
+      version:          BUILD_INFO.version,
+      // gts-pfyx: non-null when the most recent Axiom ingest POST came back
+      // non-2xx (e.g. dataset column-limit hit) -- lets the test harness
+      // distinguish "event never fired" from "Axiom ingest is broken" instead
+      // of only discovering the latter as an unexplained 60s timeout.
+      axiomIngestDegraded: GasLogger.getAxiomHealth()
     }, 200);
   }
 
@@ -626,7 +713,7 @@ function _handleSetAxiomConfig(payload) {
  * Logs a 'test.axiom_probe' entry carrying a caller-supplied sentinel id, then
  * flushes immediately. Exercises the real WebApp -> GAS -> GasLogger.flush() ->
  * UrlFetchApp -> Axiom path -- not a Python-direct-to-Axiom shortcut, which
- * would understate real latency by skipping the GAS/WebApp hop (GTaskSheet-ishz.5).
+ * would understate real latency by skipping the GAS/WebApp hop (gts-ishz.5).
  *
  * The caller measures latency by polling Axiom for data.sentinel == sentinel
  * after this responds; this route does not itself wait on Axiom.
@@ -643,8 +730,8 @@ function _handleAxiomProbe(payload) {
     return _jsonResponse({ error: 'sentinel required' });
   }
   GasLogger.log('test.axiom_probe', { sentinel: sentinel });
-  GasLogger.flush();
-  return _jsonResponse({ ok: true });
+  var flushOk = GasLogger.flush();
+  return _jsonResponse({ ok: true, flushOk: flushOk });
 }
 
 // ---------------------------------------------------------------------------
@@ -796,13 +883,19 @@ function _extractActionId(globalId) {
   return parseGlobalId(globalId).actionId;
 }
 
-// Collapse soft-return (\v), hard-return (\n), and carriage-return (\r)
-// characters to a single space so the sheet value is always single-line.
-// Flush reads action text from the sheet and passes it to insertText; a \n
-// there creates a new paragraph rather than a soft return.
+// Normalizes the soft-return spelling of action text on its way into the
+// sheet: \r, \r\n, and \v all become \n, so a sheet cell holds the same line
+// breaks the author typed with Shift+Enter (gts-dou2). Previously these were
+// collapsed to a single space, because flush could not reinsert a soft return
+// into the doc and a round-tripped \n would have split the paragraph. Flush
+// now converts \n back to U+000B via SyncManager.js's _toSoftReturnText
+// (gts-dr8j), so preserving the break here is round-trip safe.
+// Built on the same _normalizeLineEndings core (SyncManager.js) the scanner
+// uses, so the doc-side and sheet-side notion of a line break stay identical
+// — action text compared across the two surfaces still matches.
 function _normalizeActionText(text) {
   if (!text) return text;
-  return text.replace(/[\v\n\r]+/g, ' ').replace(/  +/g, ' ').trim();
+  return _normalizeLineEndings(text).trim();
 }
 
 function _rowIdentityKey(assigneeEmail, action, status) {
@@ -818,8 +911,17 @@ function _rowIdentityKey(assigneeEmail, action, status) {
  * current ActionSheet rows using the last-sync timestamp as the conflict anchor.
  *
  * Payload shape:
- *   { secret, action: 'sync_action_rows', docUrl, docTitle,
+ *   { secret, action: 'sync_action_rows', docUrl, docTitle, scanned,
  *     docState: [{ globalId, assigneeEmail, assigneeName, actionText, status }] }
+ *
+ * `scanned: true` is the caller's explicit assertion that the document was
+ * actually scanned and docState/allDocGlobalIds reflect its real contents
+ * (SyncManager.js's _syncActionRows always sets it, including for a
+ * legitimately empty document). Without it, orphan detection — which marks
+ * every row missing from docState 'Deleted' — is skipped, so a payload that
+ * simply omits docState/allDocGlobalIds (e.g. a hand-made maintenance call
+ * sending only {action, docId, secret}) cannot be misread as "document is
+ * empty, delete everything" (gts-aiaz).
  *
  * Response shape:
  *   { upserted, updated, sheetWins: [{ globalId, action, status, assigneeEmail }] }
@@ -864,6 +966,7 @@ function _handleSyncActionRows(payload) {
   var docId               = payload.docId    || '';
   var docState            = payload.docState || [];
   var allDocGlobalIds = payload.allDocGlobalIds || [];
+  var scanned              = payload.scanned === true;
 
   // Build a set for O(1) membership checks.
   var activeGlobalIdSet = {};
@@ -957,7 +1060,16 @@ function _handleSyncActionRows(payload) {
     }
 
     // Detect orphaned rows: rows for this doc whose globalId is gone from the doc.
-    if (docId) {
+    // Gated on `scanned` (gts-aiaz) — without an explicit assertion that the
+    // document was actually scanned, docState=[]/allDocGlobalIds=[] is
+    // indistinguishable from "caller omitted these fields" and must NOT be
+    // read as "every row is orphaned".
+    if (docId && !scanned) {
+      GasLogger.log('sync.orphanDetection.skipped', {
+        msg: 'sync_action_rows payload missing scanned:true; orphan detection skipped', docId: docId
+      });
+    }
+    if (docId && scanned) {
       for (var gId in existingMap) {
         if (docStateByGlobalId[gId]) continue;
         var entry = existingMap[gId];
@@ -986,7 +1098,7 @@ function _handleSyncActionRows(payload) {
     }
 
     // Refresh DocData.action_count / resolved_count from the just-reconciled
-    // Actions sheet (GTaskSheet-zc21) — counts exclude rows orphaned from this
+    // Actions sheet (gts-zc21) — counts exclude rows orphaned from this
     // doc (Deleted/Doc Not Found) so they track the document's live floating
     // actions, preserving doc_name/last_sync_time/team_id/sync_status.
     if (docId) {
@@ -1023,7 +1135,7 @@ function _handleSyncActionRows(payload) {
 /**
  * Returns ActionSheet rows for a single document without mutating any data.
  * Also checks DocData.teamId against the live Drive teamScope appProperty —
- * the one place that pays for ground truth, now that _syncTeamScope (GTaskSheet-
+ * the one place that pays for ground truth, now that _syncTeamScope (gts-
  * j8cn) trusts the DocData mirror on every sync instead of re-reading Drive.
  * A mismatch means a prior sync's Drive write and DocData write fell out of
  * step (e.g. a crashed execution between the two) — surfaced as a violation
@@ -1207,7 +1319,7 @@ function _loadRowsForDocUrl(actionsSheet, docUrl) {
 /**
  * Marks all Actions rows whose Document formula references any of docIds as
  * 'Doc Not Found' in the Sync Status column. One sheet read + one batched
- * write regardless of how many docIds are passed (GTaskSheet-kkm7.1) — a
+ * write regardless of how many docIds are passed (gts-kkm7.1) — a
  * syncAll() sweep that finds N missing docs sends them all in a single call
  * instead of N separate ones, each of which used to re-read the whole Actions
  * sheet and write matched rows one cell at a time.
@@ -1255,7 +1367,7 @@ function _handleMarkDocNotFound(payload) {
   WriteGuard.wrapPersistent(function () {
     // Stamp the same detection-time timestamp on every row across every docId
     // in this batch so they age out of ArchiveManager's 24h Doc Not Found
-    // threshold together, not independently (GTaskSheet-4tnr) — a doc going
+    // threshold together, not independently (gts-4tnr) — a doc going
     // missing is a per-doc event, not a per-row one. Only stamp on the actual
     // transition into Doc Not Found: syncAll() already keeps a permanently-
     // missing docId out of this path on later sweeps (its own
@@ -1278,7 +1390,7 @@ function _handleMarkDocNotFound(payload) {
       actionsSheet.getRangeList(modifiedA1s).setValue(now);
     }
 
-    // Mirror the Doc Not Found status to DocData (GTaskSheet-zc21) for every
+    // Mirror the Doc Not Found status to DocData (gts-zc21) for every
     // affected docId, preserving any existing Team Id / counts so the row
     // stays a consistent record of the document even after it becomes
     // unreachable. Still one upsert per docId (a sheet op, not a network
@@ -1385,7 +1497,7 @@ function _handlePatchActionStatus(payload) {
 
 // ---------------------------------------------------------------------------
 // list_importable_actions handler  (production route, WEBAPP_SECRET-gated,
-// GTaskSheet-eore — EPIC-D AC-1 import list)
+// gts-eore — EPIC-D AC-1 import list)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1397,7 +1509,7 @@ function _handlePatchActionStatus(payload) {
  * the security gate (TeamNotFound:/TeamAccessDenied: -> zero rows, never a
  * leak); isResolved(status) for the open-actions filter.
  *
- * Excludes rows whose source is gone (GTaskSheet-wdh0): an ActionSheet row
+ * Excludes rows whose source is gone (gts-wdh0): an ActionSheet row
  * with sync_status 'Deleted' (action removed from its doc) or 'Doc Not
  * Found', or whose source doc's DocData row has sync_status 'Deleted'/'Doc
  * Not Found' (doc trashed/inaccessible).
@@ -1418,19 +1530,24 @@ function _handleListImportableActions(payload) {
 }
 
 /**
- * Core row-building for list_importable_actions (GTaskSheet-8qe5) — extracted
+ * Core row-building for list_importable_actions (gts-8qe5) — extracted
  * so the import_selected_for_test route can re-derive the same team-scoped
  * importable rows without going through a second HTTP round trip / response
- * wrapper. No behaviour change versus the inlined version.
+ * wrapper.
+ *
+ * Since gts-79dw.4.11 slice 1 this is a thin gate-plus-delegate wrapper over
+ * _readTeamActions: it resolves docId -> teamId, applies assertTeamAccess as
+ * the security gate, and asks the shared reader for open actions from other
+ * documents in the same team, projected to the frozen
+ * list_importable_actions row schema. Behaviour is unchanged.
  *
  * @param {string} docId
  * @returns {{teamId: string, rows: Array<Object>}}
  */
 function _listImportableActionsData(docId) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = _openActionSheetSpreadsheet();
 
-  var currentDocDataRow = _readDocDataRow(ss, docId);
-  var teamId = currentDocDataRow ? currentDocDataRow.teamId : '';
+  var teamId = _resolveTeamIdForDoc(ss, docId);
   if (!teamId) {
     return { teamId: teamId, rows: [] };
   }
@@ -1442,53 +1559,11 @@ function _listImportableActionsData(docId) {
     return { teamId: teamId, rows: [] };
   }
 
-  var actionsSheet = ss.getSheetByName('Actions');
-  var lastRow = actionsSheet ? actionsSheet.getLastRow() : 0;
-  if (!actionsSheet || lastRow < 2) {
-    return { teamId: teamId, rows: [] };
-  }
-
-  var data = actionsSheet.getRange(2, 1, lastRow - 1, SHEET_HEADERS.length).getValues();
-
-  var docDataByFileId = {};
-  var docDataRows = _readDocDataRows(ss);
-  for (var i = 0; i < docDataRows.length; i++) {
-    docDataByFileId[docDataRows[i].fileId] = docDataRows[i];
-  }
-
-  var rows = [];
-  for (var i = 0; i < data.length; i++) {
-    var status = data[i][_ACOL.status - 1] || '';
-    if (isResolved(status)) continue;
-
-    var rowSyncStatus = data[i][_ACOL.sync_status - 1] || '';
-    if (rowSyncStatus === 'Deleted' || rowSyncStatus === 'Doc Not Found') continue;
-
-    var fileId = data[i][_ACOL.file_id - 1] || '';
-    if (!fileId || fileId === docId) continue;
-
-    var docData = docDataByFileId[fileId];
-    if (!docData || docData.teamId !== teamId) continue;
-    if (docData.syncStatus === 'Deleted' || docData.syncStatus === 'Doc Not Found') continue;
-
-    var createdRaw = data[i][_ACOL.created_date - 1];
-    rows.push({
-      global_id:      data[i][_ACOL.global_id      - 1] || '',
-      action_id:      data[i][_ACOL.action_id       - 1] || '',
-      action_text:    data[i][_ACOL.action_text     - 1] || '',
-      assignee_email: data[i][_ACOL.assignee_email  - 1] || '',
-      assignee_name:  data[i][_ACOL.assignee_name   - 1] || '',
-      status:         status,
-      doc_id:         fileId,
-      doc_name:       docData.docName || '',
-      doc_url:        'https://docs.google.com/document/d/' + fileId + '/edit',
-      created_date:   createdRaw instanceof Date ? createdRaw.toISOString() : (createdRaw || '')
-    });
-  }
-
-  rows.sort(function (a, b) {
-    if (a.doc_name !== b.doc_name) return a.doc_name < b.doc_name ? -1 : 1;
-    return parseGlobalId(a.global_id).N - parseGlobalId(b.global_id).N;
+  var rows = _readTeamActions(teamId, {
+    statusFilter:  'open',
+    excludeDocId:  docId,
+    fields:        IMPORTABLE_ACTION_FIELDS,
+    ss:            ss
   });
 
   var docIds = {};
@@ -1499,15 +1574,183 @@ function _listImportableActionsData(docId) {
 }
 
 // ---------------------------------------------------------------------------
-// import_selected_for_test handler  (testToken-gated, GTaskSheet-8qe5 —
-// interactive-test-entry-point, EPIC GTaskSheet-pw5x)
+// _readTeamActions — the one team-scoped action reader (gts-79dw.4.11)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every field _readTeamActions can emit, in canonical order. A caller that
+ * needs a narrower/frozen projection passes a subset as opts.fields.
+ */
+var TEAM_ACTION_FIELDS = Object.freeze([
+  'global_id', 'action_id', 'action_text', 'assignee_email', 'assignee_name',
+  // status is the literal the user typed; the three status_* fields are
+  // getStatusDisplay()'s answer for it (SyncManager.js). They travel with the
+  // row so a surface never re-derives the bucketing — see gts-79dw.4.7.
+  'status', 'status_bucket', 'status_resolved', 'status_icon',
+  'doc_id', 'doc_name', 'doc_url', 'created_date', 'modified_date'
+]);
+
+/**
+ * The frozen list_importable_actions row projection (ContractSchema.js
+ * messages.list_importable_actions). Kept explicit so a new field added to
+ * TEAM_ACTION_FIELDS cannot silently widen that contract.
+ */
+var IMPORTABLE_ACTION_FIELDS = Object.freeze([
+  'global_id', 'action_id', 'action_text', 'assignee_email', 'assignee_name',
+  'status', 'doc_id', 'doc_name', 'doc_url', 'created_date'
+]);
+
+/** Default age limit, in days, on resolved rows returned by 'closed'/'all'. */
+var TEAM_ACTIONS_DEFAULT_WINDOW_DAYS = 60;
+
+/**
+ * Resolves a document's Team Id via its DocData row. '' when the document is
+ * untracked or has no team.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {string} docId
+ * @returns {string}
+ */
+function _resolveTeamIdForDoc(ss, docId) {
+  var docDataRow = docId ? _readDocDataRow(ss, docId) : null;
+  return docDataRow ? (docDataRow.teamId || '') : '';
+}
+
+/**
+ * Reads every Actions-sheet row belonging to a document in teamId's scope.
+ * Read-only, and deliberately UNGATED — authorization is the caller's job
+ * (assertTeamAccess for the add-on routes, the GIS access tier for the
+ * portal), because the two surfaces authorize differently over the same data.
+ *
+ * Always excluded, on every filter:
+ *   - action rows whose sync_status is 'Deleted' or 'Doc Not Found'
+ *     (the action is gone from its document)
+ *   - actions whose source document's DocData row is 'Deleted' or
+ *     'Doc Not Found' (the document itself is trashed/inaccessible) — R13b
+ *
+ * opts:
+ *   statusFilter  'open' (default, excludes isResolved() rows) | 'closed'
+ *                 (only resolved rows) | 'all' (both). Resolved rows are
+ *                 additionally limited to those modified within windowDays.
+ *   windowDays    age limit on resolved rows; default
+ *                 TEAM_ACTIONS_DEFAULT_WINDOW_DAYS.
+ *   excludeDocId  omit rows sourced from this document.
+ *   assigneeEmail omit rows not assigned to this address (case-insensitive).
+ *   fields        subset of TEAM_ACTION_FIELDS to project; default all.
+ *   ss            already-open spreadsheet to read from; opened if absent.
+ *
+ * Rows are sorted by doc_name ASC then AI-N ASC.
+ *
+ * @param {string} teamId
+ * @param {Object} [opts]
+ * @returns {Array<Object>}
+ */
+function _readTeamActions(teamId, opts) {
+  opts = opts || {};
+  if (!teamId) return [];
+
+  var statusFilter  = opts.statusFilter || 'open';
+  var windowDays    = Number(opts.windowDays) > 0 ? Number(opts.windowDays)
+                                                  : TEAM_ACTIONS_DEFAULT_WINDOW_DAYS;
+  var excludeDocId  = opts.excludeDocId || '';
+  var assigneeEmail = (opts.assigneeEmail || '').toLowerCase();
+  var fields        = opts.fields || TEAM_ACTION_FIELDS;
+  var ss            = opts.ss || _openActionSheetSpreadsheet();
+
+  var docDataByFileId = {};
+  var docDataRows = _readDocDataRows(ss);
+  for (var d = 0; d < docDataRows.length; d++) {
+    docDataByFileId[docDataRows[d].fileId] = docDataRows[d];
+  }
+
+  var actionsSheet = ss.getSheetByName('Actions');
+  var lastRow = actionsSheet ? actionsSheet.getLastRow() : 0;
+  if (!actionsSheet || lastRow < 2) return [];
+
+  var data = actionsSheet.getRange(2, 1, lastRow - 1, SHEET_HEADERS.length).getValues();
+  var cutoffMs = Date.now() - windowDays * 24 * 60 * 60 * 1000;
+  var rows = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+
+    var rowSyncStatus = row[_ACOL.sync_status - 1] || '';
+    if (rowSyncStatus === 'Deleted' || rowSyncStatus === 'Doc Not Found') continue;
+
+    var fileId = row[_ACOL.file_id - 1] || '';
+    if (!fileId || fileId === excludeDocId) continue;
+
+    var docData = docDataByFileId[fileId];
+    if (!docData || docData.teamId !== teamId) continue;
+    if (docData.syncStatus === 'Deleted' || docData.syncStatus === 'Doc Not Found') continue;
+
+    if (assigneeEmail &&
+        String(row[_ACOL.assignee_email - 1] || '').toLowerCase() !== assigneeEmail) continue;
+
+    var status = row[_ACOL.status - 1] || '';
+    var modifiedRaw = row[_ACOL.modified_date - 1];
+    if (isResolved(status)) {
+      if (statusFilter === 'open') continue;
+      var modifiedMs = modifiedRaw instanceof Date ? modifiedRaw.getTime() : -1;
+      if (modifiedMs < cutoffMs) continue;
+    } else if (statusFilter === 'closed') {
+      continue;
+    }
+
+    var createdRaw = row[_ACOL.created_date - 1];
+    var display    = getStatusDisplay(status);
+    rows.push({
+      global_id:      row[_ACOL.global_id      - 1] || '',
+      action_id:      row[_ACOL.action_id      - 1] || '',
+      action_text:    row[_ACOL.action_text    - 1] || '',
+      assignee_email: row[_ACOL.assignee_email - 1] || '',
+      assignee_name:  row[_ACOL.assignee_name  - 1] || '',
+      status:         status,
+      status_bucket:  display.bucket,
+      status_resolved: display.resolved,
+      status_icon:    display.icon,
+      doc_id:         fileId,
+      doc_name:       docData.docName || '',
+      doc_url:        'https://docs.google.com/document/d/' + fileId + '/edit',
+      created_date:   createdRaw  instanceof Date ? createdRaw.toISOString()  : (createdRaw  || ''),
+      modified_date:  modifiedRaw instanceof Date ? modifiedRaw.toISOString() : (modifiedRaw || '')
+    });
+  }
+
+  // Sort before projecting — the sort keys are not necessarily in `fields`.
+  rows.sort(function (a, b) {
+    if (a.doc_name !== b.doc_name) return a.doc_name < b.doc_name ? -1 : 1;
+    return parseGlobalId(a.global_id).N - parseGlobalId(b.global_id).N;
+  });
+
+  return rows.map(function (row) { return _projectFields(row, fields); });
+}
+
+/**
+ * Returns a copy of row carrying only `fields`, in `fields` order.
+ *
+ * @param {Object} row
+ * @param {Array<string>} fields
+ * @returns {Object}
+ */
+function _projectFields(row, fields) {
+  var projected = {};
+  for (var f = 0; f < fields.length; f++) {
+    projected[fields[f]] = row[fields[f]];
+  }
+  return projected;
+}
+
+// ---------------------------------------------------------------------------
+// import_selected_for_test handler  (testToken-gated, gts-8qe5 —
+// interactive-test-entry-point, EPIC gts-pw5x)
 // ---------------------------------------------------------------------------
 
 /**
  * Drives _importSelectedRows (the same AC-2/AC-3 core as _submitImport) with
  * an explicit globalIds selection, inserting new floating actions at the end
  * of testDocId's body instead of at a CardService cursor. Unblocks
- * GTaskSheet-4gsx: the Import tab's CHECK_BOX SelectionInput cannot be driven
+ * gts-4gsx: the Import tab's CHECK_BOX SelectionInput cannot be driven
  * via Playwright (clicking the widget toggles the underlying <input>'s
  * checked state, but the add-on host iframe's form-state bridge to
  * e.formInputs does not pick it up).
@@ -1559,7 +1802,7 @@ function _handleImportSelectedForTest(payload) {
 
 // ---------------------------------------------------------------------------
 // forward_action_rows handler  (production route, WEBAPP_SECRET-gated,
-// GTaskSheet-st24 — EPIC-D AC-3 forward source actions)
+// gts-st24 — EPIC-D AC-3 forward source actions)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1572,14 +1815,14 @@ function _handleImportSelectedForTest(payload) {
  * to the Action text (newAiToken parsed from newGlobalId); sync_status =
  * 'Dirty' so the source document reflects 'Forwarded' on the next
  * sync_action_rows. The Dirty stamp is written in the same WriteGuard batch
- * as the other field writes (GTaskSheet-wdh0) rather than via a separate
+ * as the other field writes (gts-wdh0) rather than via a separate
  * post-loop _remarkRowDirty pass, so an error between the two passes can't
  * leave a forwarded row un-flagged.
  *
  * Rows already resolved (e.g. status already 'Forwarded' — a duplicate
  * forward from a stale Import-tab selection or a repeated sourceGlobalId in
  * the same payload) are skipped and omitted from the response's `forwarded`
- * list (GTaskSheet-wdh0) — re-forwarding would append a second
+ * list (gts-wdh0) — re-forwarding would append a second
  * '[Forward:...]' suffix to the action text.
  *
  * Payload shape (ContractSchema.js messages.forward_action_rows):
@@ -1721,6 +1964,142 @@ function _handleEditActionRow(payload) {
 }
 
 // ---------------------------------------------------------------------------
+// dump_doc_paragraphs handler  (testRouteNames — testToken-gated)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read-only structural dump of a document's body: one entry per structural
+ * element with its index range, list/bullet status, and text. Strictly a
+ * Docs API GET — mutates nothing.
+ *
+ * Exists to diagnose paragraph-boundary defects (an action merging with the
+ * following paragraph or list item after a flush), where the question is
+ * exactly which index range a rewrite spanned and whether a paragraph's
+ * trailing newline survived. `verify_chip_integrity` answers "are the chips
+ * right"; this answers "what is the document's shape".
+ *
+ * Payload: { action:'dump_doc_paragraphs', testToken, docId }
+ * Response: { ok, docId, elements:[{i, start, end, isListItem, nestingLevel,
+ *   text}] }
+ */
+function _handleDumpDocParagraphs(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.docId || '';
+  if (!docId) return _jsonResponse({ error: 'docId required', elements: [] });
+
+  var pElems = 'paragraph(bullet,elements(startIndex,endIndex,textRun/content))';
+  var fields = 'body.content(startIndex,endIndex,' + pElems +
+    ',table/tableRows/tableCells/content(startIndex,endIndex,' + pElems + '))';
+  var resp = UrlFetchApp.fetch(
+    'https://docs.googleapis.com/v1/documents/' + docId + '?fields=' + encodeURIComponent(fields),
+    { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true }
+  );
+  if (resp.getResponseCode() !== 200) {
+    return _jsonResponse({ error: 'Docs API error: ' + resp.getResponseCode(), elements: [] });
+  }
+
+  var content  = ((JSON.parse(resp.getContentText()).body) || {}).content || [];
+  var elements = [];
+
+  // Walk body content and table-cell content alike — the flush's occurrence
+  // scan recurses into tables, so a structural dump that stopped at the body
+  // would be blind to exactly the paragraphs it rewrites.
+  function walk(items, path) {
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      if (item.paragraph) {
+        var els  = item.paragraph.elements || [];
+        var text = '';
+        for (var j = 0; j < els.length; j++) {
+          if (els[j].textRun) text += els[j].textRun.content || '';
+        }
+        elements.push({
+          i:            path + i,
+          start:        item.startIndex,
+          end:          item.endIndex,
+          isListItem:   !!item.paragraph.bullet,
+          nestingLevel: item.paragraph.bullet ? (item.paragraph.bullet.nestingLevel || 0) : null,
+          text:         text
+        });
+      }
+      if (item.table) {
+        var rows = item.table.tableRows || [];
+        for (var r = 0; r < rows.length; r++) {
+          var cells = rows[r].tableCells || [];
+          for (var c = 0; c < cells.length; c++) {
+            walk(cells[c].content || [], path + i + '.r' + r + 'c' + c + '.');
+          }
+        }
+      }
+    }
+  }
+  walk(content, '');
+
+  GasLogger.log('test.dump_doc_paragraphs', { docId: docId, count: elements.length });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, docId: docId, elements: elements });
+}
+
+// ---------------------------------------------------------------------------
+// read_team_actions handler  (testRouteNames — testToken-gated,
+// gts-79dw.4.11 slice 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Exposes _readTeamActions' full parameter surface so the harness can capture
+ * a real fixture for every filter state (open / closed / all / mine / window
+ * boundary) that gts-79dw.4.7's View A review needs. Read-only.
+ *
+ * This exists so the PRODUCTION list_importable_actions contract does not
+ * grow optional filter parameters that only a fixture capture would ever
+ * send. It is testToken-gated, not WEBAPP_SECRET-gated, and applies no
+ * team-access gate of its own — holding the per-deployment test token IS the
+ * authorization, as with the other testRouteNames routes.
+ *
+ * Payload shape (ContractSchema.js messages.read_team_actions):
+ *   { action:'read_team_actions', testToken, teamId | docId, statusFilter,
+ *     windowDays, excludeDocId, assigneeEmail }
+ * `docId` is an alternative to `teamId`: the team is resolved from its
+ * DocData row, the same join list_importable_actions performs.
+ *
+ * Response shape: { ok:true, teamId, rows:[<TEAM_ACTION_FIELDS>], statusOptions }
+ * Each row already carries getStatusDisplay()'s answer for its status, so no
+ * consumer re-derives the bucketing. `statusOptions` is getStatusIconButtons()
+ * — the same canonical picker list the sidebar's status control offers.
+ */
+function _handleReadTeamActions(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var ss     = _openActionSheetSpreadsheet();
+  var teamId = payload.teamId || _resolveTeamIdForDoc(ss, payload.docId || '');
+
+  var rows = _readTeamActions(teamId, {
+    statusFilter:  payload.statusFilter,
+    windowDays:    payload.windowDays,
+    excludeDocId:  payload.excludeDocId,
+    assigneeEmail: payload.assigneeEmail,
+    ss:            ss
+  });
+
+  GasLogger.log('teamActions.read', {
+    teamId:       teamId,
+    statusFilter: payload.statusFilter || 'open',
+    count:        rows.length
+  });
+  GasLogger.flush();
+
+  return _jsonResponse({
+    ok:            true,
+    teamId:        teamId,
+    rows:          rows,
+    statusOptions: getStatusIconButtons()
+  });
+}
+
+// ---------------------------------------------------------------------------
 // find_sheet_actions handler  (testRouteNames — testToken-gated, bead .9)
 // ---------------------------------------------------------------------------
 
@@ -1839,7 +2218,7 @@ function _handlePatchActionStatusAtdd(payload) {
 /**
  * ATDD-path forward_action_rows_test: same seen[]/isResolved(entry.status)
  * guard loop as the production _handleForwardActionRows, testToken-gated
- * instead of secret-gated (GTaskSheet-apcu, UC-E AC4). Lets a test pass an
+ * instead of secret-gated (gts-apcu, UC-E AC4). Lets a test pass an
  * explicit forwards[] entry whose sourceGlobalId is already Forwarded/
  * resolved — a state the production import flow's own
  * _listImportableActionsData filter would never let through, so the guard

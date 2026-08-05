@@ -133,8 +133,13 @@ function _readTrackerSheetRows(ss, docId) {
     var globalId = data[i][_TC.global_id - 1];
     if (!globalId) continue;
     result[globalId] = {
-      id:     data[i][_TC.action_id - 1],
-      status: data[i][_TC.status    - 1] || 'Open'
+      id:     data[i][_TC.action_id   - 1],
+      status: data[i][_TC.status      - 1] || 'Open',
+      // Action text is read for the same reason status is (gts-m2gf): the
+      // sheet is the up-to-date side for a sheet-originated edit, and the
+      // document re-read that _buildTrackerDataRows otherwise relies on can be
+      // stale immediately after a REST flush.
+      action: data[i][_TC.action_text - 1] || ''
     };
   }
 
@@ -161,7 +166,16 @@ function _buildTrackerDataRows(floatingActions, sheetRows) {
       globalId:      fa.globalId || '',
       assigneeEmail: fa.assigneeEmail || '',
       assigneeName:  fa.assigneeName  || '',
-      action:        fa.actionText    || '',
+      // Sheet-first, document as fallback — the same precedence `status` uses
+      // on the next line, and for the same reason (gts-m2gf). Taking the text
+      // from the document scan alone made the tracker depend on a
+      // DocumentApp.openById read that is stale right after _flushActionParagraph
+      // writes via the Docs REST API: desired rows came back equal to the
+      // already-rendered rows, _trackerRowsMatch returned true, and the refresh
+      // skipped. By the time the tracker is rebuilt the sheet is current in BOTH
+      // directions — sheet-wins flushed to the doc, or doc-wins already written
+      // back to the sheet — so it is the safer authority for the text.
+      action:        sheet.action || fa.actionText || '',
       status:        sheet.status || fa.status || 'Open'
     });
   }
@@ -185,7 +199,13 @@ function _trackerRowsMatch(renderedRows, desiredRows) {
     var rendered = renderedRows[i];
     var desired  = desiredRows[i];
     if (String(rendered.id || '') !== String(desired.id || '')) return false;
-    if ((rendered.action || '') !== (desired.action || '')) return false;
+    // Compare action text through _normalizeLineEndings: action text may now
+    // carry soft-return line breaks (gts-dou2/dr8j), and the rendered cell
+    // text read back via getText() need not spell that break the same way the
+    // desired string does. Comparing raw would report a spurious mismatch and
+    // re-render the whole tracker on every single sync.
+    if (_normalizeLineEndings(rendered.action || '') !==
+        _normalizeLineEndings(desired.action || '')) return false;
     if ((rendered.status || 'Open') !== (desired.status || 'Open')) return false;
   }
   return true;

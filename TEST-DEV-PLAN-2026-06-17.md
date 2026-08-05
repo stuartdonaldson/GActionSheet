@@ -25,12 +25,12 @@ gap (T22 ranks these above happy-path extension), does it close a twin-ticket
 block on already-shipped IMP work, and bd's own priority field.
 
 **Excluded from this plan (production-changing, defer until review concludes):**
-- `GTaskSheet-csbv.1` (add-on name from settings — manifest change)
-- `GTaskSheet-6rv6` (assignee autocomplete rewrite — removes an OAuth scope)
-- `GTaskSheet-79dw` epic (`1hyh`, `hc6v`, `6dlp` — Phase 2 OAuth, AC not frozen)
-- `GTaskSheet-gc43` EPIC-E Notify chain (`s3ga`, `1xpj`, `twwo`, `7fng`, `ay5w`,
+- `gts-csbv.1` (add-on name from settings — manifest change)
+- `gts-6rv6` (assignee autocomplete rewrite — removes an OAuth scope)
+- `gts-79dw` epic (`1hyh`, `hc6v`, `6dlp` — Phase 2 OAuth, AC not frozen)
+- `gts-gc43` EPIC-E Notify chain (`s3ga`, `1xpj`, `twwo`, `7fng`, `ay5w`,
   `ajns`, `xiv8`) — already `deferred` in bd, blocked behind unshipped IMP work
-- `GTaskSheet-csbv.3` UX redesign decision itself (doc-only portion is in
+- `gts-csbv.3` UX redesign decision itself (doc-only portion is in
   Batch 4)
 
 ---
@@ -39,21 +39,21 @@ block on already-shipped IMP work, and bd's own priority field.
 
 | Rank | Issue | Priority | Batch |
 |---|---|---|---|
-| 1 | `GTaskSheet-f26q` | **High** | 1 |
-| 2 | `GTaskSheet-u0bb` | **High** | 2 |
-| 3 | `GTaskSheet-dq6t` | **High** | 2 |
-| 4 | `GTaskSheet-apcu` | **High** | 3 |
-| 5 | `GTaskSheet-cduk` | **High** | 3 |
-| 6 | `GTaskSheet-28q` | Medium | 2 |
-| 7 | `GTaskSheet-ez2e` | Medium | 3 |
-| 8 | `GTaskSheet-dhpt` | Medium | 1 |
-| 9 | `GTaskSheet-mpi9` | Medium | 4 |
-| 10 | `GTaskSheet-zai6` | Low-Medium | 3 (stretch) |
-| 11 | `GTaskSheet-ruoa` | Low | 4 |
-| 12 | `GTaskSheet-egl9` | Low | 4 |
-| 13 | `GTaskSheet-q37d` | Low | 1 |
-| 14 | `GTaskSheet-csbv.3` (doc-only) | Low | 4 |
-| 15 | `GTaskSheet-6ov.9` | Low | 4 |
+| 1 | `gts-f26q` | **High** | 1 |
+| 2 | `gts-u0bb` | **High** | 2 |
+| 3 | `gts-dq6t` | **High** | 2 |
+| 4 | `gts-apcu` | **High** | 3 |
+| 5 | `gts-cduk` | **High** | 3 |
+| 6 | `gts-28q` | Medium | 2 |
+| 7 | `gts-ez2e` | Medium | 3 |
+| 8 | `gts-dhpt` | Medium | 1 |
+| 9 | `gts-mpi9` | Medium | 4 |
+| 10 | `gts-zai6` | Low-Medium | 3 (stretch) |
+| 11 | `gts-ruoa` | Low | 4 |
+| 12 | `gts-egl9` | Low | 4 |
+| 13 | `gts-q37d` | Low | 1 |
+| 14 | `gts-csbv.3` (doc-only) | Low | 4 |
+| 15 | `gts-6ov.9` | Low | 4 |
 
 Batch grouping (shared fixtures, single deploy for Batch 3) still governs
 *how* the work is sequenced internally — this ranking governs which batch
@@ -65,7 +65,7 @@ items get attention first if time is constrained.
 
 Pure Python/Playwright changes. Zero risk to the deployed build.
 
-- **`GTaskSheet-f26q`** — Priority: **High**.
+- **`gts-f26q`** — Priority: **High**.
   Fix `scn/ui.py` `open_sidebar()`/`sidebar_sync()` regex (`'sync now'` →
   `'sync'`).
   *Why High:* it is a test-infrastructure blocker, not a feature gap — every
@@ -74,7 +74,7 @@ Pure Python/Playwright changes. Zero risk to the deployed build.
   trusted or even run. Highest leverage-per-effort item in the whole backlog:
   a one-line regex fix unblocks an entire test surface.
 
-- **`GTaskSheet-dhpt`** — Priority: Medium.
+- **`gts-dhpt`** — Priority: Medium.
   Replace DOM-polling in the interactive link-preview harness with a
   clasp-logs signal; seed self-describing instructions in the action text.
   *Why Medium, not High:* clasp logs already proved the underlying feature
@@ -84,7 +84,7 @@ Pure Python/Playwright changes. Zero risk to the deployed build.
   interactive harness is trustworthy next time it's run, but nothing else is
   blocked on it.
 
-- **`GTaskSheet-q37d`** — Priority: Low.
+- **`gts-q37d`** — Priority: Low.
   Lint check for `entry_point=` used without `request=`.
   *Why Low:* bd's own description calls it "a recurring footgun, not blocking
   any current work," P4. It prevents a silent-miscoverage class but has no
@@ -99,16 +99,16 @@ points and existing fixture helpers. No new `TestFixtures.js` case needed —
 pure test-code additions, per T6 (permutations are cheap; new scenarios only
 when the interaction model changes).
 
-- **`GTaskSheet-u0bb`** — Priority: **High**.
+- **`gts-u0bb`** — Priority: **High**.
   Sidebar header coverage: team subtitle, team-link anchor, fallback cases.
-  *Why High:* this is the TST half of a twin ticket — `GTaskSheet-ht19` (an
+  *Why High:* this is the TST half of a twin ticket — `gts-ht19` (an
   already-in-progress IMP, team-view header already shipped per recent
   commits) is sitting blocked waiting on this to close. It's also exactly the
   category the user called out as priority: testing of work that's already
   implemented. Closing it unblocks a stuck issue and converts shipped-but-
   unverified behavior into regression-protected behavior.
 
-- **`GTaskSheet-dq6t`** — **Moved to Batch 3** (2026-06-17 execution).
+- **`gts-dq6t`** — **Moved to Batch 3** (2026-06-17 execution).
   Reclassified during Batch 2 execution: AC-3/AC-5/AC-7/AC-8 require
   constructing tables/bulleted lists in a test doc, and the only doc-seeding
   fixture that exists (`append_doc_paragraph`, WebApp.js) only appends a
@@ -117,7 +117,7 @@ when the interaction model changes).
   deploy, contradicting Batch 2's no-deploy constraint. It now belongs with
   `apcu`/`cduk`/`ez2e` in the single controlled Batch 3 deploy.
 
-- **`GTaskSheet-28q`** — Priority: Medium.
+- **`gts-28q`** — Priority: Medium.
   Parentheses-in-action-text status-token hardening (3 variants).
   *Why Medium, not High:* same fixture/scanner context as `dq6t` (do
   together), but the failure mode here is text-corruption on a fairly
@@ -136,13 +136,13 @@ All additions are net-new test-only branches gated by the existing testToken
 mechanism — no change to any production code path the stakeholder is
 exercising.
 
-- **`GTaskSheet-dq6t`** — Priority: **High** (moved from Batch 2; see note above).
+- **`gts-dq6t`** — Priority: **High** (moved from Batch 2; see note above).
   Floating-action scanner coverage: table cells, bulleted lists, mixed
   placement, tracker-table exclusion, `@create` mid-cell caret placement.
   Needs a new test-only doc-seeding fixture (table/list builder) bundled
   into the same PR/deploy as `apcu`'s new route.
 
-- **`GTaskSheet-apcu`** — Priority: **High**.
+- **`gts-apcu`** — Priority: **High**.
   New testToken-gated route driving `forward_action_rows` with an explicit
   duplicate `forwards[]` payload to reach the duplicate-forward guard (UC-E
   AC4).
@@ -152,17 +152,17 @@ exercising.
   regression-covered," meaning a future refactor could silently reintroduce
   duplicate forwards with nothing to catch it.
 
-- **`GTaskSheet-cduk`** — Priority: **High**.
+- **`gts-cduk`** — Priority: **High**.
   `syncAll()` DocData integrity-pass coverage: counts and `doc_name`
   reconciliation for skipped docs.
   *Why High:* DocData backs the team-view/sidebar summaries users are
   actively looking at right now (stakeholder review!). A drift bug here
   (stale counts, stale doc name) would be silently wrong, not loudly broken
   — exactly the kind of reconciliation gap T22 prioritizes. The IMP side
-  (`GTaskSheet-6ipb`) is already closed, so this is pure coverage of shipped
+  (`gts-6ipb`) is already closed, so this is pure coverage of shipped
   behavior with a frozen contract.
 
-- **`GTaskSheet-ez2e`** — Priority: Medium.
+- **`gts-ez2e`** — Priority: Medium.
   New fixture cases for `menuSyncActiveDoc()` / `menuInsertTrackerActiveDoc()`
   menu wrapper entry points.
   *Why Medium, not High:* this closes a T17 entry-point-coverage technicality
@@ -171,7 +171,7 @@ exercising.
   the actual risk surface (a thin menu-wrapper bug) is small. Worth doing for
   invariant compliance, but lower stakes than `apcu`/`cduk`.
 
-**Optional stretch (Low-Medium, not blocking):** `GTaskSheet-zai6` (test.u1
+**Optional stretch (Low-Medium, not blocking):** `gts-zai6` (test.u1
 non-deployer Drive-sharing fixture) is the same additive-fixture shape and
 could ride along in this same deploy if time allows.
 *Why Low-Medium:* it upgrades test fidelity to catch a real bug class
@@ -187,7 +187,7 @@ deployed build (`tests/test_import.py::test_forward_duplicate_guard`,
 `tests/test_menu_entry_points.py`'s two new ez2e tests,
 `tests/test_floating_action_scanner.py`).
 
-- **`cduk` blocker:** its twin IMP `GTaskSheet-6ipb` was marked Closed in bd
+- **`cduk` blocker:** its twin IMP `gts-6ipb` was marked Closed in bd
   with *no actual implementation* anywhere in the codebase (no
   `sync.integrity.complete` log tag, no related commit). Implemented it now
   in `syncAll()` (SyncManager.js) per 6ipb's frozen AC1-AC5, then verified
@@ -208,20 +208,20 @@ deployed build (`tests/test_import.py::test_forward_duplicate_guard`,
   AC-4's "prefix" sub-case doesn't match shipped behavior (token must be
   paragraph-anchored; documented instead of "fixed"). AC-7/AC-8 (`@create`
   caret placement inside a table cell) need a new UiDriver capability — split
-  into `GTaskSheet-4hqn`.
+  into `gts-4hqn`.
 - **Bonus fix:** `seed_row` (TestFixtures.js) never forwarded `data.globalId`
   into the row it built — found while debugging an unrelated regression
   check (`test_sync_all`), fixed (one line).
 - **New finding, not fixed (out of scope):** `test_sync_all`'s `[nv6g]`
   archive assertion assumes a 24h Doc-Not-Found eviction threshold;
   `ArchiveManager.js` actually uses a flat 30-day threshold for everything.
-  Filed as `GTaskSheet-0f0s` for a product decision.
+  Filed as `gts-0f0s` for a product decision.
 
 ---
 
 ## Batch 4 — Documentation only (no code, no deploy, run any time/in parallel)
 
-- **`GTaskSheet-mpi9`** — Priority: Medium.
+- **`gts-mpi9`** — Priority: Medium.
   Apply four deferred LL policy levers (CLAUDE.md test-gate rules,
   implementation-gate skill additions, stub-entry-point LL archive,
   reconciliation-discipline rule).
@@ -231,7 +231,7 @@ deployed build (`tests/test_import.py::test_forward_duplicate_guard`,
   leverage, but it's process change, not closing a current coverage gap, so
   it doesn't compete with Batches 1–3 for urgency.
 
-- **`GTaskSheet-ruoa`** — Priority: Low.
+- **`gts-ruoa`** — Priority: Low.
   Fill ATDD templates into `docs/atdd/project-testing-guide.md` /
   `harness-design.md`.
   *Why Low:* pure consolidation of facts that already exist scattered across
@@ -240,20 +240,20 @@ deployed build (`tests/test_import.py::test_forward_duplicate_guard`,
   if a fresh agent/session later picks up Batches 2–3, otherwise no
   execution value.
 
-- **`GTaskSheet-egl9`** — Priority: Low.
+- **`gts-egl9`** — Priority: Low.
   Write up `/dev` vs. versioned `/exec` deploy tradeoff as a decision doc.
   *Why Low:* it's an evaluation, not an implementation — would speed up
   *future* test iteration cycles if acted on, but during a stakeholder review
   is exactly the wrong time to change the deployment model, so the upside is
   deferred regardless of when the doc gets written.
 
-- **`GTaskSheet-csbv.3`** (doc-only slice) — Priority: Low.
+- **`gts-csbv.3`** (doc-only slice) — Priority: Low.
   Document current Import-button behavior as-is in the user guide.
   *Why Low:* stopgap documentation only; the actual UX decision it's
   attached to is explicitly out of scope until the review concludes, so this
   just prevents the user guide from going stale in the meantime.
 
-- **`GTaskSheet-6ov.9`** — Priority: Low.
+- **`gts-6ov.9`** — Priority: Low.
   Restructure `DevStandard/knowledge-base/gas-addon-guide.md`.
   *Why Low:* this is a cross-project DevStandard guide, not a GActionSheet
   test or doc artifact — it has zero bearing on the current test deployment

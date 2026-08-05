@@ -1,5 +1,5 @@
 /**
- * SPIKE.js — Spike S2 (GTaskSheet-79dw.2): folder/doc access verification for
+ * SPIKE.js — Spike S2 (gts-79dw.2): folder/doc access verification for
  * an external, GIS-verified email, including access conferred only through a
  * domain-managed Google Group.
  *
@@ -14,7 +14,7 @@
  * Admin SDK fallback see whatever the deployer can see, same as any other
  * WebApp route in this project.
  *
- * See ../docs/verified-board-portal-plan.md §6 for the full spike contract,
+ * See ../docs/verified-team-portal-plan.md §6 for the full spike contract,
  * assumptions (A4/A5/A6), and the test matrix.
  */
 

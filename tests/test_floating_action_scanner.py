@@ -229,3 +229,88 @@ def test_soft_return_context_and_multiline_action(settings, request):
         _assert_action_absent(scn, "context intro")
     finally:
         scn.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-dr8j — soft returns survive the sheet -> doc flush (write-back direction)
+# ---------------------------------------------------------------------------
+
+def test_soft_return_survives_sidebar_status_flush(settings, request):
+    """gts-dr8j: soft-return continuation lines round-trip through a flush.
+
+    Preserving the line breaks on the way INTO the sheet (the three AC-T tests
+    above) is only half the round trip — the write-back has to reinsert a real
+    soft return, or the next flush silently destroys what the scan preserved.
+    The sidebar status-set path is the flush call site that matters most here:
+    it rescans the LIVE doc and pushes that raw text straight back through the
+    Docs REST API's insertText, so it never sees the sheet's normalization
+    (gts-kkm7.5).
+
+    Asserts on the durable doc surface, and specifically on the three ways
+    this has failed or could fail: lines concatenated with no separator at all
+    (\\r stripped by insertText), lines split into separate hard paragraphs
+    (\\n), and lines collapsed to spaces (the previous workaround).
+    """
+    from tests.helpers.doc_inspect import load_doc, paragraph_texts_with_breaks
+    from tests.helpers.download import download_docx
+
+    action_text = "dr8j soft flush\nline two\nline three"
+
+    def assert_doc_paragraph(expected, after):
+        """The action must occupy exactly ONE paragraph with the given text.
+
+        One entry (not three) is what proves the breaks are soft returns rather
+        than hard paragraph breaks; the exact text is what rules out both the
+        no-separator and the space-collapsed outcomes.
+        """
+        paras = paragraph_texts_with_breaks(load_doc(download_docx(scn.doc_id)))
+        hits = [p for p in paras if "dr8j soft flush" in p]
+        assert len(hits) == 1, (
+            f"after {after}: expected the action to stay in ONE paragraph, got "
+            f"{hits!r} (all paragraphs: {paras!r})"
+        )
+        assert hits[0] == expected, (
+            f"after {after}: flush did not reproduce the original soft returns: "
+            f"{hits[0]!r} != {expected!r}"
+        )
+
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture("append_doc_soft_paragraph", {"text": f"AI-1: {action_text}"})
+
+        # syncDocument's batch flush — the first of the two _buildFlushRequests
+        # call sites this test covers. It rewrites the paragraph to attach the
+        # status image and chip link, so the soft returns have to survive here
+        # before the sidebar path is even reachable.
+        scn.sync()
+        assert_doc_paragraph(
+            "AI-1: dr8j soft flush\nline two\nline three (Open)", "sync flush"
+        )
+
+        row = _find_action(scn, action_text)
+        assert row.global_id.endswith("/AI-1")
+
+        # Sidebar status-set — the second call site, and the one gts-kkm7.5 was
+        # filed against: it rescans the LIVE doc and pushes that raw text back
+        # through insertText without the sheet's normalization in between.
+        resp = scn._post_fixture(
+            "sidebar_set_status",
+            {"targetText": action_text, "newStatus": "Done"},
+        )
+        assert not (resp.get("data") or {}).get("error"), (
+            f"sidebar_set_status fixture failed: {resp!r}"
+        )
+        assert_doc_paragraph(
+            "AI-1: dr8j soft flush\nline two\nline three (Done)", "sidebar flush"
+        )
+
+        # And the round trip closes: rescanning the flushed doc yields the same
+        # action text it started with, so a further sync/flush is stable.
+        scn.sync()
+        row = _find_action(scn, action_text)
+        assert row.status == "Done"
+        assert_doc_paragraph(
+            "AI-1: dr8j soft flush\nline two\nline three (Done)", "resync flush"
+        )
+    finally:
+        scn.close()

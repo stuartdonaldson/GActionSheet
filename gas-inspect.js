@@ -1,12 +1,15 @@
 const { chromium } = require('@playwright/test');
 const fs = require('fs');
+const { resolveAuthFile } = require('./scripts/playwright-auth');
 
 (async () => {
   const settings = JSON.parse(fs.readFileSync('/mnt/c/dev/GActionSheet/local.settings.json', 'utf8'));
   const editorUrl = `https://script.google.com/d/${settings.scriptId}/edit`;
 
+  const authPath = resolveAuthFile('primary', { projectRoot: '/mnt/c/dev/GActionSheet' });
+
   const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext({ storageState: '/mnt/c/dev/GActionSheet/.auth/user.json' });
+  const context = await browser.newContext({ storageState: authPath });
   const page = await context.newPage();
 
   await page.goto(editorUrl);

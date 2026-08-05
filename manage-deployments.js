@@ -30,6 +30,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { checkbox, confirm, select } = require('@inquirer/prompts');
+const { resolveAuthFile } = require('./scripts/playwright-auth');
+const { publish: publishStaticPortal } = require('./scripts/publish-static-portal');
 
 const SETTINGS_PATH = path.join(__dirname, 'local.settings.json');
 
@@ -62,6 +64,11 @@ function stampVersionInfo(target, url) {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  // env is the source of truth (a real BUILD_INFO field, read by GasLogger.js
+  // into a top-level Axiom 'env' column); the (TEST)/(DEV) version-string
+  // suffix is a human-readable derivative of it, not the other way around --
+  // Axiom queries should filter on env=='test', not substring-match version.
+  const env = target === 'test' ? 'test' : target === 'dev' ? 'dev' : 'production';
   const suffix = target === 'test' ? ' (TEST)' : target === 'dev' ? ' (DEV)' : '';
   const versionStr = `${appVersion} (Rev. ${dateStr} ${timeStr})${suffix}`;
 
@@ -70,6 +77,7 @@ function stampVersionInfo(target, url) {
   data = data.replace(/version: "[^"]*"/, `version: "${versionStr}"`);
   data = data.replace(/buildDate: "[^"]*"/, `buildDate: "${now.toISOString()}"`);
   data = data.replace(/webappUrl: "[^"]*"/, `webappUrl: "${url}"`);
+  data = data.replace(/env: "[^"]*"/, `env: "${env}"`);
   fs.writeFileSync(versionPath, data, 'utf8');
 
   console.log(`\n📝 Version stamped: ${versionStr}`);
@@ -170,6 +178,19 @@ async function deployToTarget(target, deployments, nonInteractive) {
     await registerAxiomConfig(match.deploymentId);
     await verifyConfig('test');
   }
+
+  // Static portal publish (gts-79dw.4.25) — always the last step of a deploy: it depends on
+  // Version.js's BUILD_INFO, which stampVersionInfo() above already wrote for this target.
+  // 'test' -> SIT (Static's pub/AS-sit/), 'production' -> PROD (pub/AS/). Failure here doesn't
+  // roll back the GAS deploy that already succeeded above — it's reported so the operator can
+  // retry with `node scripts/publish-static-portal.js --env <sit|prod>`.
+  const portalEnv = target === 'test' ? 'sit' : 'prod';
+  try {
+    await publishStaticPortal(portalEnv, { nonInteractive });
+  } catch (err) {
+    console.warn(`\n⚠️  Static portal publish failed: ${err.message}`);
+    console.warn(`   Retry with: node scripts/publish-static-portal.js --env ${portalEnv}\n`);
+  }
 }
 
 /**
@@ -263,7 +284,7 @@ async function registerTestToken(deploymentId) {
  * Pushes the Axiom ingest config (axiomToken/axiomDataset from local.settings.json)
  * to the GAS WebApp via set_axiom_config — protected by WEBAPP_SECRET, same pattern
  * as registerTestToken() — so GasLogger.flush() can POST server-side events there
- * (docs/atdd/journey-logging-design.md §4.3, GTaskSheet-ishz.1).
+ * (docs/atdd/journey-logging-design.md §4.3, gts-ishz.1).
  *
  * No-op (warns only) if axiomToken/axiomDataset aren't set in local.settings.json --
  * Axiom is optional, not required for a deploy to succeed.
@@ -314,11 +335,13 @@ async function registerAxiomConfig(deploymentId) {
  * Returns a Cookie header string, or null if the file is missing or unreadable.
  * Used to authenticate requests to the /dev endpoint, which requires editor access.
  *
- * @param {string} [authPath]  Path to storageState JSON. Defaults to .auth/user.json.
+ * @param {string} [authPath]  Path to storageState JSON. Defaults to the
+ *   "primary" role's file, resolved via scripts/playwright-auth.js
+ *   (local.settings.json's playwrightAccounts map, or .auth/user.json).
  * @returns {string|null}
  */
 function loadAuthCookies(authPath) {
-  const p = authPath || path.join(__dirname, '.auth', 'user.json');
+  const p = authPath || resolveAuthFile('primary', { projectRoot: __dirname, settingsPath: SETTINGS_PATH });
   if (!fs.existsSync(p)) return null;
   try {
     const state = JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -374,7 +397,7 @@ async function verifyConfig(target, opts = {}) {
   if (target === 'dev') {
     const cookies = loadAuthCookies();
     if (!cookies) {
-      console.log('  ⚠️  Skipped — no .auth/user.json  (run: node tests/playwright/auth.setup.js)');
+      console.log('  ⚠️  Skipped — no auth session found  (run: node tests/playwright/auth.setup.js)');
       _printSurfaceHint(target);
       return;
     }
