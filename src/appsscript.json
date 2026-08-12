@@ -3,7 +3,9 @@
   "dependencies": {
     "enabledAdvancedServices": [
       { "userSymbol": "Drive", "serviceId": "drive", "version": "v2" },
-      { "userSymbol": "AdminDirectory", "serviceId": "admin", "version": "directory_v1" }
+      { "userSymbol": "DriveV3", "serviceId": "drive", "version": "v3" },
+      { "userSymbol": "AdminDirectory", "serviceId": "admin", "version": "directory_v1" },
+      { "userSymbol": "Docs", "serviceId": "docs", "version": "v1" }
     ]
   },
   "exceptionLogging": "STACKDRIVER",
@@ -40,7 +42,17 @@
       "logoUrl": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/northlake-uu-emblem.png",
       "homepageTrigger": {
         "runFunction": "buildHomepageCard"
-      }
+      },
+      "universalActions": [
+        {
+          "label": "Export Governance JSON",
+          "runFunction": "onGovernanceExportMenu"
+        },
+        {
+          "label": "Export JSON + PDF Snapshot",
+          "runFunction": "onGovernanceExportAndPdfMenu"
+        }
+      ]
     },
     "docs": {
       "homepageTrigger": {
