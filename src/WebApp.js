@@ -606,6 +606,15 @@ function doPost(e) {
   if (payload.action === 'dump_doc_paragraphs') {
     return _handleDumpDocParagraphs(payload);
   }
+  if (payload.action === 'export_governance_json') {
+    return _handleExportGovernanceJson(payload);
+  }
+  if (payload.action === 'seed_doc_content') {
+    return _handleSeedDocContent(payload);
+  }
+  if (payload.action === 'create_doc_comment') {
+    return _handleCreateDocComment(payload);
+  }
   if (payload.action === 'begin_journey_session' ||
       payload.action === 'end_journey_session') {
     return _handleJourneySession(payload);
@@ -2250,6 +2259,113 @@ function _handleDumpDocParagraphs(payload) {
   GasLogger.log('test.dump_doc_paragraphs', { docId: docId, count: elements.length });
   GasLogger.flush();
   return _jsonResponse({ ok: true, docId: docId, elements: elements });
+}
+
+// ---------------------------------------------------------------------------
+// export_governance_json handler  (testToken-gated, gts-2glm)
+// ---------------------------------------------------------------------------
+
+/**
+ * Headless call-site into src/Procedure-Exporter.js's exportGovernance_(),
+ * for the [TST] twin (gts-2glm) of the governance-exporter feature
+ * (gts-ipoy). exportGovernance_ only accepted DocumentApp.getActiveDocument()
+ * (add-on-UI-session-only) before this bead added the options.docId seam —
+ * this route is the seam's only caller; the real UI entry points
+ * (onGovernanceExportMenu/onGovernanceExportAndPdfMenu/
+ * onExportGovernanceJson/onExportGovernanceJsonAndPdf, all in
+ * Procedure-Exporter.js) never pass docId and always resolve the active
+ * document, unchanged.
+ *
+ * Does NOT write the JSON/PDF file to Drive-as-observable-state beyond what
+ * exportGovernance_ itself always does (it writes a Drive file as a side
+ * effect regardless of caller) — this route additionally returns the JSON
+ * body inline so a test can assert against it without a second Drive round
+ * trip.
+ *
+ * Payload: { action:'export_governance_json', testToken, docId,
+ *   exportPdf? (default false) }
+ * Response: { ok, json, jsonFileId, pdfFileId? } | { error }
+ */
+function _handleExportGovernanceJson(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.docId || '';
+  if (!docId) return _jsonResponse({ error: 'docId required' });
+
+  try {
+    var result = exportGovernance_({ docId: docId, exportPdf: !!payload.exportPdf });
+    var response = { ok: true, json: result.json, jsonFileId: result.jsonFile.getId() };
+    if (result.pdfFile) response.pdfFileId = result.pdfFile.getId();
+    return _jsonResponse(response);
+  } catch (ex) {
+    GasLogger.log('test.export_governance_json.error', { docId: docId, msg: ex.message });
+    return _jsonResponse({ error: ex.message });
+  }
+}
+
+/**
+ * Generic Docs-API batchUpdate passthrough (testToken-gated, gts-2glm).
+ * Lets a test build arbitrary formatted seed content — headings, tables,
+ * explicit page breaks, manual highlight colors, bold-colon labels — using
+ * the standard Docs API request shape directly, rather than this file
+ * growing a bespoke GAS-side builder function per test scenario. Read-only
+ * elsewhere in this file's philosophy does not apply here: this route
+ * exists ONLY to construct fixture documents, never called by production
+ * code or by the exporter itself.
+ *
+ * Payload: { action:'seed_doc_content', testToken, docId, requests:[...] }
+ *   (requests is passed verbatim to Docs.Documents.batchUpdate's body)
+ * Response: { ok, replies } | { error }
+ */
+function _handleSeedDocContent(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.docId || '';
+  if (!docId) return _jsonResponse({ error: 'docId required' });
+  if (!payload.requests || !payload.requests.length) {
+    return _jsonResponse({ error: 'requests (non-empty array) required' });
+  }
+
+  try {
+    var result = Docs.Documents.batchUpdate({ requests: payload.requests }, docId);
+    return _jsonResponse({ ok: true, replies: result.replies || [] });
+  } catch (ex) {
+    return _jsonResponse({ error: ex.message });
+  }
+}
+
+/**
+ * Drive-comment seeding passthrough (testToken-gated, gts-2glm). The
+ * governance exporter's comment-to-document traceability (associate
+ * CommentsToBlocks_) needs real Drive comments with quoted_text to test
+ * against — DriveV3.Comments.create (unlike Docs suggested-edits, which the
+ * public API cannot create) is fully supported, so this is a direct
+ * passthrough rather than a synthetic fixture.
+ *
+ * Payload: { action:'create_doc_comment', testToken, docId,
+ *   content, quotedText? }
+ * Response: { ok, commentId } | { error }
+ */
+function _handleCreateDocComment(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.docId || '';
+  if (!docId) return _jsonResponse({ error: 'docId required' });
+  if (!payload.content) return _jsonResponse({ error: 'content required' });
+
+  try {
+    var comment = { content: payload.content };
+    if (payload.quotedText) {
+      comment.quotedFileContent = { mimeType: 'text/plain', value: payload.quotedText };
+    }
+    var created = DriveV3.Comments.create(comment, docId, { fields: 'id' });
+    return _jsonResponse({ ok: true, commentId: created.id });
+  } catch (ex) {
+    return _jsonResponse({ error: ex.message });
+  }
 }
 
 // ---------------------------------------------------------------------------

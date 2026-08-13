@@ -92,7 +92,13 @@ const HEADING_FALLBACK_BASE_RANK = 3;
 /** Historical/editorial drafting-material detection, applied to unit titles
  * and block text alike. */
 const SEMANTIC_STATE_PATTERNS = [
-  { name: 'old_paren_prefix', state: 'historical', re: /^\(OLD\)\b/i },
+  // No \b after the closing paren: ")" and a following space are both
+  // non-word characters, so \b never matches there — a prior version of
+  // this regex (`/^\(OLD\)\b/i`) only matched the unrealistic glued form
+  // "(OLD)Something" and silently never fired on real "(OLD) Something"
+  // text. Found via gts-2glm hardening test (test_export_governance_
+  // semantic_state_text_pattern_evidence).
+  { name: 'old_paren_prefix', state: 'historical', re: /^\(OLD\)/i },
   { name: 'old_dash_prefix', state: 'historical', re: /^OLD\s*[-:]/i },
   { name: 'end_prefix', state: 'editorial', re: /^END\s*[-:]/i },
   { name: 'fyi_prefix', state: 'editorial', re: /^FYI\s*[-:]/i },
@@ -227,9 +233,17 @@ function exportGovernanceJsonAndPdf() {
   return exportGovernance_({ exportPdf: true });
 }
 
+/**
+ * @param {{exportPdf: boolean, docId: (string|undefined)}} options  docId is
+ *   an optional testability seam (gts-2glm): when supplied, the export runs
+ *   against that document instead of DocumentApp.getActiveDocument(), which
+ *   only resolves inside a live add-on UI session. Production entry points
+ *   (onGovernanceExportMenu et al.) never pass docId — they always omit it
+ *   and rely on the active-document default. Only a headless test-support
+ *   caller (WebApp.js's export_governance_json route) sets it.
+ */
 function exportGovernance_(options) {
-  const appDoc = DocumentApp.getActiveDocument();
-  const documentId = appDoc.getId();
+  const documentId = options.docId || DocumentApp.getActiveDocument().getId();
 
   // Advanced Google Service: Docs API.
   const apiDoc = Docs.Documents.get(documentId, {
@@ -242,7 +256,7 @@ function exportGovernance_(options) {
     generated_at: new Date().toISOString(),
     document: {
       id: documentId,
-      title: apiDoc.title || appDoc.getName(),
+      title: apiDoc.title || documentId,
       revision_id: apiDoc.revisionId || null,
       source_url: `https://docs.google.com/document/d/${documentId}/edit`,
       suggestion_groups: []
@@ -497,11 +511,29 @@ function processTable_(table, ctx) {
  * GOVERNANCE UNIT RECOGNITION
  * ========================================================================== */
 
+// Leading semantic-state markers ("(OLD) ", "OLD - ", "END: ", "FYI - ") are
+// stripped before GOVERNANCE_UNIT_PATTERNS matching only — a heading like
+// "(OLD) Board Policy 3: Superseded Policy" must still be recognized as a
+// `policy` unit (with `historical` semantic_state) rather than falling
+// through to the generic heading-style `section` fallback. Only patterns
+// anchored at string-start are eligible; title and semantic-state detection
+// both continue to run against the full, unstripped text.
+const KIND_MATCH_STRIP_PATTERNS = SEMANTIC_STATE_PATTERNS.filter(p => p.re.source.startsWith('^'));
+
+function stripLeadingStateMarker_(t) {
+  for (const pattern of KIND_MATCH_STRIP_PATTERNS) {
+    const m = pattern.re.exec(t);
+    if (m && m.index === 0) return t.slice(m[0].length).trim();
+  }
+  return t;
+}
+
 function detectGovernanceUnit_(text, namedStyle) {
   const t = normalizeLine_(text);
+  const kindMatchText = stripLeadingStateMarker_(t);
 
   for (const pattern of GOVERNANCE_UNIT_PATTERNS) {
-    if (pattern.re.test(t)) {
+    if (pattern.re.test(kindMatchText)) {
       const semantic = detectSemanticState_(t);
       return {
         kind: pattern.kind,
