@@ -379,7 +379,8 @@ function _handleRegister(e) {
   // separately first so a bad/unreadable docId gets its own message instead
   // of the misleading "move it into a team folder" copy.
   try {
-    DriveApp.getFileById(docId);
+    withGasRetry('WebApp._handleRegister:DriveApp.getFileById',
+      function () { return DriveApp.getFileById(docId); });
   } catch (ex) {
     GasLogger.log('webapp.register.error', { docId: docId, msg: ex.message });
     GasLogger.flush();
@@ -1283,11 +1284,24 @@ function _handleSyncActionRows(payload) {
  * Response shape:
  *   { rows: [...], violations: [{ docId, issue }] }
  */
-function _handleVerifyActionRows(payload) {
+/**
+ * Core of verify_action_rows, factored out so in-process callers (the add-on
+ * homepage card, verifyDocumentSync) can get the same answer without a
+ * round-trip through UrlFetchApp to this script's own /exec deployment
+ * (gts-8py3 — that self-call was measured taking 35-40+s from inside a GAS
+ * execution vs. 3-4s for the identical HTTP call issued externally, which
+ * blew buildHomepageCard's ~44s platform timeout most of the time). Returns
+ * the plain response object; _handleVerifyActionRows wraps it for HTTP
+ * callers (the ATDD harness, which has no in-process access).
+ *
+ * @param {{docId:?string, docUrl:?string}} payload
+ * @return {{error:?string, rows:Array, violations:?Array}}
+ */
+function _verifyActionRowsCore(payload) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var actionsSheet = ss.getSheetByName('Actions');
   if (!actionsSheet) {
-    return _jsonResponse({ error: 'Actions sheet not found', rows: [] });
+    return { error: 'Actions sheet not found', rows: [] };
   }
   // testToken path sends docId; WEBAPP_SECRET path sends docUrl — normalise to URL form
   var docId = payload.docId || _extractDocIdFromString(payload.docUrl || '');
@@ -1312,10 +1326,14 @@ function _handleVerifyActionRows(payload) {
     }
   }
 
-  return _jsonResponse({
+  return {
     rows: _loadRowsForDocUrl(actionsSheet, docUrl),
     violations: violations
-  });
+  };
+}
+
+function _handleVerifyActionRows(payload) {
+  return _jsonResponse(_verifyActionRowsCore(payload));
 }
 
 /**
@@ -1949,7 +1967,8 @@ function _handleImportSelectedForTest(payload) {
     return _jsonResponse({ ok: true, inserted: 0, baseN: null });
   }
 
-  var doc   = DocumentApp.openById(docId);
+  var doc   = withGasRetry('WebApp._handleImportSelectedForTest:DocumentApp.openById',
+    function () { return DocumentApp.openById(docId); });
   var token = ScriptApp.getOAuthToken();
 
   var indexResult = _resolveEndIndex(docId, token);
@@ -2562,7 +2581,8 @@ function _handleAppendDocParagraph(payload) {
     return _jsonResponse({ error: 'text required for append_doc_paragraph' });
   }
 
-  var doc = DocumentApp.openById(docId);
+  var doc = withGasRetry('WebApp._handleAppendDocParagraph:DocumentApp.openById',
+    function () { return DocumentApp.openById(docId); });
   doc.getBody().appendParagraph(text);
   doc.saveAndClose();
 
@@ -2602,13 +2622,17 @@ function _handleJourneySession(payload) {
     var docName   = 'GActionSheet-Test-journey-' + dateStr + '-' + hexSuffix;
 
     var sheetId    = props.getProperty('TEST_SHEET_ID') || '';
-    var folderIter = sheetId ? DriveApp.getFileById(sheetId).getParents() : null;
+    var folderIter = sheetId
+      ? withGasRetry('WebApp._handleJourneySession.begin:DriveApp.getFileById',
+          function () { return DriveApp.getFileById(sheetId).getParents(); })
+      : null;
     var parent     = (folderIter && folderIter.hasNext())
                      ? folderIter.next()
                      : DriveApp.getRootFolder();
 
     var bjsDoc = DocumentApp.create(docName);
-    DriveApp.getFileById(bjsDoc.getId()).moveTo(parent);
+    withGasRetry('WebApp._handleJourneySession.begin:DriveApp.getFileById.moveTo',
+      function () { DriveApp.getFileById(bjsDoc.getId()).moveTo(parent); });
 
     GasLogger.log('journey.begin', { docId: bjsDoc.getId(), docName: docName });
     GasLogger.flush();
@@ -2625,7 +2649,8 @@ function _handleJourneySession(payload) {
     if (!docId) {
       return _jsonResponse({ error: 'docId required for end_journey_session' });
     }
-    DriveApp.getFileById(docId).setTrashed(true);
+    withGasRetry('WebApp._handleJourneySession.end:DriveApp.getFileById.setTrashed',
+      function () { DriveApp.getFileById(docId).setTrashed(true); });
     GasLogger.log('journey.end', { docId: docId });
     GasLogger.flush();
     return _jsonResponse({ ok: true, trashed: docId });

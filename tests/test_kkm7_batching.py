@@ -149,7 +149,11 @@ def test_syncall_batches_mark_doc_not_found_and_drive_metadata(settings, gas_log
         scn_control.verify_all_expectations(control_rows_after[0], tag="[kkm7.1 control]")
         scn_control.checkpoint(CheckpointKind.INTEGRITY)
     finally:
-        scn_a.close()
+        # scn_a's doc-trashing is deferred to new_doc(request=request)'s
+        # pytest finalizer (gts-hroj); scn_b/scn_control have no `request`
+        # and keep their inline trash (this test has no browser_page, so the
+        # diagnostics ordering hook is a no-op here regardless).
+        scn_a.engine.close()
         for s in (scn_b, scn_control):
             try:
                 s._post_route("end_journey_session", {"docId": s.doc_id})
@@ -221,4 +225,6 @@ def test_syncdocument_batches_flush_for_multiple_actions_single_doc(settings, ga
         scn.checkpoint(CheckpointKind.INTEGRITY)
         scn.verify_consistency(scope=SHEET)
     finally:
-        scn.close()
+        # Doc-trashing deferred to new_doc(request=request)'s pytest
+        # finalizer (gts-hroj).
+        scn.engine.close()

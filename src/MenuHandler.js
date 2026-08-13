@@ -6,14 +6,18 @@
  */
 
 function onOpen() {
-  // [PROBE] — simple trigger: authorized services unavailable; Logger only.
-  if (PROBE_ENABLED) {
-    Logger.log(JSON.stringify({
-      tag:     'PROBE.onOpen',
-      version: BUILD_INFO.version,
-      ts:      new Date().toISOString()
-    }));
-  }
+  // Simple trigger: authorized services (DriveApp, UrlFetchApp, GasLogger.flush()
+  // which hits both) are unavailable here. Logger.log() is not — unconditional
+  // (not PROBE_ENABLED-gated) so there is at least one signal in `clasp logs`
+  // confirming onOpen fired at all and which branch it reached, instead of the
+  // total blackout this trigger had before (gts-8py3 follow-up: matches the
+  // buildHomepageCard instrumentation gap found investigating the sidebar hang —
+  // this trigger had the identical gap and was equally undiagnosable).
+  Logger.log(JSON.stringify({
+    tag:     'onOpen.start',
+    version: BUILD_INFO.version,
+    ts:      new Date().toISOString()
+  }));
 
   // Sheets context: ActionSheet management menu.
   try {
@@ -42,8 +46,10 @@ function onOpen() {
           .addItem('Probe Identity', 'menuProbeIdentity') // [PROBE]
       )
       .addToUi();
+    Logger.log(JSON.stringify({ tag: 'onOpen.sheetsMenu.added', ts: new Date().toISOString() }));
   } catch (e) {
     // Not a Sheets context — try Docs context below.
+    Logger.log(JSON.stringify({ tag: 'onOpen.sheetsMenu.notApplicable', msg: String(e), ts: new Date().toISOString() }));
   }
 
   // Docs context: per-document actions available from the menu bar.
@@ -53,8 +59,10 @@ function onOpen() {
       .addItem('Sync', 'menuSyncActiveDoc')
       .addItem('Insert Tracker', 'menuInsertTrackerActiveDoc')
       .addToUi();
+    Logger.log(JSON.stringify({ tag: 'onOpen.docsMenu.added', ts: new Date().toISOString() }));
   } catch (e) {
     // Not a Docs context — exit silently.
+    Logger.log(JSON.stringify({ tag: 'onOpen.docsMenu.notApplicable', msg: String(e), ts: new Date().toISOString() }));
   }
 }
 

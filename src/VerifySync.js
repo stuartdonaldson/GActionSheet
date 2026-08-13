@@ -26,7 +26,8 @@ function verifyDocumentSync(docId) {
     }
   };
 
-  var doc = DocumentApp.openById(docId);
+  var doc = withGasRetry('VerifySync.verifyDocumentSync:DocumentApp.openById',
+    function () { return DocumentApp.openById(docId); });
   try {
     var docUrl = doc.getUrl();
     var floatingActions = _collectFloatingActionState(doc);
@@ -168,64 +169,22 @@ function _tableToTrackerRows(table) {
   return rows;
 }
 
+/**
+ * Calls _verifyActionRowsCore (WebApp.js) directly, in-process, rather than
+ * round-tripping through UrlFetchApp to this script's own /exec deployment.
+ * That self-call previously took 35-40+s from inside a GAS execution vs.
+ * 3-4s for the identical HTTP call issued externally, and was the actual
+ * cause of buildHomepageCard blowing its ~44s platform timeout most of the
+ * time (gts-8py3) — both callers of this function (buildHomepageCard,
+ * verifyDocumentSync) always run inside this same script project, so the
+ * HTTP hop was pure overhead, never a real cross-deployment call.
+ */
 function _fetchSheetRowsForVerification(docUrl) {
-  var response = _callVerifyWebApp({
-    action: 'verify_action_rows',
-    docUrl: docUrl
-  });
+  var response = _verifyActionRowsCore({ docUrl: docUrl });
   if (response.error) {
     throw new Error(response.error);
   }
   return response.rows || [];
-}
-
-function _callVerifyWebApp(payload) {
-  var webAppUrl = getWebAppUrl();
-  var secret = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
-
-  if (!webAppUrl) {
-    throw new Error('WEBAPP_URL not set');
-  }
-
-  var oauthToken = ScriptApp.getOAuthToken();
-  var resp = UrlFetchApp.fetch(webAppUrl, {
-    method: 'post',
-    contentType: 'application/json',
-    muteHttpExceptions: true,
-    headers: { Authorization: 'Bearer ' + oauthToken },
-    payload: JSON.stringify(_mergeVerifyPayload(payload, { secret: secret || '', clientVersion: BUILD_INFO.version }))
-  });
-
-  if (resp.getResponseCode() !== 200) {
-    throw new Error('Verify request failed: HTTP ' + resp.getResponseCode());
-  }
-
-  try {
-    var parsed = JSON.parse(resp.getContentText());
-    _logVersionMismatch(parsed, 'verify');
-    return parsed;
-  } catch (e) {
-    throw new Error('Verify request returned non-JSON response');
-  }
-}
-
-function _mergeVerifyPayload(left, right) {
-  var merged = {};
-  var key;
-
-  for (key in left) {
-    if (Object.prototype.hasOwnProperty.call(left, key)) {
-      merged[key] = left[key];
-    }
-  }
-
-  for (key in right) {
-    if (Object.prototype.hasOwnProperty.call(right, key)) {
-      merged[key] = right[key];
-    }
-  }
-
-  return merged;
 }
 
 function _compareVerificationState(result, floatingActions, tracker, sheetRows) {

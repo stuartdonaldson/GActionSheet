@@ -269,11 +269,11 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         )
         scn_p4.checkpoint(STEP, on=frozenset({Surface.UI}))
     finally:
+        # Doc-trashing is deferred to a pytest finalizer registered by
+        # new_doc(request=request) (gts-hroj) -- only the drain-invariant
+        # check runs here, so the UI-failure-diagnostics hook still sees the
+        # doc pre-trash on a failure.
         for scn in sessions:
-            try:
-                scn._post_route("end_journey_session", {"docId": scn.doc_id})
-            except Exception:
-                pass
             scn.engine.close()
 
 
@@ -365,11 +365,11 @@ def test_team_view_page(settings, gas_log_dir, request):
             f"unknown teamId should not be echoed back: {html_unknown!r}"
         )
     finally:
+        # Doc-trashing is deferred to a pytest finalizer registered by
+        # new_doc(request=request) (gts-hroj) -- only the drain-invariant
+        # check runs here, so the UI-failure-diagnostics hook still sees the
+        # doc pre-trash on a failure.
         for scn in sessions:
-            try:
-                scn._post_route("end_journey_session", {"docId": scn.doc_id})
-            except Exception:
-                pass
             scn.engine.close()
 
 
@@ -390,7 +390,6 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
         setup_resp = scn_setup._post_fixture("setup_team_scope_fixture")
         teams = setup_resp.get("data") or {}
         team_a = teams["testTeamA"]
-        team_a_child = teams["testTeamAChild"]
 
         # ── Seed: target + 2 sources in testTeamA, 1 other-team negative ────
         scn_target = new_doc()
@@ -409,10 +408,14 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
         scn_src2.sync()
         src2_action = _seed_open_action(scn_src2, "Import-flow source-2 action")
 
+        # scn_other is pure leadup state for AC-1's other-team negative check
+        # (never opened/synced in this test), so it skips the real sync()
+        # round trip the same way test_import_access_filter's scn_other does
+        # — see _seed_import_candidate's docstring for why that's safe here
+        # (list_importable_actions never reads doc content, only the
+        # Actions-row + DocData join this helper fabricates directly).
         scn_other = new_doc()
-        _move_to_folder(scn_other, team_a_child)
-        scn_other.sync()
-        _seed_open_action(scn_other, "Import-flow other-team action")
+        _seed_import_candidate(scn_other, "TestTeamScopeAChild", "Import-flow other-team action")
 
         # ── AC-1: Import tab list — grouped by doc_name ASC, AI-N ASC within ─
         scn_target.ui.show_tab("Import")
@@ -556,11 +559,11 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
         scn_src1.sync()
         scn_src2.sync()
     finally:
+        # Doc-trashing is deferred to a pytest finalizer registered by
+        # new_doc(request=request) (gts-hroj) -- only the drain-invariant
+        # check runs here, so the UI-failure-diagnostics hook still sees the
+        # doc pre-trash on a failure.
         for scn in sessions:
-            try:
-                scn._post_route("end_journey_session", {"docId": scn.doc_id})
-            except Exception:
-                pass
             scn.engine.close()
 
 

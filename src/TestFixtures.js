@@ -2749,6 +2749,124 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'sync_all_force_drive_5xx': {
+        // gts-pm72 Backstop proof: simulates N consecutive transient Drive
+        // files.list 5xx responses (the sync.driveMetadata.error symptom)
+        // without depending on a real Google-side outage lining up with a
+        // test run. Sets _TEST_FORCE_DRIVE_5XX_COUNT, which
+        // SyncManager.js's _fetchDriveWithRetry consults on every Drive REST
+        // attempt via _driveFetchTestOverrideCode -- each consulted attempt
+        // decrements the counter and reports a synthetic HTTP 500 (real
+        // Drive is still called underneath; only the code the retry loop
+        // sees is overridden, so this never touches production Drive
+        // behaviour). The counter is a '_TEST_' property, so a crashed test
+        // is swept by 'reset_test_state' rather than leaking into later runs.
+        //
+        // data.fails (default 1) is the number of attempts to force-fail:
+        //   - fails < 3 (the bounded retry's max attempts): a later attempt
+        //     within the same _fetchDriveWithRetry call recovers, so
+        //     sync.driveMetadata.error is never logged and syncAll finishes
+        //     clean -- proves the retry recovers.
+        //   - fails >= 3: every attempt in the bounded window is forced,
+        //     the loop exhausts and _fetchDriveDocMetadata still throws (its
+        //     existing per-doc fallback then keeps the sweep correct) --
+        //     proves the retry is bounded, not infinite/skipped.
+        var d5xxFails = (data && data.fails != null) ? data.fails : 1;
+        PropertiesService.getScriptProperties().setProperty('_TEST_FORCE_DRIVE_5XX_COUNT', String(d5xxFails));
+        try {
+          syncAll();
+          SpreadsheetApp.flush();
+        } finally {
+          PropertiesService.getScriptProperties().deleteProperty('_TEST_FORCE_DRIVE_5XX_COUNT');
+        }
+        _TF_RESULT = { tag: 'fixture.sync_all_force_drive_5xx', data: { requestedFails: d5xxFails } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'insert_tracker_force_gas_retry': {
+        // gts-bops Backstop proof: forces N consecutive synthetic
+        // 'Service Documents failed while accessing document with id ...'
+        // exceptions out of TrackerTable.js's DocumentApp.openById call --
+        // the exact failure that triggered gts-bops (F10, S5 merge-gate run
+        // 2026-08-07) -- via withGasRetry's own test-only fault-injection
+        // hook (RetryUtil.js::_gasRetryTestShouldForceFailure), keyed on
+        // that call site's label. Real DocumentApp is never touched; only
+        // the code path withGasRetry sees is overridden, mirroring
+        // sync_all_force_drive_5xx's fault-injection shape one level up
+        // (exception-based instead of response-code-based).
+        //
+        // data.fails (default 1) is the number of attempts to force-fail:
+        //   - fails < 3 (the bounded retry's max attempts): insertTrackerTable
+        //     still succeeds, having consumed >1 attempt -- proves the retry
+        //     recovers (gasRetry.attempt + gasRetry.recovered logged, no
+        //     gasRetry.exhausted, no tracker.error).
+        //   - fails >= 3: every attempt in the bounded window is forced, the
+        //     loop exhausts and insertTrackerTable throws (caught and logged
+        //     as tracker.error by its own existing catch, same as before this
+        //     bead) -- proves the retry is bounded, not infinite/skipped.
+        var itfLabel = 'TrackerTable.insertTrackerTable:DocumentApp.openById';
+        var itfFails = (data && data.fails != null) ? data.fails : 1;
+        _tfInsertFloatingAction(body, 'AI-1: gts-bops forced-retry tracker action');
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        syncDocument(testDocId);
+        SpreadsheetApp.flush();
+        PropertiesService.getScriptProperties().setProperty(
+          '_TEST_FORCE_GAS_RETRY_FAIL_COUNT:' + itfLabel, String(itfFails));
+        var itfOk = true;
+        var itfErr = null;
+        try {
+          insertTrackerTable(testDocId);
+        } catch (e) {
+          itfOk = false;
+          itfErr = e.message;
+        } finally {
+          PropertiesService.getScriptProperties().deleteProperty(
+            '_TEST_FORCE_GAS_RETRY_FAIL_COUNT:' + itfLabel);
+        }
+        _TF_RESULT = {
+          tag: 'fixture.insert_tracker_force_gas_retry',
+          data: { requestedFails: itfFails, ok: itfOk, err: itfErr }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'gas_retry_classifier_selftest': {
+        // gts-bops AC5 proof: RetryUtil.js::_isRetryableGasError classifies
+        // real (non-transient) error messages as NOT retryable, so a genuine
+        // not-found/permission-denied error still surfaces on attempt 1
+        // rather than burning 2 extra attempts + ~2s of backoff on an answer
+        // that will never change. Pure-function check -- no live Doc/Drive
+        // call, no doc mutation, near-instant.
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        var gcsCases = [
+          { msg: 'Service Documents failed while accessing document with id abc123.', expect: true },
+          { msg: 'Service invoked too many times in a short time: getFileById.', expect: true },
+          { msg: 'Internal error executing the API request.', expect: true },
+          { msg: "We're sorry, a server error occurred. Please wait a bit and try again.", expect: true },
+          { msg: 'Invalid argument: id', expect: false },
+          { msg: 'Document is missing (perhaps it was deleted?)', expect: false },
+          { msg: 'You do not have permission to access the requested document.', expect: false },
+          { msg: 'File not found.', expect: false }
+        ];
+        var gcsResults = [];
+        var gcsAllMatch = true;
+        for (var gc = 0; gc < gcsCases.length; gc++) {
+          var gcsGot = _isRetryableGasError({ message: gcsCases[gc].msg });
+          var gcsMatch = gcsGot === gcsCases[gc].expect;
+          if (!gcsMatch) gcsAllMatch = false;
+          gcsResults.push({ msg: gcsCases[gc].msg, expect: gcsCases[gc].expect, got: gcsGot, match: gcsMatch });
+        }
+        _TF_RESULT = {
+          tag: 'fixture.gas_retry_classifier_selftest',
+          data: { allMatch: gcsAllMatch, results: gcsResults }
+        };
+        break;
+      }
+
       // ── rz4k.4: Sheets-menu entry points driven via their own MenuHandler.js ──
       // wrappers. Each case invokes the menu function itself — the call-site the
       // entry-point-coverage invariant scopes to — NOT the core function it

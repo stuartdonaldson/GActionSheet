@@ -18,6 +18,20 @@ last mutating step, and entry_point="syncAll" is what's tagged.
 
 No shared context: authored against gts-sl64's frozen Design/AC text in
 `bd show gts-sl64`, not by reading gts-b6dm's implementation diff.
+
+Batched (gts-ir1f, 2026-08-06): AC1-AC4 previously ran as 4 independent
+tests, each driving its own full syncAll() sweep against the shared
+backlog spreadsheet (syncAll() sweeps ALL docs regardless of which doc's
+scn session calls it — testDocId only scopes fixture setup, not the sweep
+itself, per src/TestWebApp.js::_handleRunFixture). Batched into ONE test:
+4 independent docs set up, then exactly 2 shared syncAll() sweeps (a seed
+sweep + a final verification sweep, both retried only for Drive
+eventual-consistency lag) instead of up to ~11 sweeps across the 4
+original tests. See plan-context.md "Test execution convention — batch
+scenario setups per live syncAll() sweep" for the general shape and the
+"when NOT to batch" exceptions this design respects (AC2's own two-sweep
+dependency is preserved as the batch's seed+final split, not force-fit
+into one sweep).
 """
 import time
 
@@ -81,6 +95,31 @@ def _sync_all_until_team(scn, expected_team_id, attempts=4, delay_s=8):
     return row
 
 
+def _sync_all_batch_until(scn, checks, fixture_name="sync_all", extra=None,
+                           attempts=4, delay_s=8):
+    """Batched analogue of _sync_all_until_team (gts-ir1f).
+
+    Runs ONE shared syncAll()-driving fixture call (via `scn`, but the
+    sweep itself covers every doc in the backlog, not just `scn`'s), then
+    evaluates every scenario's zero-arg `checks` callable (None = satisfied,
+    else a failure string, same contract as scn.expect_callable's CALLABLE
+    kind). Retries the SAME shared sweep — not a per-scenario sweep — only
+    while eventual Drive-index-consistency lag leaves any check
+    unsatisfied, so N independent scenarios still share one sweep per
+    attempt instead of each polling independently. Returns the list of
+    still-failing check messages (empty = all satisfied).
+    """
+    failures = []
+    for attempt in range(attempts):
+        _sync_all_patient(scn, fixture_name, extra=extra)
+        failures = [msg for msg in (check() for check in checks) if msg]
+        if not failures:
+            return failures
+        if attempt < attempts - 1:
+            time.sleep(delay_s)
+    return failures
+
+
 def _docdata_row(scn):
     resp = scn._post_fixture("get_docdata_row")
     return (resp.get("data") or {}).get("row")
@@ -111,187 +150,181 @@ def team_folders(settings, request):
 
 
 # ---------------------------------------------------------------------------
-# AC1 — folder move reassigns team via syncAll (not a per-doc resync)
+# AC1-AC4 batched — see module docstring for the retrofit shape (gts-ir1f)
 # ---------------------------------------------------------------------------
 
-def test_syncall_reconciles_team_after_folder_move(settings, team_folders, request):
-    scn = ScenarioSession.new_doc(settings, request=request)
+def test_syncall_team_reconciliation_batch(settings, team_folders, request):
+    """Batches AC1 (folder-move reassigns team), AC2 (UpdateDoc override
+    wins over the folder walk), AC3 (moved out of every team folder clears
+    the team), and AC4 (a transient folder-walk error leaves the existing
+    team unchanged) behind ONE seed syncAll() sweep + ONE final syncAll()
+    sweep, instead of each scenario driving its own sweep(s)."""
+    sessions = []
     try:
-        _move_to_folder(scn, team_folders["testTeamA"])
-        scn.append_paragraph("AI-1: sl64 AC1 folder-move action")
-        scn.sync()  # first-pass auto-assignment: DocData.teamId = TestTeamScopeA
-        pre = _docdata_row(scn) or {}
-        assert pre.get("teamId") == "TestTeamScopeA", (
-            f"[sl64 AC1 pre] expected initial teamId=TestTeamScopeA, got {pre.get('teamId')!r}"
+        # --- Setup: 4 independent docs, no shared syncAll yet ---------------
+        ac1 = ScenarioSession.new_doc(settings, request=request)
+        sessions.append(ac1)
+        _move_to_folder(ac1, team_folders["testTeamA"])
+        ac1.append_paragraph("AI-1: sl64 AC1 folder-move action")
+        ac1.sync()  # first-pass auto-assignment: DocData.teamId = TestTeamScopeA
+        pre1 = _docdata_row(ac1) or {}
+        assert pre1.get("teamId") == "TestTeamScopeA", (
+            f"[sl64 AC1 pre] expected initial teamId=TestTeamScopeA, got {pre1.get('teamId')!r}"
         )
 
-        # Move to a DIFFERENT team's folder, then drive reconciliation via
-        # syncAll itself — NOT scn.sync() (that per-doc path is deliberately
-        # sticky by design, test_team_scope.py S8).
-        _move_to_folder(scn, team_folders["testTeamAChild"])
-        after = _sync_all_until_team(scn, "TestTeamScopeAChild")
-        assert after.get("teamId") == "TestTeamScopeAChild", (
-            f"[sl64 AC1] DocData.teamId not reconciled to the doc's new folder team "
-            f"after syncAll: expected TestTeamScopeAChild, got {after.get('teamId')!r}"
+        ac2 = ScenarioSession.new_doc(settings, request=request)
+        sessions.append(ac2)
+        _move_to_folder(ac2, team_folders["testTeamA"])
+        ac2.append_paragraph("AI-1: sl64 AC2 UpdateDoc-override action")
+        ac2.sync()  # DocData.teamId = TestTeamScopeA
+
+        ac3 = ScenarioSession.new_doc(settings, request=request)
+        sessions.append(ac3)
+        _move_to_folder(ac3, team_folders["testTeamA"])
+        ac3.append_paragraph("AI-1: sl64 AC3 moved-out-of-folders action")
+        ac3.sync()  # DocData.teamId = TestTeamScopeA
+        pre3 = _docdata_row(ac3) or {}
+        assert pre3.get("teamId") == "TestTeamScopeA", (
+            f"[sl64 AC3 pre] expected initial teamId=TestTeamScopeA, got {pre3.get('teamId')!r}"
         )
-        assert _team_scope(scn) == "TestTeamScopeAChild", (
+
+        # testTeamADeep so the doc is NOT directly parented by a TeamData
+        # folder (rules out the O(1) fast path), forcing the actual
+        # _walkFolderForTeam call the AC4 fixture below patches.
+        ac4 = ScenarioSession.new_doc(settings, request=request)
+        sessions.append(ac4)
+        _move_to_folder(ac4, team_folders["testTeamADeep"])
+        ac4.append_paragraph("AI-1: sl64 AC4 transient-walk-error action")
+        ac4.sync()  # deep-walk auto-assignment: DocData.teamId = TestTeamScopeA
+        pre4 = _docdata_row(ac4) or {}
+        assert pre4.get("teamId") == "TestTeamScopeA", (
+            f"[sl64 AC4 pre] expected initial teamId=TestTeamScopeA via deep walk, "
+            f"got {pre4.get('teamId')!r}"
+        )
+
+        # --- Shared SEED sweep -----------------------------------------------
+        # ONE syncAll() seeds syncState for every doc in the backlog so AC2's
+        # UpdateDoc-skip check below isolates the integrity pass's own skip
+        # logic (see original AC2 docstring) rather than confounding with the
+        # main loop's never-synced-by-syncAll path. AC1/AC3/AC4 haven't moved
+        # to their post-move location yet, so this sweep is a no-op
+        # reconciliation for them (same team, no observable change).
+        _sync_all_patient(ac1)
+
+        # --- Post-seed mutation: each doc moves to its "under test" state ---
+        _move_to_folder(ac1, team_folders["testTeamAChild"])  # different team's folder
+
+        _set_docdata(ac2, syncStatus="UpdateDoc", teamId="TestTeamScopeAChild")
+        pre2 = _docdata_row(ac2) or {}
+        assert pre2.get("syncStatus") == "UpdateDoc" and pre2.get("teamId") == "TestTeamScopeAChild", (
+            f"[sl64 AC2 pre] set_docdata_row override not applied: {pre2!r}"
+        )
+
+        _move_to_folder(ac3, team_folders["testTeamNoTeam"])  # out of every team folder
+        # AC4: no further per-doc mutation — the walk-error is forced by the
+        # fixture below, for this doc only, during the shared final sweep.
+
+        # --- Shared FINAL sweep ------------------------------------------------
+        # ONE syncAll() (retried only for Drive index lag) reconciles AC1 and
+        # AC3, leaves AC2's pending override untouched, and forces AC4's walk
+        # to fail — all in the same sweep. sync_all_force_team_walk_error only
+        # intercepts the walk for ac4.doc_id (src/TestFixtures.js ~line 2737);
+        # every other doc in the same sweep walks for real.
+        checks = [
+            lambda: (
+                None if (_docdata_row(ac1) or {}).get("teamId") == "TestTeamScopeAChild"
+                else f"[sl64 AC1] teamId={(_docdata_row(ac1) or {}).get('teamId')!r}, expected TestTeamScopeAChild"
+            ),
+            lambda: (
+                None if (_docdata_row(ac3) or {}).get("teamId", "") == ""
+                else f"[sl64 AC3] teamId still set: {(_docdata_row(ac3) or {}).get('teamId')!r}"
+            ),
+        ]
+        failures = _sync_all_batch_until(
+            ac4, checks, "sync_all_force_team_walk_error", extra={"docId": ac4.doc_id},
+        )
+        assert not failures, "; ".join(failures)
+
+        # --- AC1: folder move reassigns team via syncAll ---
+        after1 = _docdata_row(ac1) or {}
+        assert after1.get("teamId") == "TestTeamScopeAChild", (
+            f"[sl64 AC1] DocData.teamId not reconciled to the doc's new folder team "
+            f"after syncAll: expected TestTeamScopeAChild, got {after1.get('teamId')!r}"
+        )
+        assert _team_scope(ac1) == "TestTeamScopeAChild", (
             "[sl64 AC1] Drive teamScope appProperty not corrected to match the new team"
         )
 
-        def _reconciled() -> str | None:
-            row = _docdata_row(scn) or {}
+        # --- AC2: UpdateDoc pending override wins over the folder walk ---
+        after2 = _docdata_row(ac2) or {}
+        assert after2.get("teamId") == "TestTeamScopeAChild", (
+            f"[sl64 AC2] syncAll's integrity pass overwrote a pending UpdateDoc override: "
+            f"expected teamId to stay TestTeamScopeAChild, got {after2.get('teamId')!r}"
+        )
+        assert after2.get("syncStatus") == "UpdateDoc", (
+            f"[sl64 AC2] syncAll's integrity pass should not touch syncStatus for an "
+            f"UpdateDoc row, got {after2.get('syncStatus')!r}"
+        )
+
+        # --- AC3: moved out of every team folder clears the team ---
+        after3 = _docdata_row(ac3) or {}
+        assert after3.get("teamId", "") == "", (
+            f"[sl64 AC3] DocData.teamId not cleared after moving out of every team "
+            f"folder; expected '', got {after3.get('teamId')!r}"
+        )
+        assert _team_scope(ac3) == "", (
+            "[sl64 AC3] Drive teamScope appProperty not cleared to match"
+        )
+
+        # --- AC4: transient folder-walk error leaves the existing team unchanged ---
+        after4 = _docdata_row(ac4) or {}
+        assert after4.get("teamId") == "TestTeamScopeA", (
+            f"[sl64 AC4] a forced transient folder-walk error clobbered "
+            f"DocData.teamId: expected it to stay TestTeamScopeA (unchanged), "
+            f"got {after4.get('teamId')!r}"
+        )
+
+        # --- Durability + entry-point tagging (T1/T17/T24), one per scenario ---
+        def _ac1_reconciled():
+            row = _docdata_row(ac1) or {}
             if row.get("teamId") != "TestTeamScopeAChild":
                 return f"[sl64 AC1] DocData.teamId={row.get('teamId')!r}, expected TestTeamScopeAChild"
             return None
 
-        scn.expect_callable(
-            _reconciled, on=SHEET, tag="[sl64 folder-move reassigns team]", entry_point="syncAll",
-        )
-        scn.checkpoint(STEP)
-    finally:
-        scn.close()
-
-
-# ---------------------------------------------------------------------------
-# AC2 — UpdateDoc pending override wins over the folder walk
-# ---------------------------------------------------------------------------
-
-def test_syncall_leaves_updatedoc_override_untouched(settings, team_folders, request):
-    """Isolates the INTEGRITY PASS's own UpdateDoc-skip check (gts-b6dm AC3),
-    distinct from _syncTeamScope's separate, pre-existing UpdateDoc-apply-and-
-    clear behavior (test_team_scope.py S3, exercised via a per-doc sync). If
-    this doc's syncState were never seeded by a prior syncAll() sweep, THIS
-    sweep's own main loop would treat it as never-synced-by-syncAll and
-    invoke syncDocument() -> _syncTeamScope() first (applying + clearing the
-    override) before the integrity pass even runs — a different, confounding
-    code path, not the one gts-b6dm AC3 is about. Running sync_all once
-    BEFORE setting the override establishes syncState so the main loop skips
-    this unchanged doc on the sweep under test, isolating the integrity
-    pass's own skip check."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        _move_to_folder(scn, team_folders["testTeamA"])
-        scn.append_paragraph("AI-1: sl64 AC2 UpdateDoc-override action")
-        scn.sync()  # DocData.teamId = TestTeamScopeA
-        _sync_all_patient(scn)  # seeds syncState so the next sweep's main loop skips this doc
-
-        # Operator sets a pending manual override to a DIFFERENT team than the
-        # doc's actual current folder location.
-        _set_docdata(scn, syncStatus="UpdateDoc", teamId="TestTeamScopeAChild")
-        pre = _docdata_row(scn) or {}
-        assert pre.get("syncStatus") == "UpdateDoc" and pre.get("teamId") == "TestTeamScopeAChild", (
-            f"[sl64 AC2 pre] set_docdata_row override not applied: {pre!r}"
-        )
-
-        # Doc's Drive folder still says testTeamA — if the integrity pass's
-        # folder walk won, this would resolve back to TestTeamScopeA. It must
-        # not: 'UpdateDoc' is a pending manual override, and it, not the
-        # folder walk, wins (mirrors _syncTeamScope's own precedence).
-        _sync_all_patient(scn)
-
-        after = _docdata_row(scn) or {}
-        assert after.get("teamId") == "TestTeamScopeAChild", (
-            f"[sl64 AC2] syncAll's integrity pass overwrote a pending UpdateDoc override: "
-            f"expected teamId to stay TestTeamScopeAChild, got {after.get('teamId')!r}"
-        )
-        assert after.get("syncStatus") == "UpdateDoc", (
-            f"[sl64 AC2] syncAll's integrity pass should not touch syncStatus for an "
-            f"UpdateDoc row, got {after.get('syncStatus')!r}"
-        )
-
-        def _override_preserved() -> str | None:
-            row = _docdata_row(scn) or {}
+        def _ac2_preserved():
+            row = _docdata_row(ac2) or {}
             if row.get("teamId") != "TestTeamScopeAChild":
                 return f"[sl64 AC2] override clobbered: teamId={row.get('teamId')!r}"
             return None
 
-        scn.expect_callable(
-            _override_preserved, on=SHEET, tag="[sl64 UpdateDoc override wins]", entry_point="syncAll",
-        )
-        scn.checkpoint(STEP)
-    finally:
-        scn.close()
-
-
-# ---------------------------------------------------------------------------
-# AC3 — moved out of every team folder clears the team
-# ---------------------------------------------------------------------------
-
-def test_syncall_clears_team_when_moved_out_of_all_folders(settings, team_folders, request):
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        _move_to_folder(scn, team_folders["testTeamA"])
-        scn.append_paragraph("AI-1: sl64 AC3 moved-out-of-folders action")
-        scn.sync()  # DocData.teamId = TestTeamScopeA
-        pre = _docdata_row(scn) or {}
-        assert pre.get("teamId") == "TestTeamScopeA", (
-            f"[sl64 AC3 pre] expected initial teamId=TestTeamScopeA, got {pre.get('teamId')!r}"
-        )
-
-        _move_to_folder(scn, team_folders["testTeamNoTeam"])
-        after = _sync_all_until_team(scn, "") or {}
-        assert after.get("teamId", "") == "", (
-            f"[sl64 AC3] DocData.teamId not cleared after moving out of every team "
-            f"folder; expected '', got {after.get('teamId')!r}"
-        )
-        assert _team_scope(scn) == "", (
-            "[sl64 AC3] Drive teamScope appProperty not cleared to match"
-        )
-
-        def _cleared() -> str | None:
-            row = _docdata_row(scn) or {}
+        def _ac3_cleared():
+            row = _docdata_row(ac3) or {}
             if row.get("teamId", "") != "":
                 return f"[sl64 AC3] teamId still set: {row.get('teamId')!r}"
             return None
 
-        scn.expect_callable(
-            _cleared, on=SHEET, tag="[sl64 moved-out-of-all-folders clears team]", entry_point="syncAll",
-        )
-        scn.checkpoint(STEP)
-    finally:
-        scn.close()
-
-
-# ---------------------------------------------------------------------------
-# AC4 — a transient folder-walk error leaves the existing team unchanged
-# ---------------------------------------------------------------------------
-
-def test_syncall_leaves_team_unchanged_on_transient_walk_error(settings, team_folders, request):
-    """Forces _walkFolderForTeam to return its own 'could not complete'
-    sentinel (false) for this doc only, for one syncAll() call
-    (sync_all_force_team_walk_error fixture), rather than relying on a real,
-    non-deterministic Drive outage. testTeamADeep is used so the doc is NOT
-    directly parented by a TeamData folder (rules out the O(1) fast path),
-    forcing the actual _walkFolderForTeam call this fixture patches."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        _move_to_folder(scn, team_folders["testTeamADeep"])
-        scn.append_paragraph("AI-1: sl64 AC4 transient-walk-error action")
-        scn.sync()  # deep-walk auto-assignment: DocData.teamId = TestTeamScopeA
-        pre = _docdata_row(scn) or {}
-        assert pre.get("teamId") == "TestTeamScopeA", (
-            f"[sl64 AC4 pre] expected initial teamId=TestTeamScopeA via deep walk, "
-            f"got {pre.get('teamId')!r}"
-        )
-
-        _sync_all_patient(scn, "sync_all_force_team_walk_error")
-
-        after = _docdata_row(scn) or {}
-        assert after.get("teamId") == "TestTeamScopeA", (
-            f"[sl64 AC4] a forced transient folder-walk error clobbered "
-            f"DocData.teamId: expected it to stay TestTeamScopeA (unchanged), "
-            f"got {after.get('teamId')!r}"
-        )
-
-        def _unchanged() -> str | None:
-            row = _docdata_row(scn) or {}
+        def _ac4_unchanged():
+            row = _docdata_row(ac4) or {}
             if row.get("teamId") != "TestTeamScopeA":
                 return f"[sl64 AC4] teamId changed on walk error: {row.get('teamId')!r}"
             return None
 
-        scn.expect_callable(
-            _unchanged, on=SHEET, tag="[sl64 transient walk error preserves team]", entry_point="syncAll",
+        ac1.expect_callable(
+            _ac1_reconciled, on=SHEET, tag="[sl64 folder-move reassigns team]", entry_point="syncAll",
         )
-        scn.checkpoint(STEP)
+        ac1.checkpoint(STEP)
+        ac2.expect_callable(
+            _ac2_preserved, on=SHEET, tag="[sl64 UpdateDoc override wins]", entry_point="syncAll",
+        )
+        ac2.checkpoint(STEP)
+        ac3.expect_callable(
+            _ac3_cleared, on=SHEET, tag="[sl64 moved-out-of-all-folders clears team]", entry_point="syncAll",
+        )
+        ac3.checkpoint(STEP)
+        ac4.expect_callable(
+            _ac4_unchanged, on=SHEET, tag="[sl64 transient walk error preserves team]", entry_point="syncAll",
+        )
+        ac4.checkpoint(STEP)
     finally:
-        scn.close()
+        for scn in sessions:
+            scn.close()

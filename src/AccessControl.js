@@ -152,7 +152,8 @@ function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows) {
 
     try {
       folderTier = _accessLevelToTier(_spikeAccessLevel(
-        DriveApp.getFolderById(folderId).getAccess(email)
+        withGasRetry('AccessControl.folder.getAccess:DriveApp.getFolderById',
+          function () { return DriveApp.getFolderById(folderId).getAccess(email); })
       ));
     } catch (e) {
       GasLogger.log('webapp.team.access.error', { where: 'folder.getAccess', folderId: folderId, message: String(e) });

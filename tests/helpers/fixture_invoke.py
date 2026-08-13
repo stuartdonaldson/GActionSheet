@@ -19,9 +19,7 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import urllib.request
-import urllib.error
+import scn.session as _session
 
 
 class FixtureTokenError(RuntimeError):
@@ -56,6 +54,18 @@ def invoke_fixture(
                            'test-token-expired'.
         FixtureError:      Response body contains { 'error': '...' }.
         RuntimeError:      HTTP error or JSON parse failure.
+
+    Transport + retry (GTaskSheet-z6bx): delegates to scn.session._http_post,
+    which bounds-retries the two known /exec -> script.googleusercontent.com
+    routing symptoms (HTTP 404; non-JSON echo-page body) instead of raising on
+    the first attempt. invoke_fixture used to be a third, independent copy of
+    this POST logic with no retry at all; because it sits on the session-scoped
+    autouse _reset_test_state path (tests/conftest.py), one transient routing
+    blip there used to abort an entire pytest session before any test code ran.
+    _http_post's exception taxonomy (scn.session.FixtureTokenError /
+    FixtureError) is mapped back onto this module's own classes below so
+    existing callers and their `except fixture_invoke.FixtureTokenError`-style
+    usage are unaffected.
     """
     url    = settings.get('webappTestUrl') or ''
     token  = settings.get('testToken')     or ''
@@ -71,50 +81,16 @@ def invoke_fixture(
             "Run npm run deploy:test to generate and register a fresh token."
         )
 
-    payload = json.dumps({
+    payload = {
         'action':    'run_fixture',
         'testToken': token,
         'fixture':   fixture_name,
         'testDocId': test_doc_id,
-    }).encode('utf-8')
-
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={'Content-Type': 'application/json'},
-        method='POST',
-    )
+    }
 
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode('utf-8')
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode('utf-8', errors='replace')
-        raise RuntimeError(
-            f"HTTP {exc.code} from GAS WebApp for fixture '{fixture_name}': {raw!r}"
-        ) from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(
-            f"Network error invoking fixture '{fixture_name}': {exc.reason}"
-        ) from exc
-
-    # Token errors are returned as plain text (not JSON).
-    if raw in ('test-token-unauthorized', 'test-token-expired'):
-        raise FixtureTokenError(
-            f"GAS WebApp rejected test token for fixture '{fixture_name}': {raw}. "
-            "Run npm run deploy:test to generate a fresh token."
-        )
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"Non-JSON response from GAS WebApp for fixture '{fixture_name}': {raw!r}"
-        ) from exc
-
-    if 'error' in result:
-        raise FixtureError(
-            f"GAS fixture '{fixture_name}' returned error: {result['error']}"
-        )
-
-    return result
+        return _session._http_post(url, payload, timeout)
+    except _session.FixtureTokenError as exc:
+        raise FixtureTokenError(str(exc)) from exc
+    except _session.FixtureError as exc:
+        raise FixtureError(str(exc)) from exc

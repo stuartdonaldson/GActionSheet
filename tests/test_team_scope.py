@@ -352,9 +352,9 @@ def test_team_scope(settings, gas_log_dir, request):
         scn_a.verify_consistency(scope=DOC)  # must not raise
 
     finally:
+        # Doc-trashing is deferred to a pytest finalizer registered by
+        # new_doc(request=request) (gts-hroj) -- only the drain-invariant
+        # check runs here, so the UI-failure-diagnostics hook still sees the
+        # doc pre-trash on a failure.
         for scn in sessions:
-            try:
-                scn._post_route("end_journey_session", {"docId": scn.doc_id})
-            except Exception:
-                pass
             scn.engine.close()

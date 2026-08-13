@@ -46,7 +46,8 @@ function insertTrackerTable(docId, options) {
   var onlyIfExists = options && options.onlyIfExists;
 
   try {
-    var doc             = DocumentApp.openById(docId);
+    var doc             = withGasRetry('TrackerTable.insertTrackerTable:DocumentApp.openById',
+      function () { return DocumentApp.openById(docId); });
     var floatingActions = _scanFloatingActions(doc);
 
     var ss        = _openActionSheetSpreadsheet();
@@ -102,7 +103,8 @@ function _openActionSheetSpreadsheet() {
     throw new Error('ActionSheet spreadsheet is unavailable in this context');
   }
 
-  return SpreadsheetApp.openById(spreadsheetId);
+  return withGasRetry('TrackerTable._openActionSheetSpreadsheet:SpreadsheetApp.openById',
+    function () { return SpreadsheetApp.openById(spreadsheetId); });
 }
 
 // ---------------------------------------------------------------------------

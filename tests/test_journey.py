@@ -102,7 +102,7 @@ def scn(settings, browser_page, request):
 # Journey
 # ---------------------------------------------------------------------------
 
-def test_journey(scn, expected_version, gas_log_dir, settings):
+def test_journey(scn, expected_version, gas_log_dir, settings, request):
     # ── Act 0 — pre-flight: confirm the add-on test deployment is installed
     # and serving the build just deployed ────────────────────────────────────
     try:
@@ -341,7 +341,7 @@ def test_journey(scn, expected_version, gas_log_dir, settings):
     }
     default_ai_token = {"fontFamily": "Comic Sans MS", "bold": True, "color": "#4c1d95"}
 
-    ref_scn = ScenarioSession.new_doc(settings)
+    ref_scn = ScenarioSession.new_doc(settings, request=request)
     try:
         # Step 1 — seed a reference doc, distinct from the journey's own doc,
         # with a styled first AI-1: action.
@@ -441,7 +441,7 @@ def test_journey(scn, expected_version, gas_log_dir, settings):
         # rather than by what _actionTextStyleRequest actually did. A fresh
         # doc has no such neighbor to inherit from, so its action-text style
         # is the genuine Google Docs blank-paragraph default.
-        reset_scn = ScenarioSession.new_doc(settings)
+        reset_scn = ScenarioSession.new_doc(settings, request=request)
         try:
             marker_reset = "configFormat reset-to-default smoke check"
             reset_scn.append_paragraph(f"AI: {marker_reset}")
@@ -479,12 +479,9 @@ def test_journey(scn, expected_version, gas_log_dir, settings):
             )
             scn.checkpoint(STEP)
         finally:
-            try:
-                reset_scn._post_route("end_journey_session", {"docId": reset_scn.doc_id})
-            except Exception:
-                pass
-    finally:
-        try:
-            ref_scn._post_route("end_journey_session", {"docId": ref_scn.doc_id})
-        except Exception:
+            # Doc-trashing deferred to new_doc(request=request)'s pytest
+            # finalizer (gts-hroj) -- nothing left to do here.
             pass
+    finally:
+        # Same as above: ref_scn's trashing is deferred to its finalizer.
+        pass

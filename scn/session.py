@@ -304,6 +304,7 @@ class ScenarioSession:
         self._gas_fence: float = clear_logs(settings.get("gasLogDir"))
         # Attach after creation: scn.ui = UiDriver(page, doc_id=scn.doc_id)
         self._ui = None
+        self._trashed = False  # guards _deferred_trash() idempotency (gts-hroj)
 
     # ``ui`` is a property so assigning the driver auto-wires the reporter + a
     # back-reference for the post-act fail-fast check — no fixture edits needed.
@@ -475,19 +476,65 @@ class ScenarioSession:
         # docId), so emit it as a synthetic first event now instead of leaving doc
         # creation invisible (§4.2, GTaskSheet-ishz.1).
         instance._reporter.event("HTTP", "begin_journey_session", dur_s=dur_s, _t_elapsed=0.0)
+        if hasattr(request, "addfinalizer"):
+            # Deferred trash, not immediate (gts-hroj): registering this as a
+            # pytest finalizer — rather than leaving it to the caller's own
+            # `finally:` — means it runs in the teardown phase, strictly
+            # after the call-phase failure report. See _deferred_trash()'s
+            # docstring for why that ordering matters. hasattr-guarded (not
+            # `is not None`) because some non-pytest callers pass a bare
+            # sentinel object as `request` just to opt into Reporter creation
+            # (e.g. test_scn_session.py's test doubles) — those aren't real
+            # FixtureRequests and have no finalizer machinery to register with.
+            request.addfinalizer(instance._deferred_trash)
         return instance
 
     def close(self) -> None:
-        """Trash the journey doc and assert the expectation queue is empty (§4.6).
+        """Assert the expectation queue is empty, then trash the journey doc (§4.6).
 
-        Calls end_journey_session (AtddContracts.js); then engine.close() enforces
-        the drain invariant — a non-empty queue is a DrainInvariantError (test failure).
+        engine.close() runs first so a caller invoking close() directly still
+        observes the DrainInvariantError (a non-empty queue is a real test
+        failure) at this call site, rather than it surfacing later out of a
+        finalizer. Trashing itself is delegated to _deferred_trash() — see its
+        docstring for why multi-doc *tests* should prefer registering that via
+        new_doc(request=...) over calling close() from their own `finally:`.
         """
-        self._post_route("end_journey_session", {"docId": self.doc_id})
+        self.engine.close()
+        self._deferred_trash()
+
+    def _deferred_trash(self) -> None:
+        """Trash the journey doc and close the reporter (gts-hroj).
+
+        Split out of close() so new_doc() can register it as a pytest
+        fixture finalizer (request.addfinalizer) instead of a test running it
+        from its own `finally:`. Fixture finalizers run in pytest's teardown
+        phase, strictly after the call-phase failure report — and this
+        suite's universal UI-failure-diagnostics hook
+        (conftest.py::pytest_runtest_makereport, GTaskSheet-3tkf) fires
+        exactly there. A test that trashes its own doc inside `finally:`
+        (part of the call phase — see the test's own stack, not a hook) beats
+        the diagnostics hook to it every time, so the captured screenshot
+        always shows the post-trash "file is in trash" Drive chrome
+        regardless of the real failure (mis-diagnosed as a product bug twice:
+        gts-lirp 2026-08-05, gts-ir1f attempt #4 2026-08-06).
+
+        Multi-doc live tests: let this run via the new_doc(request=...)
+        finalizer. Do not call this (or close()) from a test's own
+        `finally:` — call `scn.engine.close()` there instead if the
+        drain-invariant assertion still needs to happen at that point.
+
+        Idempotent — self._trashed guards a second invocation (e.g. close()
+        called explicitly on an instance that also has the auto-registered
+        finalizer) from re-trashing or double-closing the reporter.
+        """
+        if self._trashed:
+            return
+        self._trashed = True
         try:
-            self.engine.close()
-        finally:
-            self._reporter.close()
+            self._post_route("end_journey_session", {"docId": self.doc_id})
+        except Exception:
+            pass
+        self._reporter.close()
 
     # ------------------------------------------------------------------
     # Acts — HTTP mutations (§16.9 / §3.4)

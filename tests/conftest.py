@@ -7,15 +7,35 @@ import re
 
 import pytest
 
+from tests import duration_instrumentation as di
+
 _SETTINGS_PATH = pathlib.Path(__file__).parent.parent / "local.settings.json"
 _TEST_RESULTS = pathlib.Path(__file__).parent.parent / "test-results"
 
 _pytest_config = None
 
+# --- gts-y1eg: progress counter + duration/baseline instrumentation state --
+# Session-lifetime, single-process, serial suite (no xdist) — plain module
+# globals are safe here; see duration_instrumentation.py for the pure logic.
+_duration_total = 0
+_duration_index_map: dict[str, int] = {}
+_duration_next_index = 0
+_duration_run_id = None
+_duration_baseline: dict = {}
+_duration_phases: dict[str, dict[str, float]] = {}
+_duration_outcome: dict[str, str] = {}
+
 
 def pytest_configure(config):
-    global _pytest_config
+    global _pytest_config, _duration_run_id, _duration_baseline
     _pytest_config = config
+    _duration_run_id = datetime.datetime.now(datetime.timezone.utc).strftime("run-%Y%m%dT%H%M%SZ")
+    _duration_baseline = di.load_baseline()
+
+
+def pytest_collection_modifyitems(session, config, items):
+    global _duration_total
+    _duration_total = len(items)
 
 
 def _timestamp() -> str:
@@ -37,11 +57,51 @@ def _terminal_writeline(line: str) -> None:
 
 
 def pytest_runtest_logstart(nodeid, location):
-    _terminal_writeline(f"[{_timestamp()}] START  {nodeid}")
+    global _duration_next_index
+    _duration_next_index += 1
+    _duration_index_map[nodeid] = _duration_next_index
+    _terminal_writeline(f"[{_timestamp()}] {di.format_start_line(_duration_next_index, _duration_total, nodeid)}")
 
 
-def pytest_runtest_logfinish(nodeid, location):
-    _terminal_writeline(f"[{_timestamp()}] FINISH {nodeid}")
+def pytest_runtest_logreport(report):
+    """gts-y1eg AC1-AC4: per-phase durations -> [n/total] FINISH line +
+    flushed JSONL trend record + self-calibrating baseline update.
+
+    Report-only: this never raises and never touches the test outcome — a
+    failure anywhere in here must not mask the real pass/fail signal.
+    """
+    if report.when not in ("setup", "call", "teardown"):
+        return
+    global _duration_baseline
+    try:
+        nodeid = report.nodeid
+        phases = _duration_phases.setdefault(nodeid, {})
+        phases[report.when] = report.duration
+        if report.when == "call" or (report.when == "setup" and report.outcome != "passed"):
+            _duration_outcome[nodeid] = report.outcome
+        if report.when != "teardown":
+            return
+
+        phases = _duration_phases.pop(nodeid, {})
+        outcome = _duration_outcome.pop(nodeid, report.outcome)
+        index = _duration_index_map.pop(nodeid, _duration_next_index)
+        entry = _duration_baseline.get(nodeid)
+        baseline_s = entry["median_s"] if entry else None
+
+        record = di.build_record(
+            run_id=_duration_run_id, index=index, total=_duration_total,
+            nodeid=nodeid, outcome=outcome,
+            setup_s=phases.get("setup", 0.0), call_s=phases.get("call", 0.0),
+            teardown_s=phases.get("teardown", 0.0), baseline_s=baseline_s,
+        )
+        _terminal_writeline(f"[{_timestamp()}] {di.format_finish_line(record)}")
+        di.append_jsonl(record)
+        if outcome == "passed":
+            _duration_baseline = di.update_baseline(_duration_baseline, nodeid, record["total_s"])
+            di.save_baseline(_duration_baseline)
+    except Exception:
+        # Instrumentation must never mask or alter the real test result.
+        pass
 
 
 def _find_page(item):
@@ -76,6 +136,22 @@ def pytest_runtest_makereport(item, call):
     get_by_role() queries, so it tells you exactly what was clickable at the
     moment of failure without re-running or eyeballing the screenshot.
     No-op when no active page is found (non-UI tests).
+
+    Ordering contract (gts-hroj): this hook fires for report.when == "call",
+    i.e. once the test function has already fully unwound (any `finally:`
+    inside the test body has already run). A test that trashes its own
+    journey doc(s) from its own `finally:` will therefore always beat this
+    hook — the screenshot shows the post-trash Drive-trash chrome regardless
+    of the real failure. There is no hookwrapper ordering fix for this
+    (verified empirically: pytest_runtest_call's post-yield resume and every
+    report.when=="call" hook fire only after the test's own finally has
+    already executed, since that finally is part of the same call-stack
+    unwind). The actual fix lives in scn/session.py: ScenarioSession.new_doc(
+    request=...) registers doc-trashing as a pytest fixture *finalizer*
+    (teardown phase, which runs after this hook) instead of leaving it to the
+    test's own finally. Multi-doc tests must call `scn.engine.close()` (not
+    `scn.close()` / not a manual end_journey_session call) from their own
+    `finally:` if they need the drain-invariant assertion at that point.
     """
     outcome = yield
     report = outcome.get_result()

@@ -156,7 +156,8 @@ function syncDocument(docId) {
   try {
     var doc;
     try {
-      doc = DocumentApp.openById(docId);
+      doc = withGasRetry('SyncManager.syncDocument:DocumentApp.openById',
+        function () { return DocumentApp.openById(docId); });
     } catch (openErr) {
       GasLogger.log('sync.docNotFound.invalid', { msg: 'Doc not found', docId: docId, err: openErr.message });
       _markDocNotFound([docId]);
@@ -164,7 +165,8 @@ function syncDocument(docId) {
     }
     // DocumentApp.openById() succeeds on trashed docs — check explicitly.
     try {
-      if (DriveApp.getFileById(docId).isTrashed()) {
+      if (withGasRetry('SyncManager.syncDocument:DriveApp.getFileById.isTrashed',
+        function () { return DriveApp.getFileById(docId).isTrashed(); })) {
         GasLogger.log('sync.docNotFound.trashed', { msg: 'Doc not found', docId: docId, err: 'Document is in Trash' });
         _markDocNotFound([docId]);
         return;
@@ -512,7 +514,8 @@ function syncAll() {
       } else {
         // Fallback: batch fetch failed above, check this doc individually.
         try {
-          var driveFile = DriveApp.getFileById(docId);
+          var driveFile = withGasRetry('SyncManager.syncAll:DriveApp.getFileById(fallback)',
+            function () { return DriveApp.getFileById(docId); });
           isTrashed    = driveFile.isTrashed();
           lastModified = driveFile.getLastUpdated();
           docTitle     = driveFile.getName();
@@ -1770,13 +1773,74 @@ function _driveUrl(path, params, isList) {
     '?' + params + '&' + (isList ? _DRIVE_LIST_PARAMS : _DRIVE_ITEM_PARAMS);
 }
 
+/** Bounded-retry convention for Drive REST calls, mirroring scn/session.py's
+ *  _http_post (3 attempts, short backoff) -- see _fetchDriveWithRetry. */
+var _DRIVE_FETCH_MAX_ATTEMPTS   = 3;
+var _DRIVE_FETCH_RETRY_DELAY_MS = 1000;
+
+/**
+ * Executes a Drive REST UrlFetchApp.fetch call with a bounded retry on
+ * transient 5xx responses (gts-pm72). files.list/files.get failing with a
+ * one-off HTTP 500 mid-execution is Google-side transient noise, not a code
+ * defect (scn/session.py::_http_post already retries the analogous /exec
+ * routing flakiness client-side); this is the GAS-side equivalent for the
+ * Advanced-Service-adjacent Drive REST calls SyncManager's folder-walk
+ * depends on. Only 5xx is retried -- a 4xx (auth/not-found/bad-request) is a
+ * real answer, not noise, and must surface on the first attempt.
+ *
+ * @param {function(): HTTPResponse} fetchFn  zero-arg thunk performing the
+ *   UrlFetchApp.fetch call (muteHttpExceptions:true expected, so failures
+ *   arrive as response codes, not thrown exceptions).
+ * @return {{response: HTTPResponse, code: number, attempts: number}}
+ *   code is the response code the retry loop decided on (see
+ *   _driveFetchTestOverrideCode -- overridden only under test fixture
+ *   fault-injection, real otherwise); attempts is how many calls were made.
+ */
+function _fetchDriveWithRetry(fetchFn) {
+  var resp, code;
+  for (var attempt = 1; attempt <= _DRIVE_FETCH_MAX_ATTEMPTS; attempt++) {
+    resp = fetchFn();
+    code = _driveFetchTestOverrideCode(resp.getResponseCode());
+    if (code < 500 || attempt === _DRIVE_FETCH_MAX_ATTEMPTS) {
+      return { response: resp, code: code, attempts: attempt };
+    }
+    GasLogger.log('sync.driveFetch.retry', { attempt: attempt, status: code });
+    Utilities.sleep(_DRIVE_FETCH_RETRY_DELAY_MS);
+  }
+  return { response: resp, code: code, attempts: _DRIVE_FETCH_MAX_ATTEMPTS };
+}
+
+/**
+ * Test-only fault injection hook for _fetchDriveWithRetry (gts-pm72 Backstop
+ * proof) -- never trips outside the test harness. TestFixtures.js's
+ * 'sync_all_force_drive_5xx_recovery' fixture monkey-patches UrlFetchApp.fetch
+ * itself to simulate the transient-500 symptom without touching real Drive;
+ * this override exists only so a test can also exercise the "already-500
+ * response, does the retry loop's own bookkeeping treat it as retryable"
+ * path directly. No-op (returns realCode unchanged) unless a test has set
+ * the counter via PropertiesService.
+ *
+ * @param {number} realCode
+ * @return {number}
+ */
+function _driveFetchTestOverrideCode(realCode) {
+  var props = PropertiesService.getScriptProperties();
+  var raw   = props.getProperty('_TEST_FORCE_DRIVE_5XX_COUNT');
+  if (!raw) return realCode;
+  var remaining = parseInt(raw, 10);
+  if (!remaining || remaining <= 0) return realCode;
+  props.setProperty('_TEST_FORCE_DRIVE_5XX_COUNT', String(remaining - 1));
+  return 500;
+}
+
 /**
  * Fetches trashed/modifiedTime/name metadata for every Google Doc visible to
  * the calling identity — across My Drive AND every Shared Drive it can reach
  * — in a single (paginated) Drive REST call, replacing one
  * DriveApp.getFileById() call per tracked doc in syncAll()'s loop
- * (gts-kkm7.2). Throws on any non-200 page so callers can fall back to
- * the per-doc path rather than silently treating every doc as not-found.
+ * (gts-kkm7.2). Throws on any non-200 page (after exhausting the bounded
+ * retry — gts-pm72) so callers can fall back to the per-doc path rather than
+ * silently treating every doc as not-found.
  *
  * Also carries each file's immediate parent folder id (parentId) at zero
  * extra Drive calls -- gts-b6dm's syncAll team-reconciliation pass uses it as
@@ -1800,14 +1864,17 @@ function _fetchDriveDocMetadata() {
       '&fields=' + encodeURIComponent(fields) +
       '&pageSize=1000' +
       (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''), true);
-    var resp = UrlFetchApp.fetch(url, {
-      headers:            { Authorization: 'Bearer ' + token },
-      muteHttpExceptions: true
+    var result = _fetchDriveWithRetry(function () {
+      return UrlFetchApp.fetch(url, {
+        headers:            { Authorization: 'Bearer ' + token },
+        muteHttpExceptions: true
+      });
     });
-    if (resp.getResponseCode() !== 200) {
-      throw new Error('files.list failed: HTTP ' + resp.getResponseCode());
+    if (result.code !== 200) {
+      throw new Error('files.list failed: HTTP ' + result.code +
+        (result.attempts > 1 ? ' (after ' + result.attempts + ' attempts)' : ''));
     }
-    var body  = JSON.parse(resp.getContentText());
+    var body  = JSON.parse(result.response.getContentText());
     var files = body.files || [];
     for (var i = 0; i < files.length; i++) {
       map[files[i].id] = {
@@ -1847,17 +1914,23 @@ function _fetchDriveDocMetadata() {
 function _fetchSingleDocMetadata(docId) {
   var url = _driveUrl('/' + docId, 'fields=' + encodeURIComponent('id,trashed,modifiedTime,name'), false);
   try {
-    var resp = UrlFetchApp.fetch(url, {
-      method:             'get',
-      headers:            { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
-      muteHttpExceptions: true
+    // Bounded retry (gts-pm72) so a transient 500 on this per-doc fallback
+    // doesn't need a second, slower syncAll sweep just to resolve a doc a
+    // fresh call would have confirmed live in under a second.
+    var result = _fetchDriveWithRetry(function () {
+      return UrlFetchApp.fetch(url, {
+        method:             'get',
+        headers:            { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+        muteHttpExceptions: true
+      });
     });
-    var code = resp.getResponseCode();
+    var resp = result.response;
+    var code = result.code;
     if (code === 404) {
       return { status: 'gone', meta: null, err: 'HTTP 404' };
     }
     if (code !== 200) {
-      return { status: 'unknown', meta: null, err: 'HTTP ' + code };
+      return { status: 'unknown', meta: null, err: 'HTTP ' + code + ' (after ' + result.attempts + ' attempts)' };
     }
     var file = JSON.parse(resp.getContentText());
     return {
@@ -2006,7 +2079,8 @@ function _walkFolderForTeam(docId, teamDataRows, folderTeamCache) {
     return result;
   }
   try {
-    var parents = DriveApp.getFileById(docId).getParents();
+    var parents = withGasRetry('SyncManager._walkFolderForTeam:DriveApp.getFileById',
+      function () { return DriveApp.getFileById(docId).getParents(); });
     if (!parents.hasNext()) {
       GasLogger.log('sync.teamScope.walk.no-match', { docId: docId });
       return null;
@@ -2086,7 +2160,8 @@ function assertTeamAccess(teamId, ss) {
   }
   for (var m = 0; m < matches.length; m++) {
     try {
-      DriveApp.getFolderById(matches[m].folderId);
+      withGasRetry('SyncManager.assertTeamAccess:DriveApp.getFolderById',
+        function () { return DriveApp.getFolderById(matches[m].folderId); });
       return; // reachable via this folder -- grant
     } catch (e) {
       // try the next folder before giving up
@@ -2648,7 +2723,8 @@ function configFormat() {
 function _configFormatForDoc(docId) {
   var doc;
   try {
-    doc = DocumentApp.openById(docId);
+    doc = withGasRetry('SyncManager._configFormatForDoc:DocumentApp.openById',
+      function () { return DocumentApp.openById(docId); });
   } catch (e) {
     return { ok: false, message: 'Could not open document: ' + e.message };
   }

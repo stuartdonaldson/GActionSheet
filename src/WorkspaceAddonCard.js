@@ -17,9 +17,21 @@ var _USER_GUIDE_URL = 'https://stuartdonaldson.github.io/GActionSheet/docs/USER_
  * @param {boolean=} opts.skipSheetFetch  When true, omit the verify_action_rows HTTP call.
  *   Used after sidebar mutations where the sheet was just patched and is known correct —
  *   avoids a second ~3s WebApp round-trip just to rebuild the card.
+ * @param {boolean=} opts.includeDocScan  When true, walk the doc body
+ *   (_collectFloatingActionState/_readTrackerTableState) to populate the action list and
+ *   tracker status. Defaults to false — the cold homepageTrigger open (Google calls
+ *   buildHomepageCard() with no opts at all) and plain back-navigation (onImportBack/
+ *   onNotifyBack) never scan, since that walk scales with document size and was measured
+ *   pushing the platform's ~44s card-build budget on large docs (gts-8py3 follow-up: the
+ *   user's own report after the self-HTTP-call fix — a *small* doc's sidebar opened fine,
+ *   pointing at the doc scan itself as the remaining cost on large docs). Every call site
+ *   that follows an actual doc mutation (Sync, tracker insert, status set, delete) passes
+ *   includeDocScan: true explicitly so its refreshed card reflects that mutation.
  */
 function buildHomepageCard(opts) {
   var skipSheetFetch = !!(opts && opts.skipSheetFetch);
+  var includeDocScan = !!(opts && opts.includeDocScan);
+  var _t0 = Date.now();
 
   try {
     // Test-only error injection (gts-rvwu AC-5 coverage) — never set
@@ -28,7 +40,13 @@ function buildHomepageCard(opts) {
       throw new Error('Forced error (test fixture)');
     }
 
+    // Unconditional (not PROBE-gated) — the doc-reopen call right below is
+    // the first potentially-slow call in this function and previously had
+    // zero instrumentation ahead of it, so a hang there produced a total
+    // blackout in the logs (gts-8py3).
+    GasLogger.log('addon.homepage.start', {});
     var doc = _resolveActiveDocForRead(DocumentApp.getActiveDocument());
+    GasLogger.log('addon.homepage.doc_resolved', { ms: Date.now() - _t0, docId: doc ? doc.getId() : '' });
 
     // [PROBE]
     PROBE_log('sidebar.' + PROBE_docState(doc), { docId: doc ? doc.getId() : '' });
@@ -48,7 +66,7 @@ function buildHomepageCard(opts) {
         )
       );
     } else {
-      var homepageState = _buildHomepageState(doc, skipSheetFetch);
+      var homepageState = _buildHomepageState(doc, skipSheetFetch, includeDocScan);
       header.setSubtitle(homepageState.docName);
       card
         .addSection(_buildOverviewSection(homepageState))
@@ -56,6 +74,10 @@ function buildHomepageCard(opts) {
     }
 
     card.setHeader(header);
+
+    if (doc) {
+      card.addSection(_buildGovernanceExportSection());
+    }
 
     card.addSection(
       CardService.newCardSection()
@@ -67,9 +89,11 @@ function buildHomepageCard(opts) {
         .addWidget(CardService.newTextParagraph().setText(BUILD_INFO.version))
     );
 
+    GasLogger.log('addon.homepage.complete', { ms: Date.now() - _t0 });
+    GasLogger.flush();
     return card.build();
   } catch (e) {
-    GasLogger.log('addon.homepage.error', { msg: e.message, stack: e.stack || '' });
+    GasLogger.log('addon.homepage.error', { msg: e.message, stack: e.stack || '', ms: Date.now() - _t0 });
     GasLogger.flush();
 
     return CardService.newCardBuilder()
@@ -122,6 +146,34 @@ function _buildTopButtonsSection() {
           .setOnClickAction(_buildCardAction('onInsertTrackerTable'))
       )
   );
+}
+
+/**
+ * Sidebar fallback for the Governance export (src/Procedure-Exporter.js).
+ * Added because the Extensions-menu universalActions entries for this
+ * export were not appearing in the test-install (unconfirmed whether that
+ * needs Marketplace SDK config beyond appsscript.json) — this gives the
+ * export a working entry point regardless of how that turns out. Handlers
+ * live in Procedure-Exporter.js (onExportGovernanceJson /
+ * onExportGovernanceJsonAndPdf), sharing _exportGovernanceAndGetCard_ with
+ * the universalActions handlers there.
+ */
+function _buildGovernanceExportSection() {
+  return CardService.newCardSection()
+    .setHeader('Export')
+    .addWidget(
+      CardService.newButtonSet()
+        .addButton(
+          CardService.newTextButton()
+            .setText('Export JSON')
+            .setOnClickAction(_buildCardAction('onExportGovernanceJson'))
+        )
+        .addButton(
+          CardService.newTextButton()
+            .setText('Export JSON + PDF')
+            .setOnClickAction(_buildCardAction('onExportGovernanceJsonAndPdf'))
+        )
+    );
 }
 
 function onShowImport(e) { // eslint-disable-line no-unused-vars
@@ -323,7 +375,8 @@ function _resolveActiveDocForRead(doc) {
   }
 
   try {
-    return DocumentApp.openById(doc.getId());
+    return withGasRetry('WorkspaceAddonCard._resolveActiveDocForRead:DocumentApp.openById',
+      function () { return DocumentApp.openById(doc.getId()); });
   } catch (e) {
     GasLogger.log('addon.doc.reopen_failed', { msg: e.message });
     GasLogger.flush();
@@ -344,7 +397,7 @@ function onInsertTrackerTable() {
     insertTrackerTable(doc.getId());
     return CardService.newActionResponseBuilder()
       .setNotification(CardService.newNotification().setText('Tracker refreshed'))
-      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ includeDocScan: true })))
       .build();
   } catch (e) {
     GasLogger.log('addon.tracker.error', { msg: e.message });
@@ -370,7 +423,7 @@ function onSyncNow() {
     }
     return CardService.newActionResponseBuilder()
       .setNotification(CardService.newNotification().setText('Sync complete'))
-      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ includeDocScan: true })))
       .build();
   } catch (e) {
     GasLogger.log('addon.sync.error', { msg: e.message });
@@ -438,7 +491,23 @@ function _safeGetDocTitle(doc) {
   }
 }
 
-function _buildHomepageState(doc, skipSheetFetch) {
+function _buildHomepageState(doc, skipSheetFetch, includeDocScan) {
+  if (!includeDocScan) {
+    // Doc not scanned this build (gts-8py3 follow-up) — no floatingActions/tracker
+    // read, so nothing here can claim "no actions found"; say so explicitly instead
+    // of rendering a misleadingly-empty list.
+    return {
+      docName: _safeGetDocTitle(doc),
+      floatingActions: [],
+      docScanSkipped: true,
+      trackerFound: false,
+      sheetRowCount: 0,
+      syncState: 'Not loaded',
+      syncMeta: 'Click Sync to scan this document for actions.',
+      statusBreakdown: {}
+    };
+  }
+
   var floatingActions = _collectFloatingActionState(doc);
   var tracker = _readTrackerTableState(doc);
   var sheetRows = [];
@@ -475,6 +544,7 @@ function _buildHomepageState(doc, skipSheetFetch) {
   return {
     docName: _safeGetDocTitle(doc),
     floatingActions: floatingActions,
+    docScanSkipped: false,
     trackerFound: tracker.found,
     sheetRowCount: skipSheetFetch ? floatingActions.length : sheetRows.length,
     syncState: syncState,
@@ -497,6 +567,14 @@ function _buildOverviewSection(homepageState) {
 
 
 function _buildActionListSection(homepageState) {
+  if (homepageState.docScanSkipped) {
+    var placeholderSection = CardService.newCardSection().setHeader('Actions for this document');
+    placeholderSection.addWidget(
+      CardService.newTextParagraph().setText('Click Sync to load the action list.')
+    );
+    return placeholderSection;
+  }
+
   var header = 'Actions for this document (' + homepageState.floatingActions.length + ')';
   var section = CardService.newCardSection().setHeader(header);
 
@@ -730,7 +808,8 @@ function sidebarSetStatus(globalId, newStatus, docId) {
     docId = activeDoc ? activeDoc.getId() : '';
   }
 
-  var doc = DocumentApp.openById(docId);
+  var doc = withGasRetry('WorkspaceAddonCard.sidebarSetStatus:DocumentApp.openById',
+    function () { return DocumentApp.openById(docId); });
   var t1  = Date.now();
 
   // Scan to get current action state for the flush
@@ -794,7 +873,8 @@ function sidebarDeleteAction(globalId, docId) {
     var activeDoc = DocumentApp.getActiveDocument();
     docId = activeDoc ? activeDoc.getId() : '';
   }
-  var doc  = DocumentApp.openById(docId);
+  var doc  = withGasRetry('WorkspaceAddonCard.sidebarDeleteAction:DocumentApp.openById',
+    function () { return DocumentApp.openById(docId); });
   var para = _findParaByGlobalId(doc, globalId);
 
   var deleted = false;
@@ -909,7 +989,7 @@ function onSetActionStatus(e) {
     var tA = Date.now();
     sidebarSetStatus(globalId, newStatus);
     var tB = Date.now();
-    var card = buildHomepageCard({ skipSheetFetch: true });
+    var card = buildHomepageCard({ skipSheetFetch: true, includeDocScan: true });
     var tC = Date.now();
     GasLogger.log('sidebar.status-set.handler', {
       ms: { sidebarSetStatus: tB - tA, buildHomepageCard: tC - tB, total: tC - tA }
@@ -938,7 +1018,7 @@ function onDeleteAction(e) {
   return CardService.newActionResponseBuilder()
     .setNotification(CardService.newNotification().setText('Action deleted'))
     .setNavigation(CardService.newNavigation().updateCard(
-      buildHomepageCard({ skipSheetFetch: true })
+      buildHomepageCard({ skipSheetFetch: true, includeDocScan: true })
     ))
     .build();
 }
