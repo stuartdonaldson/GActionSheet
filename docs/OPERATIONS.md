@@ -511,3 +511,35 @@ Visit the new Web App URL once in a browser tab — `doGet` auto-normalizes and 
 
 ### testToken expired (tests fail with "test-token-expired")
 Run `pnpm run deploy:test`. The deployment script generates a fresh UUID, POSTs it to the Web App, stores it in script properties, and writes the new token and expiry to `local.settings.json`.
+
+### A pushed/deployed code change doesn't show up in the Extensions menu or add-on UI
+`pnpm run deploy:test`/`deploy:prod` only repoint the **Web App** deployments (`TEST-WEB-APP`/
+`PROD-WEB-APP`). The classic `Extensions > Action Sync` menu and the sidebar/card add-on surfaces
+run through a **third, independent pointer** — a specific user's installed add-on binding — which
+does not follow either the Web App deployments or a GCP Marketplace SDK App Configuration change
+automatically. Confirmed 2026-08-13/14 (`bd remember gts-addon-install-deploy-lag`): updating the
+Marketplace SDK App Configuration to a new version did not make a stale Extensions-menu error go
+away until real wall-clock time passed for the per-account install to catch up, and consecutive
+attempts surfaced under *different* deployment IDs, neither present in `clasp deployments` output.
+
+Checklist, in order:
+1. **Confirm the code actually reflects your change.** `clasp deployments` lists Web App
+   deployments only — it will not show the add-on's installed deployment ID. Reproduce the
+   failure, then run `clasp logs --json` and read `serviceContext.deployment_id`/`version` off
+   the matching error entry. Compare that ID against `clasp deployments`; if it's absent, you're
+   looking at the add-on-install pointer, not a Web App deployment.
+2. **If it's a `linkPreviewTriggers` pattern-match failure** (chip preview never fires, zero log
+   activity): check the GCP Marketplace SDK App Configuration's pinned deployment version — see
+   `docs/lessons-learned/resolved/2026-06-02-smart-chip-rendering-is-publish-gated.md` Gate 2.
+   Update it to the latest version and re-save/re-publish.
+3. **If it's any other menu/card entry point failing with stale behavior** (this is the add-on
+   install pointer, not the SDK config): a browser reload of the doc is not sufficient. Force a
+   fresh binding — reinstall the add-on (`Extensions > Add-ons > Manage add-ons` → remove, then
+   reinstall from the Marketplace listing), or, for a dev/test account, explicitly reselect the
+   deployment via the Apps Script editor: `Deploy → Test deployments → Install as Add-on`.
+4. **If reinstalling isn't practical right now,** wait and retry — this has resolved on its own
+   with enough wall-clock time in observed cases, with no documented SLA.
+
+Don't spend multiple redeploy-and-retry cycles guessing here — step 1 tells you definitively
+whether you're chasing a stale Web App deployment (fixed by `deploy:test`), stale SDK config
+(fixed by step 2), or a stale per-account install (fixed by step 3), before you touch anything.
