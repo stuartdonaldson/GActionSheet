@@ -439,17 +439,60 @@ function syncAll() {
       GasLogger.log('sync.archive.doc_not_found', { docIds: Object.keys(alreadyDocNotFound) });
     }
 
-    // Single batched Drive call for trash/modified/name metadata across every
-    // tracked doc, replacing what was previously one DriveApp.getFileById()
-    // round trip per doc (gts-kkm7.2). Falls back to the old per-doc
-    // DriveApp path if the batch fetch itself fails, so a transient Drive/
-    // network error degrades to the slower-but-correct behavior rather than
-    // misclassifying every doc as not-found.
+    // Read TeamData once, up front, so its folder ids can scope the Drive
+    // listing below (gts-uuse) -- team reconciliation further down in this
+    // function reuses this same array rather than re-reading the sheet.
+    var teamDataRows = _readTeamDataRows(ss);
+
+    // Single batched Drive call for trash/modified/name metadata, scoped to
+    // the known team folders (gts-uuse) instead of every Google Doc the
+    // executing identity can see account-wide (gts-kkm7.2's original,
+    // unscoped version: confirmed 5448 files/12 pages for a 171-doc tracked
+    // corpus -- see gts-uuse). Falls back to the old per-doc DriveApp path if
+    // the batch fetch itself fails, so a transient Drive/network error
+    // degrades to the slower-but-correct behavior rather than misclassifying
+    // every doc as not-found.
+    //
+    // Scoping narrows the *listing* to each team folder's DIRECT children --
+    // it does not recurse into subfolders, so a tracked doc nested deeper
+    // under a team folder (or legitimately living outside every configured
+    // team folder) is simply absent from driveMetadata. That is exactly the
+    // "absent from batch listing" case the loop below already treats as
+    // inconclusive (gts-rskf) rather than proof of deletion: it is resolved
+    // by an authoritative per-doc lookup (now batched -- see
+    // _fetchDriveDocMetadataBatch below), never by assuming absence == gone.
+    var scopedFolderIds = [];
+    var seenFolderIds   = {};
+    for (var tf = 0; tf < teamDataRows.length; tf++) {
+      var tfId = teamDataRows[tf].folderId;
+      if (tfId && !seenFolderIds[tfId]) {
+        seenFolderIds[tfId] = true;
+        scopedFolderIds.push(tfId);
+      }
+    }
     var driveMetadata = null;
     try {
-      driveMetadata = _fetchDriveDocMetadata();
+      driveMetadata = _fetchDriveDocMetadata(scopedFolderIds);
     } catch (metaErr) {
       GasLogger.log('sync.driveMetadata.error', { msg: metaErr.message });
+    }
+
+    // Batch the per-doc fallback lookups (gts-uuse point 3) for every tracked
+    // doc absent from the scoped listing, instead of firing
+    // _fetchSingleDocMetadata once per doc inside the main loop below. Only
+    // attempted when there is more than one such doc -- a single miss is
+    // cheaper as a direct call than as a one-item "batch".
+    var fallbackProbes = {};
+    if (driveMetadata) {
+      var missingDocIds = [];
+      for (var mi = 0; mi < docIds.length; mi++) {
+        if (!driveMetadata[docIds[mi]]) missingDocIds.push(docIds[mi]);
+      }
+      if (missingDocIds.length === 1) {
+        fallbackProbes[missingDocIds[0]] = _fetchSingleDocMetadata(missingDocIds[0]);
+      } else if (missingDocIds.length > 1) {
+        fallbackProbes = _fetchDriveDocMetadataBatch(missingDocIds);
+      }
     }
 
     var synced = 0, skipped = 0;
@@ -488,7 +531,7 @@ function syncAll() {
           // consecutive runs. Confirm with an authoritative per-doc lookup
           // before marking anything not-found — the previous code marked on
           // absence alone and silently archived live documents' actions.
-          var probe = _fetchSingleDocMetadata(docId);
+          var probe = fallbackProbes[docId] || _fetchSingleDocMetadata(docId);
           if (probe.status === 'gone') {
             GasLogger.log('sync.docNotFound.missing', {
               msg: 'Doc not found', docId: docId,
@@ -612,7 +655,8 @@ function syncAll() {
     // to the full _walkFolderForTeam walk. Without this, re-deriving team for
     // every tracked doc every sweep was measured to push syncAll's GAS
     // execution past its time budget on a sheet with a large docId backlog.
-    var teamDataRows    = _readTeamDataRows(ss);
+    // teamDataRows was already read above (gts-uuse), before the scoped
+    // driveMetadata fetch -- reused here rather than re-reading the sheet.
     var folderTeamCache = {};
     var teamToken        = null; // fetched lazily, only if a correction is actually written
     var directFolderTeamMap = {};
@@ -1873,13 +1917,27 @@ function _driveFetchTestOverrideCode(realCode) {
 }
 
 /**
- * Fetches trashed/modifiedTime/name metadata for every Google Doc visible to
- * the calling identity — across My Drive AND every Shared Drive it can reach
- * — in a single (paginated) Drive REST call, replacing one
- * DriveApp.getFileById() call per tracked doc in syncAll()'s loop
- * (gts-kkm7.2). Throws on any non-200 page (after exhausting the bounded
- * retry — gts-pm72) so callers can fall back to the per-doc path rather than
- * silently treating every doc as not-found.
+ * Fetches trashed/modifiedTime/name metadata for tracked Google Docs, in a
+ * single (paginated) Drive REST call, replacing one DriveApp.getFileById()
+ * call per tracked doc in syncAll()'s loop (gts-kkm7.2). Throws on any
+ * non-200 page (after exhausting the bounded retry — gts-pm72) so callers can
+ * fall back to the per-doc path rather than silently treating every doc as
+ * not-found.
+ *
+ * When folderIds is non-empty, the listing is scoped to Docs that are DIRECT
+ * children of one of those folders (gts-uuse) instead of every Google Doc
+ * visible to the calling identity account-wide — confirmed live at 5448
+ * files/12 pages for a 171-doc tracked corpus before this change, completely
+ * independent of how many docs the Actions sheet actually tracks. Scoping
+ * does not recurse into subfolders: a tracked doc nested deeper than one
+ * level under a team folder, or living outside every configured team folder,
+ * is simply absent from the returned map. That is intentional — callers
+ * already treat "absent from the batch listing" as inconclusive rather than
+ * proof of deletion (gts-rskf) and resolve it with an authoritative per-doc
+ * lookup, so under-scoping degrades to a slower-but-still-correct path
+ * instead of misclassifying a live doc as gone. When folderIds is empty (no
+ * TeamData folders configured), the listing is unscoped, matching the
+ * original pre-gts-uuse behavior.
  *
  * Also carries each file's immediate parent folder id (parentId) at zero
  * extra Drive calls -- gts-b6dm's syncAll team-reconciliation pass uses it as
@@ -1887,13 +1945,24 @@ function _driveFetchTestOverrideCode(realCode) {
  * falling back to a per-doc _walkFolderForTeam call for docs nested deeper
  * under a team folder.
  *
+ * @param {Array<string>=} folderIds  TeamData folder ids to scope the listing
+ *   to (direct children only). Omit or pass an empty array for the original
+ *   unscoped, account-wide listing.
  * @return {Object<string, {trashed: boolean, lastModified: Date, name: string, parentId: ?string}>}
  *   map of docId -> metadata, covering every Google Doc the listing returns.
  */
-function _fetchDriveDocMetadata() {
+function _fetchDriveDocMetadata(folderIds) {
   var token      = ScriptApp.getOAuthToken();
   var fields     = 'nextPageToken,files(id,trashed,modifiedTime,name,parents)';
-  var q          = "mimeType='application/vnd.google-apps.document'";
+  var qParts     = ["mimeType='application/vnd.google-apps.document'"];
+  if (folderIds && folderIds.length > 0) {
+    var folderClauses = [];
+    for (var f = 0; f < folderIds.length; f++) {
+      folderClauses.push("'" + folderIds[f].replace(/'/g, "\\'") + "' in parents");
+    }
+    qParts.push('(' + folderClauses.join(' or ') + ')');
+  }
+  var q          = qParts.join(' and ');
   var map        = {};
   var pageToken  = null;
   var pages      = 0;
@@ -1927,8 +1996,130 @@ function _fetchDriveDocMetadata() {
     pages++;
   } while (pageToken);
 
-  GasLogger.log('sync.driveMetadata.fetched', { count: Object.keys(map).length, pages: pages });
+  GasLogger.log('sync.driveMetadata.fetched', {
+    count: Object.keys(map).length, pages: pages, scoped: !!(folderIds && folderIds.length)
+  });
   return map;
+}
+
+/**
+ * Batched per-doc fallback lookup (gts-uuse) for tracked docs absent from
+ * _fetchDriveDocMetadata's scoped listing — groups multiple files.get calls
+ * into one HTTP round trip via Drive API's batch endpoint
+ * (https://www.googleapis.com/batch/drive/v3), instead of firing
+ * _fetchSingleDocMetadata once per doc in a loop. syncAll only calls this
+ * when more than one doc needs the fallback in the same sweep; a single miss
+ * goes straight to _fetchSingleDocMetadata.
+ *
+ * Falls back to sequential _fetchSingleDocMetadata calls if the batch request
+ * itself fails, times out, or its response can't be parsed into exactly one
+ * part per requested doc -- a malformed or short batch response must never
+ * silently leave a doc unresolved (same "never assume, always confirm"
+ * principle as gts-rskf).
+ *
+ * @param {Array<string>} docIds  tracked docs absent from the scoped listing.
+ * @return {Object<string, {status: string, meta: ?Object, err: string}>}
+ *   docId -> the same three-state contract as _fetchSingleDocMetadata.
+ */
+function _fetchDriveDocMetadataBatch(docIds) {
+  if (!docIds || docIds.length === 0) return {};
+
+  function sequentialFallback() {
+    var seq = {};
+    for (var s = 0; s < docIds.length; s++) {
+      seq[docIds[s]] = _fetchSingleDocMetadata(docIds[s]);
+    }
+    return seq;
+  }
+
+  var boundary = 'gactionsheet_' + Utilities.getUuid();
+  var token    = ScriptApp.getOAuthToken();
+  var fields   = encodeURIComponent('id,trashed,modifiedTime,name');
+  var partsArr = [];
+  for (var i = 0; i < docIds.length; i++) {
+    partsArr.push(
+      '--' + boundary + '\r\n' +
+      'Content-Type: application/http\r\n' +
+      'Content-ID: <item' + i + '>\r\n\r\n' +
+      'GET /drive/v3/files/' + docIds[i] + '?fields=' + fields + ' HTTP/1.1\r\n\r\n'
+    );
+  }
+  partsArr.push('--' + boundary + '--');
+  var body = partsArr.join('');
+
+  try {
+    var result = _fetchDriveWithRetry(function () {
+      return UrlFetchApp.fetch('https://www.googleapis.com/batch/drive/v3', {
+        method:             'post',
+        contentType:        'multipart/mixed; boundary=' + boundary,
+        headers:            { Authorization: 'Bearer ' + token },
+        payload:            body,
+        muteHttpExceptions: true
+      });
+    });
+    if (result.code !== 200) {
+      throw new Error('batch/drive/v3 failed: HTTP ' + result.code +
+        (result.attempts > 1 ? ' (after ' + result.attempts + ' attempts)' : ''));
+    }
+
+    var headers       = result.response.getHeaders();
+    var contentType   = headers['Content-Type'] || headers['content-type'] || '';
+    var boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/.exec(contentType);
+    var respBoundary  = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]).trim() : null;
+    if (!respBoundary) {
+      throw new Error('batch/drive/v3: no boundary in response Content-Type: ' + contentType);
+    }
+
+    // Each requested doc gets exactly one part back, in the SAME order the
+    // requests were sent (Drive's batch endpoint preserves request order) --
+    // relied on here rather than parsing the echoed Content-ID, which carries
+    // a "response-" prefix that isn't documented as a stable contract.
+    var rawParts = result.response.getContentText().split('--' + respBoundary);
+    var results  = {};
+    var docIndex = 0;
+    for (var p = 0; p < rawParts.length && docIndex < docIds.length; p++) {
+      var part = rawParts[p];
+      var statusMatch = /HTTP\/1\.\d\s+(\d+)/.exec(part);
+      if (!statusMatch) continue; // preamble/epilogue/boundary-only segment
+
+      var docId      = docIds[docIndex++];
+      var httpStatus = parseInt(statusMatch[1], 10);
+      if (httpStatus === 404) {
+        results[docId] = { status: 'gone', meta: null, err: 'HTTP 404' };
+        continue;
+      }
+      if (httpStatus !== 200) {
+        results[docId] = { status: 'unknown', meta: null, err: 'HTTP ' + httpStatus };
+        continue;
+      }
+      var jsonMatch = /\{[\s\S]*\}/.exec(part);
+      if (!jsonMatch) {
+        results[docId] = { status: 'unknown', meta: null, err: 'batch response part had no JSON body' };
+        continue;
+      }
+      var file = JSON.parse(jsonMatch[0]);
+      results[docId] = {
+        status: 'found',
+        meta: {
+          trashed:      !!file.trashed,
+          lastModified: new Date(file.modifiedTime),
+          name:         file.name
+        },
+        err: ''
+      };
+    }
+    if (docIndex < docIds.length) {
+      throw new Error('batch/drive/v3: expected ' + docIds.length + ' response parts, parsed ' + docIndex);
+    }
+
+    GasLogger.log('sync.driveMetadata.batchFallback.fetched', { count: docIds.length });
+    return results;
+  } catch (batchErr) {
+    // Batch request or parse failed -- degrade to the slower-but-correct
+    // sequential per-doc path rather than leaving any doc unresolved.
+    GasLogger.log('sync.driveMetadata.batchFallback.error', { msg: batchErr.message, count: docIds.length });
+    return sequentialFallback();
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -2749,6 +2749,36 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'sync_all_force_listing_miss_multi': {
+        // gts-uuse point 3: same Shared-Drive-listing-omission simulation as
+        // 'sync_all_force_listing_miss' above, but removes MULTIPLE target
+        // docs from the bulk map in the same syncAll() call so the sweep's
+        // per-doc fallback has more than one doc to resolve at once. That is
+        // exactly the condition _fetchDriveDocMetadataBatch (gts-uuse) exists
+        // for: syncAll only calls it when missingDocIds.length > 1, so a
+        // single-doc miss (the existing fixture) never exercises the actual
+        // batch/drive/v3 HTTP path. Restored in a finally block so the patch
+        // never leaks past this single request.
+        var flmmDocIds     = data.docIds || [];
+        var flmmRealFetch  = _fetchDriveDocMetadata;
+        _fetchDriveDocMetadata = function () {
+          var map = flmmRealFetch();
+          for (var flmmI = 0; flmmI < flmmDocIds.length; flmmI++) {
+            delete map[flmmDocIds[flmmI]];
+          }
+          return map;
+        };
+        try {
+          syncAll();
+          SpreadsheetApp.flush();
+        } finally {
+          _fetchDriveDocMetadata = flmmRealFetch;
+        }
+        _TF_RESULT = { tag: 'fixture.sync_all_force_listing_miss_multi', data: { docIds: flmmDocIds } };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'sync_all_force_team_walk_error': {
         // gts-sl64 AC4: simulates a transient Drive folder-parent lookup
         // failure for one specific doc during syncAll's team-reconciliation
