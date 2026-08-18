@@ -27,10 +27,15 @@ var _USER_GUIDE_URL = 'https://stuartdonaldson.github.io/GActionSheet/docs/USER_
  *   pointing at the doc scan itself as the remaining cost on large docs). Every call site
  *   that follows an actual doc mutation (Sync, tracker insert, status set, delete) passes
  *   includeDocScan: true explicitly so its refreshed card reflects that mutation.
+ * @param {boolean=} opts.allowCachedState  When true and includeDocScan is false, restore
+ *   the last real scan's homepageState from cache instead of the "Not loaded" placeholder
+ *   (gts-zg2t). Used by onImportBack/onNotifyBack so Back-navigation shows cached state
+ *   rather than resetting the card. No-op if nothing has been cached yet.
  */
 function buildHomepageCard(opts) {
   var skipSheetFetch = !!(opts && opts.skipSheetFetch);
   var includeDocScan = !!(opts && opts.includeDocScan);
+  var allowCachedState = !!(opts && opts.allowCachedState);
   var _t0 = Date.now();
 
   try {
@@ -66,7 +71,7 @@ function buildHomepageCard(opts) {
         )
       );
     } else {
-      var homepageState = _buildHomepageState(doc, skipSheetFetch, includeDocScan);
+      var homepageState = _buildHomepageState(doc, skipSheetFetch, includeDocScan, allowCachedState);
       header.setSubtitle(homepageState.docName);
       card
         .addSection(_buildOverviewSection(homepageState))
@@ -167,13 +172,13 @@ function onShowNotify(e) { // eslint-disable-line no-unused-vars
 
 function onImportBack(e) { // eslint-disable-line no-unused-vars
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ allowCachedState: true })))
     .build();
 }
 
 function onNotifyBack(e) { // eslint-disable-line no-unused-vars
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ allowCachedState: true })))
     .build();
 }
 
@@ -466,11 +471,21 @@ function _safeGetDocTitle(doc) {
   }
 }
 
-function _buildHomepageState(doc, skipSheetFetch, includeDocScan) {
+function _buildHomepageState(doc, skipSheetFetch, includeDocScan, allowCachedState) {
   if (!includeDocScan) {
     // Doc not scanned this build (gts-8py3 follow-up) — no floatingActions/tracker
     // read, so nothing here can claim "no actions found"; say so explicitly instead
-    // of rendering a misleadingly-empty list.
+    // of rendering a misleadingly-empty list. EXCEPTION (gts-zg2t): plain
+    // back-navigation (onImportBack/onNotifyBack) passes allowCachedState so a
+    // *second* Back round-trip restores the last real scan instead of resetting
+    // to this placeholder — the cache is written below whenever a full scan
+    // actually runs, so it's always at least as fresh as the last mutation.
+    if (allowCachedState) {
+      var cached = _readCachedHomepageState(doc.getId());
+      if (cached) {
+        return cached;
+      }
+    }
     return {
       docName: _safeGetDocTitle(doc),
       floatingActions: [],
@@ -516,7 +531,7 @@ function _buildHomepageState(doc, skipSheetFetch, includeDocScan) {
     }
   }
 
-  return {
+  var homepageState = {
     docName: _safeGetDocTitle(doc),
     floatingActions: floatingActions,
     docScanSkipped: false,
@@ -526,6 +541,47 @@ function _buildHomepageState(doc, skipSheetFetch, includeDocScan) {
     syncMeta: syncMeta,
     statusBreakdown: _summarizeStatuses(floatingActions)
   };
+  _writeCachedHomepageState(doc.getId(), homepageState);
+  return homepageState;
+}
+
+// ---------------------------------------------------------------------------
+// Homepage-state cache (gts-zg2t) — lets a plain Back-navigation
+// (onImportBack/onNotifyBack) restore the last real doc scan instead of
+// resetting to the "Not loaded" placeholder. Per-user (CardService homepage
+// state is per-viewer, not shared), short TTL so a stale scan can't outlive
+// a user's active session by much. Written only when a full scan actually
+// runs (includeDocScan: true), so cost stays exactly what gts-8py3 intended —
+// Back itself never triggers a scan.
+var _HOMEPAGE_STATE_CACHE_TTL_SECONDS = 600; // 10 min
+
+function _homepageStateCacheKey(docId) {
+  return 'homepageState_' + docId;
+}
+
+function _readCachedHomepageState(docId) {
+  try {
+    var raw = CacheService.getUserCache().get(_homepageStateCacheKey(docId));
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    GasLogger.log('addon.homepage.cache_read_error', { msg: e.message });
+    return null;
+  }
+}
+
+function _writeCachedHomepageState(docId, homepageState) {
+  try {
+    CacheService.getUserCache().put(
+      _homepageStateCacheKey(docId),
+      JSON.stringify(homepageState),
+      _HOMEPAGE_STATE_CACHE_TTL_SECONDS
+    );
+  } catch (e) {
+    // Cache is a best-effort restore aid, not a durable store — a write
+    // failure (e.g. >100KB value on a very large doc) must not break the
+    // scan itself.
+    GasLogger.log('addon.homepage.cache_write_error', { msg: e.message });
+  }
 }
 
 function _buildOverviewSection(homepageState) {
