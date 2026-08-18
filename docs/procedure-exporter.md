@@ -834,13 +834,29 @@ pointer, §7.4) only handles text runs and AutoText. A paragraph element that
 is an inline image (`paragraph.elements[].inlineObjectElement`) produces no
 block and is silently invisible in the export today — including images
 inside table cells (§7.2/§19.1) and inside the shaded "box" callouts
-described alongside this document's other governance content (a box is,
-structurally, a table cell; `processTable_` already walks its content with
-the same paragraph processing, so this gap and its fix apply there
-automatically once fixed at the paragraph level — no separate box-specific
-handling is needed). Diagrams and flowcharts embedded as inline images are
-the primary motivating case: their content (entities and the relationships
-between them) is currently unrecoverable from the JSON at all.
+described alongside this document's other governance content. **Correction
+(gts-283i.1 raw capture, confirmed live):** a box callout is *not*,
+structurally, a table cell — the source corpus's box pattern (e.g. Church
+Policy 05's "Policy Statement" box) is a run of ordinary consecutive body
+paragraphs that each individually carry
+`paragraphStyle.{borderTop,borderBottom,borderLeft,borderRight}` plus
+`paragraphStyle.shading.backgroundColor` (observed
+`{red:0.812, green:0.886, blue:0.953}`, a light blue). The captured document
+(`knowledge-base/references/gts-283i-raw-capture/`) contains **zero** `table`
+structural elements anywhere — `processTable_` is never invoked for this
+pattern at all. The "no separate box-specific handling is needed" conclusion
+still holds, but for a simpler reason than originally assumed: a box
+paragraph is walked by the same top-level `processParagraph_` call as every
+other body paragraph (no table detour), so fixing paragraph-level image
+handling covers it automatically with no additional code path — there is no
+table-cell walk to piggyback on because there is no table here at all. (This
+does not change §7.2/§19.1's separate, general table-support gap — tables can
+still appear elsewhere in a document and still need `processTable_`'s own
+image handling once §19.3 lands; it only corrects the assumption that *this
+specific* box pattern is an instance of that case.) Diagrams and flowcharts
+embedded as inline images are the primary motivating case: their content
+(entities and the relationships between them) is currently unrecoverable
+from the JSON at all.
 
 **Gap this proposal closes.** Embedded images carry meaning (most often a
 flowchart or diagram with labeled boxes and connecting relationships) that
@@ -886,12 +902,15 @@ later.
   image file, sends it to a vision-capable LLM, and writes a description
   back — for a flowchart/diagram, that description must capture the
   depicted entities *and the relationships between them* (the whole reason
-  this proposal exists), not a one-line caption. Whether the local tool
-  writes the description back into this same JSON file in place, or emits a
-  sidecar file keyed by `image_ref`/`inline_object_id` that a RAG ingestion
-  step merges at read time, is **left open** for the implementing bead to
-  decide and record as an ADR — this document only fixes the shape of the
-  slot, not the write-back mechanism.
+  this proposal exists), not a one-line caption. **Write-back mechanism
+  decided:** the local tool writes a separate sidecar file
+  (`<document-name>-image-descriptions.json`, keyed by `image_ref` with
+  `inline_object_id` as a verification key) into the same per-export images
+  subfolder, rather than editing this governance JSON in place — see
+  `knowledge-base/adr/0025-image-description-sidecar-writeback.md` for the
+  rationale (deterministic exporter output, avoids re-paying vision-LLM cost
+  on re-export). A downstream RAG ingestion step merges the two files at read
+  time.
 
 **Extraction mechanics.** `inlineObjectProperties.embeddedObject
 .imageProperties.contentUri` is a short-lived, signed URL — it must be
