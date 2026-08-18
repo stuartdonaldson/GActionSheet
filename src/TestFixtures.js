@@ -1876,8 +1876,35 @@ function setupTestFixtures(scenario, data) {
       case 'sync_document': {
         // Sync the clone doc. Called between fixture steps in the HTTP test runner.
         // testDocId was stored in TEST_DOC_ID by _handleRunFixture before calling us.
-        syncDocument(testDocId);
-        _TF_RESULT = { tag: 'fixture.sync_document', data: { synced: true, docId: testDocId } };
+        //
+        // scn.session.ScenarioSession.sync()'s own docstring promises "durable
+        // convergence" for a preceding async act (e.g. the sidebar's Sync Now
+        // button, whose click fires a separate syncDocument() execution).
+        // syncDocument() intentionally no-ops (sync.locked.skip) rather than
+        // proceed against a stale pre-lock read when it loses that race for
+        // the per-doc lock -- honor the convergence promise here by retrying
+        // (bounded) instead of reporting synced:true on what was actually a
+        // no-op (gts-kkm7 sidebar_bootstrap_sync race, reproduced 2026-08-14:
+        // sidebar_sync's async trigger held the lock, this call skipped, and
+        // the immediately-following find_sheet_actions() read count=0).
+        // Bound: 12 attempts * 3s = <=36s of extra wait -- comfortably above
+        // the ~14s single-doc syncDocument() hold observed live (gts-kkm7
+        // reproduction above), same order of magnitude as sidebar_sync's own
+        // 60s cold-sync budget (scn/ui.py).
+        var sdMaxAttempts = 12;
+        var sdAttempts = 0;
+        var sdResult;
+        do {
+          sdResult = syncDocument(testDocId);
+          sdAttempts++;
+          if (sdResult === 'locked-skip' && sdAttempts < sdMaxAttempts) {
+            Utilities.sleep(3000);
+          }
+        } while (sdResult === 'locked-skip' && sdAttempts < sdMaxAttempts);
+        if (sdResult === 'locked-skip') {
+          GasLogger.log('fixture.sync_document.still_locked', { docId: testDocId, attempts: sdAttempts });
+        }
+        _TF_RESULT = { tag: 'fixture.sync_document', data: { synced: sdResult !== 'locked-skip', docId: testDocId } };
         docAlreadyClosed = true;
         break;
       }
@@ -2945,6 +2972,51 @@ function setupTestFixtures(scenario, data) {
       case 'archive_journey': {
         ArchiveManager.archive(ss);
         _TF_RESULT = { tag: 'fixture.archive_journey', data: { archiveTriggered: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'purge_stale_test_docs': {
+        // gts-4m7l durable fix: TEST corpus growth races sync_all's client
+        // timeout. ArchiveManager's 24h 'Doc Not Found' grace window exists
+        // for production safety (a transient Drive blip shouldn't evict a
+        // doc's rows immediately) -- but on the shared TEST deployment it
+        // means every trashed test doc from THIS session's pytest runs
+        // lingers in Actions/DocData for a full day, so docCount (and
+        // syncAll()'s real execution time) climbs steadily across a day of
+        // repeated runs (observed 106 -> 171 in one session, see gts-4m7l).
+        //
+        // Rather than shortening the production threshold, this backdates
+        // every currently-'Doc Not Found' Actions row's Date Modified past
+        // the 24h window (same technique as 'backdate_action_row' above for
+        // the 30-day Closed case), then runs the SAME unmodified production
+        // ArchiveManager.archive() sweep. Invoked once per pytest session
+        // (tests/conftest.py _purge_stale_test_docs, alongside
+        // reset_test_state) so the shared corpus stays bounded per-suite
+        // instead of growing unboundedly across a day of sessions.
+        var pscActionsSheet = ss.getSheetByName('Actions');
+        var pscBackdated = 0;
+        if (pscActionsSheet) {
+          var pscLastRow = pscActionsSheet.getLastRow();
+          if (pscLastRow > 1) {
+            var pscNumRows   = pscLastRow - 1;
+            var pscStatusCol = pscActionsSheet.getRange(2, _ACOL.sync_status, pscNumRows, 1).getValues();
+            var pscModCol    = pscActionsSheet.getRange(2, _ACOL.modified_date, pscNumRows, 1).getValues();
+            var pscOldDate   = new Date(Date.now() - 25 * 60 * 60 * 1000); // > 24h threshold
+            for (var pscI = 0; pscI < pscStatusCol.length; pscI++) {
+              if (pscStatusCol[pscI][0] === 'Doc Not Found') {
+                pscModCol[pscI][0] = pscOldDate;
+                pscBackdated++;
+              }
+            }
+            if (pscBackdated > 0) {
+              pscActionsSheet.getRange(2, _ACOL.modified_date, pscNumRows, 1).setValues(pscModCol);
+            }
+          }
+        }
+        var pscArchivedCount = ArchiveManager.archive(ss);
+        GasLogger.log('fixture.purge_stale_test_docs', { backdated: pscBackdated, archived: pscArchivedCount });
+        _TF_RESULT = { tag: 'fixture.purge_stale_test_docs', data: { backdated: pscBackdated, archived: pscArchivedCount } };
         docAlreadyClosed = true;
         break;
       }

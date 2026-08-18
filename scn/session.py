@@ -351,7 +351,18 @@ class ScenarioSession:
             payload.update(extra)
         return self._post(payload)
 
-    def _post_fixture(self, fixture_name: str, extra: dict | None = None) -> dict:
+    # Fixtures whose GAS-side execution time scales with the shared TEST
+    # corpus's doc count rather than this call's own payload (gts-4m7l):
+    # a real syncAll() sweep over 100+ docs can legitimately run past the
+    # default 360s client-side read timeout even though the GAS side itself
+    # completes well inside it. Stopgap only — see gts-4m7l's durable fix
+    # (purge_stale_test_docs, invoked per-session in conftest.py) for the
+    # actual corpus-growth cure; this just gives the slow fixture more room
+    # while that cure keeps the corpus (and so this timeout's headroom) from
+    # eroding again.
+    _CORPUS_SCALED_FIXTURE_TIMEOUTS = {"sync_all": 600}
+
+    def _post_fixture(self, fixture_name: str, extra: dict | None = None, *, timeout: int | None = None) -> dict:
         """POST run_fixture with fixture_name and the current doc ID."""
         payload = {
             "action": "run_fixture",
@@ -361,7 +372,9 @@ class ScenarioSession:
         }
         if extra:
             payload.update(extra)
-        return self._post(payload)
+        if timeout is None:
+            timeout = self._CORPUS_SCALED_FIXTURE_TIMEOUTS.get(fixture_name, 360)
+        return self._post(payload, timeout=timeout)
 
     def _gid(self, target: ai) -> str:
         """Construct the globalId from doc_id + target.action_id (§16.11 #3)."""

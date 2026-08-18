@@ -58,6 +58,7 @@ function onOpen() {
       .createMenu('Action Sync')
       .addItem('Sync', 'menuSyncActiveDoc')
       .addItem('Insert Tracker', 'menuInsertTrackerActiveDoc')
+      .addItem('Export…', 'menuShowExportDialog')
       .addToUi();
     Logger.log(JSON.stringify({ tag: 'onOpen.docsMenu.added', ts: new Date().toISOString() }));
   } catch (e) {
@@ -110,6 +111,16 @@ function menuSyncActiveDoc() {
 function menuInsertTrackerActiveDoc() {
   var docId = _activeOrTestDocId();
   if (docId) insertTrackerTable(docId);
+}
+
+/**
+ * Opens the Export progress dialog (gts-s7ut, Procedure-Exporter.js's
+ * showGovernanceExportDialog_ + ExportProgressDialog.html). Only reachable
+ * from this classic menu — showModalDialog is unavailable from CardService
+ * action handlers, which is why export isn't a sidebar button.
+ */
+function menuShowExportDialog() {
+  showGovernanceExportDialog_();
 }
 
 // [PROBE] — dedicated identity probe callable from the sheet menu and Playwright.

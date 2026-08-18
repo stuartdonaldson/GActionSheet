@@ -35,6 +35,11 @@ test-results/playwright/
 test-results/gas-logs/
 # per-run scenario trace artifacts (scn/reporter.py: .trace.log + .trace.jsonl)
 test-results/runs/
+# suite-wide per-test progress/duration trend log (gts-y1eg) — local, appended
+# across runs for a tailing/trend tool; not durable source.
+test-results/duration-log.jsonl
+# self-calibrating local duration baseline (gts-y1eg) — machine-local, not shared.
+tests/.pytest_duration_baseline.json
 # allure and playwright HTML reports
 allure-report/
 playwright-report/

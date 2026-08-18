@@ -56,6 +56,25 @@ var CONTRACT_SCHEMA = Object.freeze({
     })
   }),
 
+  // gts-z6j0 — docId -> export-folder index, one row per document ever
+  // exported. Lives in a spreadsheet created inside EXPORT_ROOT_FOLDER_ID
+  // (see src/ExportFolderMap.js), keyed by Doc Id rather than Doc Title
+  // because document titles collide and folder identity must not. Meta Json
+  // is deliberately open-ended (empty object today) for other small
+  // per-export metadata, mirroring sheetConfig's Key/Value JSON-value
+  // convention above -- adding a field there never requires a column change.
+  sheetExportIndex: Object.freeze({
+    headers: Object.freeze(['Doc Id', 'Doc Title', 'Folder Id', 'Created At', 'Last Exported At', 'Meta Json']),
+    columnsByField: Object.freeze({
+      doc_id: 1,
+      doc_title: 2,
+      folder_id: 3,
+      created_at: 4,
+      last_exported_at: 5,
+      meta_json: 6
+    })
+  }),
+
   sheetAction: Object.freeze({
     fields: Object.freeze([
       'global_id',
@@ -106,6 +125,7 @@ var CONTRACT_SCHEMA = Object.freeze({
     routeNames: Object.freeze([
       'set_test_token',
       'set_axiom_config',
+      'set_export_config',
       'upsert_action_rows',
       'sync_action_rows',
       'verify_action_rows',
@@ -126,6 +146,9 @@ var CONTRACT_SCHEMA = Object.freeze({
       'find_sheet_actions',       // the §16.9 `find_sheet_actions` read query
       'dump_doc_paragraphs',      // read-only Docs structural dump for paragraph-
                                    // boundary diagnosis (flush merge defects)
+      'dump_raw_docs_api',        // gts-283i.1: unfiltered Docs.Documents.get()
+                                   // JSON dump for design-spike raw-capture assets
+                                   // (embedded-image / box-table structure)
       'read_team_actions',        // gts-79dw.4.11: the team-scoped reader's full
                                    // filter surface, for capturing the View A
                                    // (gts-79dw.4.7) review fixture — kept off the

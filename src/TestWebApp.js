@@ -112,5 +112,23 @@ function _handleRunFixture(payload) {
         props.deleteProperty('TEST_DOC_ID');
       }
     }
+    // gts-7389: this dispatcher previously never flushed GasLogger's buffer.
+    // Any GasLogger.log() calls made by a fixture (or by the entry points it
+    // drives, e.g. syncDocument()'s locked-skip early return, which itself
+    // has no flush()) sat in the in-memory buffer -- per-execution state,
+    // not carried by anything durable -- until either FLUSH_THRESHOLD (25
+    // entries) was crossed by a later, unrelated request reusing a warm GAS
+    // instance, or the instance was recycled and the entry was lost outright.
+    // Either way the entry's `ts` is stamped at log() time, so a delayed
+    // flush still lands in Axiom with a timestamp inside the *original*
+    // request's window -- looking, to a human cross-referencing timestamps
+    // after the fact, like the event "was there all along" while the live
+    // test's own bounded wait_for_log poll (tests/helpers/gas_log.py) never
+    // saw it in time and timed out. Flushing unconditionally here (mirrors
+    // every other WebApp.js route) makes every run_fixture response
+    // synchronously durable before the HTTP response returns, closing the
+    // gap deterministically instead of leaving it to threshold/warm-reuse
+    // luck.
+    GasLogger.flush();
   }
 }

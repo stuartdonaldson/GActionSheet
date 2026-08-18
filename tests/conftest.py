@@ -239,6 +239,27 @@ def _reset_test_state(settings):
     invoke_fixture("reset_test_state", "", settings, timeout=60)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _purge_stale_test_docs(settings, _reset_test_state):
+    """Bound the shared TEST corpus's growth by evicting aged-out 'Doc Not
+    Found' rows before this session's first test runs (gts-4m7l).
+
+    ArchiveManager's 24h grace window is correct for production but means
+    every doc trashed by a prior pytest session lingers in Actions/DocData
+    for a full day on the shared TEST deployment -- across a day of repeated
+    runs, docCount (and so syncAll()'s real execution time) climbs steadily,
+    eventually racing past the sync_all fixture's client-side read timeout
+    (observed docCount 106 -> 171 in one session). Runs once per pytest
+    session, after _reset_test_state, via the 'purge_stale_test_docs' GAS
+    fixture (src/TestFixtures.js), which backdates every currently-'Doc Not
+    Found' Actions row past the 24h window and then runs the unmodified
+    production ArchiveManager.archive() sweep.
+    """
+    from tests.helpers.fixture_invoke import invoke_fixture
+
+    invoke_fixture("purge_stale_test_docs", "", settings, timeout=120)
+
+
 @pytest.fixture(scope="session")
 def test_sheet_id(settings):
     return settings["testSheetId"]

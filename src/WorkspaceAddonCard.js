@@ -75,10 +75,6 @@ function buildHomepageCard(opts) {
 
     card.setHeader(header);
 
-    if (doc) {
-      card.addSection(_buildGovernanceExportSection());
-    }
-
     card.addSection(
       CardService.newCardSection()
         .addWidget(
@@ -148,33 +144,12 @@ function _buildTopButtonsSection() {
   );
 }
 
-/**
- * Sidebar fallback for the Governance export (src/Procedure-Exporter.js).
- * Added because the Extensions-menu universalActions entries for this
- * export were not appearing in the test-install (unconfirmed whether that
- * needs Marketplace SDK config beyond appsscript.json) — this gives the
- * export a working entry point regardless of how that turns out. Handlers
- * live in Procedure-Exporter.js (onExportGovernanceJson /
- * onExportGovernanceJsonAndPdf), sharing _exportGovernanceAndGetCard_ with
- * the universalActions handlers there.
- */
-function _buildGovernanceExportSection() {
-  return CardService.newCardSection()
-    .setHeader('Export')
-    .addWidget(
-      CardService.newButtonSet()
-        .addButton(
-          CardService.newTextButton()
-            .setText('Export JSON')
-            .setOnClickAction(_buildCardAction('onExportGovernanceJson'))
-        )
-        .addButton(
-          CardService.newTextButton()
-            .setText('Export JSON + PDF')
-            .setOnClickAction(_buildCardAction('onExportGovernanceJsonAndPdf'))
-        )
-    );
-}
+// Export is not on this card (gts-s7ut, superseding gts-7ca7's sidebar
+// button): it's reachable only from the classic Docs 'Action Sync' menu
+// (MenuHandler.js -> menuShowExportDialog -> Procedure-Exporter.js's
+// showGovernanceExportDialog_), since a live progress dialog requires
+// Ui.showModalDialog, which CardService action handlers can't call. See
+// the design note atop Procedure-Exporter.js's export-dialog entry points.
 
 function onShowImport(e) { // eslint-disable-line no-unused-vars
   var doc = DocumentApp.getActiveDocument();

@@ -39,7 +39,7 @@
  *   records the basis/limitations in the JSON.
  */
 
-const GOV_EXPORT_SCHEMA_VERSION = '2.1';
+const GOV_EXPORT_SCHEMA_VERSION = '2.3';
 
 /* ========================================================================== *
  * TEXT-PATTERN INFERENCE RULES (heuristic — tune here)
@@ -140,31 +140,14 @@ function onGovernanceExportAndPdfMenu(e) { // eslint-disable-line no-unused-vars
 }
 
 /**
- * Sidebar homepage-card button handlers (WorkspaceAddonCard.js's
- * _buildGovernanceExportSection) — added as a fallback entry point to the
- * same export, since Extensions-menu universalActions were not appearing
- * for this test install (Extensions menu rendering appears to need
- * Marketplace SDK config beyond just the manifest; unconfirmed, tracked
- * separately). Share _exportGovernanceAndGetCard_ with the universal-action
- * handlers above rather than duplicating the try/catch — only the response
- * builder type differs (ActionResponseBuilder here vs.
- * UniversalActionResponseBuilder there).
- */
-function onExportGovernanceJson() { // eslint-disable-line no-unused-vars
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().pushCard(_exportGovernanceAndGetCard_({ exportPdf: false })))
-    .build();
-}
-
-function onExportGovernanceJsonAndPdf() { // eslint-disable-line no-unused-vars
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().pushCard(_exportGovernanceAndGetCard_({ exportPdf: true })))
-    .build();
-}
-
-/**
- * Runs the export and returns the result/error card — shared core between
- * the Extensions-menu universalActions and the sidebar button fallback.
+ * Runs the export synchronously and returns the result/error card. Used
+ * only by the Extensions-menu universalActions above (onGovernanceExportMenu
+ * / onGovernanceExportAndPdfMenu) — that's a single already-blocking
+ * platform round trip with no other card to show interim state in. The
+ * classic-menu dialog (gts-s7ut, showGovernanceExportDialog_ /
+ * ExportProgressDialog.html) does NOT call this; it runs exportGovernance_
+ * via google.script.run instead, avoiding this path's ~30s ceiling on
+ * documents like the Governance Manual.
  */
 function _exportGovernanceAndGetCard_(options) {
   try {
@@ -177,34 +160,29 @@ function _exportGovernanceAndGetCard_(options) {
   }
 }
 
+function _buildBackToHomeButton_() {
+  return CardService.newTextButton()
+    .setText('Action Sync')
+    .setOnClickAction(
+      CardService.newAction().setFunctionName('onExportBackToHome')
+    );
+}
+
+function onExportBackToHome(e) { // eslint-disable-line no-unused-vars
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+    .build();
+}
+
 function _buildGovernanceExportResultCard_(jsonFile, pdfFile) {
-  const jsonId = jsonFile.getId();
-  const jsonView = `https://drive.google.com/file/d/${jsonId}/view`;
-
-  const section = CardService.newCardSection()
-    .addWidget(CardService.newTextParagraph().setText('Governance export complete.'))
-    .addWidget(
-      CardService.newTextButton()
-        .setText('Open JSON in Drive')
-        .setOpenLink(CardService.newOpenLink().setUrl(jsonView))
-    );
-
-  if (pdfFile) {
-    const pdfView = `https://drive.google.com/file/d/${pdfFile.getId()}/view`;
-    section.addWidget(
-      CardService.newTextButton()
-        .setText('Open PDF snapshot')
-        .setOpenLink(CardService.newOpenLink().setUrl(pdfView))
-    );
-  }
-
   return CardService.newCardBuilder()
     .setHeader(
       CardService.newCardHeader()
         .setTitle(_NORTHLAKE_UU_SUITE_NAME)
         .setImageUrl(_NORTHLAKE_UU_EMBLEM_URL)
     )
-    .addSection(section)
+    .addSection(CardService.newCardSection().addWidget(_buildBackToHomeButton_()))
+    .addSection(_buildExportResultSection_({ jsonFile: jsonFile, pdfFile: pdfFile }))
     .build();
 }
 
@@ -215,12 +193,41 @@ function _buildGovernanceExportErrorCard_(message) {
         .setTitle(_NORTHLAKE_UU_SUITE_NAME)
         .setImageUrl(_NORTHLAKE_UU_EMBLEM_URL)
     )
-    .addSection(
-      CardService.newCardSection().addWidget(
-        CardService.newTextParagraph().setText(`Governance export failed: ${message}`)
-      )
-    )
+    .addSection(CardService.newCardSection().addWidget(_buildBackToHomeButton_()))
+    .addSection(_buildExportErrorSection_(message))
     .build();
+}
+
+/**
+ * 'Export complete.' section, built from the live GAS File objects the
+ * synchronous universalAction path (_exportGovernanceAndGetCard_) returns.
+ */
+function _buildExportResultSection_(result) {
+  const jsonId = result.jsonFile.getId();
+  const pdfId = result.pdfFile ? result.pdfFile.getId() : null;
+
+  const section = CardService.newCardSection()
+    .addWidget(CardService.newTextParagraph().setText('Export complete.'))
+    .addWidget(
+      CardService.newTextButton()
+        .setText('Open JSON in Drive')
+        .setOpenLink(CardService.newOpenLink().setUrl(`https://drive.google.com/file/d/${jsonId}/view`))
+    );
+
+  if (pdfId) {
+    section.addWidget(
+      CardService.newTextButton()
+        .setText('Open PDF snapshot')
+        .setOpenLink(CardService.newOpenLink().setUrl(`https://drive.google.com/file/d/${pdfId}/view`))
+    );
+  }
+  return section;
+}
+
+function _buildExportErrorSection_(message) {
+  return CardService.newCardSection().addWidget(
+    CardService.newTextParagraph().setText(`Export failed: ${message}`)
+  );
 }
 
 /** Manual-invocation wrappers (Apps Script editor / ad hoc runs). Not wired
@@ -233,23 +240,211 @@ function exportGovernanceJsonAndPdf() {
   return exportGovernance_({ exportPdf: true });
 }
 
+/* ========================================================================== *
+ * ENTRY POINTS — classic "Extensions" menu dialog (gts-s7ut, supersedes the
+ * gts-7ca7 sidebar-card + time-based-trigger design below).
+ *
+ * gts-7ca7 shipped a sidebar 'Export' button backed by a ScriptApp
+ * time-based trigger (mirroring EditorAddonCard.js's _scheduleSheetUpdate /
+ * _processPendingSheetUpdates queue-drain pattern). Measured against the
+ * real Governance Manual doc it worked, but the trigger took 2m47s to fire
+ * (Apps Script gives no firing-time guarantee for sub-minute one-off
+ * `.after()` triggers — see the export-async-trigger-latency bd memory) for
+ * ~8s of actual work — a bad trade for what was supposed to be a progress
+ * indicator. Removed in favor of this: a modal dialog
+ * (DocumentApp.getUi().showModalDialog, only reachable from the classic
+ * bound-script menu below, not from a CardService action) running
+ * exportGovernance_() via google.script.run. That RPC path has Apps
+ * Script's normal ~6-minute execution ceiling (not the ~30s CardService
+ * card-action ceiling that made the Extensions-menu universalActions above
+ * risky on this same document), so the work can run synchronously inside
+ * it with zero scheduling latency, while a second google.script.run poll
+ * (getExportProgressForDialog) updates the dialog every ~1.5s from the same
+ * EXPORT_STATUS_<docId> property the trigger design also used.
+ *
+ * Trade-off accepted deliberately (2026-08-13): this dialog runs as the
+ * active user (same permission boundary as today, via the classic menu's
+ * authorization context) rather than staying reachable from the sidebar
+ * card — CardService actions cannot call Ui.showModalDialog, and the only
+ * way to keep it in the sidebar would route through the public WebApp
+ * (executeAs: USER_DEPLOYING), which would run the export as the deployer
+ * rather than the clicking user. See MenuHandler.js's Docs-context menu
+ * (menuShowExportDialog) for the entry point.
+ * ========================================================================== */
+
+const _EXPORT_STATUS_PROP_PREFIX = 'EXPORT_STATUS_';
+
+/** Ordered stage labels reported via options.onProgress in exportGovernance_
+ * below — kept in one place so the dialog's poll and the progress callback
+ * agree on totalStages. */
+function _exportStageList_(exportPdf) {
+  const stages = [
+    'Reading document',
+    'Extracting content',
+    'Processing comments',
+    'Building document views',
+    'Writing export file'
+  ];
+  if (exportPdf) stages.push('Rendering PDF snapshot');
+  return stages;
+}
+
+function _readExportStatus_(docId) {
+  const raw = PropertiesService.getScriptProperties().getProperty(_EXPORT_STATUS_PROP_PREFIX + docId);
+  return raw ? JSON.parse(raw) : null;
+}
+
+function _writeExportStatus_(docId, status) {
+  status.updatedAt = new Date().toISOString();
+  PropertiesService.getScriptProperties().setProperty(_EXPORT_STATUS_PROP_PREFIX + docId, JSON.stringify(status));
+}
+
 /**
- * @param {{exportPdf: boolean, docId: (string|undefined)}} options  docId is
- *   an optional testability seam (gts-2glm): when supplied, the export runs
- *   against that document instead of DocumentApp.getActiveDocument(), which
- *   only resolves inside a live add-on UI session. Production entry points
- *   (onGovernanceExportMenu et al.) never pass docId — they always omit it
- *   and rely on the active-document default. Only a headless test-support
- *   caller (WebApp.js's export_governance_json route) sets it.
+ * Menu handler (MenuHandler.js's Docs-context 'Action Sync' menu ->
+ * 'Export…' -> menuShowExportDialog -> this). Only callable from that
+ * classic bound-script authorization path — showModalDialog is unavailable
+ * to CardService action handlers.
+ */
+function showGovernanceExportDialog_() {
+  const doc = DocumentApp.getActiveDocument();
+  const docId = doc ? doc.getId() : '';
+  const template = HtmlService.createTemplateFromFile('ExportProgressDialog');
+  template.docId = docId;
+  template.buildVersion = BUILD_INFO.version;
+  const html = template.evaluate().setWidth(440).setHeight(340);
+  DocumentApp.getUi().showModalDialog(html, 'Export');
+}
+
+/**
+ * google.script.run entry point (ExportProgressDialog.html). Runs
+ * exportGovernance_() synchronously — safe here specifically because this
+ * is not a CardService action handler (no ~30s ceiling), just Apps
+ * Script's normal per-execution limit. Returns a plain JSON-serializable
+ * object (google.script.run cannot marshal a live DriveApp File back to
+ * the client) and clears any stale status for this doc before starting so
+ * a leftover 'done'/'error' from a previous run can't be momentarily
+ * visible to the first poll.
+ *
+ * @param {string} docId
+ * @param {boolean} exportPdf
+ * @returns {{jsonFileId: string, pdfFileId: (string|undefined)}}
+ */
+function runExportForDialog(docId, exportPdf) { // eslint-disable-line no-unused-vars
+  const stages = _exportStageList_(exportPdf);
+  _writeExportStatus_(docId, {
+    state: 'running',
+    stage: stages[0],
+    stageIndex: 0,
+    totalStages: stages.length,
+    exportPdf: exportPdf,
+    startedAt: new Date().toISOString()
+  });
+
+  try {
+    const result = exportGovernance_({
+      docId: docId,
+      exportPdf: exportPdf,
+      onProgress: (stageIndex, totalStages, stageLabel) => {
+        _writeExportStatus_(docId, {
+          state: 'running',
+          stage: stageLabel,
+          stageIndex: stageIndex,
+          totalStages: totalStages,
+          exportPdf: exportPdf
+        });
+      }
+    });
+
+    _writeExportStatus_(docId, {
+      state: 'done',
+      stage: stages[stages.length - 1],
+      stageIndex: stages.length,
+      totalStages: stages.length,
+      exportPdf: exportPdf,
+      jsonFileId: result.jsonFile.getId(),
+      pdfFileId: result.pdfFile ? result.pdfFile.getId() : undefined
+    });
+
+    return { jsonFileId: result.jsonFile.getId(), pdfFileId: result.pdfFile ? result.pdfFile.getId() : undefined };
+  } catch (err) {
+    _writeExportStatus_(docId, { state: 'error', errorMessage: err.message, exportPdf: exportPdf });
+    // gts-diag: catch-and-rethrow above dropped docId, leaving Cloud
+    // Logging's error-reporting entry with no way to tell which document
+    // Docs.Documents.get() was actually called with — log it explicitly so
+    // a repro is diagnosable from clasp logs alone.
+    GasLogger.log('export.dialog.error', { docId: docId, msg: err.message, exportPdf: exportPdf });
+    // google.script.run's withFailureHandler receives an Error built from
+    // this message — rethrow rather than swallow so the dialog's failure
+    // path (not just the polled status) sees it even if a poll is missed.
+    throw new Error(err.message);
+  }
+}
+
+/**
+ * google.script.run poll target (ExportProgressDialog.html, ~1.5s
+ * interval). Plain property read — cheap, no lock needed (single reader,
+ * single writer per docId within one dialog session).
+ *
+ * @param {string} docId
+ * @returns {object|null}
+ */
+function getExportProgressForDialog(docId) { // eslint-disable-line no-unused-vars
+  return _readExportStatus_(docId);
+}
+
+/**
+ * @param {{exportPdf: boolean, docId: (string|undefined), onProgress: (function|undefined)}} options
+ *   docId is an optional testability seam (gts-2glm): when supplied, the
+ *   export runs against that document instead of
+ *   DocumentApp.getActiveDocument(), which only resolves inside a live
+ *   add-on UI session. Production entry points (onGovernanceExportMenu et
+ *   al.) never pass docId — they always omit it and rely on the
+ *   active-document default. Only a headless test-support caller (WebApp.js's
+ *   export_governance_json route) sets it.
+ *   onProgress(stageIndex, totalStages, stageLabel) is an optional seam
+ *   (gts-s7ut, formerly gts-7ca7) called at each stage boundary below, in
+ *   the same order as _exportStageList_(options.exportPdf). Omitted by
+ *   every existing synchronous caller (exportGovernanceJson/
+ *   exportGovernanceJsonAndPdf, the universalActions handlers, the WebApp
+ *   export_governance_json route) — only runExportForDialog (the
+ *   Extensions-menu export dialog) passes it, so its absence is a no-op and
+ *   behavior for those callers is unchanged.
+ *
+ *   Stage timing is logged unconditionally (export.stage / export.complete,
+ *   see _reportStage below) regardless of caller — this is what showed the
+ *   dur_s spread (single digits to 250s+ across the gts-2glm run) in the
+ *   Axiom python-side export_governance_json events had no GAS-side
+ *   breakdown to explain; this instrumentation is that breakdown.
  */
 function exportGovernance_(options) {
   const documentId = options.docId || DocumentApp.getActiveDocument().getId();
+  const _stages = _exportStageList_(options.exportPdf);
+  const _t0 = Date.now();
+  let _tPrev = _t0;
+  const _reportStage = (i) => {
+    const now = Date.now();
+    GasLogger.log('export.stage', {
+      docId: documentId,
+      stage: _stages[i],
+      stageIndex: i + 1,
+      totalStages: _stages.length,
+      stepMs: now - _tPrev,
+      totalMs: now - _t0
+    });
+    _tPrev = now;
+    if (options.onProgress) options.onProgress(i + 1, _stages.length, _stages[i]);
+  };
 
   // Advanced Google Service: Docs API.
   const apiDoc = Docs.Documents.get(documentId, {
     suggestionsViewMode: 'SUGGESTIONS_INLINE',
     includeTabsContent: true
   });
+  _reportStage(0); // 'Reading document' — logged AFTER the work it names, so
+  // stepMs is that stage's own cost, not the previous stage's (gts-7ca7
+  // follow-up: the original pre-work placement mislabeled every stage by
+  // one, attributing e.g. the Docs.Documents.get() call's time to the
+  // 'Extracting content' log line instead of 'Reading document').
 
   const out = {
     schema_version: GOV_EXPORT_SCHEMA_VERSION,
@@ -259,7 +454,8 @@ function exportGovernance_(options) {
       title: apiDoc.title || documentId,
       revision_id: apiDoc.revisionId || null,
       source_url: `https://docs.google.com/document/d/${documentId}/edit`,
-      suggestion_groups: []
+      suggestion_groups: [],
+      toc: []
     },
     semantics: {
       baseline: 'Text against which proposed revisions are evaluated.',
@@ -298,8 +494,10 @@ function exportGovernance_(options) {
       comments: 0,
       unresolved_comments: 0,
       unmatched_comments: 0,
+      no_quoted_text_comments: 0,
       explicit_page_breaks: 0,
       distinct_suggestion_ids: 0,
+      toc_entries: 0,
       warnings: []
     }
   };
@@ -329,13 +527,19 @@ function exportGovernance_(options) {
 
     processStructuralContent_(body, ctx);
   });
+  _reportStage(1); // 'Extracting content'
 
   out.comments = getDriveComments_(documentId, out);
   associateCommentsToBlocks_(out);
   buildSuggestionGroups_(out);
+  _reportStage(2); // 'Processing comments'
+
   buildColorSignals_(out);
-  buildDocumentViews_(out);
+  buildDocumentViews_(out, options.includeWholeDocumentViews === true);
   finalizeDiagnostics_(out);
+  omitEmptyStructuralArrays_(out); // §13.4 — must run after every stage that
+  // populates comment_ids/color_signals/evidence, and before serialization.
+  _reportStage(3); // 'Building document views'
 
   const jsonBlob = Utilities.newBlob(
     JSON.stringify(out, null, 2),
@@ -343,12 +547,19 @@ function exportGovernance_(options) {
     `${sanitizeFilename_(out.document.title)}-governance.json`
   );
 
-  const folder = getSourceFolder_(documentId);
+  // gts-z6j0 — export output goes to the document's own isolated export
+  // folder (under EXPORT_ROOT_FOLDER_ID), not the source document's parent
+  // folder, so users with access to the source folder don't see export
+  // byproducts. Falls back to getSourceFolder_() if export isolation isn't
+  // configured -- see src/ExportFolderMap.js.
+  const folder = getExportFolder_(documentId, out.document.title);
   const jsonFile = folder ? folder.createFile(jsonBlob) : DriveApp.createFile(jsonBlob);
+  _reportStage(4); // 'Writing export file'
 
   let pdfFile = null;
   if (options.exportPdf) {
     pdfFile = exportPdfSnapshot_(documentId, out.document.title, folder);
+    _reportStage(5); // 'Rendering PDF snapshot'
     if (pdfFile) {
       out.document.pdf_snapshot = {
         file_id: pdfFile.getId(),
@@ -359,6 +570,23 @@ function exportGovernance_(options) {
       jsonFile.setContent(JSON.stringify(out, null, 2));
     }
   }
+
+  GasLogger.log('export.complete', {
+    docId: documentId,
+    totalMs: Date.now() - _t0,
+    exportPdf: !!options.exportPdf,
+    tabsProcessed: out.diagnostics.tabs_processed,
+    units: out.diagnostics.units,
+    blocks: out.diagnostics.blocks,
+    runs: out.diagnostics.runs,
+    comments: out.diagnostics.comments
+  });
+  // Flushed here (not left to the caller) so export.stage/export.complete
+  // reach Axiom for every entry point — several existing callers only flush
+  // on their own error path (_exportGovernanceAndGetCard_,
+  // _handleExportGovernanceJson), which would otherwise strand these events
+  // in GasLogger's in-memory buffer for the rest of that execution.
+  GasLogger.flush();
 
   return { jsonFile, pdfFile, json: out };
 }
@@ -391,12 +619,70 @@ function processStructuralContent_(content, ctx) {
     }
 
     if (se.tableOfContents) {
-      processStructuralContent_(se.tableOfContents.content || [], ctx);
+      // §7.5: TOC entries are navigation aids, not governance content — they
+      // must NOT go through processParagraph_/createUnit_/createBlock_ (that
+      // was gts-6cq2-era behavior and produced duplicate fake governance
+      // units, since TOC line text like "Board Policy 1: X\t9" matches
+      // GOVERNANCE_UNIT_PATTERNS same as a real heading). Diverted entirely
+      // to document.toc instead; ctx.sourceOrder/allBlocks/currentUnit are
+      // untouched by TOC content.
+      processTableOfContents_(se.tableOfContents.content || [], ctx);
       return;
     }
 
     // Section breaks affect layout but do not necessarily start a new page.
   });
+}
+
+/** Builds document.toc entries from a tableOfContents structural element's
+ * content. Each TOC line is a single paragraph whose text is
+ * "Title<TAB>PageNumber" and whose link-bearing run(s) carry
+ * textStyle.link.heading.{id, tabId} pointing straight at the target
+ * heading — confirmed live via SPIKE-CommentPosition.js's toc_probe op
+ * (gts-6cq2 follow-up), so this is a direct deep link, not a text match. */
+function processTableOfContents_(content, ctx) {
+  (content || []).forEach(item => {
+    if (!item.paragraph) return;
+    const entry = buildTocEntry_(item.paragraph, ctx);
+    if (entry) ctx.out.document.toc.push(entry);
+  });
+  ctx.out.diagnostics.toc_entries = ctx.out.document.toc.length;
+}
+
+function buildTocEntry_(paragraph, ctx) {
+  let text = '';
+  let heading = null;
+
+  (paragraph.elements || []).forEach(pe => {
+    if (!pe.textRun) return;
+    text += pe.textRun.content || '';
+    const link = pe.textRun.textStyle?.link;
+    if (!heading && link?.heading) heading = link.heading;
+  });
+
+  const normalized = text.replace(/\n+$/, '');
+  if (!normalized.trim()) return null;
+
+  // Docs renders a TOC line as "Title<TAB>PageNumber" — split on the last
+  // tab rather than the first, since a title itself could (rarely) contain
+  // a tab character.
+  const lastTab = normalized.lastIndexOf('\t');
+  const title = (lastTab >= 0 ? normalized.slice(0, lastTab) : normalized).trim();
+  const displayedPage = lastTab >= 0 ? normalized.slice(lastTab + 1).trim() : null;
+
+  const url = heading
+    ? `https://docs.google.com/document/d/${ctx.out.document.id}/edit` +
+      (heading.tabId ? `?tab=${heading.tabId}` : '') +
+      `#heading=${heading.id}`
+    : null;
+
+  return {
+    title,
+    displayed_page: displayedPage,
+    target_tab_id: heading ? (heading.tabId || null) : null,
+    target_heading_id: heading ? heading.id : null,
+    url
+  };
 }
 
 function processParagraph_(structuralElement, ctx) {
@@ -632,6 +918,7 @@ function createBlock_(se, paragraph, runs, ctx, meta) {
   const label = detectBoldColonLabel_(paragraph.elements || []);
   const semantic = detectSemanticState_(meta.allText);
   const kind = classifyBlock_(paragraph, meta.namedStyle, label, semantic.state);
+  const revisionSummary = summarizeRevision_(runs);
 
   const block = {
     id: makeBlockId_(ctx.tabId, se.startIndex, se.endIndex),
@@ -650,15 +937,40 @@ function createBlock_(se, paragraph, runs, ctx, meta) {
       ordered: inferOrderedList_(paragraph.bullet, ctx)
     } : null,
     runs,
-    all_text: buildViewText_(runs, 'all', semantic.state),
-    baseline_text: buildViewText_(runs, 'baseline', semantic.state),
-    proposed_text: buildViewText_(runs, 'proposed', semantic.state),
-    revision_summary: summarizeRevision_(runs),
+    revision_summary: revisionSummary,
     comment_ids: []
   };
 
+  // §13.3: unchanged blocks (93%+ of a typical export) get a single
+  // canonical `text` field; blocks with any revision activity get the
+  // all_text/baseline_text/proposed_text trio instead. Never both — the
+  // trio would be byte-identical copies of `text` on an unchanged block.
+  if (revisionSummary === 'unchanged') {
+    block.text = buildViewText_(runs, 'all', semantic.state);
+  } else {
+    block.all_text = buildViewText_(runs, 'all', semantic.state);
+    block.baseline_text = buildViewText_(runs, 'baseline', semantic.state);
+    block.proposed_text = buildViewText_(runs, 'proposed', semantic.state);
+  }
+
   block.citation_hint = makeCitationHint_(ctx.currentUnit, block);
   return block;
+}
+
+/** §13.3 fallback accessor: read the trio when present (revision activity),
+ * else the canonical `text` field (unchanged block). Every read site that
+ * previously assumed `all_text`/`baseline_text`/`proposed_text` always
+ * exist must go through here instead. */
+function blockAllText_(b) {
+  return b.all_text !== undefined ? b.all_text : (b.text || '');
+}
+
+function blockBaselineText_(b) {
+  return b.baseline_text !== undefined ? b.baseline_text : (b.text || '');
+}
+
+function blockProposedText_(b) {
+  return b.proposed_text !== undefined ? b.proposed_text : (b.text || '');
 }
 
 function classifyBlock_(paragraph, namedStyle, label, semanticState) {
@@ -833,7 +1145,7 @@ function buildViewText_(runs, view, semanticState) {
   // baseline/proposed governance views by default.
   if (view !== 'all' && ['historical', 'editorial'].includes(semanticState)) return '';
 
-  return runs
+  const joined = runs
     .filter(r => r.kind === 'text')
     .filter(r => {
       if (view === 'all') return true;
@@ -843,6 +1155,21 @@ function buildViewText_(runs, view, semanticState) {
     })
     .map(r => r.text)
     .join('');
+
+  return normalizeDerivedText_(joined);
+}
+
+/** §13.5: cosmetic normalization applied ONLY to derived/concatenated text
+ * (block.text, all_text/baseline_text/proposed_text, views.*) — never to
+ * runs[].text, which stays byte-exact per §17.1's fidelity guarantee.
+ * Non-breaking space (U+00A0, common from pasted content) reads as a plain
+ * space to a downstream consumer with no loss of meaning. Vertical tab
+ * (U+000B) is Docs' internal encoding for a Shift+Enter soft line break
+ * within a paragraph — a real, meaningful break, not noise — and renders as
+ * an unrecognizable control character to most consumers if left as-is, so
+ * it's normalized to '\n' rather than stripped. */
+function normalizeDerivedText_(s) {
+  return s.replace(/\u00A0/g, ' ').replace(/\u000B/g, '\n');
 }
 
 function summarizeRevision_(runs) {
@@ -962,7 +1289,7 @@ function associateCommentsToBlocks_(out) {
     }
 
     // Tier 1: exact substring match within a single block.
-    const exact = blocks.filter(b => normalizeForMatch_(b.all_text).includes(q));
+    const exact = blocks.filter(b => normalizeForMatch_(blockAllText_(b)).includes(q));
     if (exact.length) {
       linkCommentToBlocks(comment, exact, exact.length === 1 ? 'quoted_text_exact' : 'quoted_text_multiple');
       return;
@@ -971,7 +1298,7 @@ function associateCommentsToBlocks_(out) {
     // Tier 2: conservative prefix match (first 80 normalized characters),
     // only accepted when it resolves to exactly one block.
     const prefix = q.slice(0, 80);
-    const approx = blocks.filter(b => normalizeForMatch_(b.all_text).includes(prefix));
+    const approx = blocks.filter(b => normalizeForMatch_(blockAllText_(b)).includes(prefix));
     if (approx.length === 1) {
       linkCommentToBlocks(comment, approx, 'quoted_text_prefix');
       return;
@@ -1017,6 +1344,16 @@ function associateCommentsToBlocks_(out) {
       'anchor field is not decodable into Docs API indices, so these require manual review.'
     );
   }
+
+  out.diagnostics.no_quoted_text_comments = out.comments.filter(c => c.association_basis === 'no_quoted_text').length;
+  if (out.diagnostics.no_quoted_text_comments > 0) {
+    out.diagnostics.warnings.push(
+      `${out.diagnostics.no_quoted_text_comments} comment(s) have no quoted text ` +
+      `(Drive's quotedFileContent was empty). Their association_basis is "no_quoted_text" and ` +
+      'associated_block_ids/section_path are empty — this is not a matching-tier failure, no ' +
+      'anchoring signal was available from Drive at all, so these require manual review.'
+    );
+  }
 }
 
 /** Slides a window of up to COMMENT_MATCH_WINDOW_BLOCKS consecutive blocks
@@ -1035,7 +1372,7 @@ function findMultiBlockMatch_(q, blocksByUnit) {
     for (let start = 0; start < unitBlocks.length; start++) {
       for (let size = 2; size <= COMMENT_MATCH_WINDOW_BLOCKS && start + size <= unitBlocks.length; size++) {
         const window = unitBlocks.slice(start, start + size);
-        const joined = normalizeForMatch_(window.map(b => b.all_text).join(' '));
+        const joined = normalizeForMatch_(window.map(b => blockAllText_(b)).join(' '));
         if (joined.includes(q)) {
           candidates.push(window);
           break; // smallest window at this start is enough; don't also test larger ones
@@ -1058,7 +1395,7 @@ function findFuzzyBlockMatch_(q, blocks) {
   let secondScore = 0;
 
   blocks.forEach(b => {
-    const score = jaccardScore_(qWords, wordSet_(normalizeForMatch_(b.all_text)));
+    const score = jaccardScore_(qWords, wordSet_(normalizeForMatch_(blockAllText_(b))));
     if (score > bestScore) {
       secondScore = bestScore;
       bestScore = score;
@@ -1186,13 +1523,20 @@ function buildColorSignals_(out) {
  * DOCUMENT VIEWS / DIAGNOSTICS
  * ========================================================================== */
 
-function buildDocumentViews_(out) {
+/**
+ * §13.1/13.2: baseline_text/proposed_text are whole-document
+ * reconstructions, ~7% of a representative export's bytes on top of the
+ * gts-6cq2 per-block dedup, and are needed only by a consumer that wants
+ * "the document" rather than "a section" (§2's use case, not the common
+ * case). Opt-in via options.includeWholeDocumentViews (default false) —
+ * deleted_text/proposed_additions are much smaller extracts, not
+ * duplicative in the same way, and always included.
+ */
+function buildDocumentViews_(out, includeWholeDocumentViews) {
   const blocks = [];
   out.units.forEach(u => (u.blocks || []).forEach(b => blocks.push(b)));
 
-  out.views = {
-    baseline_text: blocks.map(b => b.baseline_text).filter(Boolean).join('\n'),
-    proposed_text: blocks.map(b => b.proposed_text).filter(Boolean).join('\n'),
+  const views = {
     deleted_text: blocks.flatMap(b => b.runs
       .filter(r => r.kind === 'text' && r.revision.change === 'deleted')
       .map(r => r.text)
@@ -1202,6 +1546,13 @@ function buildDocumentViews_(out) {
       .map(r => r.text)
     ).join('')
   };
+
+  if (includeWholeDocumentViews) {
+    views.baseline_text = blocks.map(b => blockBaselineText_(b)).filter(Boolean).join('\n');
+    views.proposed_text = blocks.map(b => blockProposedText_(b)).filter(Boolean).join('\n');
+  }
+
+  out.views = views;
 }
 
 function finalizeDiagnostics_(out) {
@@ -1256,6 +1607,37 @@ function makeLocation_(startIndex, endIndex, ctx) {
     // diagnostics warning (finalizeDiagnostics_), not repeated per-location.
     page_approximate: ctx.explicitBreaksSoFar === 0
   };
+}
+
+/** §13.4: omit kind_evidence/semantic_state_evidence/color_signals/
+ * comment_ids/runs[].revision.evidence entirely when empty, rather than
+ * emitting `[]`. Runs as a final pass (not at construction time) because
+ * every one of these arrays is populated incrementally by later stages
+ * (associateCommentsToBlocks_, buildSuggestionGroups_, buildColorSignals_)
+ * that push onto them or reassign them — deleting the key at construction
+ * time would break those in-place mutations. Deleting a key that was never
+ * present is a no-op, so this is safe to run against any unit/block shape. */
+function omitEmptyStructuralArrays_(out) {
+  const dropIfEmpty = (obj, key) => {
+    if (Array.isArray(obj[key]) && obj[key].length === 0) delete obj[key];
+  };
+
+  dropIfEmpty(out.document, 'toc');
+
+  out.units.forEach(u => {
+    dropIfEmpty(u, 'kind_evidence');
+    dropIfEmpty(u, 'semantic_state_evidence');
+    dropIfEmpty(u, 'color_signals');
+    dropIfEmpty(u, 'comment_ids');
+
+    (u.blocks || []).forEach(b => {
+      dropIfEmpty(b, 'semantic_state_evidence');
+      dropIfEmpty(b, 'comment_ids');
+      (b.runs || []).forEach(r => {
+        if (r.kind === 'text') dropIfEmpty(r.revision, 'evidence');
+      });
+    });
+  });
 }
 
 function makeCitationHint_(unit, block) {

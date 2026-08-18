@@ -6,9 +6,11 @@ Entry point: WebApp.js's 'export_governance_json' route -> exportGovernance_()
 via the options.docId testability seam this bead added (exportGovernance_
 otherwise only resolves DocumentApp.getActiveDocument(), which is add-on-UI-
 session-only and has no headless call-site). Production entry points
-(onGovernanceExportMenu/onGovernanceExportAndPdfMenu/onExportGovernanceJson/
-onExportGovernanceJsonAndPdf, all in Procedure-Exporter.js) never pass docId
-and are unaffected by the seam.
+(onGovernanceExportMenu/onGovernanceExportAndPdfMenu, the Extensions-menu
+universalActions in Procedure-Exporter.js) never pass docId and are
+unaffected by the seam. The classic-menu Export dialog's google.script.run
+path (runExportForDialog/getExportProgressForDialog, gts-s7ut) is a
+separate, not-yet-covered call-site.
 
 Seed content is built via two generic, test-only passthrough routes added
 alongside the seam:
@@ -29,6 +31,20 @@ covers those two ACs against hand-built Docs-API-shaped fixture objects.
 Also out of scope this session: table mid-cell unit-switch tagging, and the
 prefix/cross-paragraph/fuzzy comment-match tiers beyond exact — flagged as
 open follow-up in gts-2glm rather than silently skipped.
+
+gts-1nw8/gts-crzl scope gap: `document.toc` (§7.5) cannot be covered live —
+confirmed by probing `insertTableOfContents` against the real Docs API
+batchUpdate endpoint: "Unknown name insertTableOfContents ... Cannot find
+field." Table-of-contents insertion is a Docs UI-only feature with no public
+API surface, same category as the suggested-edits gap above. TOC parsing
+(processTableOfContents_/buildTocEntry_ in Procedure-Exporter.js) was instead
+verified live via a one-off manual read against a real customer document that
+already had an Insert > Table of contents TOC (docId
+1zQkRAczbRjB0iRD2OhpHsqXvHsmskE8VI7VNx8vE5yE, gts-6cq2's sample export) — see
+gts-1nw8's close notes for the result. No repeatable pytest coverage exists
+for the TOC-entry-shape/link-extraction path; a future fixture-doc with a
+pre-baked real TOC (created once by hand via the Docs UI, then reused
+read-only across test runs) would close this gap.
 """
 import pytest
 
@@ -91,6 +107,24 @@ def _insert_bold_label(scn: ScenarioSession, label: str, rest: str) -> tuple[int
     return start, end
 
 
+def _strikethrough(scn: ScenarioSession, start: int, end: int) -> None:
+    """Sets textStyle.strikethrough — the one revision-activity signal that
+    Docs' batchUpdate can seed live (suggested insertions/deletions cannot,
+    per the module docstring). makeTextRun_ treats a bare strikethrough run
+    as change='deleted', which is enough to drive revision_summary into
+    'deletions' and exercise the all_text/baseline_text/proposed_text trio
+    path (§13.3)."""
+    resp = scn._post_route("seed_doc_content", {
+        "docId": scn.doc_id,
+        "requests": [{"updateTextStyle": {
+            "range": {"startIndex": start, "endIndex": end},
+            "textStyle": {"strikethrough": True},
+            "fields": "strikethrough",
+        }}],
+    })
+    assert resp.get("ok"), resp
+
+
 def _highlight(scn: ScenarioSession, start: int, end: int, hex_color: str) -> None:
     rgb = {
         "red": int(hex_color[0:2], 16) / 255.0,
@@ -126,10 +160,36 @@ def _create_comment(scn: ScenarioSession, content: str, quoted_text: str | None 
     return resp["commentId"]
 
 
-def _export(scn: ScenarioSession, export_pdf: bool = False) -> dict:
-    resp = scn._post_route("export_governance_json", {"docId": scn.doc_id, "exportPdf": export_pdf})
+def _export(scn: ScenarioSession, export_pdf: bool = False, include_whole_document_views: bool = False) -> dict:
+    resp = scn._post_route("export_governance_json", {
+        "docId": scn.doc_id,
+        "exportPdf": export_pdf,
+        "includeWholeDocumentViews": include_whole_document_views,
+    })
     assert resp.get("ok"), resp
     return resp["json"]
+
+
+def _export_raw(scn: ScenarioSession, doc_id: str | None = None) -> dict:
+    """Like _export, but returns the full response envelope (exportFolderId,
+    jsonFileId) instead of unwrapping to just the JSON payload — gts-es3l's
+    export-folder-isolation assertions need the envelope, not the document
+    content. doc_id defaults to scn.doc_id; pass explicitly for a second doc
+    that isn't scn's own (see test_export_governance_folder_isolation_*)."""
+    resp = scn._post_route("export_governance_json", {"docId": doc_id or scn.doc_id})
+    assert resp.get("ok"), resp
+    return resp
+
+
+def _rename(scn: ScenarioSession, doc_id: str, title: str) -> None:
+    resp = scn._post_route("rename_doc_for_test", {"docId": doc_id, "title": title})
+    assert resp.get("ok"), resp
+
+
+def _export_index_rows(scn: ScenarioSession, doc_id: str) -> list[dict]:
+    resp = scn._post_route("dump_export_index_for_test", {"docId": doc_id})
+    assert resp.get("ok"), resp
+    return resp["rows"]
 
 
 def _all_blocks(doc_json: dict) -> list[dict]:
@@ -159,7 +219,7 @@ def test_export_governance_entry_point_basic_shape(settings, request):
 
     doc = _export(scn)
 
-    assert doc["schema_version"] == "2.1"
+    assert doc["schema_version"] == "2.3"
     assert doc["document"]["id"] == scn.doc_id
     assert doc["diagnostics"]["tabs_processed"] == 1
     assert doc["diagnostics"]["units"] >= 1
@@ -190,8 +250,13 @@ def test_export_governance_parent_unit_id_hierarchy(settings, request):
     assert procedure["parent_unit_id"] == policy["id"]
     assert policy["parent_unit_id"] is None
 
-    body_block = next(b for b in procedure["blocks"] if b["all_text"].startswith("Procedure body"))
+    # §13.3: this block has no revision activity, so it carries the
+    # canonical `text` field, not all_text/baseline_text/proposed_text.
+    body_block = next(b for b in procedure["blocks"] if b["text"].startswith("Procedure body"))
     assert body_block["unit_id"] == procedure["id"]
+    assert "all_text" not in body_block
+    assert "baseline_text" not in body_block
+    assert "proposed_text" not in body_block
 
 
 # ---------------------------------------------------------------------------
@@ -206,8 +271,8 @@ def test_export_governance_page_approximate_transitions_on_explicit_break(settin
 
     doc = _export(scn)
     blocks = _all_blocks(doc)
-    before = next(b for b in blocks if b["all_text"].startswith("Before any"))
-    after = next(b for b in blocks if b["all_text"].startswith("After the"))
+    before = next(b for b in blocks if b["text"].startswith("Before any"))
+    after = next(b for b in blocks if b["text"].startswith("After the"))
 
     assert before["location"]["page_approximate"] is True
     assert after["location"]["page_approximate"] is False
@@ -252,7 +317,7 @@ def test_export_governance_bold_colon_label_style_pattern(settings, request):
     doc = _export(scn)
     block = next(b for b in _all_blocks(doc) if b["label"] == "Intent")
     assert block["kind"] == "labeled_paragraph"
-    assert block["all_text"].startswith("Intent: State the purpose")
+    assert block["text"].startswith("Intent: State the purpose")
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +339,9 @@ def test_export_governance_color_signals_scoped_per_unit(settings, request):
 
     assert len(unit_a["color_signals"]) == 1
     assert unit_a["color_signals"][0]["background_color"] == "#FFFF00"
-    assert unit_b["color_signals"] == []
+    # §13.4: an empty color_signals array is omitted entirely, not emitted
+    # as `[]` — absence has the same meaning (no color signal found).
+    assert "color_signals" not in unit_b
 
     assert any("Manual highlight colors" in w for w in doc["diagnostics"]["warnings"])
 
@@ -330,3 +397,256 @@ def test_export_governance_comment_association_unmatched(settings, request):
     assert comment["associated_unit_ids"] == []
     assert doc["diagnostics"]["unmatched_comments"] == 1
     assert any("could not be associated" in w for w in doc["diagnostics"]["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# §13.3 conditional block-text emission (gts-6cq2)
+# ---------------------------------------------------------------------------
+
+def test_export_governance_unchanged_block_emits_canonical_text_only(settings, request):
+    """revision_summary='unchanged' -> single canonical `text` field; the
+    all_text/baseline_text/proposed_text trio is omitted entirely (they
+    would be byte-identical copies)."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    _insert_text(scn, "Plain unchanged paragraph, no edits.\n")
+
+    doc = _export(scn)
+    block = next(b for b in _all_blocks(doc) if b["text"].startswith("Plain unchanged"))
+
+    assert block["revision_summary"] == "unchanged"
+    assert "all_text" not in block
+    assert "baseline_text" not in block
+    assert "proposed_text" not in block
+
+
+def test_export_governance_revised_block_emits_view_trio_only(settings, request):
+    """A block with revision activity (here: strikethrough, seedable live
+    per makeTextRun_'s bare-strikethrough='deleted' rule) emits
+    all_text/baseline_text/proposed_text and omits the canonical `text`
+    field. baseline_text retains the struck text; proposed_text excludes
+    it — same semantics as the pre-existing baseline/proposed view logic,
+    just gated on presence rather than always-on."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    start, end = _insert_text(scn, "Kept text and struck text.\n")
+    struck_start = start + len("Kept text and ")
+    struck_end = struck_start + len("struck text.")
+    _strikethrough(scn, struck_start, struck_end)
+
+    doc = _export(scn)
+    block = next(b for b in _all_blocks(doc) if b.get("all_text", "").startswith("Kept text and"))
+
+    assert block["revision_summary"] == "deletions"
+    assert "text" not in block
+    assert block["all_text"] == "Kept text and struck text.\n"
+    assert "struck text." in block["baseline_text"]
+    assert "struck text." not in block["proposed_text"]
+
+
+def test_export_governance_comment_matching_falls_back_to_canonical_text(settings, request):
+    """associateCommentsToBlocks_ (quoted-text exact match) reads
+    blockAllText_(), which must fall back to `text` on an unchanged block
+    that no longer carries `all_text`."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    _insert_text(scn, "Unchanged sentence quoted by a comment.\n")
+    _create_comment(scn, "note", quoted_text="Unchanged sentence quoted by a comment.")
+
+    doc = _export(scn)
+    comment = doc["comments"][0]
+    assert comment["association_basis"] == "quoted_text_exact"
+    assert len(comment["associated_block_ids"]) == 1
+
+
+def test_export_governance_views_fallback_to_canonical_text(settings, request):
+    """buildDocumentViews_'s baseline_text/proposed_text reconstructions
+    must include unchanged blocks (which only carry `text`) as well as
+    revised blocks (which carry the baseline_text/proposed_text trio).
+    §13.1/13.2: these views are opt-in (gts-1nw8) — request them explicitly."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    _insert_text(scn, "Unchanged view line.\n")
+    start, end = _insert_text(scn, "Revised view line struck.\n")
+    struck_start = start + len("Revised view line ")
+    struck_end = struck_start + len("struck.")
+    _strikethrough(scn, struck_start, struck_end)
+
+    doc = _export(scn, include_whole_document_views=True)
+    assert "Unchanged view line." in doc["views"]["baseline_text"]
+    assert "Unchanged view line." in doc["views"]["proposed_text"]
+    assert "struck." in doc["views"]["baseline_text"]
+    assert "struck." not in doc["views"]["proposed_text"]
+
+
+def test_export_governance_schema_version_is_2_3(settings, request):
+    scn = ScenarioSession.new_doc(settings, request=request)
+    _insert_text(scn, "Version check paragraph.\n")
+    doc = _export(scn)
+    assert doc["schema_version"] == "2.3"
+
+
+# ---------------------------------------------------------------------------
+# §13.4 structural-field presence (id/kind/... stay present even when null)
+# ---------------------------------------------------------------------------
+
+def test_export_governance_scalar_structural_fields_stay_present_when_null(settings, request):
+    """label/list/parent_unit_id etc. are never omitted, even when null —
+    only the five array fields in §13.4 are conditionally dropped."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    _insert_text(scn, "Plain root-level paragraph.\n")
+
+    doc = _export(scn)
+    block = next(b for b in _all_blocks(doc) if b["text"].startswith("Plain root-level"))
+
+    for key in ("id", "kind", "unit_id", "label",
+                "named_style", "heading_level", "list", "location"):
+        assert key in block, f"{key} must be present even when null"
+    assert block["label"] is None
+    assert block["list"] is None
+
+
+# ---------------------------------------------------------------------------
+# §7.5 document.toc — insertTableOfContents is not seedable live (see module
+# docstring); this covers only the no-TOC-present omission side.
+# ---------------------------------------------------------------------------
+
+def test_export_governance_toc_omitted_when_no_toc_present(settings, request):
+    scn = ScenarioSession.new_doc(settings, request=request)
+    _insert_heading(scn, "Board Policy 7: No TOC Here", level=1)
+    _insert_text(scn, "A document with no table of contents.\n")
+
+    doc = _export(scn)
+    assert "toc" not in doc["document"]
+    assert doc["diagnostics"]["toc_entries"] == 0
+
+
+# ---------------------------------------------------------------------------
+# §13.5 control-character normalization (derived text only)
+# ---------------------------------------------------------------------------
+
+def test_export_governance_derived_text_normalizes_nbsp_and_vertical_tab(settings, request):
+    """NBSP and vertical-tab (Docs' Shift+Enter soft-break marker) are
+    normalized in the derived `text` field but left byte-exact in
+    runs[].text."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    raw = "Kept textand more.\n"
+    _insert_text(scn, raw)
+
+    doc = _export(scn)
+    block = next(b for b in _all_blocks(doc) if b["text"].startswith("Kept"))
+
+    assert " " not in block["text"]
+    assert "" not in block["text"]
+    assert block["text"] == "Kept text\nand more.\n"
+
+    run_text = "".join(r["text"] for r in block["runs"] if r["kind"] == "text")
+    assert " " in run_text
+    assert "" in run_text
+
+
+# ---------------------------------------------------------------------------
+# §13.1/13.2 includeWholeDocumentViews opt-in
+# ---------------------------------------------------------------------------
+
+def test_export_governance_whole_document_views_default_omitted(settings, request):
+    scn = ScenarioSession.new_doc(settings, request=request)
+    _insert_text(scn, "Default-export views paragraph.\n")
+
+    doc = _export(scn)
+    assert "baseline_text" not in doc["views"]
+    assert "proposed_text" not in doc["views"]
+    assert "deleted_text" in doc["views"]
+    assert "proposed_additions" in doc["views"]
+
+
+def test_export_governance_whole_document_views_opt_in(settings, request):
+    scn = ScenarioSession.new_doc(settings, request=request)
+    _insert_text(scn, "Opted-in views paragraph.\n")
+
+    doc = _export(scn, include_whole_document_views=True)
+    assert "Opted-in views paragraph." in doc["views"]["baseline_text"]
+
+
+# ---------------------------------------------------------------------------
+# gts-es3l — export folder isolation (gts-z6j0's getExportFolder_ contract).
+# Hardening tests authored against gts-z6j0's frozen pre-code contract only
+# (entry point export_governance_json / exportFolderId response field / the
+# docId-keyed sheetExportIndex row) — see docs/procedure-exporter.md §15.1.
+# Skips (not fails) when EXPORT_ROOT_FOLDER_ID isn't configured on the target
+# deployment, since isolation is deliberately best-effort/optional (§15.1) —
+# a deployment with it unset has nothing to harden here.
+# ---------------------------------------------------------------------------
+
+def _require_export_isolation_configured(scn: ScenarioSession) -> None:
+    resp = _export_raw(scn)
+    if not resp.get("exportFolderId"):
+        pytest.skip("EXPORT_ROOT_FOLDER_ID not configured on this deployment — export "
+                    "isolation is best-effort (docs/procedure-exporter.md §15.1); nothing to harden.")
+
+
+def test_export_governance_folder_isolation_new_doc_gets_isolated_folder(settings, request):
+    """AC(a): a fresh docId's export lands in a folder distinct from the doc's
+    own source-folder parent, and that folder is recorded in the index under
+    this docId (durable state, not just the response)."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    resp = _export_raw(scn)
+    if not resp.get("exportFolderId"):
+        pytest.skip("EXPORT_ROOT_FOLDER_ID not configured on this deployment.")
+
+    export_folder_id = resp["exportFolderId"]
+    assert export_folder_id != scn.sheet_id  # sanity: not accidentally the tracker sheet's own folder
+
+    rows = _export_index_rows(scn, scn.doc_id)
+    assert len(rows) == 1, f"expected exactly one index row for a fresh docId, got {rows}"
+    assert rows[0]["folderId"] == export_folder_id
+    assert rows[0]["docId"] == scn.doc_id
+
+
+def test_export_governance_folder_isolation_repeat_export_is_idempotent(settings, request):
+    """AC(b): exporting the same docId twice reuses the same folder and does
+    not append a second index row."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    _require_export_isolation_configured(scn)
+
+    first = _export_raw(scn)["exportFolderId"]
+    second = _export_raw(scn)["exportFolderId"]
+    assert first == second, "repeat export of the same docId must reuse the same folder"
+
+    rows = _export_index_rows(scn, scn.doc_id)
+    assert len(rows) == 1, f"repeat export must upsert, not append, the index row: {rows}"
+
+
+def test_export_governance_folder_isolation_title_collision_stays_distinct(settings, request):
+    """AC(c): two different docIds sharing the same document title still get
+    two distinct export folders — the index is keyed by docId, never by
+    name, precisely because titles are not unique (this project's docs can
+    and do share titles)."""
+    scn_a = ScenarioSession.new_doc(settings, request=request)
+    scn_b = ScenarioSession.new_doc(settings, request=request)
+    _require_export_isolation_configured(scn_a)
+
+    collided_title = "Duplicate Governance Policy Title (gts-es3l)"
+    _rename(scn_a, scn_a.doc_id, collided_title)
+    _rename(scn_b, scn_b.doc_id, collided_title)
+
+    folder_a = _export_raw(scn_a)["exportFolderId"]
+    folder_b = _export_raw(scn_b)["exportFolderId"]
+    assert folder_a != folder_b, (
+        f"two docs sharing a title must not resolve to the same export folder "
+        f"(name-keyed lookup regression): {folder_a!r} == {folder_b!r}"
+    )
+
+    rows_a = _export_index_rows(scn_a, scn_a.doc_id)
+    rows_b = _export_index_rows(scn_b, scn_b.doc_id)
+    assert len(rows_a) == 1 and rows_a[0]["folderId"] == folder_a
+    assert len(rows_b) == 1 and rows_b[0]["folderId"] == folder_b
+
+
+def test_export_governance_folder_isolation_falls_back_without_raising_when_unconfigured(settings, request):
+    """AC(d): proves the pre-fix fallback contract still holds — this doesn't
+    flip EXPORT_ROOT_FOLDER_ID off (that's shared deployment state, not
+    something a single test should mutate), it instead proves the *shape* of
+    the fallback: when isolation isn't active for this docId (no
+    exportFolderId in the response), the export still succeeds and returns a
+    real, usable jsonFileId rather than raising or returning an error."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    resp = _export_raw(scn)
+    assert resp.get("ok") is True
+    assert resp.get("jsonFileId"), "export must still produce a Drive file even without export-folder isolation active"

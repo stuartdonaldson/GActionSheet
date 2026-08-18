@@ -176,6 +176,7 @@ async function deployToTarget(target, deployments, nonInteractive) {
   if (target === 'test') {
     await registerTestToken(match.deploymentId);
     await registerAxiomConfig(match.deploymentId);
+    await registerExportConfig(match.deploymentId);
     await verifyConfig('test');
   }
 
@@ -328,6 +329,58 @@ async function registerAxiomConfig(deploymentId) {
     return;
   }
   console.log(`✅ Axiom config registered (dataset: ${axiomDataset}).`);
+}
+
+/**
+ * Pushes the export-isolation root folder (exportRootFolderId from
+ * local.settings.json) to the GAS WebApp via set_export_config — protected by
+ * WEBAPP_SECRET, same pattern as registerAxiomConfig() — so
+ * getExportFolder_() (src/ExportFolderMap.js, gts-z6j0) creates per-document
+ * export subfolders under it instead of writing export output into each
+ * document's own source folder.
+ *
+ * No-op (warns only) if exportRootFolderId isn't set in local.settings.json —
+ * export isolation is best-effort, not required for a deploy to succeed
+ * (getExportFolder_ falls back to the old source-folder behavior).
+ *
+ * @param {string} deploymentId  The TEST-WEB-APP deployment ID (for URL construction).
+ */
+async function registerExportConfig(deploymentId) {
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+  } catch {
+    console.warn('⚠️  Could not read local.settings.json — skipping export folder config registration.');
+    return;
+  }
+
+  const url = webAppUrl(deploymentId);
+  const secret = settings.webappSecret;
+  const exportRootFolderId = settings.exportRootFolderId;
+  if (!secret || !exportRootFolderId) {
+    console.warn('⚠️  webappSecret/exportRootFolderId not both set in local.settings.json — skipping export folder config registration.');
+    return;
+  }
+
+  console.log('\n📁 Registering export folder config with GAS WebApp...');
+  try {
+    const resp = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ secret, action: 'set_export_config', exportRootFolderId }),
+    });
+    const body = await resp.text();
+    let parsed;
+    try { parsed = JSON.parse(body); } catch { parsed = {}; }
+    if (!parsed.ok) {
+      console.warn(`⚠️  set_export_config returned unexpected response: ${body}`);
+      return;
+    }
+  } catch (err) {
+    console.warn(`⚠️  Failed to register export folder config: ${err.message}`);
+    return;
+  }
+  console.log(`✅ Export folder config registered (root: ${exportRootFolderId}).`);
 }
 
 /**

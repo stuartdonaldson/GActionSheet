@@ -517,6 +517,13 @@ function doPost(e) {
     return _handleSpikeSeedAccess(payload);
   }
 
+  // [SPIKE] gts-6ls9 — gated on SPIKE_COMMENT_POSITION_ENABLED, bypasses the
+  // secret gate intentionally (mirrors the spike routes above). See
+  // src/SPIKE-CommentPosition.js.
+  if (payload.action === 'spike_comment_position' && SPIKE_COMMENT_POSITION_ENABLED) {
+    return _handleSpikeCommentPosition(payload);
+  }
+
   // gts-79dw.4.1 — verified-board-portal identity + access-tier route.
   // Bypasses WEBAPP_SECRET intentionally: callers are external GIS-verified
   // identities that don't (and shouldn't) hold our internal secret. The ID
@@ -606,11 +613,20 @@ function doPost(e) {
   if (payload.action === 'dump_doc_paragraphs') {
     return _handleDumpDocParagraphs(payload);
   }
+  if (payload.action === 'dump_raw_docs_api') {
+    return _handleDumpRawDocsApi(payload);
+  }
   if (payload.action === 'export_governance_json') {
     return _handleExportGovernanceJson(payload);
   }
   if (payload.action === 'seed_doc_content') {
     return _handleSeedDocContent(payload);
+  }
+  if (payload.action === 'rename_doc_for_test') {
+    return _handleRenameDocForTest(payload);
+  }
+  if (payload.action === 'dump_export_index_for_test') {
+    return _handleDumpExportIndexForTest(payload);
   }
   if (payload.action === 'create_doc_comment') {
     return _handleCreateDocComment(payload);
@@ -659,6 +675,10 @@ function doPost(e) {
 
   if (payload.action === 'set_axiom_config') {
     return _handleSetAxiomConfig(payload);
+  }
+
+  if (payload.action === 'set_export_config') {
+    return _handleSetExportConfig(payload);
   }
 
   if (payload.action === 'axiom_probe') {
@@ -771,6 +791,34 @@ function _handleSetAxiomConfig(payload) {
   props.setProperty('AXIOM_TOKEN', axiomToken);
   props.setProperty('AXIOM_DATASET', axiomDataset);
   GasLogger.log('axiom.config.set', { dataset: axiomDataset });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// set_export_config handler  (deployment script only — requires WEBAPP_SECRET)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stores the export-isolation root folder in Script Properties (gts-z6j0) so
+ * getExportFolder_() (src/ExportFolderMap.js) can create per-document export
+ * subfolders under it instead of writing into each document's own source
+ * folder. Called once by the deployment script after each `npm run
+ * deploy:test`, same pattern as set_axiom_config.
+ *
+ * Payload shape:
+ *   { secret, action: 'set_export_config', exportRootFolderId: '<folderId>' }
+ *
+ * Response shape:
+ *   { ok: true }
+ */
+function _handleSetExportConfig(payload) {
+  var exportRootFolderId = payload.exportRootFolderId || '';
+  if (!exportRootFolderId) {
+    return _jsonResponse({ error: 'exportRootFolderId required' });
+  }
+  PropertiesService.getScriptProperties().setProperty('EXPORT_ROOT_FOLDER_ID', exportRootFolderId);
+  GasLogger.log('export.config.set', { folderId: exportRootFolderId });
   GasLogger.flush();
   return _jsonResponse({ ok: true });
 }
@@ -2262,6 +2310,53 @@ function _handleDumpDocParagraphs(payload) {
 }
 
 // ---------------------------------------------------------------------------
+// dump_raw_docs_api handler  (testRouteNames — testToken-gated, gts-283i.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Unfiltered Docs.Documents.get() JSON dump — no `fields` mask, so the full
+ * response shape (inlineObjects, positionedObjects, tables, suggestions,
+ * tabs) comes back verbatim. Exists solely to seed the gts-283i.1 design
+ * spike's raw-capture asset (embedded-image inlineObjectProperties shape,
+ * box/table-cell structure) — unlike dump_doc_paragraphs (a curated,
+ * fields-masked structural view for paragraph-boundary diagnosis), this
+ * route intentionally returns everything so a human/agent can inspect
+ * structure not yet known to matter. Read-only: a Docs API GET, mutates
+ * nothing.
+ *
+ * Payload: { action:'dump_raw_docs_api', testToken, docId,
+ *   includeTabsContent? (default true) }
+ * Response: { ok, docId, document } | { error }
+ */
+function _handleDumpRawDocsApi(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.docId || '';
+  if (!docId) return _jsonResponse({ error: 'docId required' });
+
+  var includeTabsContent = payload.includeTabsContent !== false;
+  var url = 'https://docs.googleapis.com/v1/documents/' + docId +
+    '?suggestionsViewMode=SUGGESTIONS_INLINE' +
+    '&includeTabsContent=' + includeTabsContent;
+  var resp = UrlFetchApp.fetch(url, {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() !== 200) {
+    return _jsonResponse({
+      error: 'Docs API error: ' + resp.getResponseCode(),
+      body: resp.getContentText()
+    });
+  }
+
+  var document = JSON.parse(resp.getContentText());
+  GasLogger.log('test.dump_raw_docs_api', { docId: docId });
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, docId: docId, document: document });
+}
+
+// ---------------------------------------------------------------------------
 // export_governance_json handler  (testToken-gated, gts-2glm)
 // ---------------------------------------------------------------------------
 
@@ -2271,10 +2366,11 @@ function _handleDumpDocParagraphs(payload) {
  * (gts-ipoy). exportGovernance_ only accepted DocumentApp.getActiveDocument()
  * (add-on-UI-session-only) before this bead added the options.docId seam —
  * this route is the seam's only caller; the real UI entry points
- * (onGovernanceExportMenu/onGovernanceExportAndPdfMenu/
- * onExportGovernanceJson/onExportGovernanceJsonAndPdf, all in
- * Procedure-Exporter.js) never pass docId and always resolve the active
- * document, unchanged.
+ * (onGovernanceExportMenu/onGovernanceExportAndPdfMenu, the Extensions-menu
+ * universalActions in Procedure-Exporter.js) never pass docId and always
+ * resolve the active document, unchanged. The Extensions-menu Export dialog
+ * (runExportForDialog, gts-s7ut) also never passes onProgress through this
+ * route — it calls exportGovernance_ directly via google.script.run.
  *
  * Does NOT write the JSON/PDF file to Drive-as-observable-state beyond what
  * exportGovernance_ itself always does (it writes a Drive file as a side
@@ -2283,8 +2379,14 @@ function _handleDumpDocParagraphs(payload) {
  * trip.
  *
  * Payload: { action:'export_governance_json', testToken, docId,
- *   exportPdf? (default false) }
- * Response: { ok, json, jsonFileId, pdfFileId? } | { error }
+ *   exportPdf? (default false), includeWholeDocumentViews? (default false) }
+ * Response: { ok, json, jsonFileId, exportFolderId, pdfFileId? } | { error }
+ *
+ * exportFolderId (gts-z6j0) is the Drive folder the JSON/PDF were actually
+ * written into -- getExportFolder_()'s per-document isolated export folder
+ * when EXPORT_ROOT_FOLDER_ID is configured, or the source document's own
+ * parent folder as a fallback otherwise. Exposed so tests can assert export
+ * isolation without a direct Drive API call.
  */
 function _handleExportGovernanceJson(payload) {
   var tokenError = _checkTestToken(payload.testToken || '');
@@ -2294,8 +2396,14 @@ function _handleExportGovernanceJson(payload) {
   if (!docId) return _jsonResponse({ error: 'docId required' });
 
   try {
-    var result = exportGovernance_({ docId: docId, exportPdf: !!payload.exportPdf });
+    var result = exportGovernance_({
+      docId: docId,
+      exportPdf: !!payload.exportPdf,
+      includeWholeDocumentViews: !!payload.includeWholeDocumentViews
+    });
     var response = { ok: true, json: result.json, jsonFileId: result.jsonFile.getId() };
+    var parents = result.jsonFile.getParents();
+    if (parents.hasNext()) response.exportFolderId = parents.next().getId();
     if (result.pdfFile) response.pdfFileId = result.pdfFile.getId();
     return _jsonResponse(response);
   } catch (ex) {
@@ -2331,6 +2439,56 @@ function _handleSeedDocContent(payload) {
   try {
     var result = Docs.Documents.batchUpdate({ requests: payload.requests }, docId);
     return _jsonResponse({ ok: true, replies: result.replies || [] });
+  } catch (ex) {
+    return _jsonResponse({ error: ex.message });
+  }
+}
+
+/**
+ * Test-only rename (gts-es3l). begin_journey_session titles always include a
+ * random hex suffix (TestFixtures.js's bjsHex) precisely so two journey docs
+ * never collide by accident -- but the export-folder-isolation hardening
+ * test (gts-z6j0's docId-keyed-not-name-keyed index) needs a deliberate
+ * title collision between two different docIds, which the Docs API's
+ * batchUpdate (seed_doc_content, above) cannot produce: title is a Drive
+ * file property, not part of document body content. Never called by
+ * production code or by the exporter itself.
+ *
+ * Payload: { action:'rename_doc_for_test', testToken, docId, title }
+ * Response: { ok, docId, title } | { error }
+ */
+function _handleRenameDocForTest(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.docId || '';
+  var title = payload.title || '';
+  if (!docId || !title) return _jsonResponse({ error: 'docId and title required' });
+
+  try {
+    DriveApp.getFileById(docId).setName(title);
+    return _jsonResponse({ ok: true, docId: docId, title: title });
+  } catch (ex) {
+    return _jsonResponse({ error: ex.message });
+  }
+}
+
+/**
+ * Test-only diagnostic (gts-es3l) — see dumpExportIndexRowsForTest_'s
+ * docstring (src/ExportFolderMap.js). Never called by production code.
+ *
+ * Payload: { action:'dump_export_index_for_test', testToken, docId }
+ * Response: { ok, rows } | { error }
+ */
+function _handleDumpExportIndexForTest(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.docId || '';
+  if (!docId) return _jsonResponse({ error: 'docId required' });
+
+  try {
+    return _jsonResponse({ ok: true, rows: dumpExportIndexRowsForTest_(docId) });
   } catch (ex) {
     return _jsonResponse({ error: ex.message });
   }

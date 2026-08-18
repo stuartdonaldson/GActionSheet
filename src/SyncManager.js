@@ -151,7 +151,12 @@ function syncDocument(docId) {
       docId: docId,
       msg: 'Another syncDocument() execution is already in flight for this doc; skipping rather than proceeding against a stale pre-lock read. Will retry next sweep.'
     });
-    return;
+    // Distinct sentinel (not just falsy/undefined) so callers that need a
+    // durable-convergence guarantee (e.g. TestFixtures.js's sync_document
+    // fixture) can tell "raced a concurrent execution and did nothing" apart
+    // from every other exit path, and retry instead of reporting synced:true
+    // on a no-op (gts-kkm7 sidebar_bootstrap_sync race, 2026-08-14).
+    return 'locked-skip';
   }
   try {
     var doc;
@@ -1076,9 +1081,28 @@ function _splitTrackedLines(text, offsets) {
 
 /**
  * Tracked twin of _extractStatusToken (see its own doc comment for the
- * status-token extraction/rejoin rule, gts-v0py) — returns the same
+ * status-token extraction/rejoin rule, gts-v0py/gts-1tbe) — returns the same
  * {status, hasExplicitStatus, actionText} shape plus a parallel `offsets`
  * array for the returned actionText.
+ *
+ * gts-1tbe fix: gts-v0py's "last paren group anywhere in the text" rule
+ * regressed gts-28q's mid-text-parens hardening — 'Review the (draft)
+ * proposal' had its ONLY paren group treated as a status token purely
+ * because it was the last (only) one found, silently dropping '(draft)'
+ * from the stored action text even though 'proposal' after it is plainly a
+ * continuation of the same sentence, not a trailing status annotation.
+ *
+ * Rule (position-based, per gts-28q, refined to still honor gts-v0py): the
+ * last '(...)' group only qualifies as the status token if what follows it,
+ * once trimmed, is EMPTY (the pre-v0py anchored case) OR begins with a
+ * non-word character (e.g. 'Peter (Open) - done' — a dash-led trailing
+ * annotation, gts-v0py's frozen case). Trailing text that begins with a
+ * plain word character ('(draft) proposal') reads as sentence continuation,
+ * not an annotation, so the group is left as literal text and no status is
+ * detected. A non-qualifying last group is never treated as a status
+ * candidate — earlier groups in the same text are not considered either,
+ * consistent with "only the trailing token" being the only sanctioned
+ * status-token grammar.
  *
  * @param {string} actionText
  * @param {Array<number>} offsets  same length as actionText
@@ -1093,12 +1117,18 @@ function _extractStatusTokenTracked(actionText, offsets) {
   if (!lastMatch) {
     return { status: status, hasExplicitStatus: false, actionText: actionText, offsets: offsets };
   }
-  status = lastMatch[1].trim() || 'Open';
   var beforeRaw = actionText.slice(0, lastMatch.index);
   var afterRaw  = actionText.slice(lastMatch.index + lastMatch[0].length);
   var beforeTrim = _trimTracked(beforeRaw, offsets.slice(0, lastMatch.index));
   var afterTrim  = _trimTracked(afterRaw, offsets.slice(lastMatch.index + lastMatch[0].length));
   var before = beforeTrim.text, after = afterTrim.text;
+  // gts-1tbe: reject a non-trailing group up front — mid-sentence prose
+  // continuation ('proposal') disqualifies the group entirely, leaving the
+  // original text untouched rather than rejoining around it.
+  if (after !== '' && /^\w/.test(after)) {
+    return { status: status, hasExplicitStatus: false, actionText: actionText, offsets: offsets };
+  }
+  status = lastMatch[1].trim() || 'Open';
   var rejoined, rejoinedOffsets;
   if (before && after) {
     rejoined = before + ' ' + after;
@@ -1266,6 +1296,15 @@ function _extractInlineRuns(textEl, actionText, offsets) {
  * A single trailing group (the pre-fix common case, '(Status)' with nothing
  * after it) is unaffected: after-text is empty, so the result is identical
  * to the old anchored match.
+ *
+ * gts-1tbe refinement: the LAST-group-anywhere rule above regressed gts-28q's
+ * mid-text-parens hardening — a paren group is now only accepted as the
+ * status token when the text after it is empty OR begins with a non-word
+ * character (a dash-led annotation like ' - done'). Trailing text that
+ * starts with a plain word ('(draft) proposal') reads as sentence
+ * continuation, not a status annotation, so the group is left untouched and
+ * no status is detected. See _extractStatusTokenTracked's doc comment for
+ * the full rule and worked examples.
  *
  * @param {string} actionText
  * @returns {{status: string, hasExplicitStatus: boolean, actionText: string}}

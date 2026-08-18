@@ -66,7 +66,7 @@ def browser_page(settings):
 # test_sidebar_bootstrap_sync — migrates sidebar_action_list.test.js T1
 # ---------------------------------------------------------------------------
 
-def test_sidebar_bootstrap_sync(settings, browser_page):
+def test_sidebar_bootstrap_sync(settings, browser_page, request):
     """Sync bootstraps action rows: sidebar goes from (0) to (N) anchored actions.
 
     Entry point under test: sidebar_sync() — the homepage Sync button.
@@ -74,16 +74,25 @@ def test_sidebar_bootstrap_sync(settings, browser_page):
     Row correctness verified on SHEET (no tracker present post-sync; G1 binding:
     per-row TEXT is NOT UI state — sidebar row text migrates to a non-UI surface).
     """
-    s = ScenarioSession.new_doc(settings)
+    s = ScenarioSession.new_doc(settings, request=request)
     s.ui = UiDriver(browser_page, doc_id=s.doc_id)
     try:
         s._post_fixture("uc_a_permutations")
 
         card = s.ui.open_sidebar(timeout="45s")
-        # Pre-sync: 0 floating actions visible (raw shell assert; NOT an ai expectation — G1)
-        card.frame.get_by_text("actions for this document (0)", exact=False).wait_for(
-            state="visible", timeout=30000
-        )
+        # Pre-sync: cold homepageTrigger open skips the doc scan by design
+        # (gts-8py3 — buildHomepageCard's includeDocScan defaults false to
+        # keep the cold-open card-build budget off large docs), so the
+        # action-list section renders the "click Sync" placeholder rather
+        # than a live "(0)" count. Assert that placeholder (raw shell
+        # assert; NOT an ai expectation — G1).
+        try:
+            card.frame.get_by_text("Click Sync to load the action list", exact=False).wait_for(
+                state="visible", timeout=30000
+            )
+        except Exception as e:
+            diag = s.ui.capture_failure("sidebar-bootstrap-pre-sync-count")
+            raise TimeoutError(f"{e}\n{diag}") from e
 
         s.ui.sidebar_sync(timeout="60s")  # ENTRY POINT: Sync Now button
         s.sync()  # durable convergence to ActionSheet (§16.11 #4; sidebar_sync is async)
@@ -102,20 +111,26 @@ def test_sidebar_bootstrap_sync(settings, browser_page):
         s.verify_consistency(scope=DOC)   # server authority: ok, 0 issues
         s.checkpoint(INTEGRITY)
     finally:
-        s.close()
+        # Drain-invariant only — trashing happens via the request=request
+        # finalizer, in pytest's teardown phase, AFTER the failure report /
+        # screenshot capture. Calling s.close() here would trash the doc
+        # inside the call phase, producing the misleading "File is in trash"
+        # screenshot on any earlier failure (gts-3zl5, gts-lirp; see
+        # scn/session.py's _deferred_trash docstring).
+        s.engine.close()
 
 
 # ---------------------------------------------------------------------------
 # test_tracker_insert_button — migrates sidebar_tracker_insert.test.js AC1
 # ---------------------------------------------------------------------------
 
-def test_tracker_insert_button(settings, browser_page):
+def test_tracker_insert_button(settings, browser_page, request):
     """Insert tracker button inserts a tracker table; full consistency passes.
 
     Entry point under test: insert_tracker_button() — the sidebar Insert tracker button.
     Per-row field truth (id/action/status non-empty) verified via verify(on=TRACKER).
     """
-    s = ScenarioSession.new_doc(settings)
+    s = ScenarioSession.new_doc(settings, request=request)
     s.ui = UiDriver(browser_page, doc_id=s.doc_id)
     try:
         s._post_fixture("uc_a_permutations")
@@ -139,14 +154,14 @@ def test_tracker_insert_button(settings, browser_page):
         s.verify_consistency(scope=DOC)   # live GAS: tracker==floating==matched, 0 issues
         s.checkpoint(INTEGRITY)
     finally:
-        s.close()
+        s.engine.close()  # trashing via request finalizer, not here (gts-3zl5)
 
 
 # ---------------------------------------------------------------------------
 # test_status_mutation_only_mutated_row — migrates sidebar_tracker_insert.test.js AC2
 # ---------------------------------------------------------------------------
 
-def test_status_mutation_only_mutated_row(settings, browser_page):
+def test_status_mutation_only_mutated_row(settings, browser_page, request):
     """After a per-row status change, only the mutated tracker row differs.
 
     Entry point under test: sidebar_set_status() — the per-row status control.
@@ -154,7 +169,7 @@ def test_status_mutation_only_mutated_row(settings, browser_page):
     Only-mutated-row falls out of enqueueing the UNCHANGED ais at baseline +
     the changed one at new status — no hand-rolled row diff (§5 review).
     """
-    s = ScenarioSession.new_doc(settings)
+    s = ScenarioSession.new_doc(settings, request=request)
     s.ui = UiDriver(browser_page, doc_id=s.doc_id)
     s.tracker_present = True   # fixture includes tracker already
     try:
@@ -191,20 +206,20 @@ def test_status_mutation_only_mutated_row(settings, browser_page):
         s.verify_consistency(scope=DOC)
         s.checkpoint(INTEGRITY)   # drains all three; unchanged rows must not drift
     finally:
-        s.close()
+        s.engine.close()  # trashing via request finalizer, not here (gts-3zl5)
 
 
 # ---------------------------------------------------------------------------
 # test_sidebar_shell_controls — migrates sidebar_shell.test.js T1
 # ---------------------------------------------------------------------------
 
-def test_sidebar_shell_controls(settings, browser_page):
+def test_sidebar_shell_controls(settings, browser_page, request):
     """Homepage card shows the expected controls and hides navigation-only controls.
 
     Raw Playwright frame assertions on UI shell structure only — NOT durable ai
     state (G1 binding). Do NOT enqueue UI expectations for shell elements.
     """
-    s = ScenarioSession.new_doc(settings)
+    s = ScenarioSession.new_doc(settings, request=request)
     s.ui = UiDriver(browser_page, doc_id=s.doc_id)
     try:
         s._post_fixture("uc_c_first_insert")
@@ -255,19 +270,19 @@ def test_sidebar_shell_controls(settings, browser_page):
             re.compile(r"v\d+\.\d+\.\d+"), exact=False
         ).wait_for(state="visible", timeout=10000)
     finally:
-        s.close()
+        s.engine.close()  # trashing via request finalizer, not here (gts-3zl5)
 
 
 # ---------------------------------------------------------------------------
 # test_sidebar_blank_doc_no_error — migrates sidebar_shell.test.js T2
 # ---------------------------------------------------------------------------
 
-def test_sidebar_blank_doc_no_error(settings, browser_page):
+def test_sidebar_blank_doc_no_error(settings, browser_page, request):
     """Opening the sidebar in a brand-new doc raises no runtime error.
 
     No fixture: fresh scn doc. Raw shell assertions only (G1 binding).
     """
-    s = ScenarioSession.new_doc(settings)
+    s = ScenarioSession.new_doc(settings, request=request)
     s.ui = UiDriver(browser_page, doc_id=s.doc_id)
     try:
         card = s.ui.open_sidebar(timeout="45s")
@@ -280,14 +295,14 @@ def test_sidebar_blank_doc_no_error(settings, browser_page):
             state="visible", timeout=15000
         )
     finally:
-        s.close()
+        s.engine.close()  # trashing via request finalizer, not here (gts-3zl5)
 
 
 # ---------------------------------------------------------------------------
 # test_sidebar_team_header — GTaskSheet-u0bb
 # ---------------------------------------------------------------------------
 
-def test_sidebar_team_header(settings, browser_page):
+def test_sidebar_team_header(settings, browser_page, request):
     """Team section above the tab bar: team set (anchor link) vs team absent.
 
     Entry point under test: buildHomepageCard -> _buildTeamSection /
@@ -303,7 +318,7 @@ def test_sidebar_team_header(settings, browser_page):
     set programmatically yet, so the anchor case below exercises the
     branded-fallback URL rather than a custom link.
     """
-    s_no_team = ScenarioSession.new_doc(settings)
+    s_no_team = ScenarioSession.new_doc(settings, request=request)
     s_no_team.ui = UiDriver(browser_page, doc_id=s_no_team.doc_id)
     try:
         card = s_no_team.ui.open_sidebar(timeout="45s")
@@ -312,9 +327,9 @@ def test_sidebar_team_header(settings, browser_page):
         )
         assert card.frame.get_by_role("link", name="(none)").count() == 0
     finally:
-        s_no_team.close()
+        s_no_team.engine.close()  # trashing via request finalizer, not here (gts-3zl5)
 
-    s_team = ScenarioSession.new_doc(settings)
+    s_team = ScenarioSession.new_doc(settings, request=request)
     s_team.ui = UiDriver(browser_page, doc_id=s_team.doc_id)
     try:
         s_team.sync()  # creates the DocData row
@@ -328,14 +343,14 @@ def test_sidebar_team_header(settings, browser_page):
         href = link.get_attribute("href") or ""
         assert "TestTeamA" in href, f"Expected teamview link for TestTeamA, got {href!r}"
     finally:
-        s_team.close()
+        s_team.engine.close()  # trashing via request finalizer, not here (gts-3zl5)
 
 
 # ---------------------------------------------------------------------------
 # test_sidebar_header_branding — GTaskSheet-rvwu
 # ---------------------------------------------------------------------------
 
-def test_sidebar_header_branding(settings, browser_page):
+def test_sidebar_header_branding(settings, browser_page, request):
     """Homepage card header: title/icon on the normal card, and on the
     error-fallback card forced via the 'force_homepage_error' fixture.
 
@@ -344,7 +359,7 @@ def test_sidebar_header_branding(settings, browser_page):
     Raw shell assertions only (G1 binding) — header text/icon is UI-only
     render state, not a durable expectation.
     """
-    s = ScenarioSession.new_doc(settings)
+    s = ScenarioSession.new_doc(settings, request=request)
     s.ui = UiDriver(browser_page, doc_id=s.doc_id)
     try:
         card = s.ui.open_sidebar(timeout="45s")
@@ -395,7 +410,7 @@ def test_sidebar_header_branding(settings, browser_page):
         finally:
             s._post_fixture("clear_homepage_error_force")
     finally:
-        s.close()
+        s.engine.close()  # trashing via request finalizer, not here (gts-3zl5)
 
 
 # ---------------------------------------------------------------------------
@@ -504,4 +519,4 @@ def test_tab_navigation_docstatus_regression(settings, browser_page, request):
             state="visible", timeout=10000
         )
     finally:
-        s.close()
+        s.engine.close()  # trashing via request finalizer, not here (gts-3zl5)
