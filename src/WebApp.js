@@ -1898,6 +1898,13 @@ function _readTeamActions(teamId, opts) {
   var fields        = opts.fields || TEAM_ACTION_FIELDS;
   var ss            = opts.ss || _openActionSheetSpreadsheet();
 
+  // Snapshot the window cutoff before the (corpus-size-scaling, gts-kkm7)
+  // DocData/Actions reads below, not after — those getValues() calls can
+  // take multiple seconds against a large TEST corpus, and computing the
+  // cutoff post-read pushes it later than "now" was when the caller's
+  // request actually landed, silently narrowing the retention window.
+  var cutoffMs = Date.now() - windowDays * 24 * 60 * 60 * 1000;
+
   var docDataByFileId = {};
   var docDataRows = _readDocDataRows(ss);
   for (var d = 0; d < docDataRows.length; d++) {
@@ -1909,7 +1916,6 @@ function _readTeamActions(teamId, opts) {
   if (!actionsSheet || lastRow < 2) return [];
 
   var data = actionsSheet.getRange(2, 1, lastRow - 1, SHEET_HEADERS.length).getValues();
-  var cutoffMs = Date.now() - windowDays * 24 * 60 * 60 * 1000;
   var rows = [];
 
   for (var i = 0; i < data.length; i++) {

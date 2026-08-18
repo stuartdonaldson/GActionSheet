@@ -135,7 +135,19 @@ def test_closed_rows_age_out_at_the_window_boundary(settings, team_doc):
     cutoff = now - window_days * 86400
     # Margin covers HTTP/client-vs-server clock jitter while still exercising
     # the boundary itself, not "some old date" -- see module docstring.
-    margin = 8
+    # gts-ppfg: 8s was not enough -- this test issues 4 sequential HTTP round
+    # trips (2 seeds + 2 reads) against a live GAS backend, and each
+    # _readTeamActions call recomputes its cutoff from the *server's* Date.now()
+    # at call time, not a value frozen at seed time. Real elapsed wall-clock
+    # time between this test's client-side cutoff calculation and its second
+    # (statusFilter='all') read call was observed eating the entire 8s margin
+    # on its own (confirmed via GAS-side cutoffMs/modifiedMs logging), with no
+    # actual off-by-something defect in the server's cutoff computation --
+    # same documented clock-jitter hazard test_team_portal_hardening.py:214
+    # already works around with a day-scale margin. 3600s (1h) stays
+    # decisively inside the 5-day window on both sides while easily
+    # outlasting observed multi-second round-trip jitter.
+    margin = 3600
     inside_iso = _iso(cutoff + margin)   # just newer than the cutoff -> kept
     outside_iso = _iso(cutoff - margin)  # just older than the cutoff -> dropped
 
