@@ -3854,3 +3854,16 @@ Outcome [user-facing]: Back-navigation from Import/Notify now restores the last 
 ### Key Learnings:
 A GAS log-wait "the event was in Axiom all along" false negative is not necessarily an Axiom latency issue — check whether the dispatcher the test call goes through actually flushes the per-execution log buffer before returning; a delayed flush still stamps the original request's timestamp, which is indistinguishable from ingest latency after the fact.
 
+## 2026-08-18 08:58:30
+_session f13b1966·110e906d·644c5c7f·7c57398e · v3 · runner es3l 283i.1_
+
+### Objective 1: Regression re-verification and bead closure sweep
+Rationale: Runner invocation explicitly scoped work to targeted checks only — "do not run a full regression test suite for this bead, i will run that separately" — so this run re-verified specific prior fixes rather than re-implementing them. gts-h1vn re-checked gts-li3g's sync lock now that its Axiom-polling blocker (gts-7389) was closed; gts-1tbe re-checked the gts-28q mid-text-parenthetical stripping fix; es3l re-checked export-folder-isolation hardening coverage.
+Outcome [internal]: All three beads closed clean. gts-h1vn: `tests/test_sync_concurrency.py::test_sync_lock_serializes_concurrent_syncdocument_for_same_doc` run 3x targeted, all green, no Axiom timeout — lock mechanism confirmed not regressed, no code change. gts-1tbe and es3l: per `git show`, their commits (dfaad2a, 2a3d50e) touch only `.beads/*.jsonl` bookkeeping — the `_extractStatusTokenTracked` fix (src/SyncManager.js) and the export-folder-isolation hardening tests (tests/test_governance_export.py) were already present in the tree as of an earlier commit (1de462b); this run confirmed and closed both rather than authoring new code/tests. (bd notes for gts-1tbe describe authoring the fix directly — commit evidence says otherwise; noted as a discrepancy between notes and shipped diff, deferring to the commit per instruction.)
+
+### Objective 2: Design spike — raw Docs API capture for embedded-image + box/table content
+Rationale: gts-283i.1 resolves an open question left by docs/procedure-exporter.md §19.3 — where a later, out-of-band vision-LLM description pass writes an image's `description` back to, since the exporter itself always emits `description: null`.
+Outcome [developer-facing]: Added knowledge-base/adr/0025-image-description-sidecar-writeback.md (Accepted) — decision is a sidecar file (`<document-name>-image-descriptions.json`, keyed by `image_ref`) merged at RAG-ingestion read time, never an in-place edit of the governance JSON, to keep the exporter's output deterministic (§17 principle 8) and avoid re-paying vision-LLM cost on unchanged images across re-exports. Updated docs/procedure-exporter.md and knowledge-base/references/gts-283i-raw-capture/README.md accordingly.
+
+### Key Learnings:
+`bd-run-beads` closure commits for re-verification/already-fixed beads can be bookkeeping-only (`.beads/*.jsonl` diff, no src/test diff) — when a bead's notes claim code authored in-session, confirm against `git show`/`git log -S` before crediting the run with new code, since the underlying change may predate the run.
