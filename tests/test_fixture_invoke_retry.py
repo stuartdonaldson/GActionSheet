@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import scn.session as _session
 from tests.helpers.fixture_invoke import FixtureError, FixtureTokenError, invoke_fixture
 
 SETTINGS = {"webappTestUrl": "https://example.com/exec", "testToken": "tok-123"}
@@ -129,3 +130,71 @@ def test_fixture_error_body_raises_fixture_invoke_fixture_error():
     with patch("scn.session.urllib.request.urlopen", side_effect=[error_body]):
         with pytest.raises(FixtureError):
             invoke_fixture("x", "doc123", SETTINGS)
+
+
+def _sent_payload(urlopen_mock, call_index: int = 0) -> dict:
+    """Decode the JSON body actually handed to urlopen() for a given call."""
+    req = urlopen_mock.call_args_list[call_index].args[0]
+    return json.loads(req.data.decode("utf-8"))
+
+
+def test_invoke_stamps_opid_and_initiated_at_on_the_request(monkeypatch):
+    """[gts-obry.1] Every outgoing call carries a client-generated correlation
+    id (opId, reused by GasLogger.startOp's existing parentOp mechanism —
+    gts-j8cn) and an initiatedAt timestamp, so a duplicate GAS-side dispatch
+    of the SAME logical call is distinguishable from two genuinely separate
+    calls after the fact, without needing to control for account contention."""
+    ok = _fake_response(json.dumps({"tag": "fixture.x", "data": {}}))
+    fake_uuid = "11111111-2222-3333-4444-555555555555"
+    monkeypatch.setattr("scn.session.uuid.uuid4", lambda: fake_uuid)
+    monkeypatch.setattr("scn.session.time.time", lambda: 1700000000.0)
+
+    with patch(
+        "scn.session.urllib.request.urlopen", side_effect=[ok],
+    ) as urlopen_mock:
+        invoke_fixture("x", "doc123", SETTINGS)
+
+    sent = _sent_payload(urlopen_mock)
+    assert sent["opId"] == fake_uuid, "opId must carry the generated invokeId"
+    assert sent["initiatedAt"] == 1700000000000, (
+        "initiatedAt must be epoch milliseconds (to compare against GAS's Date.now())"
+    )
+
+
+def test_invoke_reuses_the_same_opid_across_retry_attempts(monkeypatch):
+    """A retried call (e.g. the 404 routing symptom) is still ONE logical
+    invocation — every attempt must carry the SAME opId/initiatedAt, not a
+    fresh id per attempt, or the correlation signal is meaningless."""
+    ok = _fake_response(json.dumps({"tag": "fixture.x", "data": {}}))
+    monkeypatch.setattr("scn.session.uuid.uuid4", lambda: "same-id")
+    monkeypatch.setattr("scn.session.time.time", lambda: 1700000000.0)
+
+    with patch(
+        "scn.session.urllib.request.urlopen",
+        side_effect=[_http_error(404), ok],
+    ) as urlopen_mock:
+        invoke_fixture("x", "doc123", SETTINGS)
+
+    assert urlopen_mock.call_count == 2
+    first = _sent_payload(urlopen_mock, 0)
+    second = _sent_payload(urlopen_mock, 1)
+    assert first["opId"] == second["opId"] == "same-id"
+    assert first["initiatedAt"] == second["initiatedAt"] == 1700000000000
+
+
+def test_invoke_does_not_overwrite_a_caller_supplied_opid(monkeypatch):
+    """A caller that already set its own opId (chaining an existing op, per
+    gts-j8cn) is not clobbered by the new auto-generated one."""
+    ok = _fake_response(json.dumps({"tag": "fixture.x", "data": {}}))
+    monkeypatch.setattr("scn.session.uuid.uuid4", lambda: "auto-id")
+
+    with patch(
+        "scn.session.urllib.request.urlopen", side_effect=[ok],
+    ) as urlopen_mock:
+        _session._http_post(
+            SETTINGS["webappTestUrl"],
+            {"action": "x", "opId": "caller-supplied"},
+        )
+
+    sent = _sent_payload(urlopen_mock)
+    assert sent["opId"] == "caller-supplied"

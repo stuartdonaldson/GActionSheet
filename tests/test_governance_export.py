@@ -219,7 +219,7 @@ def test_export_governance_entry_point_basic_shape(settings, request):
 
     doc = _export(scn)
 
-    assert doc["schema_version"] == "2.3"
+    assert doc["schema_version"] == "2.4"
     assert doc["document"]["id"] == scn.doc_id
     assert doc["diagnostics"]["tabs_processed"] == 1
     assert doc["diagnostics"]["units"] >= 1
@@ -475,11 +475,11 @@ def test_export_governance_views_fallback_to_canonical_text(settings, request):
     assert "struck." not in doc["views"]["proposed_text"]
 
 
-def test_export_governance_schema_version_is_2_3(settings, request):
+def test_export_governance_schema_version_is_2_4(settings, request):
     scn = ScenarioSession.new_doc(settings, request=request)
     _insert_text(scn, "Version check paragraph.\n")
     doc = _export(scn)
-    assert doc["schema_version"] == "2.3"
+    assert doc["schema_version"] == "2.4"
 
 
 # ---------------------------------------------------------------------------

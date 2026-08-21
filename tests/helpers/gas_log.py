@@ -328,6 +328,36 @@ def assert_log(log_dir: str | None, fence: float, match_fn, what: str) -> None:
     wait_for_log(log_dir, match_fn, timeout_s=60, after=fence)
 
 
+def matches_op(match_fn, op_id: str):
+    """Wrap match_fn to additionally require the entry's `parentOp` equals
+    op_id (gts-obry.1): scopes a batching-count assertion (e.g. "exactly ONE
+    sync.driveMetadata.fetched for this sweep") to log entries chained from
+    THIS call's own opId, instead of any entry matching the bare tag within
+    the fence's timestamp window.
+
+    Why this exists: a raw tag+timestamp fence match can't distinguish this
+    test's own syncAll() sweep from an unrelated one landing in the same
+    window -- the account's installed 30-min syncAll trigger (TriggerManager.js)
+    or a second concurrent test/session both log the identical tag. Two prior
+    incidents (gts-li3g's confirmed same-doc race; gts-moy1.2's observed
+    docCount=66 spontaneous sweep mid-test) both point at that same trigger as
+    a live source of exactly this kind of false "N events instead of 1"
+    failure. Correlating by parentOp removes the ambiguity: every GasLogger.log
+    call made during one doPost execution shares the SAME parentOp (stamped
+    from GasLogger.startOp(payload.opId), see src/GasLogger.js), so a caller
+    that passes its own opId through `_post_fixture`/`_post_route`'s `extra`
+    dict can filter collect_logs/wait_for_log down to only the entries its own
+    call produced -- concurrent unrelated activity (from the trigger or another
+    session) carries a different parentOp and is excluded.
+
+    Usage:
+        op_id = str(uuid.uuid4())
+        scn._post_fixture("sync_all", extra={"opId": op_id})
+        events = collect_logs(gas_log_dir, matches_op(lambda e: e.get("tag") == "sync.foo", op_id), after=fence)
+    """
+    return lambda e: match_fn(e) and e.get("parentOp") == op_id
+
+
 def assert_no_log(log_dir: str | None, fence: float, match_fn, what: str) -> None:
     """Assert no matching log entry appears. Axiom backend uses a sentinel-
     watermark (sound against ingest latency); file backend uses an 8s bare

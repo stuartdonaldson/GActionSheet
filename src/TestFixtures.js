@@ -2323,6 +2323,58 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'seed_garbage_teamdata_row': {
+        // gts-moy1.2 regression coverage: appends one TeamData row with a
+        // deliberately implausible Folder Id (default '-NA-', the actual
+        // live-sheet placeholder that triggered the bug) under a
+        // distinctive, easily-cleaned-up teamId. Used to prove
+        // _fetchDriveDocMetadata's scoped-listing query survives one
+        // malformed folder id instead of Drive rejecting the whole combined
+        // 'in parents' OR clause with a 404 that took down BOTH the scoped
+        // listing and its own fallback safety net account-wide.
+        var sgtrTeamSheet = _getOrCreateSheet(ss, 'TeamData');
+        if (sgtrTeamSheet.getLastRow() < 1) {
+          sgtrTeamSheet.getRange(1, 1, 1, 4).setValues(
+            [CONTRACT_SCHEMA.sheetTeamData.headers]).setFontWeight('bold');
+        }
+        var sgtrTeamId   = data.teamId   || '_TEST_GTMOY12_GARBAGE';
+        var sgtrFolderId = (data.folderId !== undefined) ? data.folderId : '-NA-';
+        var sgtrLastRow  = sgtrTeamSheet.getLastRow();
+        sgtrTeamSheet.getRange(sgtrLastRow + 1, 1, 1, 4)
+          .setValues([[sgtrTeamId, sgtrFolderId, '', '']]);
+        _TF_RESULT = {
+          tag: 'fixture.seed_garbage_teamdata_row',
+          data: { teamId: sgtrTeamId, folderId: sgtrFolderId, row: sgtrLastRow + 1 }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'remove_teamdata_row_by_team_id': {
+        // Cleanup counterpart to seed_garbage_teamdata_row -- removes every
+        // TeamData row whose Team Id exactly matches data.teamId. Safe no-op
+        // if no such row exists.
+        var rtrTeamId   = data.teamId || '_TEST_GTMOY12_GARBAGE';
+        var rtrSheet    = ss.getSheetByName('TeamData');
+        var rtrRemoved  = 0;
+        if (rtrSheet && rtrSheet.getLastRow() >= 2) {
+          var rtrCols = CONTRACT_SCHEMA.sheetTeamData.columnsByField;
+          for (var rtrR = rtrSheet.getLastRow(); rtrR >= 2; rtrR--) {
+            var rtrVal = rtrSheet.getRange(rtrR, rtrCols.team_id).getValue();
+            if (rtrVal === rtrTeamId) {
+              rtrSheet.deleteRow(rtrR);
+              rtrRemoved++;
+            }
+          }
+        }
+        _TF_RESULT = {
+          tag: 'fixture.remove_teamdata_row_by_team_id',
+          data: { teamId: rtrTeamId, removed: rtrRemoved }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'seed_styled_action': {
         // gts-1pk step 1: seeds this invocation's doc (testDocId — the
         // caller's own isolated reference doc, set via the run_fixture

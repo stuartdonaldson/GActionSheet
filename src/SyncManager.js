@@ -476,6 +476,14 @@ function syncAll() {
     } catch (metaErr) {
       GasLogger.log('sync.driveMetadata.error', { msg: metaErr.message });
     }
+    // gts-moy1.2: a thrown listing call must NOT also suppress the per-doc
+    // fallback safety net below. Treat a failed listing as "every doc is
+    // absent from the listing" (map with zero entries) rather than null --
+    // downstream code already treats listing-absence as inconclusive and
+    // routes it through the same batched fallback lookup a normal listing
+    // miss would use, instead of silently skipping metadata for the whole
+    // sweep.
+    if (!driveMetadata) driveMetadata = {};
 
     // Batch the per-doc fallback lookups (gts-uuse point 3) for every tracked
     // doc absent from the scoped listing, instead of firing
@@ -483,16 +491,14 @@ function syncAll() {
     // attempted when there is more than one such doc -- a single miss is
     // cheaper as a direct call than as a one-item "batch".
     var fallbackProbes = {};
-    if (driveMetadata) {
-      var missingDocIds = [];
-      for (var mi = 0; mi < docIds.length; mi++) {
-        if (!driveMetadata[docIds[mi]]) missingDocIds.push(docIds[mi]);
-      }
-      if (missingDocIds.length === 1) {
-        fallbackProbes[missingDocIds[0]] = _fetchSingleDocMetadata(missingDocIds[0]);
-      } else if (missingDocIds.length > 1) {
-        fallbackProbes = _fetchDriveDocMetadataBatch(missingDocIds);
-      }
+    var missingDocIds = [];
+    for (var mi = 0; mi < docIds.length; mi++) {
+      if (!driveMetadata[docIds[mi]]) missingDocIds.push(docIds[mi]);
+    }
+    if (missingDocIds.length === 1) {
+      fallbackProbes[missingDocIds[0]] = _fetchSingleDocMetadata(missingDocIds[0]);
+    } else if (missingDocIds.length > 1) {
+      fallbackProbes = _fetchDriveDocMetadataBatch(missingDocIds);
     }
 
     var synced = 0, skipped = 0;
@@ -1759,7 +1765,7 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
       action:             'sync_action_rows',
       clientVersion:      BUILD_INFO.version,
       caller:             _getIdentity(),
-      opId:               GasLogger.getCurrentOp(),
+      opId:               (GasLogger.getParentOp() || GasLogger.getCurrentOp()),
       docUrl:             docUrl,
       docTitle:           docTitle,
       docId:              docId || '',
@@ -1817,7 +1823,7 @@ function _markDocNotFound(docIds) {
       action:        'mark_doc_not_found',
       clientVersion: BUILD_INFO.version,
       caller:        _getIdentity(),
-      opId:          GasLogger.getCurrentOp(),
+      opId:          (GasLogger.getParentOp() || GasLogger.getCurrentOp()),
       docIds:        docIds
     })
   });
@@ -1917,6 +1923,29 @@ function _driveFetchTestOverrideCode(realCode) {
 }
 
 /**
+ * True when `id` looks like a real Drive resource id rather than a TeamData
+ * placeholder such as '-NA-' (meaning "no dedicated folder for this team" --
+ * gts-moy1.2). Real Drive ids are opaque alphanumeric-plus-`_-` tokens with
+ * no fixed length Google guarantees, but every real id observed in this
+ * account is well over the length of any placeholder in use, so a short
+ * minimum length plus a charset check is a cheap, low-risk filter -- it
+ * exists only to keep one malformed TeamData row from making Drive reject
+ * the entire combined `in parents` query with a 404, not to fully validate
+ * the id round-trips to a real file (Drive itself is the source of truth for
+ * that; an id that passes this check but doesn't exist just yields zero
+ * results for its clause, same as today).
+ *
+ * @param {string} id
+ * @return {boolean}
+ */
+function _isPlausibleDriveId(id) {
+  if (!id) return false;
+  var trimmed = String(id).trim();
+  if (trimmed.length < 10) return false;
+  return /^[a-zA-Z0-9_-]+$/.test(trimmed);
+}
+
+/**
  * Fetches trashed/modifiedTime/name metadata for tracked Google Docs, in a
  * single (paginated) Drive REST call, replacing one DriveApp.getFileById()
  * call per tracked doc in syncAll()'s loop (gts-kkm7.2). Throws on any
@@ -1947,7 +1976,12 @@ function _driveFetchTestOverrideCode(realCode) {
  *
  * @param {Array<string>=} folderIds  TeamData folder ids to scope the listing
  *   to (direct children only). Omit or pass an empty array for the original
- *   unscoped, account-wide listing.
+ *   unscoped, account-wide listing. Entries that don't look like a real Drive
+ *   resource id (gts-moy1.2 -- e.g. a '-NA-' placeholder meaning "no team
+ *   folder") are silently dropped rather than poisoning the combined query:
+ *   a single bad id previously made Drive reject the WHOLE `in parents` OR
+ *   clause with a 404, which threw and knocked out both the scoped listing
+ *   AND its own fallback safety net for every tracked doc account-wide.
  * @return {Object<string, {trashed: boolean, lastModified: Date, name: string, parentId: ?string}>}
  *   map of docId -> metadata, covering every Google Doc the listing returns.
  */
@@ -1956,11 +1990,28 @@ function _fetchDriveDocMetadata(folderIds) {
   var fields     = 'nextPageToken,files(id,trashed,modifiedTime,name,parents)';
   var qParts     = ["mimeType='application/vnd.google-apps.document'"];
   if (folderIds && folderIds.length > 0) {
-    var folderClauses = [];
-    for (var f = 0; f < folderIds.length; f++) {
-      folderClauses.push("'" + folderIds[f].replace(/'/g, "\\'") + "' in parents");
+    var validFolderIds = [];
+    var rejectedFolderIds = [];
+    for (var v = 0; v < folderIds.length; v++) {
+      if (_isPlausibleDriveId(folderIds[v])) {
+        validFolderIds.push(folderIds[v]);
+      } else {
+        rejectedFolderIds.push(folderIds[v]);
+      }
     }
-    qParts.push('(' + folderClauses.join(' or ') + ')');
+    if (rejectedFolderIds.length > 0) {
+      GasLogger.log('sync.driveMetadata.folderIdRejected', {
+        rejected: rejectedFolderIds,
+        msg: 'TeamData folder id is not a plausible Drive resource id; excluded from scoped listing query'
+      });
+    }
+    var folderClauses = [];
+    for (var f = 0; f < validFolderIds.length; f++) {
+      folderClauses.push("'" + validFolderIds[f].replace(/'/g, "\\'") + "' in parents");
+    }
+    if (folderClauses.length > 0) {
+      qParts.push('(' + folderClauses.join(' or ') + ')');
+    }
   }
   var q          = qParts.join(' and ');
   var map        = {};

@@ -43,6 +43,7 @@
     #progressLabel { color: #5f6368; font-size: 0.9rem; }
     #errorText { color: #d93025; }
     a.file-link { display: block; margin-top: 10px; color: #1a73e8; }
+    a.file-download { display: block; margin-top: 4px; color: #1a73e8; font-size: 0.9rem; }
     #versionFooter {
       position: fixed;
       bottom: 0;
@@ -72,7 +73,9 @@
   <div id="step-done">
     <p>Export complete.</p>
     <a class="file-link" id="jsonLink" target="_blank">Open JSON in Drive</a>
+    <a class="file-download" id="jsonDownload">Download JSON</a>
     <a class="file-link" id="pdfLink" target="_blank" style="display:none;">Open PDF snapshot</a>
+    <a class="file-download" id="pdfDownload" style="display:none;">Download PDF</a>
   </div>
 
   <div id="step-error">
@@ -92,6 +95,8 @@
     var progressLabel = document.getElementById('progressLabel');
     var jsonLink = document.getElementById('jsonLink');
     var pdfLink = document.getElementById('pdfLink');
+    var jsonDownload = document.getElementById('jsonDownload');
+    var pdfDownload = document.getElementById('pdfDownload');
     var errorText = document.getElementById('errorText');
     var jsonBtn = document.getElementById('jsonBtn');
     var jsonPdfBtn = document.getElementById('jsonPdfBtn');
@@ -114,6 +119,19 @@
       progressLabel.textContent = 'Stage: ' + status.stage + ' (' + status.stageIndex + '/' + status.totalStages + ')';
     }
 
+    // Builds a same-origin Blob/data URL for a real client-side download
+    // (gts-283i.2) alongside the existing Drive 'Open in Drive' link —
+    // doesn't replace it, since the Drive copy is the durable artifact.
+    function triggerDownload_(anchorEl, filenameBase, extension, mimeType, base64OrText, isBase64) {
+      var blob = isBase64
+        ? new Blob([Uint8Array.from(atob(base64OrText), function (c) { return c.charCodeAt(0); })], { type: mimeType })
+        : new Blob([base64OrText], { type: mimeType });
+      var url = URL.createObjectURL(blob);
+      anchorEl.href = url;
+      anchorEl.download = filenameBase + '.' + extension;
+      anchorEl.style.display = 'block';
+    }
+
     function poll() {
       google.script.run
         .withSuccessHandler(function (status) {
@@ -134,11 +152,14 @@
           stopPolling();
           progressBar.style.width = '100%';
           jsonLink.href = 'https://drive.google.com/file/d/' + result.jsonFileId + '/view';
+          triggerDownload_(jsonDownload, docId + '-governance-export', 'json', 'application/json', result.jsonContent, false);
           if (result.pdfFileId) {
             pdfLink.href = 'https://drive.google.com/file/d/' + result.pdfFileId + '/view';
             pdfLink.style.display = 'block';
+            triggerDownload_(pdfDownload, docId + '-governance-export', 'pdf', 'application/pdf', result.pdfBase64, true);
           } else {
             pdfLink.style.display = 'none';
+            pdfDownload.style.display = 'none';
           }
           showStep(stepDone);
         })

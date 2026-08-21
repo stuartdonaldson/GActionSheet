@@ -490,12 +490,20 @@ function doPost(e) {
   // Log identity and caller context for every request so errors can be
   // attributed to a specific user and surface without needing PROBE.
   var _id = _getIdentity();
+  // gts-obry.1: queueDelayMs (execution start vs. the client's own
+  // initiatedAt, when the caller sends one) distinguishes "this request sat
+  // queued a while before running" from "something re-dispatched it" --
+  // read alongside op/parentOp (started above), a second execution sharing
+  // this same parentOp is the platform re-dispatching ONE client call, not
+  // two independent calls.
   GasLogger.log('webapp.request', {
-    action:  payload.action || '(unknown)',
-    eu:      _id.eu,
-    au:      _id.au,
-    caller:  payload.caller || {},
-    version: BUILD_INFO.version
+    action:       payload.action || '(unknown)',
+    eu:           _id.eu,
+    au:           _id.au,
+    caller:       payload.caller || {},
+    version:      BUILD_INFO.version,
+    initiatedAt:  payload.initiatedAt || null,
+    queueDelayMs: payload.initiatedAt ? (Date.now() - payload.initiatedAt) : null
   });
 
   // [PROBE] — gated only on probe_run presence; bypasses secret gate intentionally.
@@ -618,6 +626,12 @@ function doPost(e) {
   }
   if (payload.action === 'export_governance_json') {
     return _handleExportGovernanceJson(payload);
+  }
+  if (payload.action === 'run_export_for_dialog_test') {
+    return _handleRunExportForDialogTest(payload);
+  }
+  if (payload.action === 'get_export_progress_for_dialog_test') {
+    return _handleGetExportProgressForDialogTest(payload);
   }
   if (payload.action === 'seed_doc_content') {
     return _handleSeedDocContent(payload);
@@ -2416,6 +2430,76 @@ function _handleExportGovernanceJson(payload) {
     GasLogger.log('test.export_governance_json.error', { docId: docId, msg: ex.message });
     return _jsonResponse({ error: ex.message });
   }
+}
+
+// ---------------------------------------------------------------------------
+// run_export_for_dialog_test / get_export_progress_for_dialog_test handlers
+// (testToken-gated, gts-0002 — [TST] twin of gts-s7ut)
+// ---------------------------------------------------------------------------
+
+/**
+ * Headless call-site into src/Procedure-Exporter.js's runExportForDialog(),
+ * the google.script.run entry point ExportProgressDialog.html invokes to
+ * start a classic-menu export. runExportForDialog is a plain function (not
+ * CardService/Ui-bound), so it is directly callable here the same way
+ * exportGovernance_ is via export_governance_json (gts-2glm) — no dialog/UI
+ * session needed.
+ *
+ * Payload: { action:'run_export_for_dialog_test', testToken, docId, exportPdf? }
+ * Response: { ok, jsonFileId, pdfFileId?, jsonContent, pdfBase64? } | { error }
+ * jsonContent/pdfBase64 (gts-283i.2) pass through runExportForDialog's own
+ * return value unchanged — the same bytes/string the classic-menu dialog's
+ * client-side Blob download now uses, exposed here so a headless caller can
+ * download the export artifacts locally without a second Drive round trip.
+ *
+ * Mirrors runExportForDialog's own contract: on failure it writes the
+ * EXPORT_STATUS_ 'error' state and rethrows — this route lets that
+ * exception surface as {error} for the caller, while the durable
+ * EXPORT_STATUS_ property is asserted separately via
+ * get_export_progress_for_dialog_test.
+ */
+function _handleRunExportForDialogTest(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.docId || '';
+  if (!docId) return _jsonResponse({ error: 'docId required' });
+
+  try {
+    var result = runExportForDialog(docId, !!payload.exportPdf);
+    return _jsonResponse({
+      ok: true,
+      jsonFileId: result.jsonFileId,
+      pdfFileId: result.pdfFileId,
+      jsonContent: result.jsonContent,
+      pdfBase64: result.pdfBase64
+    });
+  } catch (ex) {
+    GasLogger.log('test.run_export_for_dialog.error', { docId: docId, msg: ex.message });
+    return _jsonResponse({ error: ex.message });
+  }
+}
+
+/**
+ * Headless call-site into src/Procedure-Exporter.js's
+ * getExportProgressForDialog() — the google.script.run poll target
+ * ExportProgressDialog.html calls every ~1.5s. Plain EXPORT_STATUS_<docId>
+ * ScriptProperty read, so directly callable here without a dialog/UI
+ * session, letting a test read the same durable state runExportForDialog
+ * wrote without racing the real ~1.5s poll interval.
+ *
+ * Payload: { action:'get_export_progress_for_dialog_test', testToken, docId }
+ * Response: { ok, status } | { error }  (status is null if no export has
+ *   ever run for this docId)
+ */
+function _handleGetExportProgressForDialogTest(payload) {
+  var tokenError = _checkTestToken(payload.testToken || '');
+  if (tokenError) return tokenError;
+
+  var docId = payload.docId || '';
+  if (!docId) return _jsonResponse({ error: 'docId required' });
+
+  return _jsonResponse({ ok: true, status: getExportProgressForDialog(docId) });
 }
 
 /**

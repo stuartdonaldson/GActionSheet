@@ -39,7 +39,7 @@
  *   records the basis/limitations in the JSON.
  */
 
-const GOV_EXPORT_SCHEMA_VERSION = '2.3';
+const GOV_EXPORT_SCHEMA_VERSION = '2.4'; // gts-283i.4 — new 'image' block kind + document.images[]
 
 /* ========================================================================== *
  * TEXT-PATTERN INFERENCE RULES (heuristic — tune here)
@@ -327,7 +327,12 @@ function showGovernanceExportDialog_() {
  *
  * @param {string} docId
  * @param {boolean} exportPdf
- * @returns {{jsonFileId: string, pdfFileId: (string|undefined)}}
+ * @returns {{jsonFileId: string, pdfFileId: (string|undefined),
+ *   jsonContent: string, pdfBase64: (string|undefined)}}
+ *   jsonContent/pdfBase64 (gts-283i.2) let the dialog trigger a real
+ *   client-side download (Blob/data URL) alongside the existing Drive
+ *   file, without a second round trip back through Drive to fetch bytes
+ *   already held in this execution.
  */
 function runExportForDialog(docId, exportPdf) { // eslint-disable-line no-unused-vars
   const stages = _exportStageList_(exportPdf);
@@ -365,7 +370,20 @@ function runExportForDialog(docId, exportPdf) { // eslint-disable-line no-unused
       pdfFileId: result.pdfFile ? result.pdfFile.getId() : undefined
     });
 
-    return { jsonFileId: result.jsonFile.getId(), pdfFileId: result.pdfFile ? result.pdfFile.getId() : undefined };
+    // Reuse the string exportGovernance_ already serialized/wrote to Drive
+    // (result.jsonString) rather than re-running JSON.stringify(result.json)
+    // here — for a large document that second full stringify measurably
+    // slowed this entry point (gts-283i.2 regression caught by
+    // test_export_dialog_status_transitions_running_then_done going from a
+    // ~152s baseline to ~494s).
+    const pdfBase64 = result.pdfFile ? Utilities.base64Encode(result.pdfFile.getBlob().getBytes()) : undefined;
+
+    return {
+      jsonFileId: result.jsonFile.getId(),
+      pdfFileId: result.pdfFile ? result.pdfFile.getId() : undefined,
+      jsonContent: result.jsonString,
+      pdfBase64: pdfBase64
+    };
   } catch (err) {
     _writeExportStatus_(docId, { state: 'error', errorMessage: err.message, exportPdf: exportPdf });
     // gts-diag: catch-and-rethrow above dropped docId, leaving Cloud
@@ -455,7 +473,8 @@ function exportGovernance_(options) {
       revision_id: apiDoc.revisionId || null,
       source_url: `https://docs.google.com/document/d/${documentId}/edit`,
       suggestion_groups: [],
-      toc: []
+      toc: [],
+      images: []
     },
     semantics: {
       baseline: 'Text against which proposed revisions are evaluated.',
@@ -498,9 +517,26 @@ function exportGovernance_(options) {
       explicit_page_breaks: 0,
       distinct_suggestion_ids: 0,
       toc_entries: 0,
+      images: 0,
       warnings: []
     }
   };
+
+  // gts-z6j0 — export output goes to the document's own isolated export
+  // folder (under EXPORT_ROOT_FOLDER_ID), not the source document's parent
+  // folder, so users with access to the source folder don't see export
+  // byproducts. Falls back to getSourceFolder_() if export isolation isn't
+  // configured -- see src/ExportFolderMap.js. Resolved up front (not just
+  // before the JSON/PDF writes, as before gts-283i.4) because embedded-image
+  // extraction (§19.3) needs a Drive folder to save image files into during
+  // traversal, before the first JSON stringify.
+  const folder = getExportFolder_(documentId, out.document.title);
+
+  // Shared across every tab's ctx below so all embedded images from a
+  // multi-tab document land in the same single "<title>-images/" subfolder
+  // instead of one per tab. Created lazily (see getImagesFolder_) so a
+  // document with no images never gets an empty subfolder.
+  const driveState = { parentFolder: folder, imagesFolder: null, imagesFolderComputed: false };
 
   const tabs = flattenTabs_(apiDoc.tabs || []);
 
@@ -522,7 +558,11 @@ function exportGovernance_(options) {
       currentUnit: null,
       sourceOrder: 0,
       allBlocks: [],
-      listState: {}
+      listState: {},
+      // §19.3 — inlineObjects/positionedObjects live under documentTab, not
+      // at the top level of the API response (confirmed live, gts-283i.1).
+      inlineObjects: tab.documentTab.inlineObjects || {},
+      driveState
     };
 
     processStructuralContent_(body, ctx);
@@ -541,18 +581,15 @@ function exportGovernance_(options) {
   // populates comment_ids/color_signals/evidence, and before serialization.
   _reportStage(3); // 'Building document views'
 
+  let jsonString = JSON.stringify(out, null, 2);
   const jsonBlob = Utilities.newBlob(
-    JSON.stringify(out, null, 2),
+    jsonString,
     'application/json',
     `${sanitizeFilename_(out.document.title)}-governance.json`
   );
 
-  // gts-z6j0 — export output goes to the document's own isolated export
-  // folder (under EXPORT_ROOT_FOLDER_ID), not the source document's parent
-  // folder, so users with access to the source folder don't see export
-  // byproducts. Falls back to getSourceFolder_() if export isolation isn't
-  // configured -- see src/ExportFolderMap.js.
-  const folder = getExportFolder_(documentId, out.document.title);
+  // folder resolved up front, before traversal — see the driveState comment
+  // near the top of this function.
   const jsonFile = folder ? folder.createFile(jsonBlob) : DriveApp.createFile(jsonBlob);
   _reportStage(4); // 'Writing export file'
 
@@ -566,8 +603,12 @@ function exportGovernance_(options) {
         file_name: pdfFile.getName()
       };
 
-      // Rewrite JSON once so it contains the PDF snapshot metadata.
-      jsonFile.setContent(JSON.stringify(out, null, 2));
+      // Rewrite JSON once so it contains the PDF snapshot metadata. Keep
+      // jsonString in sync so callers (runExportForDialog's jsonContent,
+      // gts-283i.2) get the same bytes actually written to Drive instead of
+      // paying for a third stringify of a potentially multi-MB object.
+      jsonString = JSON.stringify(out, null, 2);
+      jsonFile.setContent(jsonString);
     }
   }
 
@@ -579,7 +620,8 @@ function exportGovernance_(options) {
     units: out.diagnostics.units,
     blocks: out.diagnostics.blocks,
     runs: out.diagnostics.runs,
-    comments: out.diagnostics.comments
+    comments: out.diagnostics.comments,
+    images: out.diagnostics.images
   });
   // Flushed here (not left to the caller) so export.stage/export.complete
   // reach Axiom for every entry point — several existing callers only flush
@@ -588,7 +630,7 @@ function exportGovernance_(options) {
   // in GasLogger's in-memory buffer for the rest of that execution.
   GasLogger.flush();
 
-  return { jsonFile, pdfFile, json: out };
+  return { jsonFile, pdfFile, json: out, jsonString };
 }
 
 /* ========================================================================== *
@@ -689,6 +731,7 @@ function processParagraph_(structuralElement, ctx) {
   const p = structuralElement.paragraph;
   const paragraphElements = p.elements || [];
   const runs = [];
+  const inlineImageElements = [];
   let pageBreaksBeforeText = 0;
   let pageBreaksAfterText = 0;
   let sawText = false;
@@ -699,6 +742,14 @@ function processParagraph_(structuralElement, ctx) {
       ctx.explicitBreaksSoFar++;
       if (sawText) pageBreaksAfterText++;
       else pageBreaksBeforeText++;
+      return;
+    }
+
+    if (pe.inlineObjectElement) {
+      // §19.3 — deferred to a second pass below, after ctx.currentUnit is
+      // settled for this paragraph (unit detection runs off allText, which
+      // an image-only paragraph never has).
+      inlineImageElements.push(pe);
       return;
     }
 
@@ -725,8 +776,9 @@ function processParagraph_(structuralElement, ctx) {
   const mergedRuns = mergeAdjacentRuns_(runs);
   const allText = mergedRuns.filter(r => r.kind === 'text').map(r => r.text).join('');
 
-  // Skip empty paragraphs after applying page-break effects.
-  if (!allText.trim()) {
+  // Skip wholly-empty paragraphs after applying page-break effects — but not
+  // an image-only paragraph (§19.3): it has no text, yet still needs a block.
+  if (!allText.trim() && !inlineImageElements.length) {
     if (pageBreaksAfterText) ctx.currentPage += pageBreaksAfterText;
     return;
   }
@@ -743,6 +795,17 @@ function processParagraph_(structuralElement, ctx) {
     ctx.currentUnit = createSyntheticRootUnit_(ctx);
     ctx.out.units.push(ctx.currentUnit);
     ctx.out.diagnostics.units++;
+  }
+
+  if (inlineImageElements.length) {
+    processInlineImages_(inlineImageElements, ctx);
+  }
+
+  // An image-only paragraph produces no text block — the image block(s)
+  // above are this paragraph's entire contribution.
+  if (!allText.trim()) {
+    if (pageBreaksAfterText) ctx.currentPage += pageBreaksAfterText;
+    return;
   }
 
   const block = createBlock_(structuralElement, p, mergedRuns, ctx, {
@@ -772,6 +835,153 @@ function processParagraph_(structuralElement, ctx) {
   if (block.semantic_state === 'editorial') ctx.out.diagnostics.editorial_blocks++;
 
   if (pageBreaksAfterText) ctx.currentPage += pageBreaksAfterText;
+}
+
+/* ========================================================================== *
+ * EMBEDDED IMAGES (docs/procedure-exporter.md §19.3, gts-283i.4)
+ * ========================================================================== */
+
+/** One `image`-kind block per element, pushed onto ctx.currentUnit/allBlocks
+ * the same way a text block is, plus a mirrored document.images[] entry
+ * (§19.3's "diverted metadata" convention, matching document.toc/§7.5). A
+ * lookup or fetch failure is logged as a diagnostics warning and the element
+ * is skipped entirely — never partially recorded (no block whose image_ref
+ * doesn't correspond to an actual saved file). */
+function processInlineImages_(elements, ctx) {
+  elements.forEach(pe => {
+    const result = extractInlineImage_(pe, ctx);
+    if (!result) return;
+
+    ctx.currentUnit.blocks.push(result.block);
+    ctx.allBlocks.push(result.block);
+    ctx.out.diagnostics.blocks++;
+    ctx.out.diagnostics.images++;
+    ctx.out.document.images.push(result.docEntry);
+  });
+}
+
+/** Fetches and saves one inlineObjectElement's image, per §19.3 "Extraction
+ * mechanics": contentUri is a short-lived signed URL and must be fetched via
+ * UrlFetchApp during this same execution, never persisted/deferred. Returns
+ * null (with a diagnostics warning) if the inline object can't be resolved
+ * to a fetchable image or the fetch fails — positioned/floating objects
+ * (paragraph.positionedObjectIds) are out of scope for this proposal and are
+ * simply never seen here, since this is only reached for inlineObjectElement. */
+function extractInlineImage_(pe, ctx) {
+  const inlineObjectId = pe.inlineObjectElement.inlineObjectId;
+  const inlineObj = ctx.inlineObjects[inlineObjectId];
+  const embedded = inlineObj?.inlineObjectProperties?.embeddedObject;
+  const contentUri = embedded?.imageProperties?.contentUri;
+  const tabLabel = ctx.tabId || 'main';
+
+  if (!contentUri) {
+    ctx.out.diagnostics.warnings.push(
+      `Embedded object ${inlineObjectId} (tab ${tabLabel}) has no fetchable image contentUri -- ` +
+      'skipped, not exported.'
+    );
+    return null;
+  }
+
+  const response = UrlFetchApp.fetch(contentUri, { muteHttpExceptions: true });
+  const status = response.getResponseCode();
+  if (status < 200 || status >= 300) {
+    ctx.out.diagnostics.warnings.push(
+      `Embedded image ${inlineObjectId} (tab ${tabLabel}) fetch failed (HTTP ${status}) -- ` +
+      'skipped, not exported. contentUri is a short-lived signed URL; this can happen if it ' +
+      'expired before this export execution reached it.'
+    );
+    return null;
+  }
+
+  const blob = response.getBlob();
+  const ext = imageExtensionFromContentType_(blob.getContentType());
+  const imageRef = makeImageRef_(ctx.tabId, pe.startIndex, ext);
+
+  const imagesFolder = getImagesFolder_(ctx);
+  const file = imagesFolder
+    ? imagesFolder.createFile(blob.setName(imageRef))
+    : DriveApp.createFile(blob.setName(imageRef));
+
+  const size = embedded.size || {};
+  const location = makeLocation_(pe.startIndex, pe.endIndex, ctx);
+
+  const block = {
+    id: makeBlockId_(ctx.tabId, pe.startIndex, pe.endIndex),
+    unit_id: ctx.currentUnit.id,
+    kind: 'image',
+    semantic_state: 'baseline',
+    label: null,
+    named_style: null,
+    heading_level: null,
+    source_order: ctx.sourceOrder,
+    location,
+    list: null,
+    runs: [],
+    revision_summary: 'unchanged',
+    comment_ids: [],
+    image_ref: imageRef,
+    inline_object_id: inlineObjectId,
+    alt_title: embedded.title || null,
+    // §19.3 — always null as written by the exporter; a separate local tool
+    // fills this in later via a sidecar file (never edits this JSON in
+    // place). See ADR-0025.
+    alt_description: embedded.description || null,
+    width_pt: size.width?.magnitude ?? null,
+    height_pt: size.height?.magnitude ?? null,
+    description: null
+  };
+  block.citation_hint = makeCitationHint_(ctx.currentUnit, block);
+
+  const docEntry = {
+    id: makeImageId_(ctx.tabId, pe.startIndex),
+    image_ref: imageRef,
+    drive_file_id: file.getId(),
+    tab_id: ctx.tabId,
+    source_order: ctx.sourceOrder,
+    location
+  };
+
+  return { block, docEntry };
+}
+
+/** Lazily creates (and caches on ctx.driveState, shared across every tab of
+ * this export) the single "<title>-images/" subfolder images are saved
+ * into. Returns null — meaning "save at Drive root", mirroring jsonFile's
+ * own folder-less fallback — when export folder isolation isn't configured
+ * (getExportFolder_ returned null). A document with no embedded images never
+ * calls this, so it never creates an empty subfolder. */
+function getImagesFolder_(ctx) {
+  const state = ctx.driveState;
+  if (state.imagesFolderComputed) return state.imagesFolder;
+  state.imagesFolderComputed = true;
+  if (state.parentFolder) {
+    state.imagesFolder = state.parentFolder.createFolder(`${sanitizeFilename_(ctx.out.document.title)}-images`);
+  }
+  return state.imagesFolder;
+}
+
+const IMAGE_CONTENT_TYPE_EXTENSIONS_ = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/bmp': 'bmp',
+  'image/svg+xml': 'svg'
+};
+
+function imageExtensionFromContentType_(contentType) {
+  return IMAGE_CONTENT_TYPE_EXTENSIONS_[contentType] || 'png';
+}
+
+/** Same derivation as makeBlockId_ (§19.3): tab_id + structural start index,
+ * unique within the export by construction and stable across re-exports of
+ * an unchanged document. */
+function makeImageRef_(tabId, startIndex, ext) {
+  return `img-${tabId || 'main'}-${startIndex ?? 0}.${ext}`;
+}
+
+function makeImageId_(tabId, startIndex) {
+  return `image__${tabId || 'main'}__${startIndex ?? 0}`;
 }
 
 function processTable_(table, ctx) {
@@ -1623,6 +1833,7 @@ function omitEmptyStructuralArrays_(out) {
   };
 
   dropIfEmpty(out.document, 'toc');
+  dropIfEmpty(out.document, 'images');
 
   out.units.forEach(u => {
     dropIfEmpty(u, 'kind_evidence');

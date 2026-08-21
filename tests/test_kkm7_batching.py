@@ -35,6 +35,7 @@ and no `flush.done.batchSize` field at all, so these exact assertions could
 not have passed against it.
 """
 import time
+import uuid
 
 import pytest
 
@@ -62,7 +63,7 @@ def test_syncall_batches_mark_doc_not_found_and_drive_metadata(settings, gas_log
     if not gas_log_dir:
         pytest.skip("gas_log_dir not configured — call-count assertions require GAS log access")
 
-    from tests.helpers.gas_log import clear_logs, collect_logs, wait_for_log
+    from tests.helpers.gas_log import clear_logs, collect_logs, matches_op, wait_for_log
 
     scn_a = ScenarioSession.new_doc(settings, request=request)
     scn_b = ScenarioSession.new_doc(settings)
@@ -87,12 +88,20 @@ def test_syncall_batches_mark_doc_not_found_and_drive_metadata(settings, gas_log
         # own log entries don't leak into the sweep's collected window.
         time.sleep(12)
 
+        # op-correlation (gts-obry.1): scope this sweep's own opId so the
+        # exactly-ONE assertions below can't be inflated by an unrelated
+        # concurrent syncAll (the account's 30-min trigger, or another
+        # session) landing in the same fence window — see matches_op's
+        # docstring.
+        sweep_op_id = str(uuid.uuid4())
         fence = clear_logs(gas_log_dir)
-        scn_control._post_fixture("sync_all")
+        scn_control._post_fixture("sync_all", extra={"opId": sweep_op_id})
         wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=90, after=fence)
 
         notfound_events = collect_logs(
-            gas_log_dir, lambda e: e.get("tag") == "sync.docNotFound.confirmed", after=fence,
+            gas_log_dir,
+            matches_op(lambda e: e.get("tag") == "sync.docNotFound.confirmed", sweep_op_id),
+            after=fence,
         )
         assert len(notfound_events) == 1, (
             f"[kkm7.1] expected exactly ONE mark_doc_not_found webapp call for this sweep "
@@ -100,7 +109,9 @@ def test_syncall_batches_mark_doc_not_found_and_drive_metadata(settings, gas_log
         )
 
         drivemeta_events = collect_logs(
-            gas_log_dir, lambda e: e.get("tag") == "sync.driveMetadata.fetched", after=fence,
+            gas_log_dir,
+            matches_op(lambda e: e.get("tag") == "sync.driveMetadata.fetched", sweep_op_id),
+            after=fence,
         )
         assert len(drivemeta_events) == 1, (
             f"[kkm7.2] expected exactly ONE Drive files.list metadata fetch for this sweep "

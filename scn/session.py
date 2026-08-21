@@ -23,6 +23,7 @@ import pathlib
 import re
 import sys
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -158,6 +159,22 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
         raise RuntimeError(
             "webappTestUrl not set in local.settings.json"
         )
+
+    # Correlation instrumentation (gts-obry.1): every call is stamped with a
+    # client-generated opId (a uuid4, reused across all retry attempts of the
+    # SAME logical call -- computed once, before the retry loop below) and an
+    # initiatedAt epoch-ms timestamp. doPost's existing
+    # GasLogger.startOp(opId) (src/WebApp.js, gts-j8cn) already stamps any
+    # caller-supplied opId onto every log entry it makes as `parentOp`,
+    # distinct from the fresh `op` each execution mints for itself -- this
+    # was previously always null for Python-initiated calls since nothing
+    # populated it. Two log groups sharing one parentOp but carrying
+    # different op values means the SAME client call was dispatched twice by
+    # the platform (a real duplicate-execution bug); different parentOp
+    # values means two genuinely separate calls. A caller that already set
+    # its own opId (chaining an existing op) is not overwritten.
+    payload.setdefault("opId", str(uuid.uuid4()))
+    payload.setdefault("initiatedAt", int(time.time() * 1000))
 
     data = json.dumps(payload).encode("utf-8")
     headers: dict = {"Content-Type": "application/json"}

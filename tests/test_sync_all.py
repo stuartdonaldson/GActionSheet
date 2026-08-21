@@ -474,8 +474,9 @@ def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
         pytest.skip("gas_log_dir not configured — op correlation requires GAS log access")
 
     import time
+    import uuid
 
-    from tests.helpers.gas_log import clear_logs, collect_logs, wait_for_log
+    from tests.helpers.gas_log import clear_logs, collect_logs, matches_op, wait_for_log
 
     scn_a = ScenarioSession.new_doc(settings, request=request)
     scn_b = ScenarioSession.new_doc(settings)
@@ -486,24 +487,37 @@ def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
         scn_b.sync()
         time.sleep(12)  # see test_sync_all_op_correlation's clock-skew note
 
+        # gts-7vo2.2: mint our own opId up front (kkm7/uuse convention) rather
+        # than reading it back from sync.all.start after the fact, then scope
+        # every assertion below to entries chained from THIS sweep via
+        # matches_op. Without this, a concurrent syncAll (the account's
+        # installed 30-min trigger, or another session) landing in the same
+        # fence window can contribute its own sync_action_rows webapp.request
+        # entries that coincidentally satisfy the raw count check, then fail
+        # the parentOp check with a DIFFERENT sweep's op — a live, confirmed
+        # occurrence (see TD-PLAN-20-08.md §0/§2, gts-obry.1's disambiguation).
+        sweep_op = str(uuid.uuid4())
         fence = clear_logs(gas_log_dir)
-        scn_a._post_fixture("sync_all")
-        wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=60, after=fence)
-
-        sweep_op_entries = collect_logs(
-            gas_log_dir, lambda e: e.get("tag") == "sync.all.start", after=fence,
+        scn_a._post_fixture("sync_all", extra={"opId": sweep_op})
+        wait_for_log(
+            gas_log_dir,
+            matches_op(lambda e: e.get("tag") == "sync.all.complete", sweep_op),
+            timeout_s=60,
+            after=fence,
         )
-        assert sweep_op_entries, "[j8cn] no sync.all.start captured for sweep"
-        sweep_op = sweep_op_entries[0].get("op")
-        assert sweep_op, "[j8cn] sweep has no op id of its own — precondition for this test failed"
 
         webapp_entries = collect_logs(
             gas_log_dir,
-            lambda e: e.get("tag") == "webapp.request" and (e.get("data") or {}).get("action") == "sync_action_rows",
+            matches_op(
+                lambda e: e.get("tag") == "webapp.request"
+                and (e.get("data") or {}).get("action") == "sync_action_rows",
+                sweep_op,
+            ),
             after=fence,
         )
         assert len(webapp_entries) >= 2, (
-            f"[j8cn] expected ≥2 sync_action_rows webapp.request entries (one per doc), got {webapp_entries!r}"
+            f"[j8cn] expected ≥2 sync_action_rows webapp.request entries for THIS sweep "
+            f"(one per doc), got {webapp_entries!r}"
         )
 
         webapp_ops = {e.get("op") for e in webapp_entries}
@@ -511,6 +525,10 @@ def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
             f"[j8cn] each doPost execution should mint its OWN op id, not share one: {webapp_ops!r}"
         )
 
+        # matches_op already filtered to parentOp == sweep_op above; this
+        # assertion is retained as an explicit, readable statement of the
+        # invariant it's proving (defense-in-depth, not a redundant check —
+        # a regression in matches_op itself would still be caught here).
         webapp_parent_ops = {e.get("parentOp") for e in webapp_entries}
         assert webapp_parent_ops == {sweep_op}, (
             f"[j8cn] all sync_action_rows calls in this sweep should carry parentOp={sweep_op!r}, "

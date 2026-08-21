@@ -211,9 +211,22 @@ var GasLogger = (function () {
     // the generated op id (callers don't need it, but it's handy for tests).
     // receivedOpId (optional): a caller's own op id, propagated in as `parentOp`
     // on every entry -- this execution still mints its own fresh op either way.
+    //
+    // A nested startOp() call (e.g. syncAll() calling startOp() with no arg
+    // from inside a doPost execution that already called
+    // startOp(payload.opId)) must NOT wipe an already-established parentOp --
+    // it falls back to the existing _parentOp rather than unconditionally
+    // resetting to null (gts-obry.1: this reset was silently breaking
+    // op/parentOp correlation for every webapp-driven syncAll() call --
+    // sync.docNotFound.confirmed and friends were logged AFTER syncAll()'s own
+    // startOp() ran, so they always carried parentOp=null regardless of the
+    // caller's opId). A genuinely top-level entry point (e.g. syncAll() fired
+    // directly by the 30-min trigger, no enclosing doPost) still gets
+    // parentOp=null as before, since there is no existing _parentOp to fall
+    // back to in that case.
     startOp: function (receivedOpId) {
       _currentOp = Utilities.getUuid();
-      _parentOp = receivedOpId || null;
+      _parentOp = receivedOpId || _parentOp || null;
       return _currentOp;
     },
 
@@ -222,6 +235,20 @@ var GasLogger = (function () {
     // Lets a caller read its own current op id before issuing a UrlFetchApp
     // call into another execution, so it can pass it along as opId.
     getCurrentOp: function () { return _currentOp; },
+
+    // Lets a caller read the op id IT was invoked under (its own parentOp),
+    // as distinct from getCurrentOp() (the fresh op this execution minted for
+    // itself). A multi-hop self-call chain (e.g. syncAll() -> _markDocNotFound()
+    // UrlFetchApp-POSTing back into the WebApp) should propagate the ROOT
+    // caller's opId onward so every hop's log entries correlate back to the
+    // same originating call, not just the immediately-enclosing one --
+    // callers making such a self-call should pass
+    // `GasLogger.getParentOp() || GasLogger.getCurrentOp()` as the outgoing
+    // opId (gts-obry.1): getParentOp() when this execution itself has an
+    // established caller to chain to, falling back to getCurrentOp() only
+    // when this execution IS the root (e.g. syncAll() fired directly by the
+    // 30-min trigger, no enclosing doPost).
+    getParentOp: function () { return _parentOp; },
 
     log: function (tag, data) {
       // version on every entry (not just call sites that remember to add it) so

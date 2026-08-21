@@ -1118,7 +1118,7 @@ function _callWebApp(action, payload) {
   payload.secret         = secret || '';
   payload.clientVersion  = BUILD_INFO.version;
   payload.caller         = _getIdentity();
-  payload.opId           = GasLogger.getCurrentOp();
+  payload.opId           = GasLogger.getParentOp() || GasLogger.getCurrentOp();
 
   var resp = UrlFetchApp.fetch(webAppUrl, {
     method:             'post',

@@ -33,7 +33,8 @@
     "https://www.googleapis.com/drive/",
     "https://www.googleapis.com/batch/drive/",
     "https://api.axiom.co/",
-    "https://oauth2.googleapis.com/"
+    "https://oauth2.googleapis.com/",
+    "https://*.googleusercontent.com/"
   ],
   "webapp": {
     "access": "ANYONE_ANONYMOUS",

@@ -384,7 +384,13 @@ def test_sidebar_header_branding(settings, browser_page, request):
             # its TimeoutError and poll for the error text ourselves.
             try:
                 s.ui.open_sidebar(timeout="5s")
-            except TimeoutError:
+            except Exception:
+                # gts-7vo2.1: open_sidebar's icon-visibility wait raises
+                # Playwright's own TimeoutError (not a subclass of the
+                # builtin TimeoutError), while its deadline-exceeded path
+                # raises the builtin one — either is the expected, harmless
+                # outcome here (the error card never renders a "Sync"
+                # button), so catch broadly rather than the wrong type.
                 pass
             error_text = "Unable to load the document state right now."
             deadline = time.monotonic() + 45

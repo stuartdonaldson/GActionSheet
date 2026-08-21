@@ -22,6 +22,9 @@
   "_note_exportRootFolderId": "gts-z6j0. Drive folder ID that getExportFolder_() (src/ExportFolderMap.js) creates per-document export subfolders under, so governance-exporter output (JSON/PDF, and future image-extraction artifacts) stays out of each source document's own folder/visibility. Create the folder once by hand and paste its ID here; pushed to the GAS WebApp's EXPORT_ROOT_FOLDER_ID script property at deploy:test via set_export_config (manage-deployments.js's registerExportConfig). Optional — if unset, exports fall back to writing into the source document's own parent folder.",
   "exportRootFolderId": "YOUR_EXPORT_ROOT_DRIVE_FOLDER_ID",
 
+  "_note_exportTestDocId": "Default docId scripts/export_governance.py uses when no doc_id is given on the command line. Optional — if unset, doc_id becomes a required positional argument.",
+  "exportTestDocId": "YOUR_DEFAULT_EXPORT_TEST_DOC_ID",
+
   "_note_testToken": "Auto-populated by pnpm run deploy:test — do not edit manually.",
   "_note_webappTestUrl": "Auto-written by pnpm run deploy:test from the TEST-WEB-APP deployment ID — do not set manually. deploy:test always overwrites this with the current derived URL so it cannot become stale.",
   "webappTestUrl": "",

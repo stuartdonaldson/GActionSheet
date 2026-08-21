@@ -30,6 +30,8 @@ doc with no batching at all, so a build predating this change would show ZERO
 'sync.driveMetadata.batchFallback.fetched' events (the tag itself is new) for
 this same scenario, not one.
 """
+import uuid
+
 import pytest
 
 from scn.engine import CheckpointKind, Surface
@@ -63,7 +65,7 @@ def test_syncall_batches_multi_doc_listing_miss_fallback(settings, gas_log_dir, 
     if not gas_log_dir:
         pytest.skip("gas_log_dir not configured — call-count assertions require GAS log access")
 
-    from tests.helpers.gas_log import clear_logs, collect_logs, wait_for_log
+    from tests.helpers.gas_log import clear_logs, collect_logs, matches_op, wait_for_log
 
     scn_a = ScenarioSession.new_doc(settings, request=request)
     scn_b = ScenarioSession.new_doc(settings, request=request)
@@ -80,15 +82,23 @@ def test_syncall_batches_multi_doc_listing_miss_fallback(settings, gas_log_dir, 
         pre_statuses_a = {r.global_id: r.sync_status for r in pre_rows_a}
         pre_statuses_b = {r.global_id: r.sync_status for r in pre_rows_b}
 
+        # op-correlation (gts-obry.1): scope this sweep's own opId so the
+        # exactly-ONE batch assertion below can't be inflated by an unrelated
+        # concurrent syncAll (the account's 30-min trigger, or another
+        # session) landing in the same fence window — see matches_op's
+        # docstring.
+        sweep_op_id = str(uuid.uuid4())
         fence = clear_logs(gas_log_dir)
         _post_fixture_patient(
             scn_a, "sync_all_force_listing_miss_multi",
-            extra={"docIds": [scn_a.doc_id, scn_b.doc_id]},
+            extra={"docIds": [scn_a.doc_id, scn_b.doc_id], "opId": sweep_op_id},
         )
         wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=90, after=fence)
 
         batch_events = collect_logs(
-            gas_log_dir, lambda e: e.get("tag") == "sync.driveMetadata.batchFallback.fetched", after=fence,
+            gas_log_dir,
+            matches_op(lambda e: e.get("tag") == "sync.driveMetadata.batchFallback.fetched", sweep_op_id),
+            after=fence,
         )
         assert len(batch_events) == 1, (
             f"[uuse] expected exactly ONE batched fallback call for 2 simultaneously-missing "
@@ -99,7 +109,9 @@ def test_syncall_batches_multi_doc_listing_miss_fallback(settings, gas_log_dir, 
         )
 
         error_events = collect_logs(
-            gas_log_dir, lambda e: e.get("tag") == "sync.driveMetadata.batchFallback.error", after=fence,
+            gas_log_dir,
+            matches_op(lambda e: e.get("tag") == "sync.driveMetadata.batchFallback.error", sweep_op_id),
+            after=fence,
         )
         assert not error_events, (
             f"[uuse] batch/drive/v3 request degraded to the sequential fallback path "
@@ -152,3 +164,87 @@ def test_syncall_batches_multi_doc_listing_miss_fallback(settings, gas_log_dir, 
     finally:
         for scn in (scn_a, scn_b):
             scn.engine.close()
+
+
+def test_syncall_survives_garbage_teamdata_folder_id(settings, gas_log_dir, request):
+    """[gts-moy1.2] A TeamData row with a placeholder Folder Id ('-NA-', the
+    literal value the live sheet used to mean "no dedicated folder for this
+    team") must not poison syncAll()'s scoped Drive listing query for the
+    rest of the account.
+
+    Root cause: _fetchDriveDocMetadata built ONE combined files.list query
+    ORing every TeamData folderId's `'<id>' in parents` clause together with
+    zero validation. An implausible id (like '-NA-') made Drive reject the
+    WHOLE query with HTTP 404 — which threw, and (compounding bug) the
+    per-doc fallback safety net was gated behind `if (driveMetadata)`, so a
+    thrown listing call silently skipped BOTH the scoped listing AND its own
+    fallback for every tracked doc account-wide, not just the doc(s)
+    associated with the bad TeamData row.
+
+    Backstop: this assertion is proven to fail against the pre-fix build —
+    the bad row alone produces a 404 that throws inside _fetchDriveDocMetadata
+    (confirmed live during gts-moy1.1 Stage 1 triage with a temporary
+    diagnostic log), so `sync.driveMetadata.error` fires and the doc below
+    would surface either as an error or (via the compounding bug) skip
+    metadata-driven detection entirely for the sweep."""
+    if not gas_log_dir:
+        pytest.skip("gas_log_dir not configured — log-based assertions require GAS log access")
+
+    from tests.helpers.gas_log import clear_logs, collect_logs, wait_for_log
+
+    scn = ScenarioSession.new_doc(settings, request=request)
+    garbage_team_id = "_TEST_GTMOY12_GARBAGE"
+    try:
+        scn.append_paragraph("AI-1: moy1.2 garbage-folder-id survival action")
+        scn.sync()
+        pre_rows = scn.find_sheet_actions()
+        assert pre_rows, "[moy1.2] expected ≥1 Actions row before the garbage-row sweep"
+        pre_statuses = {r.global_id: r.sync_status for r in pre_rows}
+
+        seed_result = scn._post_fixture("seed_garbage_teamdata_row", {
+            "teamId": garbage_team_id, "folderId": "-NA-",
+        })
+        assert (seed_result.get("data") or {}).get("folderId") == "-NA-", (
+            f"[moy1.2] seed_garbage_teamdata_row did not write the expected placeholder: "
+            f"{seed_result!r}"
+        )
+
+        fence = clear_logs(gas_log_dir)
+        _post_fixture_patient(scn, "sync_all")
+        wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=600, after=fence)
+
+        rejected_events = collect_logs(
+            gas_log_dir, lambda e: e.get("tag") == "sync.driveMetadata.folderIdRejected", after=fence,
+        )
+        assert rejected_events, (
+            "[moy1.2] expected the '-NA-' folder id to be logged as rejected/excluded from "
+            "the scoped listing query, found no sync.driveMetadata.folderIdRejected event"
+        )
+
+        error_events = collect_logs(
+            gas_log_dir, lambda e: e.get("tag") == "sync.driveMetadata.error", after=fence,
+        )
+        assert not error_events, (
+            f"[moy1.2] scoped Drive listing threw despite the garbage TeamData folder id — "
+            f"filtering did not prevent the poisoned query: {error_events!r}"
+        )
+
+        post_rows = scn.find_sheet_actions()
+        assert len(post_rows) == len(pre_rows), (
+            f"[moy1.2] Actions row count changed after a syncAll sweep with a garbage "
+            f"TeamData folder id present: before={len(pre_rows)} after={len(post_rows)}"
+        )
+        for row in post_rows:
+            assert row.sync_status != "Doc Not Found", (
+                f"[moy1.2] row {row.global_id!r} marked 'Doc Not Found' after a syncAll sweep "
+                f"with a garbage TeamData folder id present — the fallback safety net was "
+                f"suppressed for the whole account, not just the bad row's own team"
+            )
+            prior = pre_statuses.get(row.global_id)
+            assert row.sync_status == (prior or ""), (
+                f"[moy1.2] row {row.global_id!r} sync_status changed: "
+                f"{prior!r} -> {row.sync_status!r}"
+            )
+    finally:
+        scn._post_fixture("remove_teamdata_row_by_team_id", {"teamId": garbage_team_id})
+        scn.engine.close()

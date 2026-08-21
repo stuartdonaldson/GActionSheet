@@ -241,6 +241,7 @@ lost by either operation — only unused field *definitions* are dropped.
 | Admin SDK Directory API disabled at the GCP-project level | Same "permission" error as above, persists even after consent-screen scope registration | Enable **Admin SDK API** in GCP Console → APIs & Services → Library (separate from declaring it as an Apps Script advanced service in the manifest) |
 | `AdminDirectory.Members.hasMember(groupKey, externalEmail)` | Throws `GoogleJsonResponseException: Invalid Input: memberKey` for a non-domain (external) member email, even when that email IS a real member | Use `AdminDirectory.Members.get(groupKey, memberKey)` instead — catch the thrown 404 as "not a member," a successful return as confirmed membership. `hasMember` only reliably works for domain-internal memberKeys. |
 | `DriveApp.setSharing(...)` on a Shared Drive folder | Throws `Exception: Cannot use this operation on a shared drive item` | Use the Drive v2 advanced service instead: `Drive.Permissions.insert({role, type}, fileId, {supportsAllDrives: true})` / `Drive.Permissions.remove(fileId, permissionId, {supportsAllDrives: true})` |
+| Shared TEST-account contention during a full pytest sweep | A "call this fires exactly ONCE" assertion (e.g. batching-count tests) sees N>1 events in its fence window; the inverse shape also occurs — an expected event never appears within its bounded wait, because the same background trigger/session activity delayed it (or a differently-tagged event) past the window instead of duplicating a tag | The account's installed 30-min `syncAll` time-based trigger (`TriggerManager.js`) or a second concurrent test/session can log the identical tag inside the same window (confirmed incidents: `gts-li3g`, `gts-moy1.2`; `gts-obry.2` reproduced the missing-event shape on `test_sync_lock_serializes_concurrent_syncdocument_for_same_doc` during a ~2h full sweep, then passed clean twice in isolation — no code change; `gts-7vo2.2` caught a live recurrence via `test_sync_all_op_propagates_to_webapp` and cross-checked it against Axiom — the contaminating `sync.all.start` had a growing `docCount` (118→122 across ~7 min, ~2–3 min apart), a cadence inconsistent with the 30-min trigger, pointing at concurrent test-session activity rather than `TriggerManager.js` for that specific occurrence). Don't run two full sweeps, or a sweep alongside manual TEST-deployment testing, concurrently. **The `op`/`parentOp`-correlation filtering mode this row used to recommend now exists and is in use**: `tests/helpers/gas_log.py::matches_op` (`gts-obry.1`) scopes `collect_logs`/`wait_for_log` to entries chained from one call's own `opId`, and all three batching-assertion tests it was built for — `test_kkm7_batching.py`, `test_uuse_scoped_listing.py`, and `test_sync_all.py::test_sync_all_op_propagates_to_webapp` (`gts-7vo2.2`) — now mint their own opId up front and filter through it, rather than relying on the raw tag+timestamp fence alone. |
 
 ---
 
@@ -412,6 +413,28 @@ symptom, not a selector defect) — exactly the diagnosis-time reduction the
 diagnostic was built for. Use `describe_visible_buttons()` (or extend it) for
 any future custom UI-failure capture point rather than reinventing a
 screenshot-only diagnostic.
+
+#### Op/parentOp correlation for batching-count assertions (`gts-obry.1`)
+
+`scn/session.py::_http_post` stamps every outgoing call with a client-
+generated `opId` (a uuid4, stable across retry attempts) as `payload.opId`.
+GAS's `doPost` already calls `GasLogger.startOp(payload.opId)`
+(`src/WebApp.js`, `gts-j8cn`), which stamps that id as `parentOp` on every
+`GasLogger.log(...)` entry the execution makes. A test asserting "exactly ONE
+call of tag X for this sweep" should pass its own `opId` explicitly (via
+`extra={"opId": ...}` on `_post_fixture`/`_post_route`) and filter with
+`tests/helpers/gas_log.py::matches_op(match_fn, op_id)` instead of a bare
+tag+timestamp fence — this scopes the count to log entries chained from THAT
+call specifically, immune to an unrelated concurrent syncAll (the account's
+30-min trigger, or another session) landing in the same window. See
+`tests/test_kkm7_batching.py` / `tests/test_uuse_scoped_listing.py` for the
+pattern, and the Failure Modes table above for the contention constraint this
+closes.
+
+Known gap: `scripts/call_webapp.py` (manual probes) does not populate `opId`
+today, so `parentOp` is `null` for entries it produces — not on the
+live-suite failure path this exists for, but worth porting if manual-probe
+correlation ever matters.
 
 #### onLinkPreview card rendering — `tests/test_link_preview.py`
 
