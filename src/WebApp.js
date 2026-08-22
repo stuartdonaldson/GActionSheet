@@ -29,7 +29,52 @@ function _getIdentity() {
   return { eu: eu, au: au, version: BUILD_INFO.version };
 }
 
+/**
+ * ?cmd=version — the deploy-verification contract (GAS-Core gas-deployment RECOMMENDATION §3.2).
+ *
+ * Answers the one question `clasp deploy` exiting 0 cannot: is this /exec URL actually serving
+ * the build that was just stamped, and is it the environment we meant to deploy to? The deploy
+ * pipeline (manage-deployments.js -> gas-deploy's assertDeployedVersion) polls this and fails the
+ * deploy on a mismatch.
+ *
+ * Deliberately requires NO secret and is routed ahead of every gate in both doGet and doPost, so
+ * it answers on an ANYONE_ANONYMOUS deployment and before WEBAPP_SECRET/TEST_TOKEN/ADMIN_SECRET
+ * are bootstrapped. It exposes only the build identity — nothing about documents or users.
+ *
+ * `version` is reported BARE (no leading 'v'): BUILD_INFO.version carries the 'v' for display
+ * (sidebar footer, static portal), the wire contract does not. `target` is the deploy target's
+ * label ('TEST'/'PRODUCTION'/'DEV'), which is what catches a deploy landing in the wrong
+ * environment — distinct from BUILD_INFO.env ('test'/'production'/'dev'), which remains the
+ * source of truth for Axiom's env column.
+ */
+function _handleVersionRequest() {
+  var url = '';
+  try { url = ScriptApp.getService().getUrl() || ''; } catch (_) {}
+  return ContentService
+    .createTextOutput(JSON.stringify({
+      ok: true,
+      version: String(BUILD_INFO.version || '').replace(/^v/, ''),
+      versionDate: BUILD_INFO.buildDate || '',
+      target: BUILD_INFO.target || '',
+      env: BUILD_INFO.env || '',
+      deploymentId: _extractDeploymentId(url)
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/** 'https://script.google.com/macros/s/<id>/exec' -> '<id>' ('' when it does not match). */
+function _extractDeploymentId(url) {
+  var m = String(url || '').match(/\/macros\/s\/([^\/]+)\/(?:exec|dev)/);
+  return m ? m[1] : '';
+}
+
 function doGet(e) {
+  // Ahead of the WEBAPP_URL registration and logging below: a version poll must stay cheap and
+  // must not depend on any script property or side effect succeeding.
+  if (e && e.parameter && e.parameter.cmd === 'version') {
+    return _handleVersionRequest();
+  }
+
   var url = ScriptApp.getService().getUrl();
   // Normalize org-specific URL to the canonical form stored in script properties
   url = url.replace(/https:\/\/script\.google\.com\/a\/[^\/]+\/macros\//, 'https://script.google.com/macros/');
@@ -474,11 +519,22 @@ function _escapeHtml(s) {
 }
 
 function doPost(e) {
+  // ?cmd=version / action:'version' — deploy verification (see _handleVersionRequest above).
+  // First, before the JSON parse and before every auth gate: the deploy pipeline polls this
+  // immediately after `clasp deploy`, when nothing else about this deployment is guaranteed yet.
+  if (e && e.parameter && e.parameter.cmd === 'version') {
+    return _handleVersionRequest();
+  }
+
   var payload;
   try {
     payload = JSON.parse(e.postData.contents);
   } catch (ex) {
     return _jsonResponse({ error: 'bad JSON' }, 200);
+  }
+
+  if (payload.action === 'version') {
+    return _handleVersionRequest();
   }
 
   // This execution's own op id, carrying the addon caller's op id (if any) as

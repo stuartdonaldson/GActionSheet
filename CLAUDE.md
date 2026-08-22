@@ -263,9 +263,33 @@ Use the pnpm scripts in `package.json` — never invoke `clasp` directly.
 | Deploy for test cycle | `pnpm run deploy:test` |
 | Deploy to production | `pnpm run deploy:prod` |
 | Push only (no redeploy) | `pnpm run push` |
+| What is deployed right now? | `node manage-deployments.js --summary --env test\|prod` (read-only) |
 
 `clasp logs | tail -50` to look at the last 50 lines of the logs in the cloud google apps server environment
-`pnpm run deploy:test` runs `update-revision.js` + `manage-deployments.js --deploy-prod`
-in one step. Running `clasp push` (or `pnpm run push`) alone leaves the versioned
-WebApp deployment stale — the test suite will call the old revision and produce
-`sync.warn: Non-JSON response` failures.
+
+`pnpm run deploy:test` stamps `src/Version.js`, pushes `src/`, repoints the TEST-WEB-APP
+deployment, runs the post-deploy hooks (test token, Axiom config, export config, config
+verification, static portal), **verifies over the wire that TEST is actually serving the build
+just stamped**, and prints the standard summary. Running `clasp push` (or `pnpm run push`) alone
+leaves the versioned WebApp deployment stale — the test suite will call the old revision and
+produce `sync.warn: Non-JSON response` failures.
+
+**The pipeline is GAS-Core's `gas-deploy` package** (pinned in `package.json`;
+`GAS-Core/packages/gas-deploy/README.md` documents the config surface).
+`manage-deployments.js` is this project's configuration of it — targets, stamper, resolver, and
+the ordered hook list — plus `--verify*` and `--deploy-dev`, which are not deploys.
+`local.settings.json` must carry `claspAuth` (the clasp credential file this project deploys
+with): without it clasp silently falls back to `~/.clasprc.json` and can push to a different
+script project. Every clasp call goes through the package, which always sets it.
+
+**Deploy verification** (`?cmd=version`, `src/WebApp.js`): the deployed webapp reports
+`{ok, version, versionDate, target, deploymentId}` with no secret required, routed ahead of every
+auth gate in both `doGet` and `doPost`. The deploy polls it until version *and* target match what
+was stamped, and fails the deploy otherwise — `clasp deploy` exiting 0 only proves a version was
+created, not that the /exec URL serves it, and the `target` check is what catches a deploy landing
+in the wrong environment. Query it directly:
+`curl -sL "$(python3 -c "import json;print(json.load(open('local.settings.json'))['webappTestUrl'])")?cmd=version"`
+
+**Versions:** `package.json` is the sole source of truth. TEST bumps the integer `build` and stamps
+`v<version>.<build>`; PROD bumps the semver patch, resets `build`, and stamps `v<version>`.
+`src/Version.js` is generated output — never hand-edit it, and never read a version back out of it.

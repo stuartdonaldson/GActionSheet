@@ -15,11 +15,13 @@ if (!fs.existsSync(metadataFile)) {
   process.exit(1);
 }
 
-const { deploymentId, version, description, target } = JSON.parse(fs.readFileSync(metadataFile, 'utf8'));
-const versionMatch = description.match(/v\d+\.\d+\.\d+/);
-const revMatch = description.match(/Rev\.\s+(.+)\)/);
-const deployVersion = versionMatch ? versionMatch[0] : 'unknown';
-const deployTimestamp = revMatch ? revMatch[1] : 'unknown';
+const meta = JSON.parse(fs.readFileSync(metadataFile, 'utf8'));
+const { deploymentId, version, description, target } = meta;
+// productVersion/at are written explicitly by manage-deployments.js's deployMetadata shaper
+// (gas-deploy, RECOMMENDATION.md Stage 3). The regexes are the pre-package fallback: metadata
+// written by the old script only carried the product version and timestamp inside `description`.
+const deployVersion = meta.productVersion || (description.match(/v\d+\.\d+\.\d+/) || ['unknown'])[0];
+const deployTimestamp = meta.at || (description.match(/Rev\.\s+(.+)\)/) || [null, 'unknown'])[1];
 
 const msg = `chore: deploy stamp\n\nDeployed ${deployVersion} to ${target}\nDeployment ID: ${deploymentId}\nDeployment revision: ${version}\nTimestamp: ${deployTimestamp}`;
 execSync('git add src/Version.js', { stdio: 'inherit' });

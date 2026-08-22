@@ -166,8 +166,14 @@ _SIDEBAR_INSERT_TRACKER = (
 )
 # Sidebar homepage card — per-row Delete action button
 _SIDEBAR_DELETE = '[aria-label="Delete action"]'
-# Sidebar homepage card — BUILD_INFO.version footer (e.g. "v0.2.1 (Rev. Jun 9, 2026 22:06) (TEST)")
-_VERSION_FOOTER_RE = re.compile(r"v\d+\.\d+\.\d+\s*\(Rev\.[^)]*\)(?:\s*\([A-Za-z]+\))?")
+# Sidebar homepage card — BUILD_INFO.version footer. Two shapes are accepted because the deploy
+# pipeline moved onto GAS-Core's gas-deploy package (RECOMMENDATION.md Stage 3):
+#   current: "v0.2.2.7"                                 — semver + build counter (#6)
+#   legacy:  "v0.2.1 (Rev. Jun 9, 2026 22:06) (TEST)"   — pre-package stamp format
+# Both are matched so a session against an older deployment still reads its version.
+_VERSION_FOOTER_RE = re.compile(
+    r"v\d+\.\d+\.\d+(?:\.\d+|\s*\(Rev\.[^)]*\)(?:\s*\([A-Za-z]+\))?)?"
+)
 
 
 # ---------------------------------------------------------------------------

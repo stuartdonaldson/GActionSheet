@@ -79,9 +79,21 @@ Use the pnpm scripts — never invoke `clasp` directly.
 | Deploy to production | `pnpm run deploy:prod` |
 | Push source only (no new version) | `pnpm run push` |
 
-**`pnpm run deploy:test`** runs `update-revision.js` (stamps `src/Version.js`) then `manage-deployments.js --deploy-prod` (pushes source and repoints the TEST Web App deployment). Running `clasp push` or `pnpm run push` alone leaves the versioned Web App deployment stale — the test suite will call the old revision and produce `sync.warn: Non-JSON response` failures.
+| What is deployed right now? | `node manage-deployments.js --summary --env test\|prod` |
 
-**Deployment IDs** are maintained via `clasp deploy -i <id>` so Web App URLs never change across pushes. IDs are stored in `.deploy-metadata.json`.
+**`pnpm run deploy:test`** stamps `src/Version.js`, pushes `src/`, repoints the TEST Web App deployment, runs the post-deploy hooks, verifies over the wire, and prints the deploy summary. Running `clasp push` or `pnpm run push` alone leaves the versioned Web App deployment stale — the test suite will call the old revision and produce `sync.warn: Non-JSON response` failures.
+
+**The pipeline itself is GAS-Core's `gas-deploy` package**, pinned as a git dependency in `package.json` and documented in `GAS-Core/packages/gas-deploy/README.md`. `manage-deployments.js` is this project's *configuration* of it: the two targets and their anchors, the `BUILD_INFO` stamper, the ordered post-deploy hooks, and the ledger/metadata record shapes. Two entry points in that file are deliberately not deploys and stay project-local: `--verify*` (Script-Property drift, `scripts/deploy-hooks.js`) and `--deploy-dev` (a HEAD push, which has no named deployment to verify against).
+
+**Credentials.** `local.settings.json` must carry `claspAuth` — the clasp credential file this project deploys with (`~/.clasprc-sdonaldson.json`). Every clasp invocation goes through the package's `claspEnv()`, which always sets `clasp_config_auth`; there is no code path that runs bare `clasp` and silently falls back to `~/.clasprc.json`, which is how a push lands in the wrong script project.
+
+**Deployment IDs** are maintained via `clasp deploy --deploymentId <id>` so Web App URLs never change across pushes. The deployment is resolved from the *live* `clasp deployments` list by matching the `TEST-WEB-APP` / `PROD-WEB-APP` anchor in its description — so a stale recorded ID can never be deployed into, and the anchor must stay in the deployment description. Neither the script nor the package ever creates a deployment: a new URL is always a deliberate human decision, made in the Apps Script editor.
+
+**Deploy verification (`?cmd=version`).** The deployed webapp answers `{ok, version, versionDate, target, deploymentId}` with no secret required, routed ahead of every auth gate in both `doGet` and `doPost` (so it works on an `ANYONE_ANONYMOUS` deployment and before any secret is bootstrapped). The deploy polls it until both the version and the target match what was just stamped, and fails the deploy on a mismatch — printing the summary anyway, so the operator can see what *is* deployed. `clasp deploy` exiting 0 only proves a version was created, not that the /exec URL is serving it; the `target` check is the only thing that catches a deploy landing in the wrong environment.
+
+**Version numbering.** `package.json` is the sole source of truth for both counters. A TEST deploy bumps the integer `build` and stamps `v<version>.<build>`; a PROD deploy bumps the semver patch, resets `build` to 0, and stamps `v<version>`. `BUILD_INFO.env` (`test`/`production`/`dev`) remains the source of truth for Axiom's `env` column — the version string is a human-readable derivative, never the reverse. `src/Version.js` is generated output: never hand-edit it, and nothing reads a version back out of it.
+
+**Records.** Every deploy appends one line to `deployment-ledger/<target>.jsonl` (`timestamp`, `target`, `deploymentId`, `version` as `@<revision>`, `description`, `url` — the schema `write-environment.py` and the pipeline report read) and overwrites `.deploy-metadata.json`, which `commit-deploy-stamp.js` consumes during `release:*`.
 
 ### Static Assets (GitHub Pages)
 Logo and other static assets are served from GitHub Pages:
@@ -477,14 +489,21 @@ containing everything from that single run:
 - `allure-results/` + `allure-report/` — raw and generated Allure HTML report
 - `junit/pytest.xml` — JUnit results
 - `pytest-stdout.log` — full captured console output
+- `system-metrics.jsonl` — host CPU%/mem%/loadavg, sampled every 30s for the
+  run's duration (`scripts/system_metrics.py`, gts-l6h0). Triaging a run
+  whose per-test wall time is blown out vs its own baseline (gts-f3me.6):
+  check this file first — sustained `cpu_pct`/`mem_pct` well above idle
+  points to host-side contention (e.g. another session running concurrently
+  on the same machine) rather than a GAS-backend or Google-infra slowdown,
+  without depending on recalling what else was running at the time.
 - `README.md` — deployed GAS version, test package, investigation question,
   and PASS/FAIL summary
 
 `test-results/INDEX.md` is regenerated after every run, newest-first, linking
 to each `TestExec-NNN/README.md` and its Allure report. Only `README.md` and
 `INDEX.md` are committed — the bulky generated subdirs (`runs/`, `gas-logs/`,
-`allure-results/`, `junit/`, `allure-report/`, `pytest-stdout.log`) are
-gitignored.
+`allure-results/`, `junit/`, `allure-report/`, `pytest-stdout.log`,
+`system-metrics.jsonl`) are gitignored.
 
 Without `run_test_exec.py`, traces/GAS-logs/JUnit/Allure output still go to
 their default unconditional locations (`test-results/runs/`,

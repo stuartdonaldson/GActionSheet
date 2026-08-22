@@ -1,6 +1,7 @@
 {
   "name": "gactionsheet",
   "version": "0.2.2",
+  "build": 5,
   "private": true,
   "packageManager": "pnpm@11.15.1",
   "scripts": {
@@ -35,7 +36,8 @@
     "verify:prod": "node manage-deployments.js --verify-prod"
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.4.1"
+    "@inquirer/prompts": "^8.4.1",
+    "gas-deploy": "github:stuartdonaldson/GAS-Core#gas-deploy-v1.1.0&path:/packages/gas-deploy"
   },
   "devDependencies": {
     "@playwright/test": "1.59.1",
