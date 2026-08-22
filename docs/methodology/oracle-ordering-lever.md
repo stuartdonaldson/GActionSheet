@@ -68,6 +68,16 @@ perceptual state why an assertion cannot cheaply pre-specify "correct." Add the 
 the diagnostic. Add a Success-Criteria checkbox for the oracle declaration. (See this project's
 `.claude/skills/implementation-gate/SKILL.md` Step 4 for the exact wording.)
 
+**Wire the declaration to this file's Evidence log, don't leave it to be remembered.** A
+declaration step with no forced write-back evaporates at session end — this project's own log
+sat empty for 7 weeks after the 2026-07-01 deploy because Step 4 declared the oracle type but
+nothing carried it into the table below. Add two gated sub-steps: (a) at declaration, append a
+row with `Outcome / friction` = `pending`; (b) at the point the ordering is actually followed to
+completion (the `[IMP]` close gate for specifiable/test-first, or the hardening `[TST]`'s close
+for perceptual/Slice), find that row by bead id and replace `pending` with the real outcome —
+including whether the three guardrails were observed, for a Slice row. Both sub-steps are
+gate-fail conditions, not optional housekeeping.
+
 ### 3. Record the trial
 
 Add the deploying project as a trial site on `gts-m65t` (or its successor tracker) so

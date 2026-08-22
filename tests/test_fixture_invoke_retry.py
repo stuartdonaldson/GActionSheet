@@ -90,11 +90,40 @@ def test_retries_and_recovers_on_echo_page_then_success():
 
 
 def test_exhaustion_after_repeated_404_names_attempt_count():
+    """gts-f3me.5: retry budget widened from 3 to 5 attempts."""
     with patch(
         "scn.session.urllib.request.urlopen",
-        side_effect=[_http_error(404), _http_error(404), _http_error(404)],
+        side_effect=[_http_error(404)] * 5,
     ):
-        with pytest.raises(RuntimeError, match=r"3 attempts"):
+        with pytest.raises(RuntimeError, match=r"5 attempts"):
+            invoke_fixture("x", "doc123", SETTINGS)
+
+
+def test_retries_and_recovers_on_timeout_error_then_success():
+    """gts-f3me.4 (Stage B, TD-PLAN-21-08.md): TimeoutError raised out of
+    h.getresponse() (a read-side stall, distinct from the HTTPError/URLError
+    paths above) is retried and a subsequent success is returned — not left
+    to propagate as a bare traceback."""
+    ok = _fake_response(json.dumps({"tag": "fixture.x", "data": {}}))
+    with patch(
+        "scn.session.urllib.request.urlopen",
+        side_effect=[TimeoutError("timed out"), ok],
+    ) as urlopen_mock:
+        result = invoke_fixture("x", "doc123", SETTINGS)
+
+    assert result == {"tag": "fixture.x", "data": {}}
+    assert urlopen_mock.call_count == 2, (
+        "retry did not engage — invoke_fixture must retry once on TimeoutError, "
+        "not let it propagate on the first attempt"
+    )
+
+
+def test_exhaustion_after_repeated_timeout_error_names_attempt_count():
+    with patch(
+        "scn.session.urllib.request.urlopen",
+        side_effect=[TimeoutError("timed out")] * 5,
+    ):
+        with pytest.raises(RuntimeError, match=r"Timed out.*5 attempts"):
             invoke_fixture("x", "doc123", SETTINGS)
 
 

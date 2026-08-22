@@ -2434,6 +2434,41 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'replace_action_plain_text': {
+        // gts-a8yh.2 state probe: rewrites an existing floating action's
+        // paragraph (previously seeded by e.g. seed_formatted_action) with
+        // NEW plain text carrying no bold/italic anywhere, so a re-sync
+        // exercises WebApp.js's doc-authoritative "update existing row"
+        // branch (actionText differs -> write executes) with
+        // runs === [] -- the exact code path _buildRichTextValueForActionText
+        // returns null for. Accepts {n, text}; `text` defaults to a plain
+        // sentence distinct from seed_formatted_action's text so the content
+        // comparison in that branch is guaranteed to trigger a write.
+        var raptN    = (data && data.n) || 1;
+        var raptText = (data && data.text) || ('AI-' + raptN + ': now nothing but plain text');
+        var raptParas = body.getParagraphs();
+        var raptFound = false;
+        for (var rapti = 0; rapti < raptParas.length; rapti++) {
+          if (raptParas[rapti].getText().indexOf('AI-' + raptN + ':') === 0) {
+            var raptTextEl = raptParas[rapti].editAsText();
+            var raptOldLen = raptTextEl.getText().length;
+            raptTextEl.setText(raptText);
+            // setText() does not reliably reset per-character style runs on
+            // its own (this fixture must not itself mask the very bug it is
+            // probing) -- explicitly clear bold/italic over the full new
+            // range.
+            raptTextEl.setBold(0, raptText.length - 1, false);
+            raptTextEl.setItalic(0, raptText.length - 1, false);
+            raptFound = true;
+            break;
+          }
+        }
+        _TF_RESULT = { tag: 'fixture.replace_action_plain_text', data: {
+          ok: raptFound, n: raptN, text: raptText
+        } };
+        break;
+      }
+
       case 'debug_action_runs': {
         // gts-zocq round-trip verification fixture. Accepts {docId, n}
         // (docId defaults to testDocId). Returns three independently-sourced
@@ -3115,8 +3150,24 @@ function setupTestFixtures(scenario, data) {
         var backdateDate = new Date();
         backdateDate.setDate(backdateDate.getDate() - daysAgo);
         actionsSheet.getRange(backdateEntry.rowIndex, _ACOL.modified_date).setValue(backdateDate);
+        // Optional gts-a8yh.2 state-probe extension: also stamp Status so the
+        // row becomes ArchiveManager-eligible (_isExpired requires
+        // status === 'Closed') without a second round-trip fixture call.
+        if (data.status) {
+          actionsSheet.getRange(backdateEntry.rowIndex, _ACOL.status).setValue(data.status);
+        }
         _TF_RESULT = { tag: 'fixture.backdate_action_row', data: { globalId: backdateGlobalId, daysAgo: daysAgo } };
         docAlreadyClosed = true;
+        break;
+      }
+
+      case 'archive_sweep': {
+        // gts-a8yh.2 state probe: runs ArchiveManager.archive(ss) directly,
+        // same call menuRunArchive() makes, without the doc-scoped ceremony
+        // most other fixtures carry (archive operates sheet-wide).
+        var archivedCount = ArchiveManager.archive(ss);
+        docAlreadyClosed = true;
+        _TF_RESULT = { tag: 'fixture.archive_sweep', data: { ok: true, archived: archivedCount } };
         break;
       }
 

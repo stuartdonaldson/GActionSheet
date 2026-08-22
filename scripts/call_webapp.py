@@ -45,10 +45,11 @@ import urllib.request
 
 _SETTINGS_PATH = pathlib.Path(__file__).parent.parent / "local.settings.json"
 
-# Mirrors scn.session._HTTP_POST_MAX_ATTEMPTS/_HTTP_POST_RETRY_DELAY_S — see
-# that module for why this is a bounded retry, not a fixed post-deploy delay.
-_CALL_MAX_ATTEMPTS = 3
-_CALL_RETRY_DELAY_S = 3
+# Mirrors scn.session._HTTP_POST_MAX_ATTEMPTS/_HTTP_POST_RETRY_DELAY_S (gts-f3me.5
+# bumped both from 3/flat to 5/exponential) — see that module for why this is a
+# bounded retry, not a fixed post-deploy delay.
+_CALL_MAX_ATTEMPTS = 5
+_CALL_RETRY_DELAY_S = 3  # base delay; backs off exponentially, same as scn.session
 
 _ENV_URL_KEY = {
     "test": "webappTestUrl",
@@ -102,7 +103,7 @@ def call(url: str, payload: dict, *, timeout: int = 360) -> dict:
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")
             if exc.code == 404 and attempt < _CALL_MAX_ATTEMPTS:
-                time.sleep(_CALL_RETRY_DELAY_S)
+                time.sleep(_CALL_RETRY_DELAY_S * (2 ** (attempt - 1)))
                 continue
             raise RuntimeError(
                 f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw[:500]!r}"
@@ -128,7 +129,7 @@ def call(url: str, payload: dict, *, timeout: int = 360) -> dict:
         except json.JSONDecodeError as exc:
             redir = f" (redirected to {final_url!r})" if final_url != url else ""
             if attempt < _CALL_MAX_ATTEMPTS:
-                time.sleep(_CALL_RETRY_DELAY_S)
+                time.sleep(_CALL_RETRY_DELAY_S * (2 ** (attempt - 1)))
                 continue
             raise RuntimeError(
                 f"Non-JSON response (action={payload.get('action')!r}){redir}: {raw[:500]!r} "

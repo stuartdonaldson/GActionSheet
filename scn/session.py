@@ -135,25 +135,46 @@ def _load_auth_cookie_header() -> str | None:
     return "; ".join(parts) if parts else None
 
 
-_HTTP_POST_MAX_ATTEMPTS = 3
-_HTTP_POST_RETRY_DELAY_S = 3
+_HTTP_POST_MAX_ATTEMPTS = 5
+_HTTP_POST_RETRY_DELAY_S = 3  # base delay; _http_post backs off exponentially from this
 
 
 def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
     """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors.
 
-    Retries a bounded number of times on two symptoms of the same underlying
-    flakiness: (1) the response is the GAS echo page instead of JSON, and (2)
-    a Drive "Page Not Found" error page arrives with HTTP 404. Neither is a
-    fixed deployment-propagation window (observed recurring 50+ minutes after
-    a deploy, and intermittently mid-run with no redeploy at all) — both are
-    the /exec -> script.googleusercontent.com/echo routing intermittently
-    failing to resolve (replayed as GET dropping the POST body for the first
-    case; a bare 404 instead of a redirect for the second). A fresh POST
-    attempt either lands on the real handler or hits the same routing quirk
-    again, so a short bounded retry is the fix, not a longer sleep. Every
-    other failure (non-404 HTTP error, token rejection, network error) raises
-    immediately — only these two routing symptoms are retried.
+    Retries a bounded number of times on three symptoms of the same underlying
+    flakiness: (1) the response is the GAS echo page instead of JSON, (2) a
+    Drive "Page Not Found" error page arrives with HTTP 404, and (3) the read
+    side stalls until the socket timeout fires (`TimeoutError`). None of these
+    is a fixed deployment-propagation window (observed recurring 50+ minutes
+    after a deploy, and intermittently mid-run with no redeploy at all) — all
+    three are the /exec -> script.googleusercontent.com/echo routing
+    intermittently failing to resolve (replayed as GET dropping the POST body
+    for the first case, a bare 404 instead of a redirect for the second, and
+    a hung read for the third). A fresh POST attempt either lands on the real
+    handler or hits the same routing quirk again, so a bounded retry with
+    exponential backoff is the fix, not a longer flat sleep. Every other
+    failure (non-404 HTTP error, token rejection, network error) raises
+    immediately — only these three routing symptoms are retried.
+
+    gts-f3me.4 (Stage B, TD-PLAN-21-08.md): `TimeoutError` was previously
+    unretried and uncaught. `urllib.request.urlopen`'s `do_open` wraps only
+    `h.request()` in `except OSError: raise URLError(err)`;
+    `h.getresponse()` (visible in all three original tracebacks at
+    request.py:1348) propagates `TimeoutError` raw, bypassing the
+    `URLError` handler and the retry/backoff loop entirely. Note `socket.
+    timeout` is a `TimeoutError` alias as of CPython 3.10, so catching
+    `TimeoutError` covers both spellings.
+
+    gts-f3me.5: bumped from 3 attempts/flat 3s delay to 5 attempts/exponential
+    backoff (3s, 6s, 12s, 24s) after a full sweep (gas-test3.log) hit this
+    exhausted-retry path 4x in one run against zero occurrences in the two
+    prior sweeps (gas-test.log, gas-test2.log) — a step change from baseline,
+    plausibly inflated by that run's general slowdown (more wall time / HTTP
+    call volume = more exposure to the same low-probability routing glitch;
+    see gts-f3me.6, the cause-side investigation this bead deliberately does
+    not conflate with). Widening the budget is a low-risk, isolated mitigation
+    of the symptom either way.
     """
     if not url:
         raise RuntimeError(
@@ -199,7 +220,7 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")
             if exc.code == 404 and attempt < _HTTP_POST_MAX_ATTEMPTS:
-                time.sleep(_HTTP_POST_RETRY_DELAY_S)
+                time.sleep(_HTTP_POST_RETRY_DELAY_S * (2 ** (attempt - 1)))
                 continue
             raise RuntimeError(
                 f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw!r}"
@@ -208,6 +229,23 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
         except urllib.error.URLError as exc:
             raise RuntimeError(
                 f"Network error (action={payload.get('action')!r}): {exc.reason}"
+            ) from exc
+        except TimeoutError as exc:
+            # gts-f3me.4: urllib.request.urlopen's do_open wraps only
+            # h.request() in `except OSError: raise URLError(err)` -- a
+            # read-side stall inside h.getresponse() (request.py:1348)
+            # propagates TimeoutError/socket.timeout raw, past the
+            # URLError handler above, so it was previously unretried and
+            # uncaught (bare traceback out of _http_post). Route it
+            # through the same bounded-retry/backoff path as the other two
+            # routing symptoms above -- a fresh attempt either completes
+            # inside the timeout or hits the same stall again.
+            if attempt < _HTTP_POST_MAX_ATTEMPTS:
+                time.sleep(_HTTP_POST_RETRY_DELAY_S * (2 ** (attempt - 1)))
+                continue
+            raise RuntimeError(
+                f"Timed out waiting for response (action={payload.get('action')!r}, "
+                f"timeout={timeout}s) after {_HTTP_POST_MAX_ATTEMPTS} attempts"
             ) from exc
 
         if raw in ("test-token-unauthorized", "test-token-expired"):
@@ -224,7 +262,7 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
         except json.JSONDecodeError as exc:
             redir = f" (redirected to {final_url!r})" if final_url != url else ""
             if attempt < _HTTP_POST_MAX_ATTEMPTS:
-                time.sleep(_HTTP_POST_RETRY_DELAY_S)
+                time.sleep(_HTTP_POST_RETRY_DELAY_S * (2 ** (attempt - 1)))
                 continue
             raise RuntimeError(
                 f"Non-JSON response (action={payload.get('action')!r}){redir}: {raw!r} "
@@ -340,13 +378,21 @@ class ScenarioSession:
     # Private HTTP helpers
     # ------------------------------------------------------------------
 
-    def _post(self, payload: dict, *, timeout: int = 360) -> dict:
+    def _post(self, payload: dict, *, timeout: int | None = None) -> dict:
         """POST JSON payload to webappTestUrl; time it and emit an HTTP trace event.
 
         Unexpected responses (HTTP error / non-JSON / token / GAS error field) are
         raised by _http_post; we record a FAIL HTTP event first so the trace shows
         the bad response at the source (G2 fail-fast signal), then re-raise.
+
+        When `timeout` is omitted, a `payload["fixture"]` present in
+        `_CORPUS_SCALED_FIXTURE_TIMEOUTS` (e.g. "sync_all") gets that fixture's
+        scaled timeout even on a hand-rolled call that bypasses _post_fixture —
+        this used to be advisory-only in _post_fixture, which let a direct
+        caller silently under-time a corpus-scaled fixture (gts-a8yh Stage A #3).
         """
+        if timeout is None:
+            timeout = self._CORPUS_SCALED_FIXTURE_TIMEOUTS.get(payload.get("fixture"), 360)
         url = self.settings.get("webappTestUrl") or ""
         action = payload.get("fixture") or payload.get("action") or "post"
         t0 = time.monotonic()
@@ -389,8 +435,6 @@ class ScenarioSession:
         }
         if extra:
             payload.update(extra)
-        if timeout is None:
-            timeout = self._CORPUS_SCALED_FIXTURE_TIMEOUTS.get(fixture_name, 360)
         return self._post(payload, timeout=timeout)
 
     def _gid(self, target: ai) -> str:

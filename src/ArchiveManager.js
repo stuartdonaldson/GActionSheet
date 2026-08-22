@@ -137,7 +137,15 @@ var ArchiveManager = (function () {
 
     WriteGuard.wrap(function () {
       archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, archiveRows.length, TOTAL_COLS).setValues(archiveRows);
-      actionsSheet.getRange(2, 1, numDataRows, TOTAL_COLS).clearContent();
+      var compactRange = actionsSheet.getRange(2, 1, numDataRows, TOTAL_COLS);
+      compactRange.clearContent();
+      // gts-a8yh.2: belt-and-suspenders — also strip any per-cell formatting
+      // (e.g. a leftover RichTextValue bold/italic run on action_text) so a
+      // row compacted into a new physical position starts from a clean
+      // slate rather than possibly inheriting a prior occupant's styling.
+      // clearFormat() (unlike a bare clear()) does not touch the Status
+      // column's data validation rule.
+      compactRange.clearFormat();
       if (keepRows.length > 0) {
         actionsSheet.getRange(2, 1, keepRows.length, TOTAL_COLS).setValues(keepRows);
       }

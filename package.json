@@ -1,7 +1,7 @@
 {
   "name": "gactionsheet",
   "version": "0.2.2",
-  "build": 5,
+  "build": 8,
   "private": true,
   "packageManager": "pnpm@11.15.1",
   "scripts": {

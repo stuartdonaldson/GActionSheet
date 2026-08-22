@@ -51,6 +51,7 @@ test-results/TestExec-*/runs/
 test-results/TestExec-*/gas-logs/
 test-results/TestExec-*/pytest-stdout.log
 test-results/TestExec-*/allure-generate.log
+test-results/TestExec-*/system-metrics.jsonl
 node_modules/
 .venv/
 __pycache__/

@@ -33,6 +33,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = REPO_ROOT / "test-results"
 
+sys.path.insert(0, str(REPO_ROOT))
+from scripts.system_metrics import Sampler  # gts-l6h0
+
 
 def _next_exec_dir() -> Path:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -135,6 +138,9 @@ def main() -> int:
         f"--alluredir={allure_results}",
         f"--junitxml={junit_path}",
     ]
+    metrics_path = exec_dir / "system-metrics.jsonl"
+    sampler = Sampler(metrics_path, interval_s=30.0).start()
+
     print(f"[run_test_exec] {exec_dir.name}: {' '.join(cmd)}")
     with open(stdout_path, "w", encoding="utf-8") as out:
         proc = subprocess.Popen(
@@ -146,6 +152,7 @@ def main() -> int:
             out.write(line)
         proc.wait()
     rc = proc.returncode
+    sampler.stop()
 
     allure_ok = False
     try:
@@ -174,6 +181,7 @@ def main() -> int:
 - **Trace files:** `runs/`
 - **GAS logs:** `gas-logs/`
 - **pytest output:** `pytest-stdout.log`
+- **System metrics (CPU%/mem%/loadavg, 30s samples):** `system-metrics.jsonl`
 """
     (exec_dir / "README.md").write_text(readme)
 

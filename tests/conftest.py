@@ -220,6 +220,49 @@ def settings():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _check_auth_session_alive():
+    """Probe the shared Playwright auth session once, before any other
+    session fixture or test runs, and hard-abort the whole run if it's
+    signed out (gts-85x3.1).
+
+    gts-f3me.4's proactive/reactive cookie-*rotation* refresh
+    (tests/helpers/download.py) cannot repair a fully signed-out session --
+    by its own docstring, that's out of scope for automated refresh. Without
+    this check, a dead session is only discovered test-by-test, each one
+    burning its own setup/timeout cost before failing -- confirmed live
+    2026-08-21 (gas-test4.log): 39 failed / 6 errors over a full 2h21m run,
+    all traced back to one dead session that nothing caught until the very
+    last test. There is no point running the suite at all in that state, so
+    this fails the whole session immediately (pytest.exit, not a single
+    failed test) with a clear "re-run auth.setup.js" message.
+
+    Runs headless and skips silently if Playwright isn't installed (e.g. a
+    pure-download-helper-only environment) -- browser_page-based tests would
+    already fail loudly on their own in that case, this check just isn't the
+    right layer for that particular gap.
+    """
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        return
+    from tests.helpers.auth_probe import AuthSessionDeadError, probe_auth_session
+
+    try:
+        result = probe_auth_session("primary", headless=True)
+    except AuthSessionDeadError as exc:
+        pytest.exit(f"Auth session pre-flight check failed: {exc}", returncode=1)
+        return
+    if not result.ok:
+        pytest.exit(
+            f"Auth session pre-flight check failed: {result.message} "
+            f"Re-run 'node tests/playwright/auth.setup.js' by hand for role "
+            f"'primary', then re-run the suite. (Or diagnose visually: "
+            f"python scripts/check_auth.py --headed)",
+            returncode=1,
+        )
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _reset_test_state(settings):
     """Clear transient '_TEST_*' script-property toggles before this session's
     first test runs (gts-rvwu follow-up).

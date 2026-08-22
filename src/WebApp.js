@@ -1231,12 +1231,18 @@ function _handleSyncActionRows(payload) {
           ''  // Sync Status — blank on insert
         ]);
         // RichTextValue can't be passed through appendRow's plain-values array
-        // — apply it as a follow-up write to the just-appended row when the
-        // action carries inline formatting (gts-zocq). No-op (common case)
-        // when richTextForWrite is null.
-        if (richTextForWrite) {
-          actionsSheet.getRange(actionsSheet.getLastRow(), _ACOL.action_text).setRichTextValue(richTextForWrite);
-        }
+        // — apply it as a follow-up write to the just-appended row (gts-zocq).
+        // Always issue this follow-up write, even for the plain-text (null)
+        // case: appendRow's plain values array only sets the cell's content,
+        // not necessarily its per-character text style, so a physical row
+        // recycled from an earlier occupant that carried bold/italic could
+        // otherwise leak that styling forward onto unrelated plain text
+        // (gts-a8yh.2). Live probes did not reproduce this specific path,
+        // but it is the defensive fix the plan prescribes and costs nothing
+        // in the common (plain-text) case.
+        actionsSheet.getRange(actionsSheet.getLastRow(), _ACOL.action_text).setRichTextValue(
+          richTextForWrite || SpreadsheetApp.newRichTextValue().setText(normalizedActionText || '').build()
+        );
         upserted++;
       } else if (existing.syncStatus === 'Dirty') {
         // Sheet was edited (onActionSheetEdit set Sync Status = 'Dirty') — sheet wins.
@@ -3001,14 +3007,39 @@ function _handleAppendDocParagraph(payload) {
     return _jsonResponse({ error: 'text required for append_doc_paragraph' });
   }
 
+  // Idempotency guard (gts-f3me.1): scn/session.py's _http_post retries on HTTP
+  // 404 / a non-JSON echo-page response, on the assumption the first attempt
+  // never reached this handler. When it DID reach the handler and only the
+  // *response* was lost to the /exec -> script.googleusercontent.com routing
+  // glitch, a bare retry re-appends the same paragraph a second time (observed
+  // as a duplicated Actions row after sync). Dedupe on the client-supplied
+  // opId, which _http_post reuses across every retry attempt of one logical
+  // call. Cache TTL only needs to cover the retry loop's worst case
+  // (_HTTP_POST_MAX_ATTEMPTS=3 * _HTTP_POST_RETRY_DELAY_S=3s + handler time);
+  // 120s is a comfortable margin over that.
+  var opId = payload.opId || '';
+  var cache = opId ? CacheService.getScriptCache() : null;
+  var cacheKey = opId ? ('append_doc_paragraph:' + opId) : null;
+  if (cache) {
+    var cached = cache.get(cacheKey);
+    if (cached) {
+      return _jsonResponse(JSON.parse(cached));
+    }
+  }
+
   var doc = withGasRetry('WebApp._handleAppendDocParagraph:DocumentApp.openById',
     function () { return DocumentApp.openById(docId); });
   doc.getBody().appendParagraph(text);
   doc.saveAndClose();
 
+  var response = { ok: true, docId: docId };
+  if (cache) {
+    cache.put(cacheKey, JSON.stringify(response), 120);
+  }
+
   GasLogger.log('test.append_doc_paragraph', { docId: docId, textLen: text.length });
   GasLogger.flush();
-  return _jsonResponse({ ok: true, docId: docId });
+  return _jsonResponse(response);
 }
 
 // ---------------------------------------------------------------------------

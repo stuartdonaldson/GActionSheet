@@ -81,6 +81,33 @@ function _handleRunFixture(payload) {
     return _jsonResponse({ error: 'fixture name required' });
   }
 
+  // Idempotency guard (gts-f3me.2 — same class as gts-f3me.1's
+  // _handleAppendDocParagraph fix). scn/session.py's _http_post retries on
+  // HTTP 404 / a non-JSON echo-page response, on the assumption the first
+  // attempt never reached this handler. Fixture calls routed through here
+  // include long-running full-corpus sweeps (e.g. sync_all_force_listing_
+  // miss_multi's syncAll()) that can legitimately still be running -- or
+  // may have already completed and only had its *response* lost to the
+  // /exec -> script.googleusercontent.com routing glitch -- by the time a
+  // same-opId retry arrives. A bare retry re-runs the fixture from scratch,
+  // producing a real second execution (observed as two
+  // sync.driveMetadata.batchFallback.fetched events sharing one parentOp,
+  // ~3 minutes apart, in test_uuse_scoped_listing.py). Dedupe on the
+  // client-supplied opId (reused across every retry attempt of one logical
+  // call), same as append_doc_paragraph: 21600s (CacheService's own max TTL)
+  // comfortably covers even the slowest full-corpus fixture plus the retry
+  // delay, and the key is scoped to a fresh uuid4 per logical call so a
+  // stale entry can never collide with an unrelated later invocation.
+  var opId     = payload.opId || '';
+  var rfCache  = opId ? CacheService.getScriptCache() : null;
+  var rfCacheKey = opId ? ('run_fixture:' + opId) : null;
+  if (rfCache) {
+    var rfCached = rfCache.get(rfCacheKey);
+    if (rfCached) {
+      return _jsonResponse(JSON.parse(rfCached));
+    }
+  }
+
   // Allow caller to override TEST_DOC_ID for the duration of this invocation.
   // begin/end session fixtures intentionally manage persistent session state;
   // all other fixtures restore the prior TEST_DOC_ID when they finish.
@@ -103,7 +130,11 @@ function _handleRunFixture(payload) {
     }
 
     var result = setupTestFixtures(fixtureName, fixtureData);
-    return _jsonResponse(result || { tag: 'fixture.' + fixtureName, data: {} });
+    var response = result || { tag: 'fixture.' + fixtureName, data: {} };
+    if (rfCache) {
+      rfCache.put(rfCacheKey, JSON.stringify(response), 21600);
+    }
+    return _jsonResponse(response);
   } finally {
     if (shouldRestoreTestDocId) {
       if (previousTestDocId) {

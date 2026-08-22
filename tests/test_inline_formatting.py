@@ -117,3 +117,104 @@ def test_plain_action_text_has_no_runs(settings, request):
         assert result.get("sheetRuns") == []
     finally:
         scn.close()
+
+
+def test_plain_edit_clears_prior_italic_formatting(settings, request):
+    """[gts-a8yh.2 — durable invariant] Once an action's text has ever
+    carried bold/italic, a later doc-side edit that removes ALL formatting
+    must make the sheet report an empty runs[] too — not leak the previous
+    occupant's RichTextValue styling forward. This is the WebApp.js
+    doc-authoritative "update existing row" branch: _buildRichTextValueForActionText
+    returns null for the new (plain) runs, so the write must actively clear
+    any rich-text formatting already on the cell rather than relying on
+    setValue() to do so (it does not — see gts-a8yh.2 / TD-PLAN-21-08 §3.3)."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        seed = scn._post_fixture("seed_formatted_action", {"n": 1})
+        seed_data = seed.get("data") or {}
+        assert seed_data.get("ok"), f"seed_formatted_action failed: {seed}"
+
+        scn.sync()
+
+        before = _debug_runs(scn, 1)
+        assert before.get("sheetRuns"), (
+            "precondition: the cell must actually carry rich-text runs "
+            "before we test that a plain edit clears them"
+        )
+
+        replace = scn._post_fixture("replace_action_plain_text", {"n": 1})
+        replace_data = replace.get("data") or {}
+        assert replace_data.get("ok"), f"replace_action_plain_text failed: {replace}"
+
+        scn.sync()
+
+        after = _debug_runs(scn, 1)
+        assert after.get("ok"), f"debug_action_runs failed: {after}"
+        assert after.get("scanRuns") == [], (
+            "doc-side scan should already show no formatting after the "
+            "plain-text replace"
+        )
+        assert after.get("sheetRuns") == [], (
+            "Actions sheet cell still reports a rich-text run after the "
+            "action was rewritten as plain text — stale RichTextValue "
+            "formatting was left on the cell by the update write"
+        )
+    finally:
+        scn.close()
+
+
+def test_archived_row_reuse_does_not_leak_italic_into_new_plain_action(settings, request):
+    """[gts-a8yh.2 — durable invariant, root-cause repro] Reproduces the
+    actual gas-test6.log mechanism: an Actions-sheet row that once carried
+    an italic run gets archived (ArchiveManager._archiveActionsRows
+    compacts the sheet via clearContent()+setValues(), and clearContent()
+    explicitly preserves per-cell/per-character formatting), freeing its
+    physical row for reuse by a later, unrelated, plain-text action. That
+    row must not inherit the archived occupant's stale italic run.
+
+    Only meaningful run in isolation (no concurrent writers to the shared
+    TEST Actions sheet) — the row-freed-by-archive must be this test's own
+    seeded row and nothing else's, or the "next append lands in the freed
+    slot" assumption below does not hold. Do not run this test with -n>1
+    or interleaved against other Actions-sheet writers."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        seed = scn._post_fixture("seed_formatted_action", {"n": 1})
+        seed_data = seed.get("data") or {}
+        assert seed_data.get("ok"), f"seed_formatted_action failed: {seed}"
+
+        scn.sync()
+
+        before = _debug_runs(scn, 1)
+        assert before.get("sheetRuns"), (
+            "precondition: the row must actually carry a rich-text run "
+            "before we test that archiving+reuse doesn't leak it forward"
+        )
+
+        global_id = f"{scn.doc_id}/AI-1"
+        backdate = scn._post_fixture(
+            "backdate_action_row", {"globalId": global_id, "daysAgo": 35, "status": "Closed"}
+        )
+        assert (backdate.get("data") or {}).get("globalId") == global_id, backdate
+
+        sweep = scn._post_fixture("archive_sweep")
+        sweep_data = sweep.get("data") or {}
+        assert sweep_data.get("ok") and sweep_data.get("archived", 0) >= 1, (
+            f"archive_sweep did not archive the backdated row: {sweep}"
+        )
+
+        scn.append_paragraph("AI-2: brand new plain action, no formatting")
+        scn.sync()
+
+        after = _debug_runs(scn, 2)
+        assert after.get("ok"), f"debug_action_runs failed: {after}"
+        assert after.get("scanRuns") == []
+        assert after.get("sheetRuns") == [], (
+            "a brand-new plain action's sheet cell reports a rich-text run "
+            "— it landed on a physical row recycled from the archived "
+            "italic action and inherited that row's stale RichTextValue "
+            "formatting (gts-a8yh.2 root cause: ArchiveManager's "
+            "clearContent()+setValues() compaction preserves format)"
+        )
+    finally:
+        scn.close()
