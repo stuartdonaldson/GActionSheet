@@ -96,6 +96,21 @@ def _authed_session(role: str = "primary", *, allow_proactive_refresh: bool = Tr
     $PLAYWRIGHT_AUTH_DIR location, falling back to the project-local
     .auth/user.json) rather than a hardcoded path -- see .auth/README.md.
 
+    ADR-0026: this cookie session is no longer test-only infrastructure. The
+    document exporter's .docx source-fetch path uses it too, so a change here
+    affects a production ingestion path, not just the suite. Cookie auth was
+    chosen deliberately over an OAuth credential -- the shared storage state is
+    durable in practice given the rotation refresh below, and it needs no
+    separate credential setup.
+
+    Known gap, recorded rather than solved: cookies authenticate Google's *web*
+    endpoints (/document/d/<id>/export, /uc?export=download) but NOT the Docs
+    or Drive REST APIs, which require an OAuth bearer token. The exporter
+    therefore cannot call documents.get, and so cannot count a document's tabs
+    -- which is what it would need to warn accurately about multi-tab documents
+    (gts-11rq, ADR-0026 Consequences). Acquiring an OAuth credential is the
+    natural trigger for revisiting that.
+
     gts-f3me.4: if the on-disk snapshot is older than _STALE_THRESHOLD_S,
     proactively refreshes it (see _refresh_auth_state) before building the
     session, rather than waiting to discover staleness via a failed
