@@ -1,7 +1,8 @@
 # ADR-0023: Dual-Prefix Action Token — `ACT-N:` Canonical, `AI-N:` Read-Compatible
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-05
+Accepted: 2026-08-26 (Stuart Donaldson, gts-4l1a)
 Supersedes: ADR-0008 (token spelling only — identity model, chip URL shape, and
 single-project architecture from ADR-0008 are retained, not reopened)
 
@@ -65,7 +66,6 @@ without a migration pass.
   flush — a correctness requirement of rule 4, called out explicitly so it isn't missed during
   implementation.
 
-**Open question (resolved at Accept):** should this ADR also number the centralizing refactor as
-its own `[IMP]`/`[TST]` twin-ticket pair ahead of the `custom_fields` work in ADR-0024, since
-ADR-0024's implementation touches many of the same call sites? Recommend yes — sequencing avoided
-here to keep this ADR to one decision.
+**Resolved at Accept (2026-08-26):** yes — the centralizing refactor (rule 4) is numbered as its
+own `[IMP]`/`[TST]` twin-ticket pair (gts-mmyc et al.) ahead of the `custom_fields` work in
+ADR-0024, since ADR-0024's implementation touches many of the same call sites.

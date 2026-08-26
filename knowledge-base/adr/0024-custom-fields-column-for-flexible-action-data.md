@@ -1,7 +1,8 @@
 # ADR-0024: `custom_fields` Column for Team-Defined Action Data
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-05
+Accepted: 2026-08-26 (Stuart Donaldson, gts-4l1a)
 
 ## Context
 
@@ -40,6 +41,41 @@ The column is additive and optional, following the precedent set by the `runs` f
 (`gts-zocq`, `SyncManager.js:157-162`): a row with no custom fields either omits the column value
 or stores `{}`/empty, and every code path that predates this ADR keeps working unchanged.
 
+## Examples
+
+`<BR>` denotes a soft return (Shift+Enter) inside a single paragraph — the continuation-line
+boundary this ADR's `custom_fields` column and ADR-0027's grammar both key off. All three
+paragraphs below are otherwise identical (same token, assignee, status).
+
+**Without fields — header line only, no continuation:**
+```
+ACT-3: jane@example.com Draft the Q3 budget memo (In Progress)
+```
+`custom_fields` is omitted (or stored as `{}`); `action_text` is `Draft the Q3 budget memo`.
+
+**Soft return, no fields — continuation is prose, not a field:**
+```
+ACT-4: jane@example.com Draft the Q3 budget memo (In Progress)<BR>
+Still waiting on finance numbers before this can close.
+```
+The continuation line doesn't match the `fieldLine` production (ADR-0027 rule 5 — no leading
+`Name:` shape), so it's absorbed as prose into `action_text` rather than parsed as a field:
+`action_text` becomes `Draft the Q3 budget memo\nStill waiting on finance numbers before this can close.`
+`custom_fields` is still omitted/`{}` — this column only ever holds recognized `Field: value`
+lines, never absorbed continuation prose.
+
+**Soft return with fields:**
+```
+ACT-5: jane@example.com Draft the Q3 budget memo (In Progress)<BR>
+Target: September board meeting<BR>
+Progress: revenue section drafted, expenses pending
+```
+Each continuation line matches the `fieldLine` production. `action_text` remains
+`Draft the Q3 budget memo` (unchanged by the fields); `custom_fields` becomes:
+```json
+{"Target": "September board meeting", "Progress": "revenue section drafted, expenses pending"}
+```
+
 ## Consequences
 
 **Positive:**
@@ -64,9 +100,9 @@ or stores `{}`/empty, and every code path that predates this ADR keeps working u
   a continuation line that appears before any `Field:` header has been seen in the record. These
   are parser-design questions, not schema questions, and are out of scope for this ADR.
 
-**Open question (resolved at Accept):** does `custom_fields` need a per-team allowlist of valid
-field names (enforced at parse time), or is any team-typed field name accepted verbatim? Left open
-pending the twin-ticket contract for the parser work.
+**Resolved at Accept (2026-08-26):** no per-team allowlist. ADR-0027 rule 5 answers this with a
+bounded `fieldLine` production (leading letter, ≤32 chars from `[A-Za-z0-9 _-]`, then `: `) instead
+of a per-team enforced list — any team-typed field name matching that shape is accepted verbatim.
 
 ## Related
 

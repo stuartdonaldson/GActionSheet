@@ -28,8 +28,7 @@ Two adjacent decisions are already on file and are **not reopened here**:
   lines into a `custom_fields` JSON sheet column, leaving the header line's field set unchanged.
   Questions Q3 (field set) and Q7 (does the change reach the sheet columns) are answered there.
 
-Both are **Proposed**, not Accepted. This ADR presumes them; if either is rejected the grammar
-below must be revisited.
+Both were Accepted 2026-08-26 (gts-4l1a). This ADR presumes them.
 
 What remained genuinely open was the delimiter grammar, its interaction with the trailing
 `(Status)` token, and what happens to a paragraph that fails to parse.
@@ -66,7 +65,8 @@ email           := [\w.+-]+ "@" [\w-]+ ("." [a-z]{2,})+
 actionBody      := text [ statusToken ]
 statusToken     := "(" [^)]* ")"        ; last such group on the HEADER LINE, per rule 4
 continuation    := "\n" ( fieldLine | prose )
-fieldLine       := [A-Za-z] [A-Za-z0-9 _-]{0,31} ":" [ \t]
+fieldLine       := fieldName ":" ( [ \t] inlineValue? | EOL )
+fieldName       := [A-Za-z] [A-Za-z0-9 _-]{0,31}
 ```
 
 Whitespace between the token, the assignee and the action body is the only separator. There is
@@ -114,8 +114,9 @@ what follows it is empty or begins with a non-word character) is unchanged.
 
 A continuation line is a `fieldLine` if and only if it matches the bounded production above: no
 leading whitespace, an initial letter, a name of at most 32 characters drawn from
-`[A-Za-z0-9 _-]`, then a colon followed by a space or tab. Every other continuation line is prose
-and is absorbed into `actionText`, preserving current gts-dr8j behavior.
+`[A-Za-z0-9 _-]`, then a colon followed by a space, a tab, or the end of the line. A bare
+`Consult With:` with nothing after the colon is a field line with an empty inline value, not
+prose. Every other continuation line is prose.
 
 This resolves ADR-0024's three open parser questions:
 
@@ -126,8 +127,62 @@ This resolves ADR-0024's three open parser questions:
 2. *Field-name line versus the next record's token* — the token production is attempted first and
    wins. A line beginning `ACT-4:` starts a new record even though it would also satisfy
    `fieldLine`.
-3. *Continuation prose before any `Field:` line* — absorbed into `actionText`, unchanged from
-   today.
+3. *Continuation prose before any `Field:` line* — absorbed into `actionText`, per rule 5a.
+
+### 5a. Prose attaches to the open block; soft-return order is retained
+
+A paragraph is an ordered sequence of **blocks**. The action body opens the first block; each
+`fieldLine` closes the block before it and opens a new one named by its field. **A prose
+continuation line belongs to whichever block is open when it is read** — `actionText` if no field
+line has been seen yet, otherwise the value of the most recent field line. Prose does not jump
+back to `actionText` once a field has been opened.
+
+A block's value is an ordered list of lines, joined with `\n`:
+
+- the action body's first line is the header line's text (chip/email and status token stripped);
+- a field's first line is its inline value — the text after the colon, or the empty string when
+  the field line is bare;
+- each subsequent prose line is appended in document order.
+
+Line order within a block, and field order across blocks, are both document order and are
+preserved end to end: parse, `custom_fields` JSON (object keys in insertion order), sheet cell,
+and re-render on flush. The joined string is the value's `text` under ADR-0028 rule 6. A soft return in the document is a `\n` in the stored value and a soft
+return again on flush — never a space, never a reordering, never a dropped line.
+
+Worked example:
+
+```
+ACT-9: jane@example.com Draft the Q3 budget memo (In Progress)<BR>
+- pull last year's actuals<BR>
+- circulate before Friday<BR>
+Consult With:<BR>
+- Stuart<BR>
+- John<BR>
+Due: Tuesday
+```
+
+```
+actionText    = "Draft the Q3 budget memo\n- pull last year's actuals\n- circulate before Friday"
+custom_fields = {"Consult With": {"text": "\n- Stuart\n- John", "runs": []},
+                 "Due":          {"text": "Tuesday",             "runs": []}}
+```
+
+(field values carry `{text, runs}` per ADR-0028 rule 6; the joined line text is the `text`, and
+run offsets are indices into it, so a `\n` is an ordinary character as far as runs are concerned)
+
+`- Stuart` and `- John` are the `Consult With` value, not action prose and not their own fields —
+so a later tabular view of these records puts both names in the `Consult With` column. The leading
+`\n` in that value is the bare field line's empty inline value, and is what lets flush re-render
+`Consult With:` on its own line exactly as the author typed it.
+
+**Repeated field name.** A field name that appears twice does not overwrite: the later block's
+lines are appended to the existing value, in document order, separated by `\n`. Nothing an author
+typed is dropped (the gts-dr8j / gts-zocq precedent), at the cost of the two occurrences reading
+as one value on flush.
+
+**Round-trip.** Flush renders block *n* as `Name:` + the value's first line + one soft return per
+remaining line, in order. Parsing that output reproduces the same blocks, so the rendering is
+exact for input already in this shape and idempotent thereafter.
 
 ### 6. A paragraph that starts with a token but fails to parse is reported, not skipped
 
@@ -145,8 +200,9 @@ The grammar above is a strict superset of what the current parsers accept: it ad
 `@` sigil and the continuation-line productions, and it narrows nothing. No document requires
 migration, and rule 6 introduces reporting only for input that is already being lost.
 
-Rule 4 is the sole behavior change, and it is only observable once continuation lines exist —
-which they do not yet.
+Rule 4 is the sole change to behavior observable today; rules 5/5a specify behavior that only
+exists once continuation field lines do, which they do not yet. Today's rule — prose is absorbed
+into `actionText` (gts-dr8j) — is rule 5a's first-block case, unchanged.
 
 ## Consequences
 
@@ -166,7 +222,17 @@ which they do not yet.
 
 - The 32-character field-name bound in rule 5 is a judgment call, not a derived constant. A team
   wanting a longer field name gets prose instead, with no diagnostic. Rule 6's reporting does not
-  cover this case because the paragraph itself parses fine.
+  cover this case because the paragraph itself parses fine. Under rule 5a that misclassified line
+  is now absorbed into the preceding field's value rather than into `actionText`, which is a
+  quieter failure than it was — the text survives, but under a neighbouring label.
+- Rule 5a makes `custom_fields` values multi-line strings, where ADR-0024's examples show only
+  single-line ones. The column's shape is unchanged (JSON object, string values); a sheet cell can
+  now contain embedded newlines, which is opaque to Sheets-native filtering — already accepted in
+  ADR-0024 for this admin-only sheet.
+- Appending on a repeated field name is the lossless choice, not the intuitive one: an author who
+  retypes `Due:` to correct it gets both values concatenated rather than the later one winning.
+  Making the correction case work would require discarding author-typed text, which this project
+  does not do silently.
 - The header line cannot grow new fields without a further ADR. This is intended, but it means a
   future due-date or priority field must arrive as a continuation field rather than as a
   first-class column, or reopen this decision.
@@ -176,11 +242,10 @@ which they do not yet.
   into one shared helper or the status rule will drift between the two paths — the same class of
   drift `_extractStatusTokenTracked` was extracted to prevent (gts-v0py).
 
-**Open question (resolve at Accept):** should the PERSON-chip/text-email divergence between the two
-parsers be closed as part of this ADR's implementation, or tracked separately? The grammar above
-describes one language; two parsers implementing it differently is a latent contradiction
-regardless of whether rule 4 forces the issue. Recommend folding the shared header-line helper into
-this ADR's `[IMP]` twin and leaving full chip parity in the soft-return path as its own bead.
+**Resolved (2026-08-26, gts-4l1a):** the shared header-line helper (rule 4's status-scoping) folds
+into this ADR's `[IMP]` twin — both parsers must agree on where the header line ends for rule 4 to
+hold at all. Full PERSON-chip/text-email parity in the soft-return path is tracked separately as
+its own bead, not folded into this ADR's implementation.
 
 ## Related
 

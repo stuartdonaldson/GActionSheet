@@ -117,7 +117,7 @@ JSON shape now and avoids migrating stored cells later.
 - A link whose range spans a status token or the assignee is not representable, since runs cover
   `actionText` only. Such a link is truncated to the surviving range rather than preserved whole.
 
-**Open question (resolve at Accept):** should an existing action be re-read to recover links that
+**Resolved (2026-08-26, gts-4l1a):** should an existing action be re-read to recover links that
 were already destroyed by a previous flush? It cannot be — the URL is gone from both doc and
 sheet. This ADR is forward-only; there is no recovery path, and that should be stated to users
 rather than discovered.

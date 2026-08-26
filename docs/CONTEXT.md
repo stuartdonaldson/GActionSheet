@@ -48,7 +48,8 @@ email           := [\w.+-]+ "@" [\w-]+ ("." [a-z]{2,})+
 actionBody      := text [ statusToken ]
 statusToken     := "(" [^)]* ")"        ; last qualifying group on the HEADER LINE only
 continuation    := "\n" ( fieldLine | prose )
-fieldLine       := [A-Za-z] [A-Za-z0-9 _-]{0,31} ":" [ \t]
+fieldLine       := fieldName ":" ( [ \t] inlineValue? | EOL )
+fieldName       := [A-Za-z] [A-Za-z0-9 _-]{0,31}
 ```
 
 The **header line** is everything up to the first soft return. Continuation lines are soft returns
@@ -83,9 +84,17 @@ Rules:
   text. There is no escape mechanism because none is needed. The header line is not extensible;
   `Field: value` continuation lines are the sanctioned extension point (ADR-0024).
 - **Field lines.** A continuation line is a field line only if it matches `fieldLine` above — no
-  leading whitespace, an initial letter, a name of at most 32 characters. Anything else is prose
-  and is absorbed into `action_text` (gts-dr8j). A line matching the `token` production starts a
-  new action and wins over `fieldLine`.
+  leading whitespace, an initial letter, a name of at most 32 characters, then a colon followed by
+  a space, a tab, or the end of the line (a bare `Consult With:` is a field line with an empty
+  inline value). A line matching the `token` production starts a new action and wins over
+  `fieldLine`.
+- **Prose attaches to the open block; order is retained.** The action body opens the first block
+  and each field line opens a new one. A prose continuation line belongs to whichever block is
+  open when it is read — `action_text` before any field line, otherwise the value of the most
+  recent field line (gts-dr8j is the first-block case). Line order within a block and field order
+  across blocks are document order, preserved through parse, the `custom_fields` JSON, the sheet
+  cell and re-render on flush: a soft return is a `\n` in the stored value and a soft return again
+  on flush. A repeated field name appends rather than overwrites.
 - **Inline formatting.** Bold, italic and hyperlinks are author-owned and survive round-trip as
   per-character runs (ADR-0022, ADR-0028). Config's uniform `action_text` style owns font family,
   size, colour and underline only.
@@ -99,10 +108,20 @@ Example with continuation fields:
 
 ```
 [img] ACT-7: [Jane Smith] draft the Q4 board deck and circulate (In Progress)
+- pull last year's actuals
 Target: September 12 board meeting
 Progress: outline done, needs the revenue section
+Consult With:
+- Stuart
+- John
 Notes: Peter wants the a|b test results folded in
 ```
+
+parses to `action_text` = `draft the Q4 board deck and circulate\n- pull last year's actuals` and
+`custom_fields` = `{"Target": "September 12 board meeting", "Progress": "outline done, needs the
+revenue section", "Consult With": "\n- Stuart\n- John", "Notes": "Peter wants the a|b test results
+folded in"}` (each value carried as `{text, runs}` per ADR-0028) — `Stuart` and `John` are the
+`Consult With` value, so a tabular view of these records shows both under that column.
 
 ### Organizational Constraints
 - No external service dependencies; both projects run entirely within Google Workspace
