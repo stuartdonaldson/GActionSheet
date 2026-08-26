@@ -82,7 +82,7 @@ async function primeCachedAuth(page) {
 test.describe('@team-portal View B — per-document verified view (gts-79dw.4.23)', () => {
   test.beforeAll(() => {
     expect(fs.existsSync(DIST_HTML),
-      `${DIST_HTML} missing — run: node scripts/build-static-portal.js --env sit`).toBe(true);
+      `${DIST_HTML} missing — run: node -e "require('./scripts/static-pages.js').build('sit')"`).toBe(true);
   });
 
   test('VIEW-tier caller sees the document actions with sidebar-parity fields, no write controls', async ({ page }) => {

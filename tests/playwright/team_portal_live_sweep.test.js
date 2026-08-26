@@ -125,7 +125,7 @@ async function mintAssertion(webappTestUrl, testToken, sub, email) {
 test.describe('@team-portal @live Unit E.5 — full live portal sweep (no mocks)', () => {
   test.beforeAll(() => {
     expect(fs.existsSync(DIST_HTML),
-      `${DIST_HTML} missing — run: node scripts/build-static-portal.js --env sit`).toBe(true);
+      `${DIST_HTML} missing — run: node -e "require('./scripts/static-pages.js').build('sit')"`).toBe(true);
   });
 
   test('live team list load + assignee status change (R17) + VIEW-tier sync/edit rejection shapes -- real backend, no page.route()', async ({ page }) => {

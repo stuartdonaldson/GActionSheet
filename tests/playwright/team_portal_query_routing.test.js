@@ -86,7 +86,7 @@ function routeTwoTeams(page, gactionsheetUrl) {
 test.describe('@team-portal team portal query-string routing (gts-79dw.4.24)', () => {
   test.beforeAll(() => {
     expect(fs.existsSync(DIST_HTML),
-      `${DIST_HTML} missing — run: node scripts/build-static-portal.js --env sit`).toBe(true);
+      `${DIST_HTML} missing — run: node -e "require('./scripts/static-pages.js').build('sit')"`).toBe(true);
   });
 
   test('?team= preselects that team instead of defaulting to the first team', async ({ page }) => {

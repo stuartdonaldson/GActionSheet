@@ -2,9 +2,9 @@
 
 Source of truth for the team-action portal's static frontend (`gts-79dw.4.25`,
 migrated from hand-editing `Static/pub/AS/index.html` directly). Built and
-published by `scripts/build-static-portal.js` + `scripts/publish-static-portal.js`,
-following the `F3Go30` `tools/build-static-pages.js` / `publish-static-pages.js`
-pattern — see those scripts' headers for the stamping/publish mechanics.
+published through GAS-Core's shared `gas-static` package, configured by
+`scripts/static-pages.js` — see that file's header and
+`packages/gas-static/README.md` (GAS-Core) for the stamping/publish mechanics.
 
 - `index.html` — the team portal page. Three placeholders are stamped at build
   time from `src/Version.js`'s `BUILD_INFO` (already stamped by
@@ -21,5 +21,7 @@ pattern — see those scripts' headers for the stamping/publish mechanics.
 
 Published to the sibling `Static` repo (`local.settings.json`'s
 `staticPortalRepoPath`) — SIT to `pub/AS-sit/`, PROD to `pub/AS/` — as the
-automatic last step of `pnpm run deploy:test` / `pnpm run deploy:prod`. See
-`scripts/publish-static-portal.js` for standalone/recovery invocation.
+automatic last step of `pnpm run deploy:test` / `pnpm run deploy:prod`. For a
+standalone build or a recovery publish:
+`node -e "require('./scripts/static-pages.js').build('sit')"` /
+`.publish('sit', { yes: true })`.

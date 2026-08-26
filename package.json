@@ -1,7 +1,7 @@
 {
   "name": "gactionsheet",
-  "version": "0.2.2",
-  "build": 8,
+  "version": "0.2.3",
+  "build": 1,
   "private": true,
   "packageManager": "pnpm@11.15.1",
   "scripts": {
@@ -37,7 +37,8 @@
   },
   "dependencies": {
     "@inquirer/prompts": "^8.4.1",
-    "gas-deploy": "github:stuartdonaldson/GAS-Core#gas-deploy-v1.1.0&path:/packages/gas-deploy"
+    "gas-deploy": "github:stuartdonaldson/GAS-Core#gas-deploy-v1.4.0&path:/packages/gas-deploy",
+    "gas-static": "github:stuartdonaldson/GAS-Core#gas-static-v1.3.1&path:/packages/gas-static"
   },
   "devDependencies": {
     "@playwright/test": "1.59.1",

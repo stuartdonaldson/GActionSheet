@@ -1,4 +1,5 @@
 {
+  "_note_gasProjectJson": "scriptId/testSheetId are ALSO committed project truth in gas-project.json (GAS-Core adr/0004) — gas-deploy reads that copy. Kept here too because tests/conftest.py's script_id fixture and tests/playwright/editor_helpers.js read local.settings.json directly, not through gas-deploy's loader (GAS-Core-rgh).",
   "testSheetId": "SPREADSHEET_ID_FOR_TESTING",
   "testDocId": "DOC_ID_FOR_TESTING",
   "scriptId": "APPS_SCRIPT_SCRIPT_ID",
@@ -24,7 +25,7 @@
   "webappTestUrl": "",
   "testToken": "",
   "testTokenExpiresAt": "",
-  "_note_staticPortalRepoPath": "Sibling checkout of the Static repo (nuuc-it/Static) that GitHub Pages serves. Used by scripts/publish-static-portal.js (chained automatically into pnpm run deploy:test/deploy:prod, gts-79dw.4.25) to publish the built team-action portal to pub/AS-sit/ (SIT) or pub/AS/ (PROD).",
+  "_note_staticPortalRepoPath": "Sibling checkout of the Static repo (nuuc-it/Static) that GitHub Pages serves. Used by scripts/static-pages.js (GAS-Core's gas-static package, chained automatically into pnpm run deploy:test/deploy:prod) to publish the built team-action portal to pub/AS-sit/ (SIT) or pub/AS/ (PROD).",
   "staticPortalRepoPath": "../Static",
   "_note_playwrightAccounts": "Maps this project's test-account roles (docs/security-architecture.md \u00a75) to shared, cross-project auth-identity files under $PLAYWRIGHT_AUTH_DIR (.envrc, default ~/.playwright). Capture a file with: node tests/playwright/auth.setup.js --account=<slug>",
   "playwrightAccounts": {

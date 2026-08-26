@@ -23,6 +23,9 @@
  *   3. local.settings.json needs `claspAuth` (the clasp credential file this project deploys
  *      with). Without it clasp silently falls back to ~/.clasprc.json and can push to the wrong
  *      script project — the package refuses to run rather than let that happen.
+ *
+ * scriptId/sheetId are project truth, committed in gas-project.json (GAS-Core adr/0004);
+ * local.settings.json keeps auth, secrets and the static-host checkout path.
  */
 
 const fs = require('fs');
@@ -33,7 +36,12 @@ const {
   claspEnv, execWithRetry, parseDeployments,
 } = require('gas-deploy');
 
-const { publish: publishStaticPortal } = require('./scripts/publish-static-portal');
+// The static front end, published as part of the deploy rather than beside it. The hook chain
+// (build -> publish -> assertPublishedBuild, each required, the publish chained) and the summary
+// row are gas-static's, not this project's — see that package's README §"Chaining off a deploy".
+// This used to be one hand-rolled `Publish static portal` hook shelling out to
+// scripts/publish-static-portal.js, which read nothing back.
+const staticPipeline = require('./scripts/static-pages');
 const hooks = require('./scripts/deploy-hooks');
 
 const ROOT = __dirname;
@@ -41,16 +49,14 @@ const SETTINGS_PATH = path.join(ROOT, 'local.settings.json');
 const VERSION_PATH = path.join(ROOT, 'src', 'Version.js');
 
 // BUILD_INFO.env is the source of truth for Axiom's top-level `env` column (GasLogger.js) and for
-// build-static-portal.js's env guard. It is a different vocabulary from the deploy target's label
+// gas-static's env-agreement guard. It is a different vocabulary from the deploy target's label
 // ('TEST'/'PRODUCTION'), which is what the cmd=version contract compares — so both are stamped.
 const BUILD_INFO_ENV = { test: 'test', production: 'production', dev: 'dev' };
 
-// The static portal's public URL per target (gts-79dw.4.25): 'test' publishes to Static's
-// pub/AS-sit/, 'production' to pub/AS/.
-const STATIC_PORTAL_URL = {
-  test: 'https://nuuc-it.github.io/Static/pub/AS-sit/',
-  production: 'https://nuuc-it.github.io/Static/pub/AS/',
-};
+// deploy target -> portal env ('sit'/'prod', the Static repo's hosting-folder split). The same map
+// scripts/static-pages.js uses internally — passed here so gas-static's hooks and this deploy loop
+// agree on which portal env a given deploy target publishes to.
+const envFor = (ctx) => staticPipeline.PORTAL_ENV[ctx.targetKey];
 
 function loadSettings() {
   return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
@@ -89,16 +95,16 @@ const config = {
 
   // Lineage A: one script project holds both named deployments, told apart by an anchor in the
   // description — the case sole-active-deployment resolution cannot express at all.
+  // No scriptIdKey/sheetIdKey: both are declared in gas-project.json now, and leaving the legacy
+  // *Key indirection declared beside it would be the second mechanism adr/0004 argues against.
   targets: {
     test: {
-      scriptIdKey: 'scriptId', label: 'TEST', emoji: '🧪', counter: 'build',
+      label: 'TEST', emoji: '🧪', counter: 'build',
       anchor: 'TEST-WEB-APP', resolveDeployment: anchorMatch('TEST-WEB-APP'),
-      sheetIdKey: 'testSheetId',
     },
     production: {
-      scriptIdKey: 'scriptId', label: 'PRODUCTION', emoji: '🚀', counter: 'version',
+      label: 'PRODUCTION', emoji: '🚀', counter: 'version',
       anchor: 'PROD-WEB-APP', resolveDeployment: anchorMatch('PROD-WEB-APP'),
-      sheetIdKey: 'prodSheetId',
     },
   },
   envAliases: { prod: 'production', sit: 'test' },
@@ -112,12 +118,17 @@ const config = {
   resolveBeforeStamp: true,
   stamper: buildInfoStamper({
     file: 'src/Version.js',
-    // The GAS runtime reads these by name (Version.js, PROBE.js, build-static-portal.js).
+    // The GAS runtime reads these by name (Version.js, PROBE.js, scripts/static-pages.js).
     fields: { date: 'buildDate', webAppUrl: 'webappUrl' },
-    extraFields: ({ targetKey, version }) => ({
-      // Display form only. The wire contract (cmd=version) reports the bare version, so the two
-      // can never disagree: handleVersionRequest_ strips this 'v' before answering.
-      version: `v${version}`,
+    // version is left at buildInfoStamper's own default (the bare gas-deploy counter) —
+    // deliberately NOT the display form with a leading 'v' this used to carry. gas-static reads
+    // BUILD_INFO.version verbatim and compares it against the bare version gas-deploy's own
+    // assertDeployedVersion/assertPublishedBuild poll for; a 'v'-prefixed value here would make
+    // `pnpm run deploy:test`/`:prod` fail every time waiting for a version that can never match
+    // (found converting to gas-static, GAS-Core-rgh). _handleVersionRequest's `.replace(/^v/, '')`
+    // is now a no-op, kept rather than removed — the wire contract's contract text ("version is
+    // reported BARE") is unaffected either way.
+    extraFields: ({ targetKey }) => ({
       env: BUILD_INFO_ENV[targetKey] || 'test',
     }),
   }),
@@ -132,18 +143,16 @@ const config = {
     testOnly('Register Axiom config', ({ deploymentId }) => hooks.registerAxiomConfig(deploymentId)),
     testOnly('Register export folder config', ({ deploymentId }) => hooks.registerExportConfig(deploymentId)),
     testOnly('Verify Script Properties', () => hooks.verifyConfig('test')),
-    {
-      // Depends on the BUILD_INFO the stamp above wrote for this target, so it is last.
-      name: 'Publish static portal',
-      required: false,
-      retryCommand: 'node scripts/publish-static-portal.js --env <sit|prod>',
-      run: ({ targetKey }) => publishStaticPortal(targetKey === 'test' ? 'sit' : 'prod', { nonInteractive: true }),
-    },
+    // build -> publish -> assertPublishedBuild, all three required. The page ships in the same
+    // deploy as the backend it calls, and the last step is the one that can tell a published page
+    // from a merely propagated one. Depends on the BUILD_INFO the stamp above wrote for this
+    // target, so it runs last.
+    ...staticPipeline.deployHooks({ envFor }),
   ],
 
-  extraRows: ({ targetKey }) => [
-    { label: 'Static portal', value: STATIC_PORTAL_URL[targetKey], missing: '(static portal not configured)' },
-  ],
+  // Puts the published portal's URL in the deploy summary block — on the verification-failure
+  // path too, which is when "which page is actually live?" matters most.
+  extraRows: staticPipeline.summaryRows({ envFor }),
 
   // Reading the stamped file is deliberately the consumer's job — the package never reads back
   // what it stamped (RECOMMENDATION.md #5). This exists only so `--summary` can flag a live-vs-

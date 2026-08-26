@@ -78,7 +78,7 @@ async function primeCachedAuth(page) {
 test.describe('@team-portal team portal wired controls (gts-79dw.4.21 / .22)', () => {
   test.beforeAll(() => {
     expect(fs.existsSync(DIST_HTML),
-      `${DIST_HTML} missing — run: node scripts/build-static-portal.js --env sit`).toBe(true);
+      `${DIST_HTML} missing — run: node -e "require('./scripts/static-pages.js').build('sit')"`).toBe(true);
   });
 
   test('Edit button saves via team_edit_action and the row reflects the edit without a page reload', async ({ page }) => {
