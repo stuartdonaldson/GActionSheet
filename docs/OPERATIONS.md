@@ -532,6 +532,14 @@ This is the last full-suite run across the UC matrix; later regression runs
 not a re-run of the full UC matrix. UC-E (EPIC-D import/forward) was added
 later and is not part of the mol06g 8-scenario sign-off baseline above.
 
+> **Note (2026-08-26):** the two xfails above are void. They covered the
+> pipe-delimited assignee form, which belonged to `FloatingActionParser.js` —
+> deleted the day after this sign-off by `fd3249b` (GTaskSheet-ii7) together with
+> `test_floating_action_parser.py`, the file the xfail markers lived in. ADR-0027
+> records that `|` carries no meaning in an action paragraph; `gts-tis` is closed
+> obsolete. The sign-off is otherwise unchanged: read it as 14 passed against the
+> parser of that date. See bd memory `act-fields-pipe-separator-provenance`.
+
 ---
 
 ## Recovery Procedures

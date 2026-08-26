@@ -37,16 +37,72 @@ GActionSheet captures and tracks action items inside Google Docs and aggregates 
 
 ### Action Format
 
-A **floating action** (also called an action item) is a paragraph or list item in the doc identified by one of two detection rules:
+A **floating action** (also called an action item) is a paragraph or list item in the doc. The
+grammar below is authoritative (ADR-0027); a paragraph either satisfies it or is not an action.
 
-1. **Chip-led**: the first inline child is a Google Docs PERSON chip — the assignee email and display name come from the chip.
-2. **Email-at-start**: the first text content begins with a valid email address (`word@word.tld`) — the assignee email is extracted from the text; the display name is derived from the username portion (punctuation replaced with spaces, title-cased). e.g. `jane.smith@example.com` → `Jane Smith`.
+```
+actionParagraph := [inlineImage] token [assignee] actionBody [continuation*]
+token           := ("ACT" | "AI") "-" digits ":" [ \t]*
+assignee        := personChip | "@"? email [ \t]*
+email           := [\w.+-]+ "@" [\w-]+ ("." [a-z]{2,})+
+actionBody      := text [ statusToken ]
+statusToken     := "(" [^)]* ")"        ; last qualifying group on the HEADER LINE only
+continuation    := "\n" ( fieldLine | prose )
+fieldLine       := [A-Za-z] [A-Za-z0-9 _-]{0,31} ":" [ \t]
+```
 
-Common fields:
-- Action text is everything after the chip/email on the same paragraph, with any trailing `(Status)` token stripped
-- Status lives in a trailing parenthesized token at the end of the paragraph; Sync writes an explicit token when one is missing, using `(Open)` as the default; `(Closed)` is recognized for archiving; any other value is preserved verbatim as a free-form status
-- Each action is identified by an in-text `AI-N:` token; the durable identity is `globalId = {docId}/AI-{N}`, stored in the ActionSheet
-- Dates are stored in the ActionSheet as native sheet date values; in the in-doc tracker table they are written using the sheet's locale-formatted date
+The **header line** is everything up to the first soft return. Continuation lines are soft returns
+(Shift+Enter) within the same paragraph element, not separate paragraphs.
+
+| Element | Required | Absent-value behavior |
+|---------|----------|-----------------------|
+| `inlineImage` | optional | no status icon; Sync inserts one on flush |
+| `token` | **required** | the paragraph is not an action |
+| `assignee` | optional | `assignee_email` and `assignee_name` are empty strings |
+| `actionBody` text | optional | `action_text` is an empty string (bare token, gts-jxrw) |
+| `statusToken` | optional | status defaults to `Open`; Sync writes `(Open)` explicitly on flush |
+| `continuation` | optional | `custom_fields` is `{}` |
+
+Rules:
+
+- **Token.** `ACT-N:` is canonical for new writes; `AI-N:` remains valid on read indefinitely, and
+  N is one shared namespace across both spellings (ADR-0023). The durable identity is
+  `globalId = {docId}/{token}`, stored in ActionSheet column 1 and embedded in chip URLs. Existing
+  `AI-N` globalIds are never rewritten.
+- **Assignee.** From a PERSON chip when present, otherwise from a leading email in the text, where
+  an optional `@` sigil is accepted and not stored. A display name derived from an email replaces
+  punctuation in the username with spaces and title-cases it: `jane.smith@example.com` →
+  `Jane Smith`.
+- **Status.** Extracted from the **header line only**, before continuation lines are considered.
+  The last `(...)` group on that line qualifies only if what follows it, trimmed, is empty or
+  begins with a non-word character; otherwise it reads as sentence continuation and no status is
+  detected (gts-28q / gts-v0py / gts-1tbe). `(Closed)` is recognized for archiving; any other
+  value is preserved verbatim as a free-form status. Parentheses in field values and in
+  continuation prose are always literal.
+- **No field delimiter.** `|` carries no meaning anywhere in an action paragraph and is literal
+  text. There is no escape mechanism because none is needed. The header line is not extensible;
+  `Field: value` continuation lines are the sanctioned extension point (ADR-0024).
+- **Field lines.** A continuation line is a field line only if it matches `fieldLine` above — no
+  leading whitespace, an initial letter, a name of at most 32 characters. Anything else is prose
+  and is absorbed into `action_text` (gts-dr8j). A line matching the `token` production starts a
+  new action and wins over `fieldLine`.
+- **Inline formatting.** Bold, italic and hyperlinks are author-owned and survive round-trip as
+  per-character runs (ADR-0022, ADR-0028). Config's uniform `action_text` style owns font family,
+  size, colour and underline only.
+- **Unparseable input is reported.** A paragraph beginning `(ACT|AI)-\d+` that does not complete
+  the grammar is recorded by VerifySync as `unparseable-action-paragraph`. It is not synced and
+  not silently skipped.
+- **Dates** are stored in the ActionSheet as native sheet date values; in the in-doc tracker table
+  they are written using the sheet's locale-formatted date.
+
+Example with continuation fields:
+
+```
+[img] ACT-7: [Jane Smith] draft the Q4 board deck and circulate (In Progress)
+Target: September 12 board meeting
+Progress: outline done, needs the revenue section
+Notes: Peter wants the a|b test results folded in
+```
 
 ### Organizational Constraints
 - No external service dependencies; both projects run entirely within Google Workspace
