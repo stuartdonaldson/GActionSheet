@@ -843,11 +843,13 @@ class TestRevisionModel:
             "basis": "ooxml_w_ins_w_del_author",
         }
 
-    # -- AC #3: document.suggestion_groups groups revisions by (author, date)
-    # identity, with real authorship attached.
+    # -- AC #3: document.revision_groups groups revisions by (author, date)
+    # identity, with real authorship attached. ADR-0029 renamed the field
+    # from document.suggestion_groups; regenerated here per the ADR's own
+    # Consequences section rather than patched field-by-field.
 
-    def test_suggestion_groups_grouped_by_author_and_date(self, artifact):
-        groups = artifact["document"]["suggestion_groups"]
+    def test_revision_groups_grouped_by_author_and_date(self, artifact):
+        groups = artifact["document"]["revision_groups"]
         assert len(groups) == 3  # insertion, deletion, inserted-then-deleted -- three distinct dates.
         for g in groups:
             assert g["author"] == "Diane Slota"
@@ -857,7 +859,7 @@ class TestRevisionModel:
         assert by_date["2026-08-18T09:00:00Z"]["block_ids"][0].endswith("000003")  # the insertion's block.
         assert by_date["2026-08-18T09:05:00Z"]["block_ids"][0].endswith("000003")  # the deletion's block.
         assert by_date["2026-08-18T09:12:00Z"]["block_ids"][0].endswith("000004")  # inserted-then-deleted's block.
-        assert artifact["diagnostics"]["distinct_suggestion_ids"] == 3
+        assert artifact["diagnostics"]["distinct_revision_group_ids"] == 3
 
     # -- AC #4: top-level views.baseline_text/proposed_text reconstruct
     # correctly across a document mixing changed and unchanged blocks,

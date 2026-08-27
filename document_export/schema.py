@@ -14,8 +14,10 @@ import unicodedata
 
 # Schema version for the Python DOCX pipeline. The GAS exporter stays at 2.4
 # (GOV_EXPORT_SCHEMA_VERSION, src/Procedure-Exporter.js:42) and is not
-# touched (ADR-0026 Decision 7) — contract §6.
-SCHEMA_VERSION = "3.0"
+# touched (ADR-0026 Decision 7) — contract §6. Bumped to 3.1 by ADR-0029:
+# revision.state removed, document.suggestion_groups -> revision_groups,
+# semantic_state/semantic_state_evidence/semantics removed document-wide.
+SCHEMA_VERSION = "3.1"
 
 # Contract §6: for symmetry the Python artifact carries this so the
 # differential oracle (gts-klp8) can distinguish producers without editing
@@ -125,9 +127,9 @@ def make_citation_hint(unit: dict | None, block: dict) -> str | None:
 def drop_if_empty(obj: dict, key: str) -> None:
     """Contract §13.4: an array field is omitted entirely, not emitted as
     `[]`, when it would be empty. Shared by structure.py (kind_evidence,
-    semantic_state_evidence, color_signals, run revision evidence) and
-    comments.py (comment_ids, applied after comment resolution mutates
-    blocks/units — must run after, not during, the structure pass)."""
+    color_signals, run revision evidence) and comments.py (comment_ids,
+    applied after comment resolution mutates blocks/units — must run after,
+    not during, the structure pass)."""
     if isinstance(obj.get(key), list) and len(obj[key]) == 0:
         del obj[key]
 

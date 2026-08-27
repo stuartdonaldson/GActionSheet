@@ -146,7 +146,6 @@ def process_inline_images(p_el, pkg, rels: dict, ctx) -> None:
             "id": make_block_id(SEGMENT_MAIN, ordinal),
             "unit_id": ctx.current_unit["id"],
             "kind": "image",
-            "semantic_state": "baseline",
             "label": None,
             "named_style": None,
             "heading_level": None,

@@ -3,8 +3,10 @@ stage docx-structure, gts-pmga).
 
 Mirrors src/Procedure-Exporter.js's structural-walk region one-for-one per
 the contract's "Standing constraint: architectural alignment for back-port" —
-GOVERNANCE_UNIT_PATTERNS / HEADING_FALLBACK_BASE_RANK / SEMANTIC_STATE_PATTERNS
-are the same rules, unchanged, moved here rather than reinvented.
+GOVERNANCE_UNIT_PATTERNS / HEADING_FALLBACK_BASE_RANK are the same rules,
+unchanged, moved here rather than reinvented. ADR-0029 removes the
+SEMANTIC_STATE_PATTERNS classifier entirely (see below) -- it predates the
+DOCX rewrite and was never a GAS-mirroring concern to preserve.
 processStructuralContent_/processParagraph_/processTable_/createUnit_/
 createBlock_/pushUnitOntoStack_ all have a same-shape counterpart below.
 
@@ -94,22 +96,21 @@ GOVERNANCE_UNIT_PATTERNS = [
 
 HEADING_FALLBACK_BASE_RANK = 3
 
-SEMANTIC_STATE_PATTERNS = [
-    {"name": "old_paren_prefix", "state": "historical", "re": re.compile(r"^\(OLD\)", re.IGNORECASE)},
-    {"name": "old_dash_prefix", "state": "historical", "re": re.compile(r"^OLD\s*[-:]", re.IGNORECASE)},
-    {"name": "end_prefix", "state": "editorial", "re": re.compile(r"^END\s*[-:]", re.IGNORECASE)},
-    {"name": "fyi_prefix", "state": "editorial", "re": re.compile(r"^FYI\s*[-:]", re.IGNORECASE)},
-    {"name": "tbd_marker", "state": "editorial", "re": re.compile(r"\bTBD\b", re.IGNORECASE)},
-    {"name": "question_marks_marker", "state": "editorial", "re": re.compile(r"\?\?\?+")},
-    {"name": "link_placeholder_marker", "state": "editorial", "re": re.compile(r"\blink\?\?", re.IGNORECASE)},
-    {"name": "placeholder_word_marker", "state": "editorial", "re": re.compile(r"\bplaceholder\b", re.IGNORECASE)},
+# ADR-0029 Decision 2: the semantic_state regex classifier
+# (SEMANTIC_STATE_PATTERNS / _detect_semantic_state) is removed entirely on
+# this path -- it predates the DOCX rewrite and guessed document *intent*
+# from surface markers, exactly the kind of heuristic ADR-0026's rationale
+# already argued for retiring. What survives is a narrower, unrelated
+# concern: GOVERNANCE_UNIT_PATTERNS kind-matching ignores a handful of
+# leading prose markers ("(OLD)", "OLD -", "END -", "FYI -") so a title like
+# "(OLD) Church Policy 5: ..." still matches the policy pattern -- that
+# stripping has nothing to do with semantic_state and is kept.
+_LEADING_MARKER_STRIP_PATTERNS = [
+    {"name": "old_paren_prefix", "re": re.compile(r"^\(OLD\)", re.IGNORECASE)},
+    {"name": "old_dash_prefix", "re": re.compile(r"^OLD\s*[-:]", re.IGNORECASE)},
+    {"name": "end_prefix", "re": re.compile(r"^END\s*[-:]", re.IGNORECASE)},
+    {"name": "fyi_prefix", "re": re.compile(r"^FYI\s*[-:]", re.IGNORECASE)},
 ]
-
-# Leading semantic-state markers stripped before GOVERNANCE_UNIT_PATTERNS
-# matching only (title/semantic-state detection still run against the full,
-# unstripped text) -- only patterns anchored at string-start are eligible,
-# mirroring KIND_MATCH_STRIP_PATTERNS' `source.startsWith('^')` filter.
-_KIND_MATCH_STRIP_PATTERNS = [p for p in SEMANTIC_STATE_PATTERNS if p["re"].pattern.startswith("^")]
 
 LABEL_MAX_LEN = 80
 LABEL_SCAN_MAX_LEN = 100
@@ -126,36 +127,25 @@ _UNORDERED_NUM_FORMATS = {"bullet"}
 _UNRESOLVED_NUM_FORMATS = {"none"}
 
 
-def _strip_leading_state_marker(t: str) -> str:
-    for pattern in _KIND_MATCH_STRIP_PATTERNS:
+def _strip_leading_marker(t: str) -> str:
+    for pattern in _LEADING_MARKER_STRIP_PATTERNS:
         m = pattern["re"].match(t)
         if m and m.start() == 0:
             return t[m.end():].strip()
     return t
 
 
-def _detect_semantic_state(text: str) -> dict:
-    t = normalize_line(text)
-    for pattern in SEMANTIC_STATE_PATTERNS:
-        if pattern["re"].search(t):
-            return {"state": pattern["state"], "evidence": [{"type": "text_pattern", "rule": pattern["name"]}]}
-    return {"state": "baseline", "evidence": []}
-
-
 def _detect_governance_unit(text: str, heading_level: int | None, has_image: bool = False) -> dict | None:
     t = normalize_line(text)
-    kind_match_text = _strip_leading_state_marker(t)
+    kind_match_text = _strip_leading_marker(t)
 
     for pattern in GOVERNANCE_UNIT_PATTERNS:
         if pattern["re"].search(kind_match_text):
-            semantic = _detect_semantic_state(t)
             return {
                 "kind": pattern["kind"],
                 "title": t,
                 "rank": pattern["rank"],
                 "kind_evidence": [{"type": "text_pattern", "rule": pattern["name"]}],
-                "semantic_state": semantic["state"],
-                "semantic_state_evidence": semantic["evidence"],
             }
 
     # gts-pczo.1 AC #3: a heading-styled paragraph with neither text nor an
@@ -166,14 +156,11 @@ def _detect_governance_unit(text: str, heading_level: int | None, has_image: boo
     # unit (mirrors GAS's own detectSemanticUnit_(allText, ...) behavior,
     # unchanged since before stage docx-images).
     if heading_level and (t or has_image) and len(t) < 180:
-        semantic = _detect_semantic_state(t)
         return {
             "kind": "section",
             "title": t,
             "rank": HEADING_FALLBACK_BASE_RANK + heading_level,
             "kind_evidence": [{"type": "style_pattern", "rule": "heading_style", "named_style": f"HEADING_{heading_level}"}],
-            "semantic_state": semantic["state"],
-            "semantic_state_evidence": semantic["evidence"],
         }
 
     return None
@@ -211,17 +198,18 @@ def _detect_bold_colon_label(raw_runs: list[dict]) -> dict | None:
     return None
 
 
-def _classify_block(heading_level: int | None, has_bullet: bool, label: dict | None, semantic_state: str) -> str:
-    if semantic_state == "historical":
-        return "historical_note"
-    if semantic_state == "editorial":
-        return "editorial_note"
+def _classify_block(heading_level: int | None, has_bullet: bool, label: dict | None) -> str:
+    """ADR-0029 Decision 2: the semantic_state-triggered historical_note/
+    editorial_note kinds are retired on this path -- including the
+    bold-label special case below that used to route a "Historical Note:"
+    labeled paragraph to the same kind; it now falls through to
+    labeled_paragraph like any other bold-colon label."""
     if heading_level:
         return "heading"
     if has_bullet:
         return "list_item"
     if label:
-        return "historical_note" if label["normalized"] == "historical note" else "labeled_paragraph"
+        return "labeled_paragraph"
     return "paragraph"
 
 
@@ -542,8 +530,6 @@ def _create_unit(info: dict, ctx: _Ctx) -> dict:
         "title": info["title"],
         "parent_unit_id": None,
         "kind_evidence": info["kind_evidence"],
-        "semantic_state": info["semantic_state"],
-        "semantic_state_evidence": info["semantic_state_evidence"],
         "source_order": ordinal,
         "location": _make_location(ctx, ordinal),
         "citation_hint": None,
@@ -563,8 +549,6 @@ def _create_synthetic_root_unit(ctx: _Ctx) -> dict:
         "title": "Document",
         "parent_unit_id": None,
         "kind_evidence": [],
-        "semantic_state": "baseline",
-        "semantic_state_evidence": [],
         "source_order": ordinal,
         "location": _make_location(ctx, ordinal),
         "citation_hint": None,
@@ -641,9 +625,8 @@ def _process_paragraph(p_el, ctx: _Ctx) -> None:
     ctx.next_ordinal += 1
 
     label = _detect_bold_colon_label(_raw_runs_for_label(p_el, ctx.rels))
-    semantic = _detect_semantic_state(all_text)
     list_info = _resolve_list(num_pr, ctx.num_to_abstract, ctx.abstract_fmt) if num_pr is not None else None
-    kind = _classify_block(heading_level, num_pr is not None, label, semantic["state"])
+    kind = _classify_block(heading_level, num_pr is not None, label)
     named_style = f"HEADING_{heading_level}" if heading_level else "NORMAL_TEXT"
 
     revision_summary = revisions.summarize_revision(runs)
@@ -652,8 +635,6 @@ def _process_paragraph(p_el, ctx: _Ctx) -> None:
         "id": make_block_id(SEGMENT_MAIN, ordinal),
         "unit_id": ctx.current_unit["id"],
         "kind": kind,
-        "semantic_state": semantic["state"],
-        "semantic_state_evidence": semantic["evidence"],
         "label": label["text"] if label else None,
         "named_style": named_style,
         "heading_level": heading_level,
@@ -669,11 +650,11 @@ def _process_paragraph(p_el, ctx: _Ctx) -> None:
     # proposed_text trio instead -- never both (contract §3.2, gts-e7ca's
     # inherited invariant).
     if revision_summary == "unchanged":
-        block["text"] = revisions.build_view_text(runs, "all", semantic["state"])
+        block["text"] = revisions.build_view_text(runs, "all")
     else:
-        block["all_text"] = revisions.build_view_text(runs, "all", semantic["state"])
-        block["baseline_text"] = revisions.build_view_text(runs, "baseline", semantic["state"])
-        block["proposed_text"] = revisions.build_view_text(runs, "proposed", semantic["state"])
+        block["all_text"] = revisions.build_view_text(runs, "all")
+        block["baseline_text"] = revisions.build_view_text(runs, "baseline")
+        block["proposed_text"] = revisions.build_view_text(runs, "proposed")
     block["citation_hint"] = make_citation_hint(ctx.current_unit, block)
 
     ctx.current_unit["blocks"].append(block)
@@ -751,19 +732,18 @@ def _process_table(tbl_el, ctx: _Ctx) -> None:
 
 
 def _finalize_units(units: list[dict]) -> list[dict]:
-    """§13.4: omit kind_evidence/semantic_state_evidence/color_signals/
-    runs[].revision.evidence entirely when empty (AC #4). `comment_ids` is
-    deliberately NOT finalized here: stage docx-comments (gts-nxx3) attaches
-    it after this pass returns, by mutating these same unit/block dicts —
-    finalizing it here would drop the key before comments.py ever gets to
-    populate it. comments.resolve_comments finalizes comment_ids itself,
-    once comment resolution is done."""
+    """§13.4: omit kind_evidence/color_signals/runs[].revision.evidence
+    entirely when empty (AC #4). ADR-0029 removes semantic_state_evidence
+    document-wide, so there is nothing to finalize there any more.
+    `comment_ids` is deliberately NOT finalized here: stage docx-comments
+    (gts-nxx3) attaches it after this pass returns, by mutating these same
+    unit/block dicts — finalizing it here would drop the key before
+    comments.py ever gets to populate it. comments.resolve_comments
+    finalizes comment_ids itself, once comment resolution is done."""
     for unit in units:
         drop_if_empty(unit, "kind_evidence")
-        drop_if_empty(unit, "semantic_state_evidence")
         drop_if_empty(unit, "color_signals")
         for block in unit["blocks"]:
-            drop_if_empty(block, "semantic_state_evidence")
             for run in block.get("runs", []):
                 if run.get("kind") == "text":
                     drop_if_empty(run["revision"], "evidence")

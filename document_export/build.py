@@ -12,9 +12,10 @@ document_export.structure.walk_structure. Stage 4 (docx-comments, gts-nxx3)
 adds comment anchoring via document_export.comments.resolve_comments. Stage 5
 (docx-revisions, gts-9c8k) adds real revision classification -- structure.py
 now classifies each run's w:ins/w:del state inline (document_export.revisions
-.classify_revision), and this module adds document.suggestion_groups
-(document_export.revisions.build_suggestion_groups) and the top-level
-views.* (document_export.revisions.build_document_views). Stage 6
+.classify_revision), and this module adds document.revision_groups
+(document_export.revisions.build_revision_groups, renamed from
+build_suggestion_groups by ADR-0029) and the top-level views.*
+(document_export.revisions.build_document_views). Stage 6
 (docx-images, gts-8uo6) adds image extraction -- document_export.structure's
 own paragraph walk calls document_export.images.process_inline_images
 interleaved with text-block emission (mirrors GAS's own
@@ -28,7 +29,7 @@ import datetime as _dt
 
 from document_export.comments import resolve_comments
 from document_export.package import DocxPackage
-from document_export.revisions import build_document_views, build_suggestion_groups
+from document_export.revisions import build_document_views, build_revision_groups
 from document_export.schema import PRODUCER, SCHEMA_VERSION
 from document_export.structure import walk_structure
 
@@ -60,7 +61,7 @@ def _empty_diagnostics() -> dict:
         # contract §5: unanchored_comments replaces unmatched_comments.
         "unanchored_comments": 0,
         "explicit_page_breaks": 0,
-        "distinct_suggestion_ids": 0,
+        "distinct_revision_group_ids": 0,
         "toc_entries": 0,
         "images": 0,
         # contract §5: null means "could not determine", never "zero".
@@ -98,8 +99,8 @@ def build_export(
 
     units, document_images = walk_structure(pkg, diagnostics, include_images)
     comments = resolve_comments(pkg, units, diagnostics)
-    suggestion_groups = build_suggestion_groups(units)
-    diagnostics["distinct_suggestion_ids"] = len(suggestion_groups)
+    revision_groups = build_revision_groups(units)
+    diagnostics["distinct_revision_group_ids"] = len(revision_groups)
 
     out: dict = {
         "schema_version": SCHEMA_VERSION,
@@ -114,14 +115,8 @@ def build_export(
             # this stage's handoff, not silently resolved here).
             "revision_id": None,
             "source_url": source_url,
-            "suggestion_groups": suggestion_groups,
+            "revision_groups": revision_groups,
             "toc": [],
-        },
-        "semantics": {
-            "baseline": "Text against which proposed revisions are evaluated.",
-            "proposed": "Unchanged baseline plus proposed insertions, excluding deletions.",
-            "historical": "Old or superseded material retained for reference.",
-            "editorial": "Drafting/reviewer material not intended as governance text.",
         },
         "page_numbering": {
             "exact_rendered_page_map_available": False,

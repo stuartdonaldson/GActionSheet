@@ -1,6 +1,7 @@
 """Revision model: w:ins/w:del -> run.revision, block revision_summary, the
-all_text/baseline_text/proposed_text trio, document.suggestion_groups and
-document-wide views (contract §3, §13.1-13.3; stage docx-revisions, gts-9c8k).
+all_text/baseline_text/proposed_text trio, document.revision_groups and
+document-wide views (contract §3, §13.1-13.3; stage docx-revisions, gts-9c8k;
+ADR-0029 field removals/rename).
 
 Mirrors src/Procedure-Exporter.js's revision-summarisation functional region
 one-for-one per the contract's "Standing constraint: architectural alignment
@@ -25,8 +26,6 @@ from __future__ import annotations
 
 from document_export.schema import normalize_derived_text
 
-_EXCLUDED_VIEW_SEMANTIC_STATES = ("historical", "editorial")
-
 
 def classify_revision(tracked: tuple[dict, ...]) -> dict:
     """`tracked` is a run's w:ins/w:del ancestor chain, outer-to-inner, each
@@ -35,7 +34,7 @@ def classify_revision(tracked: tuple[dict, ...]) -> dict:
     Empty -> unchanged; per contract §3.3 ("each REVISION-BEARING run
     carries revision.author/date"), an unchanged run carries neither key.
 
-    A single ins or del ancestor -> that state, author/date read off it.
+    A single ins or del ancestor -> that change, author/date read off it.
 
     Both present ("w:del inside w:ins, or vice versa", contract §3.2) ->
     inserted_then_deleted. Author/date come from the innermost ancestor --
@@ -43,9 +42,10 @@ def classify_revision(tracked: tuple[dict, ...]) -> dict:
     action that actually produced the run's current text representation
     (the golden fixture's own case nests w:del inside w:ins, so the
     innermost element is the del that determined the run ended up as
-    deleted text)."""
+    deleted text). ADR-0029: `state` (a derived baseline/proposed label) is
+    removed -- `change` plus author/date is the single fact."""
     if not tracked:
-        return {"state": "baseline", "change": "unchanged", "evidence": []}
+        return {"change": "unchanged", "evidence": []}
 
     has_ins = any(a["tag"] == "ins" for a in tracked)
     has_del = any(a["tag"] == "del" for a in tracked)
@@ -53,16 +53,12 @@ def classify_revision(tracked: tuple[dict, ...]) -> dict:
 
     if has_ins and has_del:
         change = "inserted_then_deleted"
-        state = "proposed"
     elif has_ins:
         change = "inserted"
-        state = "proposed"
     else:
         change = "deleted"
-        state = "baseline"
 
     return {
-        "state": state,
         "change": change,
         "author": innermost["author"],
         "date": innermost["date"],
@@ -87,18 +83,16 @@ def summarize_revision(runs: list[dict]) -> str:
     return "unchanged"
 
 
-def build_view_text(runs: list[dict], view: str, semantic_state: str) -> str:
+def build_view_text(runs: list[dict], view: str) -> str:
     """Contract §3.2's table, `view` in {"all", "baseline", "proposed"}.
-    Historical/editorial content is excluded from baseline/proposed (kept in
-    all_text only) -- unchanged from the GAS exporter's buildViewText_.
+    ADR-0029 removes the `semantic_state`-conditioned exclusion
+    (`_EXCLUDED_VIEW_SEMANTIC_STATES`) -- every run's membership in the
+    three derived strings is now a pure function of its own `change` value.
     inserted_then_deleted is excluded from both baseline and proposed
     (contract §3.2: "never in the baseline and is not proposed"), kept only
     in all_text. Result is §13.5-normalized (NBSP -> space, vertical tab ->
     '\\n') since this always builds a derived/concatenated field, never
     runs[].text itself."""
-    if view != "all" and semantic_state in _EXCLUDED_VIEW_SEMANTIC_STATES:
-        return ""
-
     if view == "all":
         def keep(change: str) -> bool:
             return True
@@ -118,15 +112,16 @@ def build_view_text(runs: list[dict], view: str, semantic_state: str) -> str:
     return normalize_derived_text(joined)
 
 
-def build_suggestion_groups(units: list[dict]) -> list[dict]:
-    """Contract §3.3: grouped by (author, date) rather than the Docs
-    suggestion_id, which has no OOXML equivalent. `possible_authors` is
-    retired -- nothing left to guess. Every revision-bearing run
-    (inserted, deleted, or inserted_then_deleted) contributes, mirroring
-    buildSuggestionGroups_'s walk over every run carrying suggestion
-    evidence. Runs carry no `location` (stage docx-structure, gts-pmga's
-    Found note); the group's first/last location is its blocks' instead --
-    the closest available granularity."""
+def build_revision_groups(units: list[dict]) -> list[dict]:
+    """Contract §3.3 (ADR-0029: renamed from build_suggestion_groups /
+    document.suggestion_groups -> document.revision_groups): grouped by
+    (author, date) rather than the Docs suggestion_id, which has no OOXML
+    equivalent. `possible_authors` is retired -- nothing left to guess.
+    Every revision-bearing run (inserted, deleted, or inserted_then_deleted)
+    contributes, mirroring buildSuggestionGroups_'s walk over every run
+    carrying suggestion evidence. Runs carry no `location` (stage
+    docx-structure, gts-pmga's Found note); the group's first/last location
+    is its blocks' instead -- the closest available granularity."""
     groups: dict[tuple[str | None, str | None], dict] = {}
 
     for unit in units:
