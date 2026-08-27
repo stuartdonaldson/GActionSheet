@@ -182,7 +182,7 @@ ENTRY_POINT_DEFERRED: dict[str, str] = {
     # been removed from this map. The two below are PERMANENT EXEMPTIONS (epic AC alt (b)):
     "menuBootstrap": "menu wrapper over bootstrap() — itself a permanent exemption below. "
         "One-time script-property setup; driving it mid-suite would overwrite "
-        "TEST_DOC_ID/TEST_SHEET_ID and break every subsequent scenario. A dedicated tag "
+        "TEST_SHEET_ID and break every subsequent scenario. A dedicated tag "
         "would require save/restore plumbing redundant with the bootstrap-route exemption "
         "— GTaskSheet-rz4k.4.",
     "menuInitializeTriggers": "menu wrapper over initializeTriggers(); driving it mid-suite "
@@ -198,7 +198,7 @@ ENTRY_POINT_DEFERRED: dict[str, str] = {
         "the TEST_TOKEN every testToken-gated call depends on; a regression here fails every "
         "such call with test-token-unauthorized/expired (fixture_invoke.FixtureTokenError) "
         "before any test body runs.",
-    "bootstrap": "one-time script-properties setup (TEST_DOC_ID/TEST_SHEET_ID/GAS_LOGGER_FOLDER_ID), "
+    "bootstrap": "one-time script-properties setup (TEST_SHEET_ID/GAS_LOGGER_FOLDER_ID), "
         "run manually from the Apps Script editor after the first clasp push "
         "(clasp-bootstrap-pattern) -- not part of the per-run pytest harness loop.",
     "begin_journey_session": "every ScenarioSession.new_doc() call POSTs this (hundreds of "

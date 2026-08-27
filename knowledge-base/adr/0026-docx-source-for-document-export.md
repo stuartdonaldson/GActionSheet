@@ -4,6 +4,10 @@
 **Date:** 2026-08-25
 **Amended:** 2026-08-25 — "fate of the GAS exporter" resolved in favour of preservation as a
 comparison baseline (Decision 7); it is no longer an open question.
+**Superseded (partial):** 2026-08-26 — ADR-0029 supersedes Decision 4 ("Schema shape is
+preserved") for `document.suggestion_groups` (renamed `revision_groups`), `semantic_state`/
+`semantics` (removed), and run-level `revision.state` (removed). Decision 4's default — schema
+shape otherwise preserved — stands.
 **Relates to:** gts-283i (epic), gts-283i.1 (design spike — this resolves its AC #3), gts-6ls9
 (comment-position spike, the dead end this supersedes), gts-11rq (multi-tab export behavior,
 deferred), gts-284o (terminology migration), ADR-0025 (image-description sidecar — unaffected),

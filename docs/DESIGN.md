@@ -119,8 +119,8 @@ Release pipeline (`pnpm run release:patch`) additionally runs `commit-deploy-sta
 | `DOC_FOLDER_ID` | `ensureSheetStructure` (auto) | Parent folder of the bound spreadsheet (resolved + cached) |
 | `ACTION_SHEET_QUEUE` | Editor add-on (auto) | JSON array of pending sheet updates, drained by the time-based trigger (cross-context async hand-off) |
 | `GAS_LOGGER_FOLDER_ID` | Manual | Drive folder for GasLogger output (TDD phase) |
-| `TEST_DOC_ID` | Manual / `bootstrap()` | Test Google Doc ID for smoke tests |
 | `TEST_SHEET_ID` | Manual / `bootstrap()` | Test Sheet ID for smoke tests |
+| `_TEST_ACTIVE_DOC_ID` | `setupTestFixtures()` (per-call, `_TEST_` prefix) | Case-scoped bridge for `menuSyncActiveDoc()`/`menuInsertTrackerActiveDoc()` — real zero-argument menu callbacks with no other channel to receive a doc ID under test (ADR-0006 §4); set immediately before the call and cleared immediately after |
 | `TEST_TOKEN` · `TEST_TOKEN_EXPIRES` | `set_test_token` (deploy) | Per-deployment token + expiry gating the `run_fixture` test route |
 
 ### urlFetchWhitelist

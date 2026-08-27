@@ -862,7 +862,8 @@ function sidebarSetStatus(globalId, newStatus, docId) {
     var token = ScriptApp.getOAuthToken();
     _flushActionParagraph(docId, token, N, globalId,
       currentAction.actionText, newStatus, currentAction.assigneeEmail, currentAction.assigneeName,
-      currentAction.runs); // gts-zocq: preserve the doc's own just-scanned inline runs
+      currentAction.runs, // gts-zocq: preserve the doc's own just-scanned inline runs
+      currentAction.customFields); // gts-t6xs: preserve the doc's own just-scanned field lines
     var t3 = Date.now();
 
     _patchActionStatus(globalId, newStatus);

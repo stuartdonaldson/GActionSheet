@@ -475,8 +475,9 @@ function _setStatusFromPreview(e, docOverride) { // eslint-disable-line no-unuse
   var assigneeEmail = (match && match.assigneeEmail) || '';
   var assigneeName  = (match && match.assigneeName)  || '';
   var runs          = (match && match.runs)          || []; // gts-zocq
+  var customFields  = (match && match.customFields)  || {}; // gts-t6xs
 
-  var flushed = _flushActionParagraph(docId, token, N, globalId, actionText, newStatus, assigneeEmail, assigneeName, runs);
+  var flushed = _flushActionParagraph(docId, token, N, globalId, actionText, newStatus, assigneeEmail, assigneeName, runs, customFields);
 
   if (!flushed) {
     GasLogger.log('pocEditAction.flush_failed', { globalId: globalId });

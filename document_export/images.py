@@ -102,6 +102,15 @@ def _extension_for(pkg, source_part: str) -> str:
     return _CONTENT_TYPE_EXTENSIONS.get(pkg.content_type(source_part) or "", _DEFAULT_EXTENSION)
 
 
+def has_drawing(p_el) -> bool:
+    """Public seam for structure.py (gts-pczo.1): a cheap presence check --
+    "does this paragraph carry a drawing at all" -- with no ordinal
+    consumption or extraction, so unit detection can tell an image-only
+    heading (still opens its own unit) from a truly blank one (does not)
+    before process_inline_images does the real, ordinal-consuming walk."""
+    return next(_find_drawings(p_el), None) is not None
+
+
 def process_inline_images(p_el, pkg, rels: dict, ctx) -> None:
     """Mutates `ctx` exactly the way structure.py's own paragraph/table walk
     does: pushes each resolvable drawing's `image` block onto

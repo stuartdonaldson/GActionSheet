@@ -23,8 +23,8 @@ This test drives run_fixture directly with a fixed opId (rather than through
 _post_fixture, which mints a fresh one per call) to simulate exactly the
 retry-after-lost-response scenario. NOTE: 'sync_all' is NOT a cheap
 single-doc fixture — src/TestFixtures.js's 'sync_all' case calls the
-full-corpus syncAll() sweep; testDocId only rebinds TEST_DOC_ID around the
-call, it does not scope the sweep to one doc. This call legitimately takes
+full-corpus syncAll() sweep; testDocId is passed through as a real parameter
+but does not scope the sweep to one doc. This call legitimately takes
 longer than the default 360s client timeout (scn/session.py's
 _CORPUS_SCALED_FIXTURE_TIMEOUTS["sync_all"] = 600) and must use that
 timeout explicitly here since it bypasses _post_fixture. Asserts exactly one

@@ -199,6 +199,16 @@ var CONTRACT_SCHEMA = Object.freeze({
       // deliberately compare actionText/action only — `runs` never
       // participates in identity, so a formatting-only change does not
       // orphan a row, mark it Dirty, or force a tracker re-render.
+      // gts-u0kh (2026-08-26): each docState row MAY additionally carry
+      // `customFields: {FieldName: {text, runs}}` (ADR-0027 rule 5/5a scanned
+      // field-line blocks). ADDITIVE and OPTIONAL, same contract as `runs`
+      // above -- omitted or {} means "no custom fields" and an older caller
+      // that never sends it keeps working unchanged. Written JSON-encoded
+      // into the Actions sheet's custom_fields column (columnsByField above)
+      // on both the appendRow (new-row) and doc-authoritative update paths;
+      // NOT yet persisted through the Dirty/sheetWins flush path (gts-t6xs
+      // -- the doc remains the sole source of truth for custom_fields until
+      // sheet-side persistence of edits ships).
       sync_action_rows: Object.freeze({
         request:  Object.freeze(['action', 'testToken', 'docId']),
         response: Object.freeze(['ok', 'sheetWins', 'docWins', 'queueDrained']),

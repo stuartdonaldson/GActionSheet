@@ -242,7 +242,8 @@ function syncDocument(docId) {
         assigneeName:  a.assigneeName,
         actionText:    a.actionText,
         status:        a.status,
-        runs:          a.runs || [] // gts-zocq: scanned inline bold/italic runs
+        runs:          a.runs || [], // gts-zocq: scanned inline bold/italic runs
+        customFields:  a.customFields || {} // gts-u0kh: scanned ADR-0027 rule 5/5a field-line blocks
       };
     });
 
@@ -265,7 +266,12 @@ function syncDocument(docId) {
         status:        win.status,
         assigneeEmail: win.assigneeEmail,
         assigneeName:  win.assigneeName,
-        runs:          win.runs || [] // gts-zocq: read back from the sheet's RichTextValue
+        runs:          win.runs || [], // gts-zocq: read back from the sheet's RichTextValue
+        // gts-t6xs: the sheet does not persist custom_fields yet, so a
+        // sheetWin flush preserves whatever field lines the doc scan (cf,
+        // not win) just found for this globalId -- the doc is the only
+        // source of truth for them until sheet persistence ships.
+        customFields:  cf.customFields || {}
       };
     }
     for (var ni = 0; ni < assignResult.newGlobalIds.length; ni++) {
@@ -280,7 +286,8 @@ function syncDocument(docId) {
         status:        cfn.status,
         assigneeEmail: cfn.assigneeEmail,
         assigneeName:  cfn.assigneeName,
-        runs:          cfn.runs || []
+        runs:          cfn.runs || [],
+        customFields:  cfn.customFields || {} // gts-t6xs
       };
     }
     for (var gId in hasDuplicateN) {
@@ -294,7 +301,8 @@ function syncDocument(docId) {
         status:        cf2.status,
         assigneeEmail: cf2.assigneeEmail,
         assigneeName:  cf2.assigneeName,
-        runs:          cf2.runs || []
+        runs:          cf2.runs || [],
+        customFields:  cf2.customFields || {} // gts-t6xs
       };
     }
 
@@ -310,7 +318,8 @@ function syncDocument(docId) {
           status:        cfm.status,
           assigneeEmail: cfm.assigneeEmail,
           assigneeName:  cfm.assigneeName,
-          runs:          cfm.runs || []
+          runs:          cfm.runs || [],
+          customFields:  cfm.customFields || {} // gts-t6xs
         };
       }
     }
@@ -327,7 +336,7 @@ function syncDocument(docId) {
         var f = toFlush[gid];
         return { N: f.N, globalId: f.globalId, actionText: f.action, status: f.status,
                  assigneeEmail: f.assigneeEmail, assigneeName: f.assigneeName,
-                 runs: f.runs || [] };
+                 runs: f.runs || [], customFields: f.customFields || {} }; // gts-t6xs
       });
       var flushResults = _flushActionParagraphs(docId2, token, flushItems);
       for (var ti = 0; ti < flushIds.length; ti++) {
@@ -880,6 +889,12 @@ function _syncSheetRowToDoc(sheet, row) {
     var N = parsed.N;
 
     var token = ScriptApp.getOAuthToken();
+    // gts-t6xs: this onEdit-trigger flush has no customFields source (the
+    // sheet does not persist custom_fields, and this path -- unlike the
+    // batch syncAll loop -- has no fresh doc scan to read them back from).
+    // customFields is omitted here, so a field-line continuation still gets
+    // dropped on THIS specific trigger until sheet persistence ships or this
+    // path gains its own scan. Known, tracked gap -- see gts-t6xs.
     var ok = _flushActionParagraph(docId, token, N, globalId, action, status, assigneeEmail, assigneeName || '', runs);
     if (ok) {
       // Flush confirmed — clear Dirty immediately rather than waiting for WebApp round-trip.
@@ -1966,7 +1981,8 @@ function _nameFromEmail(email) {
  * POSTs the doc state to the Web App for conflict resolution and sheet writes.
  * Returns { upserted, updated, sheetWins: [{ globalId, action, status, assigneeEmail }] }.
  *
- * @param {Array}  anchorResults  Each element: { globalId, assigneeEmail, assigneeName, actionText, status }.
+ * @param {Array}  anchorResults  Each element: { globalId, assigneeEmail, assigneeName, actionText, status,
+ *                                runs, customFields } (runs/customFields optional — gts-zocq/gts-u0kh).
  * @param {string} docUrl
  * @param {string} docTitle
  * @param {string} docId          Document ID (for orphan detection).
@@ -1994,7 +2010,10 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
       // gts-zocq: additive, optional — an older WebApp/client that ignores
       // this field keeps working unmodified (contract-compatible per the
       // bead's own transit-representation decision).
-      runs:          a.runs || []
+      runs:          a.runs || [],
+      // gts-u0kh: additive, optional — same contract-compatible pattern as
+      // runs above; {FieldName:{text,runs}} from the ADR-0027 rule 5/5a scanner.
+      customFields:  a.customFields || {}
     });
   }
 
@@ -3494,7 +3513,10 @@ function _collectFlushOccurrences(items, N) {
  *
  * @param {{pEnd:number, lineDocIdx:number, pStart:number}} occurrence
  * @param {{N:number, globalId:string, actionText:string, status:string,
- *          assigneeEmail:string, assigneeName:string}} item
+ *          assigneeEmail:string, assigneeName:string,
+ *          customFields:(Object<string,{text:string}>|undefined)}} item
+ *          customFields is optional (gts-t6xs) -- {} or undefined omits
+ *          field lines entirely, preserving pre-existing flush behavior.
  * @returns {Array<Object>} requests to append to one batchUpdate call
  */
 /**
@@ -3531,6 +3553,57 @@ function _renderActionBodyWithStatus(text, status) {
   };
 }
 
+/**
+ * ADR-0027 rule 5a, write side (gts-t6xs fix): serializes action.customFields
+ * back into the doc as indented 'FieldName:<TAB>value' soft-return
+ * continuation lines, mirroring the read side
+ * (_parseFieldContinuationBlocksTracked / _buildCustomFieldsFromBlocks) so
+ * flush is a real round trip instead of a silent delete. Without this, any
+ * flush of a paragraph carrying a field-line continuation rebuilds the
+ * paragraph from actionText alone (_buildFlushRequests/_applyActionFragment)
+ * and permanently drops the field lines from the document (gts-t6xs).
+ *
+ * Layout decision (user, 2026-08-26): each field opens on its own
+ * soft-return line indented two tabs -- one tab further than the header's
+ * own body-start tab stop ([image][token][TAB]actionText) -- so a field
+ * line reads as visually subordinate to the header rather than a plain
+ * wrapped continuation. A value that itself spans multiple original lines
+ * gets a third tab on its continuation lines, indented under the value's
+ * own start rather than back under the field name. The field name is
+ * bolded; the colon is followed by a literal tab (U+0009, not a space)
+ * before the value -- this exactly reproduces _FIELD_LINE_REGEX's own
+ * `[ \t]inlineValue?` production, so a written field line still parses as
+ * one on the next scan (round trip, not one-way formatting).
+ *
+ * @param {Object<string,{text:string}>} customFields  Object.keys() order
+ *   is first-appearance order -- see _buildCustomFieldsFromBlocks.
+ * @returns {{text: string, boldRanges: Array<[number,number]>}}
+ *   text: soft-return continuation to append after the action body (starts
+ *   with '\v'; '' when there are no fields).
+ *   boldRanges: [start,end) offsets into `text` covering each field name +
+ *   its trailing ':', for the caller to bold via updateTextStyle.
+ */
+function _renderCustomFieldLines(customFields) {
+  var names = customFields ? Object.keys(customFields) : [];
+  if (!names.length) return { text: '', boldRanges: [] };
+  var text = '';
+  var boldRanges = [];
+  for (var i = 0; i < names.length; i++) {
+    var name  = names[i];
+    var raw   = (customFields[name] && customFields[name].text) || '';
+    var lines = _normalizeLineEndings(raw).split('\n');
+    text += '\v\t\t';
+    var labelStart = text.length;
+    text += name + ':';
+    boldRanges.push([labelStart, text.length]);
+    text += '\t' + lines[0];
+    for (var li = 1; li < lines.length; li++) {
+      text += '\v\t\t\t' + lines[li];
+    }
+  }
+  return { text: text, boldRanges: boldRanges };
+}
+
 function _buildFlushRequests(occurrence, item) {
   var chipUrl    = _buildChipUrl(item.globalId);
   var imgUrl     = getStatusIconUrl(item.status);
@@ -3560,7 +3633,13 @@ function _buildFlushRequests(occurrence, item) {
   // LINE, not after the last continuation line — see
   // _renderActionBodyWithStatus for why placement and extraction must agree.
   var rendered   = _renderActionBodyWithStatus(actionText, item.status);
-  var bodyText   = rendered.text;
+  // gts-t6xs fix: append any custom field-line continuations after the
+  // status-suffixed body, so a flush preserves them instead of silently
+  // deleting them (see _renderCustomFieldLines). Appended strictly after
+  // rendered.text, so the run-offset math below (which is relative to
+  // rendered.text's own length) is unaffected.
+  var fieldLines = _renderCustomFieldLines(item.customFields);
+  var bodyText   = rendered.text + fieldLines.text;
   // insertAt: for simple paragraphs this equals pStart; for soft-return
   // paragraphs it is the document index right after the preceding \n, which
   // also clears any image placed there by a previous flush.
@@ -3602,6 +3681,18 @@ function _buildFlushRequests(occurrence, item) {
   var actionTextStart = insertAt + 1 + tokenLen + (validEmail ? 1 : 0);
   var actionTextStyleReq = _actionTextStyleRequest(actionTextStart, actionTextStart + trailingText.length);
   if (actionTextStyleReq) requests.push(actionTextStyleReq);
+
+  // gts-t6xs fix: bold each field name (+ its colon) in the field lines just
+  // appended to bodyText. fieldLineBase is the doc index of the first
+  // character of fieldLines.text, i.e. right after rendered.text.
+  var fieldLineBase = actionTextStart + rendered.text.length;
+  for (var fbi = 0; fbi < fieldLines.boldRanges.length; fbi++) {
+    var fbr = fieldLines.boldRanges[fbi];
+    requests.push({ updateTextStyle: {
+      range: { startIndex: fieldLineBase + fbr[0], endIndex: fieldLineBase + fbr[1] },
+      textStyle: { bold: true }, fields: 'bold'
+    }});
+  }
 
   // gts-zocq FLUSH: reapply inline bold/italic/link runs sampled at scan time
   // (or read back from the sheet's RichTextValue for a sheetWins flush), so
@@ -3755,13 +3846,18 @@ function _flushActionParagraphs(docId, token, items) {
  * @param {string} status         Status string
  * @param {string} assigneeEmail  May be empty
  * @param {string=} assigneeName  Optional display name for person chip
+ * @param {Array=} runs           gts-zocq — optional inline bold/italic/link runs
+ * @param {Object=} customFields  gts-t6xs — optional {FieldName:{text}}
+ *   field-line continuations to preserve on this flush; defaults to {}
+ *   (no field lines rewritten), same as omitting the argument entirely.
  * @returns {boolean} whether the item flushed
  */
-function _flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail, assigneeName, runs) {
+function _flushActionParagraph(docId, token, N, globalId, actionText, status, assigneeEmail, assigneeName, runs, customFields) {
   var results = _flushActionParagraphs(docId, token, [{
     N: N, globalId: globalId, actionText: actionText, status: status,
     assigneeEmail: assigneeEmail, assigneeName: assigneeName || '',
-    runs: runs || [] // gts-zocq — optional, defaults to no inline formatting
+    runs: runs || [], // gts-zocq — optional, defaults to no inline formatting
+    customFields: customFields || {} // gts-t6xs — optional, defaults to no field lines
   }]);
   return !!results[globalId];
 }

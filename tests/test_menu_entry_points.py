@@ -170,7 +170,9 @@ def test_menuSyncActiveDoc_syncs_active_doc(scn):
     (MenuHandler.js), distinct from the already-covered syncDocument() core and
     from the Sheets-side menuSync (-> syncAll()). DocumentApp.getActiveDocument()
     only resolves inside a real Docs UI session; outside one (this fixture's
-    stateless webapp execution) it falls back to TEST_DOC_ID."""
+    stateless webapp execution) it falls back to _TEST_ACTIVE_DOC_ID, a
+    case-scoped script-property bridge the 'menu_sync_active_doc' fixture
+    case sets for the duration of this call only."""
     seed = ai(action="menuSyncActiveDoc unsynced floating action")
     scn.append_paragraph(seed.as_text())        # doc-side change, no Actions row yet
 

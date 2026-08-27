@@ -364,6 +364,166 @@ class TestStructurePass:
         assert sanitize_filename(None) == "document"
 
 
+def _minimal_docx_with_headings(body_xml: str, *, with_drawing_rels: bool = False) -> bytes:
+    """A .docx like `_minimal_docx_with_body_xml` but with a real
+    word/styles.xml giving "Heading1"/"Heading2" style ids resolvable heading
+    levels (via the name-based "heading N" fallback `_load_heading_levels`
+    reads when no `w:outlineLvl` is present) -- gts-pczo.2's hierarchy/
+    unit-boundary cases need real `heading_level` resolution, which the
+    styles-free `_minimal_docx_with_body_xml` can't provide.
+    `with_drawing_rels=True` additionally wires a rels part + a fake
+    word/media/image1.png so a heading paragraph's `w:drawing` can resolve
+    (the "image-only heading still opens its own unit" case
+    `_detect_governance_unit`'s docstring names)."""
+    import io
+    import zipfile
+
+    styles_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style>'
+        '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/></w:style>'
+        "</w:styles>"
+    )
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f"<w:body>{body_xml}<w:sectPr/></w:body></w:document>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("word/document.xml", document_xml)
+        zf.writestr("word/styles.xml", styles_xml)
+        if with_drawing_rels:
+            rels_xml = (
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                '<Relationship Id="rId9" '
+                'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+                'Target="media/image1.png"/></Relationships>'
+            )
+            zf.writestr("word/_rels/document.xml.rels", rels_xml)
+            zf.writestr("word/media/image1.png", b"\x89PNG\r\n\x1a\nfake-but-present-bytes")
+    return buf.getvalue()
+
+
+_ARTICLE_ONE_P = (
+    '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
+    "<w:r><w:t>ARTICLE ONE - INTRODUCTION</w:t></w:r></w:p>"
+)
+# Two consecutive blank heading-styled paragraphs -- no text, no image -- the
+# real-world authoring noise gts-pczo.1's "73 empty structural units"
+# baseline came from (a stray Enter-after-heading leaving an empty
+# Heading-styled line). Two in a row, sharing the same kind+slug fallback
+# ("section"), is what reproduces the reported duplicate-id collision:
+# each one's unclaimed ordinal is reused by the next thing that asks for
+# one -- including the very next blank heading.
+_BLANK_HEADING_P = (
+    '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr></w:p>'
+    '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr></w:p>'
+)
+# ARTICLE TWO wrapped in a Google-Docs-export `w:sdt` (`goog_rdk_*` tag) --
+# the exact shape found in the reviewed document's ARTICLE FOUR paragraph
+# (/tmp/export-test, gts-pczo.1) that made the whole paragraph vanish
+# because the body-level walk only recursed into "p"/"tbl" tags.
+_ARTICLE_TWO_SDT_P = (
+    '<w:sdt><w:sdtPr><w:id w:val="1"/><w:tag w:val="goog_rdk_1"/></w:sdtPr><w:sdtContent>'
+    '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
+    "<w:r><w:t>ARTICLE TWO - MEMBERSHIP</w:t></w:r></w:p>"
+    "</w:sdtContent></w:sdt>"
+)
+_SECTION_ONE_P = (
+    '<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr>'
+    "<w:r><w:t>Section 1. Eligibility</w:t></w:r></w:p>"
+    "<w:p><w:r><w:t>Membership is open to all.</w:t></w:r></w:p>"
+)
+
+
+class TestHierarchyAndUnitBoundaries:
+    """gts-pczo.1/gts-pczo.2 -- ARTICLE detection across a Google-Docs-export
+    `w:sdt`-wrapped heading paragraph, and the ordinal/duplicate-id and
+    empty-unit fallout from a blank heading-styled paragraph, reproduced
+    from the shape found in the reviewed document at /tmp/export-test."""
+
+    @pytest.fixture(scope="class")
+    def artifact(self):
+        docx = _minimal_docx_with_headings(
+            _ARTICLE_ONE_P + _BLANK_HEADING_P + _ARTICLE_TWO_SDT_P + _SECTION_ONE_P
+        )
+        diagnostics = {"blocks": 0, "units": 0, "runs": 0, "explicit_page_breaks": 0}
+        pkg = DocxPackage(docx)
+        units, _ = walk_structure(pkg, diagnostics)
+        return units
+
+    # AC #1: every top-level ARTICLE-style heading is its own unit, with
+    # correct child nesting -- no section mis-nested under the wrong ARTICLE.
+
+    def test_sdt_wrapped_article_is_not_dropped(self, artifact):
+        titles = [u["title"] for u in artifact]
+        assert "ARTICLE TWO - MEMBERSHIP" in titles, (
+            "a w:sdt-wrapped heading paragraph (Google Docs export's "
+            "goog_rdk_* artifact) must still be walked, not silently skipped"
+        )
+
+    def test_sdt_wrapped_article_is_its_own_top_level_unit(self, artifact):
+        by_title = {u["title"]: u for u in artifact}
+        article_two = by_title["ARTICLE TWO - MEMBERSHIP"]
+        assert article_two["kind"] == "article"
+        assert article_two["parent_unit_id"] is None
+
+    def test_section_nests_under_the_sdt_wrapped_article_not_the_prior_one(self, artifact):
+        by_title = {u["title"]: u for u in artifact}
+        article_one = by_title["ARTICLE ONE - INTRODUCTION"]
+        article_two = by_title["ARTICLE TWO - MEMBERSHIP"]
+        section = by_title["Section 1. Eligibility"]
+        assert section["parent_unit_id"] == article_two["id"]
+        assert section["parent_unit_id"] != article_one["id"]
+
+    # AC #2: zero duplicate unit IDs.
+
+    def test_no_duplicate_unit_ids(self, artifact):
+        ids = [u["id"] for u in artifact]
+        assert len(ids) == len(set(ids)), f"duplicate unit ids: {sorted(ids)}"
+
+    # AC #3: the blank heading-styled paragraph does not open its own
+    # (empty) unit at all -- root-caused and eliminated, not merely reduced.
+
+    def test_blank_heading_paragraph_opens_no_unit(self, artifact):
+        assert all(u["title"] != "" for u in artifact)
+        assert not any(not u["blocks"] for u in artifact), (
+            "a heading-styled paragraph with no text and no image must not "
+            "open a structural unit"
+        )
+
+    # Companion positive case: an image-only heading (no text, but a real
+    # w:drawing) is the documented, intentional exception -- _detect_
+    # governance_unit's docstring names it explicitly -- so it must still
+    # open its own unit even after AC #3's blank-heading suppression.
+
+    def test_image_only_heading_still_opens_its_own_unit(self):
+        docx = _minimal_docx_with_headings(
+            '<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:drawing>'
+            '<wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">'
+            '<wp:extent cx="914400" cy="457200"/><wp:docPr id="1" name="Test Picture"/>'
+            '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+            '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+            '<pic:blipFill><a:blip r:embed="rId9"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+            "</pic:pic></a:graphicData></a:graphic></wp:inline>"
+            "</w:drawing></w:r></w:p>",
+            with_drawing_rels=True,
+        )
+        diagnostics = {
+            "blocks": 0, "units": 0, "runs": 0, "explicit_page_breaks": 0,
+            "images": 0, "warnings": [],
+        }
+        pkg = DocxPackage(docx)
+        units, _ = walk_structure(pkg, diagnostics)
+        assert len(units) == 1
+        assert units[0]["kind"] == "section"
+
+
 def _minimal_docx_with_comments(body_xml: str, comments_xml: str, comments_extended_xml: str | None = None) -> bytes:
     """A .docx with word/document.xml + word/comments.xml (+ optionally
     commentsExtended.xml) and nothing else -- DocxPackage degrades every
@@ -729,6 +889,112 @@ class TestRevisionModel:
         assert "1. Introduction" in proposed_lines
         assert "Draft note removed before acceptance." not in baseline_lines
         assert "Draft note removed before acceptance." not in proposed_lines
+
+
+class TestADR0029FactualRevisions:
+    """gts-pczo.4 -- twin [TST] for gts-pczo.3 (ADR-0029: revisions and
+    unit/block classification are OOXML facts only, no semantic-
+    interpretation layer). Authored against docs/interfaces/document-
+    export-contract.md §3.2/§3.3/§6 and ADR-0029 only, no shared context
+    with the [IMP] bead.
+
+    AC #5 note: as of this bead, every assertion below is proven to fail
+    against the pre-ADR-0029 export -- confirmed by running this class
+    (`pytest tests/test_document_export_harness.py -k ADR0029Factual`)
+    before gts-pczo.3 lands. `TestRevisionModel.test_suggestion_groups_
+    grouped_by_author_and_date` (this file) and any golden-fixture JSON
+    under document_export/fixtures/ asserting the pre-3.1 shape are exactly
+    the fixtures ADR-0029's Consequences section calls out as needing
+    regeneration, not field-by-field patching -- gts-pczo.3's job, not
+    this bead's."""
+
+    @pytest.fixture(scope="class")
+    def artifact(self):
+        return build_export(GOLDEN.read_bytes())
+
+    def _blocks(self, artifact):
+        return [b for u in artifact["units"] for b in u["blocks"]]
+
+    def _runs(self, artifact):
+        return [r for b in self._blocks(artifact) for r in b["runs"]]
+
+    # -- AC #1: document.revision_groups present, document.suggestion_groups
+    # absent, on a fixture with tracked-change activity (the golden fixture
+    # carries insertion/deletion/inserted-then-deleted runs -- TestRevisionModel).
+
+    def test_revision_groups_present_suggestion_groups_absent(self, artifact):
+        document = artifact["document"]
+        assert "revision_groups" in document, (
+            "contract §3.3 (ADR-0029): document.suggestion_groups is "
+            "renamed document.revision_groups"
+        )
+        assert "suggestion_groups" not in document, (
+            "ADR-0029 Decision 1: suggestion_groups is retired, not kept "
+            "alongside the rename"
+        )
+        # Grouping key/membership are unchanged by the rename (author, date).
+        groups = document["revision_groups"]
+        assert len(groups) == 3
+        for g in groups:
+            assert g["author"] == "Diane Slota"
+            assert "possible_authors" not in g
+
+    # -- AC #2: no run object in the export carries a `state` key.
+
+    def test_no_run_carries_a_state_key(self, artifact):
+        revision_bearing = [r for r in self._runs(artifact) if "revision" in r]
+        assert revision_bearing, "fixture must exercise at least one revision-bearing run"
+        for run in revision_bearing:
+            assert "state" not in run["revision"], (
+                "ADR-0029 Decision 3: revision.state is removed; "
+                f"revision.change ({run['revision'].get('change')!r}) is the single fact"
+            )
+
+    # -- AC #3: no unit/block carries semantic_state/semantic_state_evidence,
+    # and top-level `semantics` is absent, on a fixture containing the
+    # (OLD)/TBD/FYI-style markers ADR-0029 Context names as the classifier's
+    # trigger surface (`_detect_semantic_state`, document_export/structure.py).
+
+    def test_no_semantic_state_anywhere_on_marker_bearing_fixture(self):
+        docx = _minimal_docx_with_body_xml(
+            "<w:p><w:r><w:t>(OLD) This clause is superseded.</w:t></w:r></w:p>"
+            "<w:p><w:r><w:t>TBD -- pending legal review.</w:t></w:r></w:p>"
+            "<w:p><w:r><w:t>FYI: informational only, ???</w:t></w:r></w:p>"
+        )
+        diagnostics = {"blocks": 0, "units": 0, "runs": 0, "explicit_page_breaks": 0}
+        pkg = DocxPackage(docx)
+        units, _ = walk_structure(pkg, diagnostics)
+        dumped = json.dumps(units)
+        assert "semantic_state" not in dumped, (
+            "ADR-0029 Decision 2: semantic_state/semantic_state_evidence "
+            "removed document-wide, including semantic_state_evidence "
+            "(substring-covered by the same check)"
+        )
+        for unit in units:
+            assert "semantic_state" not in unit
+            assert "semantic_state_evidence" not in unit
+            assert unit["kind"] not in ("historical_note", "editorial_note"), (
+                "ADR-0029 Decision 2: historical_note/editorial_note block "
+                "kinds are retired on this path"
+            )
+            for block in unit["blocks"]:
+                assert "semantic_state" not in block
+                assert "semantic_state_evidence" not in block
+                assert block["kind"] not in ("historical_note", "editorial_note")
+
+    def test_top_level_semantics_absent(self, artifact):
+        assert "semantics" not in artifact, (
+            "ADR-0029 Decision 2: the top-level semantics object "
+            "(baseline/proposed/historical/editorial) is removed"
+        )
+
+    # -- AC #4: schema_version reports 3.1.
+
+    def test_schema_version_is_3_1(self, artifact):
+        assert artifact["schema_version"] == "3.1", (
+            "contract §6 (ADR-0029): schema version bumps 3.0 -> 3.1 for "
+            "the revision_groups rename + state/semantic_state/semantics removal"
+        )
 
 
 def _minimal_docx_with_drawing(

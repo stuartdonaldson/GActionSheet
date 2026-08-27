@@ -1,9 +1,13 @@
-# DOCX Document-Export Contract (schema 3.0)
+# DOCX Document-Export Contract (schema 3.1)
 
 **Status:** Frozen — stage 1 deliverable of `knowledge-base/staging/document-export.md` (`gts-lm0a`).
 **Authorised by:** ADR-0026 (Accepted). This document answers the one open question ADR-0026
 records under "Open questions this ADR does not resolve" — the block-correlation contract — and
 freezes the surface every downstream `[IMP]`/`[TST]` bead is authored against.
+**Amended by:** ADR-0029 (Accepted, 2026-08-26) — §3.2/§3.3 revised: `revision.state` removed,
+`document.suggestion_groups` renamed `document.revision_groups`; `semantic_state`/
+`semantic_state_evidence`/top-level `semantics` removed document-wide (no section here previously
+named them as contract — see ADR-0029 for the full removal). Schema version bumped 3.0 → 3.1.
 **Applies to:** the Python `.docx` pipeline only. The frozen GAS exporter
 (`src/Procedure-Exporter.js`, schema 2.4) is unchanged by this document and is not to be edited to
 conform to it.
@@ -39,7 +43,9 @@ Concretely, this is binding on:
   §Terminology); nothing else about them changes.
 - **Schema shape** stays the contract (ADR-0026 Decision 4). Everything in §5 is a *value*
   degradation or a strictly additive field; no field is restructured for the Python side's
-  convenience.
+  convenience. **Exception (ADR-0029):** three fields inherited from GAS 2.4 without independent
+  justification — `suggestion_groups` naming, `revision.state`, `semantic_state`/`semantics` — are
+  restructured/removed based on first-consumer review, not Python-side convenience. See ADR-0029.
 - **Deviations are enumerated, not incidental.** The only structural deviations this contract
   permits are the ordinal id derivation (§1, forced by the coordinate system) and the retirement of
   the quoted-text matcher (§2, mandated by ADR-0026 Decision 5). Both are back-portable in principle:
@@ -222,12 +228,15 @@ Deleted runs carry their text in `w:delText` rather than `w:t`; both are read as
 
 ### 3.2 Run states and derived text
 
-| `revision.state` / `change` | OOXML | in `baseline_text` | in `proposed_text` | in `all_text` |
+**Amended by ADR-0029 (schema 3.1).** `revision.state` is removed. `revision.change` is the single
+fact; `baseline_text`/`proposed_text`/`all_text` membership is computed directly from it:
+
+| `revision.change` | OOXML | in `baseline_text` | in `proposed_text` | in `all_text` |
 |---|---|---|---|---|
 | unchanged | bare `w:r` | yes | yes | yes |
-| proposed insertion | `w:ins` | no | yes | yes |
-| suggested deletion | `w:del` | yes | no | yes |
-| inserted then deleted | `w:del` inside `w:ins` (or vice versa) | no | no | yes |
+| inserted | `w:ins` | no | yes | yes |
+| deleted | `w:del` | yes | no | yes |
+| inserted_then_deleted | `w:del` inside `w:ins` (or vice versa) | no | no | yes |
 
 `inserted_then_deleted` is a real OOXML state (an edit made and then withdrawn within the same
 tracked-changes session) with no Docs-API analogue. It is preserved rather than dropped — §17
@@ -235,13 +244,16 @@ principle 5 forbids discarding deleted material — and excluded from both recon
 was never in the baseline and is not proposed. A block containing one has
 `revision_summary: "mixed"`.
 
-Because each run's membership in the three derived strings is a pure function of its own state, the
-reconstructions are deterministic by construction and independent of traversal bookkeeping. §13.3's
-conditional emission rule (single `text` for unchanged blocks; the `all_text`/`baseline_text`/
-`proposed_text` trio otherwise) is unchanged and applies verbatim — this is the invariant carried
-forward from `gts-e7ca`.
+Because each run's membership in the three derived strings is a pure function of its own `change`
+value, the reconstructions are deterministic by construction and independent of traversal
+bookkeeping and independent of any unit/block-level classification (ADR-0029 also removes
+`semantic_state`, which this table used to be conditioned on via
+`_EXCLUDED_VIEW_SEMANTIC_STATES` — that exclusion mechanism is gone; every run follows this table
+uniformly). §13.3's conditional emission rule (single `text` for unchanged blocks; the
+`all_text`/`baseline_text`/`proposed_text` trio otherwise) is unchanged and applies verbatim — this
+is the invariant carried forward from `gts-e7ca`.
 
-Adjacent runs are merged only when **all** of `state`, `author`, `date` and the §9 formatting
+Adjacent runs are merged only when **all** of `change`, `author`, `date` and the §9 formatting
 attributes are equal.
 
 ### 3.3 Authorship is a fact
@@ -254,9 +266,11 @@ attributes are equal.
 - `suggestion_authorship` becomes
   `{"resolvable": true, "basis": "ooxml_w_ins_w_del_author"}`, replacing
   `{"resolvable_via_documents_get": false, …}`.
-- `document.suggestion_groups` is retained, grouped by `(author, date)` rather than by the Docs
-  `suggestion_id`, which has no OOXML equivalent. Each group carries `author`, `date`, and the
-  member run/block ids.
+- **Amended by ADR-0029 (schema 3.1):** the group container is renamed `document.revision_groups`
+  (was `document.suggestion_groups` — "suggestion" is a Docs-era term for something that, on this
+  path, is a native Word tracked-changes event, not a pending suggestion). Grouping key and member
+  structure are unchanged: grouped by `(author, date)` rather than by the Docs `suggestion_id`,
+  which has no OOXML equivalent; each group carries `author`, `date`, and the member run/block ids.
 
 ---
 
@@ -314,6 +328,11 @@ missing key would be noise on every `location` object in the artifact.
 ---
 
 ## 6. Schema version
+
+**Bumped again to `3.1` by ADR-0029** (2026-08-26): `revision.state` removed,
+`document.suggestion_groups` → `document.revision_groups`, and `semantic_state`/
+`semantic_state_evidence`/`semantics` removed document-wide. Field removals plus a rename, not a
+patch. See ADR-0029 for full rationale. The `3.0` bump below is otherwise unchanged history.
 
 **Bumped to `3.0`.** Not a patch, not `2.5`:
 

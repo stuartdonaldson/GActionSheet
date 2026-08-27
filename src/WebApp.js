@@ -756,10 +756,11 @@ function doPost(e) {
   }
 
   // Deployment health-check routes — called by manage-deployments.js after deploy:test.
+  // No testDocId field: GAS holds no script property for any doc ID
+  // (ADR-0006 §4) — the master template ID lives only in local.settings.json.
   if (payload.action === 'get_test_config') {
     var props = PropertiesService.getScriptProperties();
     return _jsonResponse({
-      testDocId:        props.getProperty('TEST_DOC_ID')          || '',
       testSheetId:      props.getProperty('TEST_SHEET_ID')        || '',
       gasLoggerFolderId: props.getProperty('GAS_LOGGER_FOLDER_ID') || '',
       webappUrl:        props.getProperty('WEBAPP_URL')           || '',
@@ -1066,7 +1067,11 @@ function _loadExistingRowsByGlobalId(actionsSheet, duplicatesOut) {
       action:        data[i][_ACOL.action_text    - 1],
       status:        data[i][_ACOL.status         - 1],
       dateModified:  data[i][_ACOL.modified_date  - 1] instanceof Date ? data[i][_ACOL.modified_date - 1] : null,
-      syncStatus:    data[i][_ACOL.sync_status    - 1] || ''
+      syncStatus:    data[i][_ACOL.sync_status    - 1] || '',
+      // gts-u0kh: raw JSON string as stored, not parsed — every comparison
+      // site treats this as an opaque diff key against the freshly-encoded
+      // JSON.stringify(row.customFields) from the incoming docState.
+      customFieldsJson: data[i][_ACOL.custom_fields - 1] || ''
     };
   }
 
@@ -1214,6 +1219,10 @@ function _handleSyncActionRows(payload) {
       var shiftedForWrite = _shiftRunsForNormalize(row.actionText, row.runs);
       var normalizedActionText = shiftedForWrite.text;
       var richTextForWrite = _buildRichTextValueForActionText(normalizedActionText, shiftedForWrite.runs);
+      // gts-u0kh: JSON-encode customFields for the custom_fields column
+      // (ContractSchema.js sheetAction.columnsByField.custom_fields:12),
+      // same additive/optional contract as runs above.
+      var newCustomFieldsJson = JSON.stringify(row.customFields || {});
 
       if (!existing) {
         var syncFileId = parseGlobalId(row.globalId).docId;
@@ -1244,6 +1253,10 @@ function _handleSyncActionRows(payload) {
         actionsSheet.getRange(actionsSheet.getLastRow(), _ACOL.action_text).setRichTextValue(
           richTextForWrite || SpreadsheetApp.newRichTextValue().setText(normalizedActionText || '').build()
         );
+        // gts-u0kh: appendRow's plain-values array only carries columns 1-11
+        // (SHEET_HEADERS through sync_status) — custom_fields (col 12) is a
+        // follow-up write, same pattern as the RichTextValue follow-up above.
+        actionsSheet.getRange(actionsSheet.getLastRow(), _ACOL.custom_fields).setValue(newCustomFieldsJson);
         upserted++;
       } else if (existing.syncStatus === 'Dirty') {
         // Sheet was edited (onActionSheetEdit set Sync Status = 'Dirty') — sheet wins.
@@ -1272,7 +1285,11 @@ function _handleSyncActionRows(payload) {
         if (existing.assigneeEmail !== row.assigneeEmail ||
             existing.assigneeName !== row.assigneeName ||
             existing.action !== row.actionText ||
-            existing.status !== row.status) {
+            existing.status !== row.status ||
+            // gts-u0kh: a customFields-only edit (no assignee/text/status
+            // change) must still produce a write, or a second sync after a
+            // field-line-only doc edit would report no diff when it should.
+            (existing.customFieldsJson || '{}') !== newCustomFieldsJson) {
           actionsSheet.getRange(rowIdx, _ACOL.assignee_email).setValue(row.assigneeEmail || '');
           actionsSheet.getRange(rowIdx, _ACOL.assignee_name).setValue(row.assigneeName  || '');
           // gts-a8yh.2: setValue() does not reliably clear a cell's prior
@@ -1284,6 +1301,7 @@ function _handleSyncActionRows(payload) {
           );
           actionsSheet.getRange(rowIdx, _ACOL.status).setValue(row.status || 'Open');
           actionsSheet.getRange(rowIdx, _ACOL.modified_date).setValue(now);
+          actionsSheet.getRange(rowIdx, _ACOL.custom_fields).setValue(newCustomFieldsJson);
           updated++;
         }
         var fIdx = rowIdx - 2;

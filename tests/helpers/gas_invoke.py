@@ -70,14 +70,16 @@ def setup_and_sync(scenario: str, doc_id: str | None = None) -> None:
 
     Args:
         scenario: Name of the fixture scenario to set up.
-        doc_id: Unused at helper level (GAS reads from TEST_DOC_ID script property).
-                Provided for explicitness when calling code.
+        doc_id: Unused at helper level — the menu click carries only `scenario`
+                via TestControl!A1, so GAS resolves the doc itself from
+                TestControl!B1 (active session clone) or else the deploy-time
+                master template. Provided for explicitness when calling code.
     """
     _invoke("Test: Setup And Sync", scenario)
 
 
 def begin_test_session(master_doc_id: str) -> None:
-    """Clone the master template doc and set TEST_DOC_ID to the clone.
+    """Clone the master template doc.
 
     GAS writes the clone ID to TestControl!B1 and logs session.begin.
     """
@@ -85,7 +87,7 @@ def begin_test_session(master_doc_id: str) -> None:
 
 
 def end_test_session() -> None:
-    """Trash the clone and restore TEST_DOC_ID to the master template."""
+    """Trash the clone (read from TestControl!B1) and restore B1 to the master template."""
     _invoke("Test: End Session", timeout=60)
 
 

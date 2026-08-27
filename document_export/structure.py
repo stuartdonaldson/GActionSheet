@@ -142,7 +142,7 @@ def _detect_semantic_state(text: str) -> dict:
     return {"state": "baseline", "evidence": []}
 
 
-def _detect_governance_unit(text: str, heading_level: int | None) -> dict | None:
+def _detect_governance_unit(text: str, heading_level: int | None, has_image: bool = False) -> dict | None:
     t = normalize_line(text)
     kind_match_text = _strip_leading_state_marker(t)
 
@@ -158,7 +158,14 @@ def _detect_governance_unit(text: str, heading_level: int | None) -> dict | None
                 "semantic_state_evidence": semantic["evidence"],
             }
 
-    if heading_level and len(t) < 180:
+    # gts-pczo.1 AC #3: a heading-styled paragraph with neither text nor an
+    # image is authoring noise (a stray Enter-after-heading leaving an empty
+    # Heading-styled line), not a structural boundary -- do not open a unit
+    # for it. `has_image` keeps the documented, intentional exception: a
+    # heading paragraph whose entire content is an image still opens its own
+    # unit (mirrors GAS's own detectSemanticUnit_(allText, ...) behavior,
+    # unchanged since before stage docx-images).
+    if heading_level and (t or has_image) and len(t) < 180:
         semantic = _detect_semantic_state(t)
         return {
             "kind": "section",
@@ -581,21 +588,32 @@ def _process_paragraph(p_el, ctx: _Ctx) -> None:
     heading_level = ctx.heading_levels.get(style_id) if style_id else None
     runs, all_text = _build_runs(p_el, ctx.rels, ctx)
 
+    # A peek, not an extraction -- just "does this paragraph carry a
+    # drawing at all", so the heading-fallback branch below can tell an
+    # image-only heading (opens a unit) from a truly blank one (does not).
+    # The real extraction (ordinal consumption included) still happens
+    # below, in its original GAS-mirroring position.
+    has_image = images.has_drawing(p_el)
+
     # Unit detection runs against allText unconditionally -- including an
     # empty string, which no GOVERNANCE_UNIT_PATTERNS entry matches and
-    # which only reaches the heading-fallback branch for a heading-styled,
-    # otherwise-empty paragraph (e.g. one whose entire content is an image;
-    # mirrors GAS's own detectSemanticUnit_(allText, ...) -> allText.trim()
-    # ordering, unchanged since before stage docx-images).
-    unit_info = _detect_governance_unit(all_text, heading_level)
+    # which only reaches the heading-fallback branch for a heading-styled
+    # paragraph that is otherwise empty of text, and then only when it
+    # carries an image (mirrors GAS's own detectSemanticUnit_(allText, ...)
+    # -> allText.trim() ordering, unchanged since before stage docx-images;
+    # gts-pczo.1 AC #3 narrowed this further -- see _detect_governance_unit).
+    unit_info = _detect_governance_unit(all_text, heading_level, has_image)
+    opened_unit_this_paragraph = False
     if unit_info:
         ctx.current_unit = _create_unit(unit_info, ctx)
         ctx.units.append(ctx.current_unit)
         ctx.diagnostics["units"] += 1
+        opened_unit_this_paragraph = True
     elif ctx.current_unit is None:
         ctx.current_unit = _create_synthetic_root_unit(ctx)
         ctx.units.append(ctx.current_unit)
         ctx.diagnostics["units"] += 1
+        opened_unit_this_paragraph = True
 
     # Images are extracted before the text-block emptiness check (stage
     # docx-images, gts-8uo6) -- mirrors GAS's processInlineImages_ ->
@@ -606,7 +624,18 @@ def _process_paragraph(p_el, ctx: _Ctx) -> None:
         images.process_inline_images(p_el, ctx.pkg, ctx.rels, ctx)
 
     if not all_text.strip():
-        return  # image-only or wholly-empty paragraph -- no text block; any image(s) above already consumed their own ordinal.
+        # gts-pczo.1 AC #2: a unit opened above (_create_unit/
+        # _create_synthetic_root_unit) stamps its id from ctx.next_ordinal
+        # without incrementing it -- by design, so a unit and the text block
+        # that opens it share one ordinal (contract: "a unit id and its
+        # first block id agree on their tail number"). But when this
+        # paragraph produces no text block (this branch), that ordinal is
+        # never claimed by anything else and must be consumed here, or the
+        # next unit/block to ask for one collides with it (duplicate ids).
+        # Any image(s) above already consumed their own, separate ordinals.
+        if opened_unit_this_paragraph:
+            ctx.next_ordinal += 1
+        return  # image-only or wholly-empty paragraph -- no text block.
 
     ordinal = ctx.next_ordinal
     ctx.next_ordinal += 1
@@ -688,6 +717,17 @@ def _process_content(elements, ctx: _Ctx) -> None:
             _process_paragraph(el, ctx)
         elif tag == "tbl":
             _process_table(el, ctx)
+        elif tag == "sdt":
+            # gts-pczo.1 AC #1: a body-level w:sdt (Google Docs' own export
+            # artifact -- observed as a goog_rdk_* tag wrapping a single
+            # paragraph) is not structural content itself, but its
+            # w:sdtContent can hold a real w:p/w:tbl that must still be
+            # walked -- otherwise the whole paragraph (and any unit heading
+            # it opens) silently vanishes. Mirrors _iter_run_elements's own
+            # sdt/sdtContent passthrough for the run-level walk.
+            sdt_content = el.find("w:sdtContent", NS)
+            if sdt_content is not None:
+                _process_content(list(sdt_content), ctx)
         # sectPr and anything else at this level: not structural content.
 
 

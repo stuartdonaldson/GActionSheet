@@ -312,20 +312,27 @@ def test_sheet_id(settings):
 def test_doc_id(settings):
     """Per-run clone of the master template doc.
 
-    Creates a named clone at session start (TEST_DOC_ID script property is
-    updated to the clone ID), yields the clone ID to all tests, then trashes
-    the clone and restores the master at teardown.
+    Creates a named clone at session start, yields the clone ID to all tests,
+    then trashes the clone and restores the master at teardown. Both the
+    master doc ID and the clone ID are threaded through as real parameters on
+    every call — GAS holds no shared script property for either on this path
+    (ADR-0006 §4); a script property is only in play for the bare, no-payload
+    menu-driven equivalent (menuBeginTestSession/menuEndTestSession).
 
     Uses HTTP fixture invocation (invoke_fixture) — no browser required.
     """
     from tests.helpers.fixture_invoke import invoke_fixture
 
-    result = invoke_fixture("begin_test_session", settings["testDocId"], settings, timeout=180)
+    master_doc_id = settings["testDocId"]
+    result = invoke_fixture("begin_test_session", master_doc_id, settings, timeout=180)
     clone_id = result["data"]["cloneId"]
 
     yield clone_id
 
-    invoke_fixture("end_test_session", clone_id, settings, timeout=120)
+    invoke_fixture(
+        "end_test_session", clone_id, settings,
+        extra={"masterDocId": master_doc_id}, timeout=120,
+    )
 
 
 @pytest.fixture(scope="session")

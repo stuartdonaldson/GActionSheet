@@ -347,15 +347,18 @@ async function verifyConfig(target, opts = {}) {
     return;
   }
 
-  // Script property checks — only for dev/test where these are meaningful
+  // Script property checks — only for dev/test where these are meaningful.
+  // TEST_DOC_ID is retired (ADR-0006 §4): GAS holds no script property for
+  // any doc ID — beginTestSession/endTestSession take it as a real parameter
+  // on every call, sourced from local.settings.json's testDocId, so there is
+  // nothing on the GAS side left to drift. Only TEST_SHEET_ID remains
+  // meaningful to check here.
   if (target !== 'prod') {
     const checks = [
-      { label: 'TEST_DOC_ID',   remote: remote.testDocId,   local: settings.testDocId },
       { label: 'TEST_SHEET_ID', remote: remote.testSheetId, local: settings.testSheetId },
     ];
     const drifted = checks.filter(c => c.remote !== c.local);
     if (drifted.length === 0) {
-      console.log('  ✅ TEST_DOC_ID   matches local.settings.json');
       console.log('  ✅ TEST_SHEET_ID matches local.settings.json');
     } else {
       console.warn('\n  ⚠️  Script property drift detected:');
@@ -366,8 +369,7 @@ async function verifyConfig(target, opts = {}) {
         console.warn(`  ${d.label.padEnd(22)} ${(d.remote||'(not set)').padEnd(36)}  ${d.local||'(not set)'}`);
       }
       console.warn('');
-      console.warn('  Drift can occur when beginTestSession/endTestSession updates TEST_DOC_ID');
-      console.warn('  or script properties are manually changed.\n');
+      console.warn('  Drift can occur when script properties are manually changed.\n');
 
       if (warnOnly) {
         console.warn(`  ⚠️  Run pnpm run verify:${target} for the interactive bootstrap prompt.\n`);

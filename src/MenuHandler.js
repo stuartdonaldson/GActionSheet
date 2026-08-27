@@ -92,15 +92,21 @@ function menuSync() {
  * getActiveDocument() only resolves when actually invoked from that doc's own
  * UI session (real menu click). run_fixture (TestFixtures.js) executes
  * statelessly via the Sheet-bound web app, so it has no active document —
- * fall back to TEST_DOC_ID, the same script property _handleRunFixture
- * (TestWebApp.js) stages for the duration of a fixture call, to make these
- * wrappers reachable from a test (gts-ez2e) without changing
- * production behavior (the real menu click always has an active document).
+ * fall back to _TEST_ACTIVE_DOC_ID, a narrow script-property bridge that the
+ * 'menu_sync_active_doc' / 'menu_insert_tracker_active_doc' fixture cases
+ * (TestFixtures.js) set immediately before calling menuSyncActiveDoc() /
+ * menuInsertTrackerActiveDoc() and clear immediately after, to make these
+ * wrappers reachable from a test (gts-ez2e) without changing production
+ * behavior (the real menu click always has an active document). This is
+ * unrelated to any general "which doc is under test" concept — GAS holds no
+ * script property for that anywhere (ADR-0006 §4), it is always a real
+ * parameter. This one narrow property exists only because a real Docs menu
+ * callback takes zero arguments and has no other channel to receive one.
  */
 function _activeOrTestDocId() {
   var doc = DocumentApp.getActiveDocument();
   if (doc) return doc.getId();
-  return PropertiesService.getScriptProperties().getProperty('TEST_DOC_ID') || '';
+  return PropertiesService.getScriptProperties().getProperty('_TEST_ACTIVE_DOC_ID') || '';
 }
 
 function menuSyncActiveDoc() {
@@ -136,12 +142,19 @@ function menuBeginTestSession() {
 }
 
 function menuEndTestSession() {
-  endTestSession();
+  // No HTTP payload to carry a cloneId on this bare menu callback — resolve
+  // it from TestControl!B1, the session pointer beginTestSession() wrote
+  // there, and pass it through as a real parameter. No masterDocId here (no
+  // script property to fall back to — ADR-0006 §4), so the B1 restore is
+  // simply skipped for this manual path; the automated webapp path (which is
+  // how every test actually runs) always supplies masterDocId explicitly.
+  var cloneId = _readTestControlB1();
+  endTestSession(cloneId);
 }
 
 function menuSetupFixture() {
   var scenario = _readTestControlArg();
-  setupTestFixtures(scenario);
+  setupTestFixtures(scenario, { docId: _readTestControlB1() });
 }
 
 function menuSyncDocument() {
@@ -151,7 +164,7 @@ function menuSyncDocument() {
 
 function menuSetupAndSync() {
   var scenario = _readTestControlArg();
-  setupAndSync(scenario);
+  setupAndSync(scenario, _readTestControlB1());
 }
 
 function menuVerifyConsistency() {
@@ -172,7 +185,7 @@ function menuRunArchive() {
 }
 
 function menuDebugDocBody() {
-  debugDocBody();
+  debugDocBody(_readTestControlB1());
 }
 
 function _readTestControlArg() {
@@ -180,5 +193,18 @@ function _readTestControlArg() {
   var ctrl = ss.getSheetByName('TestControl');
   if (!ctrl) return null;
   var val = ctrl.getRange('A1').getValue();
+  return val ? String(val) : null;
+}
+
+/**
+ * Reads TestControl!B1 — the session pointer beginTestSession() writes the
+ * active clone's ID to, and endTestSession() restores to the master template
+ * ID. Returns null when the sheet or cell is empty (no session started yet).
+ */
+function _readTestControlB1() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ctrl = ss.getSheetByName('TestControl');
+  if (!ctrl) return null;
+  var val = ctrl.getRange('B1').getValue();
   return val ? String(val) : null;
 }

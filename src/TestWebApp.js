@@ -72,10 +72,8 @@ function _handleRunFixture(payload) {
   var tokenError = _checkTestToken(payload.testToken || '');
   if (tokenError) return tokenError;
 
-  var props = PropertiesService.getScriptProperties();
   var fixtureName = payload.fixture   || '';
   var testDocId   = payload.testDocId || '';
-  var previousTestDocId = props.getProperty('TEST_DOC_ID') || '';
 
   if (!fixtureName) {
     return _jsonResponse({ error: 'fixture name required' });
@@ -108,19 +106,13 @@ function _handleRunFixture(payload) {
     }
   }
 
-  // Allow caller to override TEST_DOC_ID for the duration of this invocation.
-  // begin/end session fixtures intentionally manage persistent session state;
-  // all other fixtures restore the prior TEST_DOC_ID when they finish.
-  var shouldRestoreTestDocId = !!testDocId &&
-    fixtureName !== 'begin_test_session' &&
-    fixtureName !== 'end_test_session';
-
   try {
-    if (testDocId) {
-      props.setProperty('TEST_DOC_ID', testDocId);
-    }
-
     // Extract caller-supplied fixture data: everything except framework keys.
+    // docId is threaded through as a real parameter (fixtureData.docId) rather
+    // than staged into a shared script property — the previous TEST_DOC_ID
+    // mutate/restore shim raced when two run_fixture calls were in flight
+    // concurrently (parallel test workers): call B's restore could stomp
+    // call A's still-in-progress override, or vice versa.
     var fixtureData = {};
     var _reserved = ['action', 'testToken', 'fixture', 'testDocId'];
     for (var _k in payload) {
@@ -128,6 +120,7 @@ function _handleRunFixture(payload) {
         fixtureData[_k] = payload[_k];
       }
     }
+    fixtureData.docId = testDocId;
 
     var result = setupTestFixtures(fixtureName, fixtureData);
     var response = result || { tag: 'fixture.' + fixtureName, data: {} };
@@ -136,13 +129,6 @@ function _handleRunFixture(payload) {
     }
     return _jsonResponse(response);
   } finally {
-    if (shouldRestoreTestDocId) {
-      if (previousTestDocId) {
-        props.setProperty('TEST_DOC_ID', previousTestDocId);
-      } else {
-        props.deleteProperty('TEST_DOC_ID');
-      }
-    }
     // gts-7389: this dispatcher previously never flushed GasLogger's buffer.
     // Any GasLogger.log() calls made by a fixture (or by the entry points it
     // drives, e.g. syncDocument()'s locked-skip early return, which itself

@@ -708,6 +708,9 @@ function _tfExtractActionTextStyle(content, N) {
  * When called from the function picker, scenario defaults to 'default'.
  *
  * @param {string} [scenario] - Name of the fixture scenario to set up.
+ * @param {{docId: string}} [data] - Fixture data; docId is required — the doc
+ *   to operate on is always a real parameter, never read from a shared
+ *   script property (see ADR-0006 §4).
  */
 function setupTestFixtures(scenario, data) {
   var resolvedScenario = scenario || 'default';
@@ -715,14 +718,14 @@ function setupTestFixtures(scenario, data) {
   _TF_RESULT = null; // reset for this invocation
   var _SF = CONTRACT_SCHEMA.sheetAction.columnsByField;
   try {
-    // -- Read test IDs from script properties --------------------------------
+    // -- docId is a real parameter; TEST_SHEET_ID is still deploy-time config --
     var props = PropertiesService.getScriptProperties();
-    var testDocId   = props.getProperty('TEST_DOC_ID');
+    var testDocId   = data.docId;
     var testSheetId = props.getProperty('TEST_SHEET_ID');
 
     if (!testDocId || !testSheetId) {
       GasLogger.log('fixture.error', {
-        msg: 'TEST_DOC_ID and/or TEST_SHEET_ID script properties not set'
+        msg: 'docId parameter and/or TEST_SHEET_ID script property not set'
       });
       return;
     }
@@ -1125,8 +1128,9 @@ function setupTestFixtures(scenario, data) {
         // available standalone via `call_webapp.py run_fixture reset_test_state`.
         //
         // Deliberately does NOT touch:
-        //   - Durable deployment config (no '_' prefix): TEST_DOC_ID, TEST_SHEET_ID,
-        //     TEST_TOKEN, WEBAPP_URL, ADMIN_SECRET, AXIOM_TOKEN, DOC_FOLDER_ID, ...
+        //   - Durable deployment config (no '_' prefix): TEST_SHEET_ID,
+        //     TEST_TOKEN, WEBAPP_URL, ADMIN_SECRET, AXIOM_TOKEN, DOC_FOLDER_ID,
+        //     ... (no doc-ID property exists to list here — ADR-0006 §4)
         //   - Memoized fixture caches (DISCOVERY_*, TEAMSCOPE_FOLDER_*): these
         //     create-once Drive folders/docs are meant to persist across sessions —
         //     DISCOVERY_STALE_DOC_ID in particular only becomes useful once its doc
@@ -1880,7 +1884,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'sync_document': {
         // Sync the clone doc. Called between fixture steps in the HTTP test runner.
-        // testDocId was stored in TEST_DOC_ID by _handleRunFixture before calling us.
+        // testDocId arrives as a real parameter (data.docId) from _handleRunFixture.
         //
         // scn.session.ScenarioSession.sync()'s own docstring promises "durable
         // convergence" for a preceding async act (e.g. the sidebar's Sync Now
@@ -1946,7 +1950,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'begin_journey_session': {
         // Empty-create a fresh journey doc (§16.11 #1 — never a template clone).
-        // Does NOT update TEST_DOC_ID or TEST_DOC_TEMPLATE_ID — safe to run
+        // Does NOT touch TestControl!B1 — safe to run
         // alongside an active begin_test_session clone in the same pytest session.
         var bjsNow    = new Date();
         var bjsDate   = Utilities.formatDate(bjsNow, Session.getScriptTimeZone(), 'yyyyMMdd');
@@ -2229,10 +2233,10 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'begin_test_session': {
-        // masterDocId was stored in TEST_DOC_ID by _handleRunFixture from the HTTP payload.
-        // beginTestSession creates a named clone and updates TEST_DOC_ID to the clone.
-        beginTestSession(testDocId);
-        var btsCloneId = props.getProperty('TEST_DOC_ID');
+        // masterDocId arrives as a real parameter (data.docId, from the HTTP
+        // payload's testDocId). beginTestSession creates a named clone and
+        // returns its ID directly — no script-property round-trip.
+        var btsCloneId = beginTestSession(testDocId);
         _TF_RESULT = {
           tag:  'fixture.begin_test_session',
           data: { cloneId: btsCloneId }
@@ -2242,8 +2246,11 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'end_test_session': {
-        // Trash the clone and restore TEST_DOC_ID to the master template.
-        endTestSession(testDocId);
+        // Trash the clone. Both the clone ID (testDocId, i.e. data.docId) and
+        // the master ID to restore (data.masterDocId) are real parameters —
+        // the caller already knows the master ID (Python: settings['testDocId'])
+        // so there's no need to round-trip it through a script property.
+        endTestSession(testDocId, data.masterDocId);
         _TF_RESULT = { tag: 'fixture.end_test_session', data: {} };
         docAlreadyClosed = true;
         break;
@@ -3053,9 +3060,22 @@ function setupTestFixtures(scenario, data) {
         // call-site (gts-ez2e), distinct from the already-covered
         // syncDocument() core. doc.saveAndClose() first so syncDocument's own
         // open of testDocId doesn't lock against this dispatcher's handle.
+        //
+        // menuSyncActiveDoc() is a real zero-argument menu callback (production
+        // API shape) so it cannot take docId as a parameter here either — it
+        // resolves via DocumentApp.getActiveDocument(), which is null outside a
+        // real Docs UI session. _TEST_ACTIVE_DOC_ID is the narrow, case-scoped
+        // bridge for that one gap: set immediately before the call, cleared
+        // immediately after in a finally, so its lifetime never spans more than
+        // this single case (unlike the old dispatcher-wide TEST_DOC_ID shim).
         doc.saveAndClose();
         docAlreadyClosed = true;
-        menuSyncActiveDoc();
+        props.setProperty('_TEST_ACTIVE_DOC_ID', testDocId);
+        try {
+          menuSyncActiveDoc();
+        } finally {
+          props.deleteProperty('_TEST_ACTIVE_DOC_ID');
+        }
         SpreadsheetApp.flush();
         _TF_RESULT = { tag: 'fixture.menu_sync_active_doc', data: { docId: testDocId } };
         break;
@@ -3065,9 +3085,15 @@ function setupTestFixtures(scenario, data) {
         // menuInsertTrackerActiveDoc() -> insertTrackerTable(docId) — Docs-menu
         // wrapper call-site (gts-ez2e), distinct from the already-covered
         // insertTrackerTable() core (see the 'insert_tracker_table' case above).
+        // See 'menu_sync_active_doc' above for why _TEST_ACTIVE_DOC_ID exists.
         doc.saveAndClose();
         docAlreadyClosed = true;
-        menuInsertTrackerActiveDoc();
+        props.setProperty('_TEST_ACTIVE_DOC_ID', testDocId);
+        try {
+          menuInsertTrackerActiveDoc();
+        } finally {
+          props.deleteProperty('_TEST_ACTIVE_DOC_ID');
+        }
         _TF_RESULT = { tag: 'fixture.menu_insert_tracker_active_doc', data: { docId: testDocId } };
         break;
       }
@@ -3339,22 +3365,18 @@ function setupTestFixtures(scenario, data) {
 
 /**
  * Combined fixture setup and sync in one invocation.
- * Reads the scenario from TestControl!A1 and the doc ID from script properties.
  *
  * @param {string} [scenario] - Name of the fixture scenario to set up.
+ * @param {string} docId - Doc to operate on; always a real parameter.
  */
-function setupAndSync(scenario) {
+function setupAndSync(scenario, docId) {
   try {
-    setupTestFixtures(scenario);
-    var props = PropertiesService.getScriptProperties();
-    var testDocId = props.getProperty('TEST_DOC_ID');
-    if (!testDocId) {
-      GasLogger.log('sync.error', {
-        msg: 'TEST_DOC_ID script property not set'
-      });
+    if (!docId) {
+      GasLogger.log('sync.error', { msg: 'docId parameter not set' });
       return;
     }
-    syncDocument(testDocId);
+    setupTestFixtures(scenario, { docId: docId });
+    syncDocument(docId);
     GasLogger.log('sync.complete', { scenario: scenario });
   } finally {
     GasLogger.flush();
@@ -3386,7 +3408,8 @@ function setupAndSync(scenario) {
  * Logs verify.consistency.complete with the result object so Playwright tests
  * can poll gasLogDir and assert result.ok === true.
  *
- * @param {string} [docId]  Defaults to TEST_DOC_ID script property.
+ * @param {string} docId  Doc to verify; always a real parameter (no
+ *   script-property fallback).
  * @param {?{teamId: string}} [expected]  Optional Team Scope expectation
  *   (gts-me6w.6). When expected.teamId is set, additionally asserts:
  *     - the document's Drive appProperty 'teamScope' === expected.teamId
@@ -3395,21 +3418,21 @@ function setupAndSync(scenario) {
  *       resolved_count populated and consistent with the current scan
  */
 function verifyConsistencyForTest(docId, expected) {
-  var props = PropertiesService.getScriptProperties();
-  var resolvedDocId = docId || props.getProperty('TEST_DOC_ID');
+  var props        = PropertiesService.getScriptProperties();
+  var resolvedDocId = docId;
   var testSheetId   = props.getProperty('TEST_SHEET_ID');
 
   if (!resolvedDocId || !testSheetId) {
     GasLogger.log('verify.consistency.complete', {
       ok: false,
-      issues: ['TEST_DOC_ID or TEST_SHEET_ID script properties not set'],
+      issues: ['docId parameter and/or TEST_SHEET_ID script property not set'],
       counts: { floating: 0, sheet: 0, tracker: 0, matched: 0, unparseable: 0 },
       docTitle: ''
     });
     GasLogger.flush();
     return {
       ok: false,
-      issues: ['TEST_DOC_ID or TEST_SHEET_ID script properties not set'],
+      issues: ['docId parameter and/or TEST_SHEET_ID script property not set'],
       counts: { floating: 0, sheet: 0, tracker: 0, matched: 0, unparseable: 0 },
       docTitle: ''
     };
@@ -3736,10 +3759,11 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
 /**
  * Diagnostic: logs the body element types of the test doc to GasLogger.
  * Run via "Test: Debug Doc Body" menu item to verify fixture state.
+ *
+ * @param {string} testDocId  Doc to inspect; always a real parameter.
  */
-function debugDocBody() {
+function debugDocBody(testDocId) {
   var props   = PropertiesService.getScriptProperties();
-  var testDocId = props.getProperty('TEST_DOC_ID');
   GasLogger.log('debug.props', {
     webAppUrl:    getWebAppUrl(),
     hasSecret:    !!props.getProperty('WEBAPP_SECRET'),
@@ -3779,23 +3803,25 @@ function debugDocBody() {
  *
  * Properties set:
  *   TEST_SHEET_ID        — the bound spreadsheet used for testing
- *   TEST_DOC_ID          — the Google Doc used for testing
  *   GAS_LOGGER_FOLDER_ID — the Drive folder GasLogger writes .log files to
  *   TEST_ASSIGNEE_EMAIL  — email used for the chip-led list item in UC-A fixtures
  *   TEST_ASSIGNEE_NAME   — display name for the chip (optional; email used as fallback)
+ *
+ * Deliberately does NOT set a master-template-doc property: GAS holds no
+ * script property for any doc ID (ADR-0006 §4). The master template ID lives
+ * in local.settings.json (settings.testDocId) and is always passed to GAS as
+ * a real parameter — including the very first beginTestSession call.
  */
 function bootstrap() {
   var props = PropertiesService.getScriptProperties();
   props.setProperties({
     'TEST_SHEET_ID':        '10UCsEHPL2RjA1IduUSFDSaA2lpkoCuZY79sIjratH_s',
-    'TEST_DOC_ID':          '11jA0FMowlJbyxyJoK6bePVvcO63niVrKcXA0eMJW1F4',
     'GAS_LOGGER_FOLDER_ID': '1lg2CWtOmDGglMVasSjEk3jTaW9SXcO6s',
     'TEST_ASSIGNEE_EMAIL':  'stuart.donaldson@gmail.com',
     'TEST_ASSIGNEE_NAME':   'Stuart Donaldson'
   });
   GasLogger.log('bootstrap.complete', {
     testSheetId:     '10UCsEHPL2RjA1IduUSFDSaA2lpkoCuZY79sIjratH_s',
-    testDocId:       '11jA0FMowlJbyxyJoK6bePVvcO63niVrKcXA0eMJW1F4',
     logFolderId:     '1lg2CWtOmDGglMVasSjEk3jTaW9SXcO6s',
     assigneeEmail:   'stuart.donaldson@gmail.com'
   });
@@ -3808,14 +3834,19 @@ function bootstrap() {
 
 /**
  * Creates a named clone of the master template doc in the same Drive folder as
- * the test sheet, sets TEST_DOC_ID to the clone, and stores the master ID in
- * TEST_DOC_TEMPLATE_ID so endTestSession can restore it.
- *
- * Called by menuBeginTestSession; masterDocId is read from TestControl!A1.
+ * the test sheet, and returns the clone's ID directly to the caller. GAS holds
+ * no script property for any doc ID (ADR-0006 §4) — masterDocId arrives as a
+ * real parameter (the webapp path: Python's settings.testDocId; the menu path:
+ * whatever the human typed into TestControl!A1) and cloneId is returned
+ * directly rather than staged anywhere for the caller to read back. Also
+ * mirrors the clone ID to TestControl!B1 purely as a human-visible pointer for
+ * manual continuation — not read back by any test path.
  *
  * @param {string} masterDocId  ID of the master template doc (read-only).
+ * @return {string} The new clone's Drive file ID.
  */
 function beginTestSession(masterDocId) {
+  var cloneId = '';
   try {
     var props       = PropertiesService.getScriptProperties();
     var testSheetId = props.getProperty('TEST_SHEET_ID');
@@ -3837,10 +3868,7 @@ function beginTestSession(masterDocId) {
     if (cloneFile.setTrashed) {
       cloneFile.setTrashed(false);
     }
-    var cloneId   = cloneFile.getId();
-
-    props.setProperty('TEST_DOC_TEMPLATE_ID', masterDocId);
-    props.setProperty('TEST_DOC_ID', cloneId);
+    cloneId = cloneFile.getId();
 
     var ss   = SpreadsheetApp.openById(testSheetId);
     var ctrl = ss.getSheetByName('TestControl');
@@ -3859,27 +3887,37 @@ function beginTestSession(masterDocId) {
     GasLogger.log('session.begin.error', { msg: err.message, masterDocId: masterDocId });
   }
   GasLogger.flush();
+  return cloneId;
 }
 
 /**
- * Trashes the clone created by beginTestSession and restores TEST_DOC_ID to
- * the master template ID stored in TEST_DOC_TEMPLATE_ID.
+ * Trashes the clone identified by cloneId and, when masterDocId is supplied,
+ * restores TestControl!B1 to it (a human-visible convenience only — no test
+ * path reads B1 back).
  *
- * @param {string} [cloneIdOverride]  Explicit clone ID to end. Falls back to TEST_DOC_ID.
+ * @param {string} cloneId  Clone ID to end; always a real parameter.
+ * @param {string} [masterDocId]  Master template ID to restore. The webapp
+ *   path always passes this explicitly (Python already knows it from
+ *   settings — no round trip needed). GAS holds no script property for it
+ *   (ADR-0006 §4); the bare menuEndTestSession() call simply omits the
+ *   B1 restore rather than reach for one.
  */
-function endTestSession(cloneIdOverride) {
+function endTestSession(cloneId, masterDocId) {
   try {
     var props      = PropertiesService.getScriptProperties();
-    var cloneId    = cloneIdOverride || props.getProperty('TEST_DOC_ID');
-    var masterId   = props.getProperty('TEST_DOC_TEMPLATE_ID');
+    var masterId   = masterDocId || '';
 
     if (cloneId && cloneId !== masterId) {
       DriveApp.getFileById(cloneId).setTrashed(true);
     }
     if (masterId) {
-      props.setProperty('TEST_DOC_ID', masterId);
+      var testSheetId = props.getProperty('TEST_SHEET_ID');
+      var ss   = testSheetId ? SpreadsheetApp.openById(testSheetId) : null;
+      var ctrl = ss ? ss.getSheetByName('TestControl') : null;
+      if (ctrl) {
+        ctrl.getRange('B1').setValue(masterId);
+      }
     }
-    props.deleteProperty('TEST_DOC_TEMPLATE_ID');
 
     GasLogger.log('session.end', { cloneId: cloneId, masterDocId: masterId });
   } catch (err) {

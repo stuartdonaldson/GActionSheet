@@ -35,15 +35,20 @@ def invoke_fixture(
     test_doc_id: str,
     settings: dict,
     *,
+    extra: dict | None = None,
     timeout: int = 360,
 ) -> dict:
     """Invoke a GAS test fixture via HTTP POST to the WebApp run_fixture endpoint.
 
     Args:
         fixture_name: Name of the fixture scenario (e.g. 'sync_status_deleted').
-        test_doc_id:  Google Doc ID to pass as TEST_DOC_ID override on the GAS side.
+        test_doc_id:  Google Doc ID, threaded through as a real parameter on the
+                      GAS side (setupTestFixtures's data.docId) — GAS holds no
+                      shared script property for this (ADR-0006 §4).
         settings:     Loaded local.settings.json dict.  Must contain 'webappTestUrl'
                       and 'testToken'.
+        extra:        Additional fixture-specific fields merged into the payload
+                      (e.g. {'masterDocId': ...} for 'end_test_session').
         timeout:      HTTP timeout in seconds (default 360 — GAS can be slow).
 
     Returns:
@@ -87,6 +92,8 @@ def invoke_fixture(
         'fixture':   fixture_name,
         'testDocId': test_doc_id,
     }
+    if extra:
+        payload.update(extra)
 
     try:
         return _session._http_post(url, payload, timeout)
