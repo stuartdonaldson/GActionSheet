@@ -66,7 +66,8 @@ actionBody      := text [ statusToken ]
 statusToken     := "(" [^)]* ")"        ; last such group on the HEADER LINE, per rule 4
 continuation    := "\n" ( fieldLine | prose )
 fieldLine       := fieldName ":" ( [ \t] inlineValue? | EOL )
-fieldName       := [A-Za-z] [A-Za-z0-9 _-]{0,31}
+fieldName       := fieldWord (" " fieldWord)*   ; ≤32 chars total (gts-eezz)
+fieldWord       := [A-Z] [A-Za-z0-9_-]*
 ```
 
 Whitespace between the token, the assignee and the action body is the only separator. There is
@@ -113,17 +114,26 @@ what follows it is empty or begins with a non-word character) is unchanged.
 ### 5. Field line versus continuation prose
 
 A continuation line is a `fieldLine` if and only if it matches the bounded production above: no
-leading whitespace, an initial letter, a name of at most 32 characters drawn from
-`[A-Za-z0-9 _-]`, then a colon followed by a space, a tab, or the end of the line. A bare
-`Consult With:` with nothing after the colon is a field line with an empty inline value, not
-prose. Every other continuation line is prose.
+leading whitespace, a name of at most 32 characters drawn from `[A-Za-z0-9 _-]` where **every
+space-separated word starts with an uppercase letter**, then a colon followed by a space, a tab,
+or the end of the line. A bare `Consult With:` with nothing after the colon is a field line with
+an empty inline value, not prose. Every other continuation line is prose.
+
+**Resolved (gts-eezz, 2026-08-26):** the per-word-uppercase constraint narrows the production as
+first drafted here (`[A-Za-z] [A-Za-z0-9 _-]{0,31}`, no case requirement). That looser form cannot
+actually distinguish a field name from ordinary prose containing a colon: `then he said` (12
+chars, all letters/spaces) satisfies it exactly as `Consult With` does, so a sentence like `then
+he said: we should ship it` would parse as a field line, which is wrong. The per-word-uppercase
+form matches every field-name example on record (`Target`, `Progress`, `Notes`, `Consult With`,
+`Due` — all Title Case) and correctly excludes lowercase sentence continuations. The 32-character
+length bound is unchanged and still independently enforced.
 
 This resolves ADR-0024's three open parser questions:
 
 1. *Field-name line versus a continuation line containing a colon* — the bounded production. A
-   prose line such as `then he said: we should ship it` fails it (the name exceeds 32 characters
-   and contains disallowed characters), so it stays prose. No per-team allowlist is required, and
-   ADR-0024's open question about one is answered **no**.
+   prose line such as `then he said: we should ship it` fails it (`then`/`he`/`said` do not start
+   with uppercase letters), so it stays prose. No per-team allowlist is required, and ADR-0024's
+   open question about one is answered **no**.
 2. *Field-name line versus the next record's token* — the token production is attempted first and
    wins. A line beginning `ACT-4:` starts a new record even though it would also satisfy
    `fieldLine`.

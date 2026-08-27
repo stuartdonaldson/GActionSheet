@@ -105,7 +105,7 @@ function _submitCreateAction(e) {
 
     var doc      = DocumentApp.getActiveDocument();
     var N        = _getNextActionN(doc);
-    var globalId = doc.getId() + '/AI-' + N;
+    var globalId = doc.getId() + '/' + _actionTokenId(N);
 
     // Insert chip at cursor — doc is source of truth; the sheet row will be
     // created by the next sync (no separate upsert call here to stay within
@@ -128,7 +128,7 @@ function _submitCreateAction(e) {
     GasLogger.log('actionTrigger.done', { globalId: globalId });
     GasLogger.flush();
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', 'AI-' + N + ': ' + actionText + '\n\nSync now to record it in the ActionSheet.')))
+      .setNavigation(CardService.newNavigation().updateCard(_buildMessageCard('Action created', _actionTokenPrefix(N) + ' ' + actionText + '\n\nSync now to record it in the ActionSheet.')))
       .build();
   } catch (err) {
     GasLogger.log('actionTrigger.error', { msg: String(err), stack: err.stack ? err.stack.substring(0, 300) : '' });
@@ -838,7 +838,7 @@ function _importSelectedRows(doc, docId, token, index, importRows) {
   for (var k = 0; k < importRows.length; k++) {
     var src         = importRows[k];
     var N           = baseN + k;
-    var newGlobalId = docId + '/AI-' + N;
+    var newGlobalId = docId + '/' + _actionTokenId(N);
 
     var fragResult = _applyActionFragment(docId, token, index, {
       N:             N,
@@ -929,6 +929,11 @@ function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
   // producing a soft return. \v is one character wide, so insertedLength and
   // the style ranges below stay correct.
   var actionText    = _toSoftReturnText(fields.actionText);
+  // gts-q23h / ADR-0027 rule 4: status token belongs at the end of the HEADER
+  // LINE, the same placement _buildFlushRequests writes — see
+  // _renderActionBodyWithStatus (SyncManager.js) for why the read and write
+  // sides have to agree on it.
+  var bodyText      = _renderActionBodyWithStatus(actionText, fields.status).text;
   var assigneeEmail = fields.assigneeEmail;
   var status        = fields.status;
 
@@ -940,7 +945,7 @@ function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
   // pushes prior inserts rightward, so requests are listed in reverse final order.
   // Final paragraph order: [status image][AI-N: text][optional person chip][action text (status)]
   var validEmail = assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail);
-  var tokenLen   = ('AI-' + N + ': ').length;
+  var tokenLen   = _actionTokenText(N).length;
   var fragIndex  = precedeWithNewline ? index + 1 : index;
 
   var requests = [];
@@ -950,15 +955,15 @@ function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
 
   // 1. Trailing text (listed first → ends up rightmost)
   if (validEmail) {
-    requests.push({ insertText: { text: ' ' + actionText + ' (' + status + ')', location: { index: fragIndex } } });
+    requests.push({ insertText: { text: ' ' + bodyText, location: { index: fragIndex } } });
     // insertPerson rejects any name field in personProperties — email only
     requests.push({ insertPerson: { personProperties: { email: assigneeEmail }, location: { index: fragIndex } } });
   } else {
-    requests.push({ insertText: { text: actionText + ' (' + status + ')', location: { index: fragIndex } } });
+    requests.push({ insertText: { text: bodyText, location: { index: fragIndex } } });
   }
 
-  // 2. AI-N: text
-  requests.push({ insertText: { text: 'AI-' + N + ': ', location: { index: fragIndex } } });
+  // 2. token text
+  requests.push({ insertText: { text: _actionTokenText(N), location: { index: fragIndex } } });
 
   // 3. Status image (listed last → ends up at fragIndex)
   requests.push({
@@ -981,14 +986,12 @@ function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
   // Action-text style (gts-d99c) — same Config-sourced style and range
   // math as SyncManager.js's _buildFlushRequests; null when no 'action_text'
   // Config row exists yet, leaving today's inherited default formatting.
-  var trailingTextOnly  = (validEmail ? ' ' : '') + actionText + ' (' + status + ')';
+  var trailingTextOnly  = (validEmail ? ' ' : '') + bodyText;
   var actionTextStart   = fragIndex + 1 + tokenLen + (validEmail ? 1 : 0);
   var actionTextStyleReq = _actionTextStyleRequest(actionTextStart, actionTextStart + trailingTextOnly.length);
   if (actionTextStyleReq) requests.push(actionTextStyleReq);
 
-  var trailingLen = validEmail
-    ? 1 + (' ' + actionText + ' (' + status + ')').length
-    : (actionText + ' (' + status + ')').length;
+  var trailingLen = trailingTextOnly.length;
   var insertedLength = (precedeWithNewline ? 1 : 0) + 1 + tokenLen + trailingLen;
 
   var batchResp = UrlFetchApp.fetch(

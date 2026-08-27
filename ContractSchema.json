@@ -53,6 +53,24 @@
       "value": 2
     }
   },
+  "sheetExportIndex": {
+    "headers": [
+      "Doc Id",
+      "Doc Title",
+      "Folder Id",
+      "Created At",
+      "Last Exported At",
+      "Meta Json"
+    ],
+    "columnsByField": {
+      "doc_id": 1,
+      "doc_title": 2,
+      "folder_id": 3,
+      "created_at": 4,
+      "last_exported_at": 5,
+      "meta_json": 6
+    }
+  },
   "sheetAction": {
     "fields": [
       "global_id",
@@ -67,7 +85,8 @@
       "doc_name",
       "created_date",
       "modified_date",
-      "sync_status"
+      "sync_status",
+      "custom_fields"
     ],
     "headers": [
       "globalId",
@@ -80,7 +99,8 @@
       "Document",
       "Date Created",
       "Date Modified",
-      "Sync Status"
+      "Sync Status",
+      "Custom Fields"
     ],
     "columnsByField": {
       "global_id": 1,
@@ -93,13 +113,15 @@
       "document_formula": 8,
       "created_date": 9,
       "modified_date": 10,
-      "sync_status": 11
+      "sync_status": 11,
+      "custom_fields": 12
     }
   },
   "webApp": {
     "routeNames": [
       "set_test_token",
       "set_axiom_config",
+      "set_export_config",
       "upsert_action_rows",
       "sync_action_rows",
       "verify_action_rows",
@@ -114,6 +136,7 @@
       "edit_action_row",
       "find_sheet_actions",
       "dump_doc_paragraphs",
+      "dump_raw_docs_api",
       "read_team_actions",
       "verify_chip_integrity",
       "import_selected_for_test",
@@ -244,7 +267,8 @@
         "response": [
           "ok",
           "teamId",
-          "rows"
+          "rows",
+          "statusOptions"
         ],
         "completionSignal": "synchronous response; rows scoped to teamId under the requested filters"
       },

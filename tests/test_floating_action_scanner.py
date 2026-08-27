@@ -284,7 +284,7 @@ def test_soft_return_survives_sidebar_status_flush(settings, request):
         # before the sidebar path is even reachable.
         scn.sync()
         assert_doc_paragraph(
-            "AI-1: dr8j soft flush\nline two\nline three (Open)", "sync flush"
+            "AI-1: dr8j soft flush (Open)\nline two\nline three", "sync flush"
         )
 
         row = _find_action(scn, action_text)
@@ -301,7 +301,7 @@ def test_soft_return_survives_sidebar_status_flush(settings, request):
             f"sidebar_set_status fixture failed: {resp!r}"
         )
         assert_doc_paragraph(
-            "AI-1: dr8j soft flush\nline two\nline three (Done)", "sidebar flush"
+            "AI-1: dr8j soft flush (Done)\nline two\nline three", "sidebar flush"
         )
 
         # And the round trip closes: rescanning the flushed doc yields the same
@@ -310,7 +310,7 @@ def test_soft_return_survives_sidebar_status_flush(settings, request):
         row = _find_action(scn, action_text)
         assert row.status == "Done"
         assert_doc_paragraph(
-            "AI-1: dr8j soft flush\nline two\nline three (Done)", "resync flush"
+            "AI-1: dr8j soft flush (Done)\nline two\nline three", "resync flush"
         )
     finally:
         scn.close()
@@ -438,5 +438,74 @@ def test_v0py_flush_does_not_double_status_token(settings, request):
         assert hits[0].count("(Open)") == 1, (
             f"expected exactly one '(Open)' token after flush, got: {hits[0]!r}"
         )
+    finally:
+        scn.close()
+
+
+# ---------------------------------------------------------------------------
+# ADR-0027 rule 6 / gts-xvlu — unparseable-action-paragraph is reported, not
+# silently skipped. Repro is the gts-tis pipe-delimited spelling that used to
+# vanish with no trace: _parseParagraphAsFloatingAction's token regex needs a
+# trailing colon, so a bare "ACT-2 | ..." never matched at all.
+# ---------------------------------------------------------------------------
+
+def _run_verify_consistency(scn):
+    resp = scn._post_fixture("verify_consistency")
+    return resp.get("data") or {}
+
+
+def test_xvlu_token_without_colon_reported_unparseable(settings, request):
+    """A paragraph beginning with a token but missing the colon (token present,
+    grammar incomplete) is reported by verify_consistency as
+    'unparseable-action-paragraph', carrying the body index and leading text,
+    and is not written to the ActionSheet."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture("append_doc_soft_paragraph",
+                          {"text": "ACT-2 | someone | do the thing"})
+        scn.sync()
+
+        _assert_action_absent(scn, "do the thing")
+
+        data = _run_verify_consistency(scn)
+        assert not data.get("ok"), f"expected verify_consistency to report an issue: {data!r}"
+        issues = data.get("issues") or []
+        matches = [i for i in issues if "does not parse" in i]
+        assert matches, f"expected an unparseable-action-paragraph issue, got: {issues!r}"
+        assert "ACT-2 | someone | do the thing" in matches[0]
+        assert data.get("counts", {}).get("unparseable") == 1
+    finally:
+        scn.close()
+
+
+def test_xvlu_well_formed_action_not_reported(settings, request):
+    """A well-formed action (token + colon) is not reported as unparseable."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture("append_doc_soft_paragraph",
+                          {"text": "ACT-3: a perfectly normal action"})
+        scn.sync()
+
+        data = _run_verify_consistency(scn)
+        issues = data.get("issues") or []
+        assert not any("does not parse" in i for i in issues), f"unexpected unparseable report: {issues!r}"
+        assert data.get("counts", {}).get("unparseable") == 0
+    finally:
+        scn.close()
+
+
+def test_xvlu_prose_paragraph_not_reported(settings, request):
+    """A plain prose paragraph with no action-token-like prefix is not an
+    action and is not reported as unparseable."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture("append_doc_soft_paragraph",
+                          {"text": "just some ordinary paragraph text, nothing to see here"})
+        scn.sync()
+
+        data = _run_verify_consistency(scn)
+        issues = data.get("issues") or []
+        assert not any("does not parse" in i for i in issues), f"unexpected unparseable report: {issues!r}"
+        assert data.get("counts", {}).get("unparseable") == 0
     finally:
         scn.close()

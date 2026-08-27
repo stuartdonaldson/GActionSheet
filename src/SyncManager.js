@@ -947,13 +947,16 @@ function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
   // indistinguishable from a single-line "AI-N: <that line's text>". Keeping
   // the \n in afterToken is what lets the empty-first-line check below
   // detect the bare-token case.
-  var tokenMatch = fullText.match(/^AI-(\d+):[ \t]*/);
+  var tokenMatch = _matchActionTokenPrefixed(fullText);
   if (!tokenMatch) return null;
+  // gts-jxrw: only consume space/tab after the colon here, NOT \n — see comment above.
+  var trailingWs = fullText.slice(tokenMatch.match.length).match(/^[ \t]*/)[0];
+  var consumedLen = tokenMatch.match.length + trailingWs.length;
 
-  var N          = parseInt(tokenMatch[1], 10);
-  var globalId   = docId + '/AI-' + N;
-  var afterToken = fullText.slice(tokenMatch[0].length);
-  var afterOffsets = fullOffsets.slice(tokenMatch[0].length);
+  var N          = tokenMatch.N;
+  var globalId   = docId + '/' + tokenMatch.prefix + '-' + N;
+  var afterToken = fullText.slice(consumedLen);
+  var afterOffsets = fullOffsets.slice(consumedLen);
 
   // gts-jxrw: an empty first line after the token ("AI-N: " with nothing
   // else on that line) means the user left the action bare. Do NOT absorb
@@ -1003,34 +1006,33 @@ function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
     }
     if (ac.getType() === DocumentApp.ElementType.TEXT) {
       var t  = ac.asText().getText();
-      var em = t.match(/^[\s]*([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
+      var em = t.match(_ASSIGNEE_TEXT_REGEX_LEADING_WS);
       if (em) { assigneeEmail = em[1]; assigneeName = _nameFromEmail(assigneeEmail); }
       break;
     }
   }
 
-  var actionText    = afterToken;
-  var actionOffsets = afterOffsets;
-  var assigneeStrip = afterToken.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
-  if (assigneeStrip) {
-    actionText = afterToken.slice(assigneeStrip[0].length);
-    actionOffsets = afterOffsets.slice(assigneeStrip[0].length);
-    if (!assigneeEmail) {
-      assigneeEmail = assigneeStrip[1];
-      assigneeName  = _nameFromEmail(assigneeEmail);
-    }
+  // gts-q23h: the assignee strip and the header-line-scoped status extraction
+  // both live in _parseActionHeaderLineTracked, shared with the soft-return
+  // parser. A PERSON chip found in the child walk above still wins over a
+  // text assignee found here (chips are the richer source: they carry a real
+  // display name), but the text form is stripped off actionText either way.
+  var header            = _parseActionHeaderLineTracked(afterToken, afterOffsets);
+  var actionText        = header.actionText;
+  var actionOffsets     = header.offsets;
+  var status            = header.status;
+  var hasExplicitStatus = header.hasExplicitStatus;
+  if (!assigneeEmail && header.assigneeEmail) {
+    assigneeEmail = header.assigneeEmail;
+    assigneeName  = header.assigneeName;
   }
-
-  var statusTracked     = _extractStatusTokenTracked(actionText, actionOffsets);
-  var status            = statusTracked.status;
-  var hasExplicitStatus = statusTracked.hasExplicitStatus;
-  actionText            = statusTracked.actionText;
-  actionOffsets         = statusTracked.offsets;
 
   // gts-zocq SCAN: bold/italic runs over the final actionText, sampled from
   // the paragraph's own Text element at each surviving character's original
   // offset. [] when nothing in range is bold/italic (common case).
   var runs = _extractInlineRuns(para.editAsText(), actionText, actionOffsets);
+  // gts-eezz: ADR-0027 rule 5/5a continuation fields, {} when none.
+  var customFields = _buildCustomFieldsFromBlocks(para.editAsText(), header.customFieldBlocks || []);
 
   var action = {
     bodyChildIndex:    bodyIdx,
@@ -1043,7 +1045,8 @@ function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
     status:            status,
     hasExplicitStatus: hasExplicitStatus,
     isDuplicate:       seenN[N] === true,
-    runs:              runs
+    runs:              runs,
+    customFields:      customFields
   };
   seenN[N] = true;
   return action;
@@ -1193,14 +1196,15 @@ function _extractStatusTokenTracked(actionText, offsets) {
 
 /**
  * Converts a Sheets RichTextValue's getRuns() array (each run the longest
- * substring with consistent styling) into gts-zocq's {start,end,bold,italic}
+ * substring with consistent styling) into gts-zocq's {start,end,bold,italic,link}
  * shape, using cumulative run-text length for offsets (Sheets' RichTextValue
  * API exposes runs in order but not their own start/end indices directly).
- * Returns [] when nothing in the cell is bold/italic (mirrors
- * _extractInlineRuns' "empty means plain" convention).
+ * Link uses RichTextValue's native per-run getLinkUrl() (ADR-0028 — no new
+ * sheet column). Returns [] when nothing in the cell is bold/italic/linked
+ * (mirrors _extractInlineRuns' "empty means plain" convention).
  *
  * @param {Array<GoogleAppsScript.Spreadsheet.RichTextValue>} richRuns
- * @returns {Array<{start:number,end:number,bold:boolean,italic:boolean}>}
+ * @returns {Array<{start:number,end:number,bold:boolean,italic:boolean,link:?string}>}
  */
 function _runsFromRichTextRuns(richRuns) {
   var runs = [];
@@ -1212,10 +1216,11 @@ function _runsFromRichTextRuns(richRuns) {
     var style = seg.getTextStyle();
     var bold   = !!style.isBold();
     var italic = !!style.isItalic();
+    var link   = seg.getLinkUrl() || null;
     var start = offset;
     var end   = offset + text.length;
-    runs.push({ start: start, end: end, bold: bold, italic: italic });
-    if (bold || italic) hasFormatting = true;
+    runs.push({ start: start, end: end, bold: bold, italic: italic, link: link });
+    if (bold || italic || link) hasFormatting = true;
     offset = end;
   }
   return hasFormatting ? runs : [];
@@ -1226,7 +1231,7 @@ function _runsFromRichTextRuns(richRuns) {
  * cell's RichTextValue — the "flush a sheetWins/Dirty row" read path.
  *
  * @param {GoogleAppsScript.Spreadsheet.Range} range  a single-cell range
- * @returns {Array<{start:number,end:number,bold:boolean,italic:boolean}>}
+ * @returns {Array<{start:number,end:number,bold:boolean,italic:boolean,link:?string}>}
  */
 function _richTextRunsForCell(range) {
   var rtv = range.getRichTextValue();
@@ -1235,13 +1240,14 @@ function _richTextRunsForCell(range) {
 }
 
 /**
- * Builds a RichTextValue applying gts-zocq inline bold/italic `runs` over
- * `text`, or null when runs is empty — callers fall back to the pre-existing
- * setValue(text) for the common unformatted case (zero behavior/perf change
- * for plain action text).
+ * Builds a RichTextValue applying gts-zocq inline bold/italic/link `runs`
+ * over `text`, or null when runs is empty — callers fall back to the
+ * pre-existing setValue(text) for the common unformatted case (zero
+ * behavior/perf change for plain action text). Link uses RichTextValue's
+ * native setLinkUrl (ADR-0028 — no new sheet column).
  *
  * @param {string} text
- * @param {Array<{start:number,end:number,bold:boolean,italic:boolean}>} runs
+ * @param {Array<{start:number,end:number,bold:boolean,italic:boolean,link:?string}>} runs
  * @returns {?GoogleAppsScript.Spreadsheet.RichTextValue}
  */
 function _buildRichTextValueForActionText(text, runs) {
@@ -1255,6 +1261,7 @@ function _buildRichTextValueForActionText(text, runs) {
     if (end <= start) continue;
     var style = SpreadsheetApp.newTextStyle().setBold(!!r.bold).setItalic(!!r.italic).build();
     builder.setTextStyle(start, end, style);
+    if (r.link) builder.setLinkUrl(start, end, r.link);
     applied = true;
   }
   return applied ? builder.build() : null;
@@ -1269,7 +1276,7 @@ function _buildRichTextValueForActionText(text, runs) {
  * characters of the text actually stored in the sheet.
  *
  * @param {string} rawText
- * @param {Array<{start:number,end:number,bold:boolean,italic:boolean}>} runs
+ * @param {Array<{start:number,end:number,bold:boolean,italic:boolean,link:?string}>} runs
  * @returns {{text:string, runs:Array<Object>}}
  */
 function _shiftRunsForNormalize(rawText, runs) {
@@ -1281,23 +1288,27 @@ function _shiftRunsForNormalize(rawText, runs) {
     var r = runs[i];
     var start = Math.max(0, r.start - leadWs);
     var end   = Math.min(trimmed.length, r.end - leadWs);
-    if (end > start) shifted.push({ start: start, end: end, bold: !!r.bold, italic: !!r.italic });
+    if (end > start) shifted.push({ start: start, end: end, bold: !!r.bold, italic: !!r.italic, link: r.link || null });
   }
   return { text: trimmed, runs: shifted };
 }
 
 /**
- * Collapses actionText's per-character bold/italic (sampled at each
- * offsets[i] via textEl.isBold/isItalic(offset), -1 offsets treated as
- * unformatted) into a minimal set of {start,end,bold,italic} runs. Returns
- * [] (not a single all-false run) when nothing in the range is bold or
- * italic — the common, unformatted case stays cheap and the sheet/transit
- * payload carries no `runs` noise for plain text (gts-zocq transit decision).
+ * Collapses actionText's per-character bold/italic/link (sampled at each
+ * offsets[i] via textEl.isBold/isItalic/getLinkUrl(offset), -1 offsets
+ * treated as unformatted) into a minimal set of {start,end,bold,italic,link}
+ * runs. Returns [] (not a single all-false run) when nothing in the range is
+ * bold, italic, or linked — the common, unformatted case stays cheap and the
+ * sheet/transit payload carries no `runs` noise for plain text (gts-zocq
+ * transit decision, extended to links by ADR-0028 rule 3).
+ *
+ * ADR-0028 boundary: offsets covers actionText only (post token/assignee
+ * strip) — a link sampled here never extends into the chip token range.
  *
  * @param {GoogleAppsScript.Document.Text} textEl  para.editAsText()
  * @param {string} actionText
  * @param {Array<number>} offsets  same length as actionText, -1 = synthetic
- * @returns {Array<{start:number,end:number,bold:boolean,italic:boolean}>}
+ * @returns {Array<{start:number,end:number,bold:boolean,italic:boolean,link:?string}>}
  */
 function _extractInlineRuns(textEl, actionText, offsets) {
   var runs = [];
@@ -1306,17 +1317,18 @@ function _extractInlineRuns(textEl, actionText, offsets) {
     var off    = offsets[i];
     var bold   = off >= 0 ? !!textEl.isBold(off)   : false;
     var italic = off >= 0 ? !!textEl.isItalic(off) : false;
-    if (cur && cur.bold === bold && cur.italic === italic) {
+    var link   = off >= 0 ? (textEl.getLinkUrl(off) || null) : null;
+    if (cur && cur.bold === bold && cur.italic === italic && cur.link === link) {
       cur.end = i + 1;
     } else {
       if (cur) runs.push(cur);
-      cur = { start: i, end: i + 1, bold: bold, italic: italic };
+      cur = { start: i, end: i + 1, bold: bold, italic: italic, link: link };
     }
   }
   if (cur) runs.push(cur);
   var hasFormatting = false;
   for (var ri = 0; ri < runs.length; ri++) {
-    if (runs[ri].bold || runs[ri].italic) { hasFormatting = true; break; }
+    if (runs[ri].bold || runs[ri].italic || runs[ri].link) { hasFormatting = true; break; }
   }
   return hasFormatting ? runs : [];
 }
@@ -1368,6 +1380,220 @@ function _extractStatusToken(actionText) {
   for (var oi = 0; oi < actionText.length; oi++) identityOffsets.push(oi);
   var tracked = _extractStatusTokenTracked(actionText, identityOffsets);
   return { status: tracked.status, hasExplicitStatus: tracked.hasExplicitStatus, actionText: tracked.actionText };
+}
+
+/**
+ * ADR-0027 rule 5/5a: bounded fieldLine production, gts-eezz.
+ *
+ * fieldLine := fieldName ':' ( [ \t] inlineValue? | EOL )
+ * fieldName := [A-Za-z] [A-Za-z0-9 _-]{0,31}
+ *
+ * gts-eezz resolution (human decision, 2026-08-26 — the written grammar's
+ * charset alone cannot separate a field name like 'Consult With' from prose
+ * that happens to contain a colon, e.g. 'then he said: we should ship it' —
+ * 'then he said' is 12 chars, all letters/spaces, and satisfies the charset
+ * exactly like 'Consult With' does; ADR-0027's own stated reason for
+ * rejecting it ("exceeds 32 characters") is not actually true of that
+ * example): every space-separated WORD in fieldName must start with an
+ * uppercase letter, matching every field-name example on file (Target,
+ * Progress, Notes, Consult With, Due) and excluding lowercase sentence
+ * continuations. This is a narrowing of the written production, not
+ * documented in ADR-0027/CONTEXT.md itself — tracked as a gap to fold back
+ * into those docs (see gts-eezz).
+ *
+ * The 32-char total-length bound (ADR-0027 Consequences: "a judgment call")
+ * is enforced separately, after the regex match, since regex quantifier
+ * bounds compose awkwardly with the per-word uppercase constraint.
+ */
+var _FIELD_LINE_REGEX = /^([A-Z][A-Za-z0-9_-]*(?: [A-Z][A-Za-z0-9_-]*)*):(?:[ \t](.*))?$/;
+var _FIELD_NAME_MAX_LENGTH = 32;
+
+/**
+ * Splits the continuation text following an action's header line (ADR-0027
+ * rule 5a) into the action-text prose block and an ordered list of
+ * custom-field blocks.
+ *
+ * A paragraph's continuation is an ordered sequence of blocks: the action
+ * body opens block 0 (unnamed — its lines fold back into actionText); each
+ * recognized fieldLine closes the currently open block and opens a new one
+ * named by its field. A prose line (no leading whitespace, no match for
+ * _FIELD_LINE_REGEX, or a field name over _FIELD_NAME_MAX_LENGTH chars)
+ * belongs to whichever block is open when it is read — it never jumps back
+ * to block 0 once a field has been opened. A repeated field name reopens its
+ * EXISTING block (append, not overwrite) rather than starting a new one, so
+ * field order in the output is first-appearance order.
+ *
+ * `restText`/`restOffsets` is the tracked continuation text starting with the
+ * leading '\n' after the header line (i.e. exactly what
+ * `_parseActionHeaderLineTracked` used to append to actionText verbatim), or
+ * '' when the action has no continuation at all.
+ *
+ * @param {string} restText
+ * @param {Array<number>} restOffsets  same length as restText
+ * @returns {{actionTextExtra: string, actionTextExtraOffsets: Array<number>,
+ *            customFieldBlocks: Array<{name: string, text: string, offsets: Array<number>}>}}
+ */
+function _parseFieldContinuationBlocksTracked(restText, restOffsets) {
+  if (!restText) {
+    return { actionTextExtra: '', actionTextExtraOffsets: [], customFieldBlocks: [] };
+  }
+
+  function joinTrackedLines(lines, offsetsList) {
+    if (!lines.length) return { text: '', offsets: [] };
+    var text = lines[0];
+    var offsets = offsetsList[0];
+    for (var i = 1; i < lines.length; i++) {
+      text += '\n' + lines[i];
+      offsets = offsets.concat([-1], offsetsList[i]);
+    }
+    return { text: text, offsets: offsets };
+  }
+
+  // allLines[0] is always '' — the (empty) text before the leading '\n' this
+  // rest string starts with — and is not a continuation line.
+  var allLines = _splitTrackedLines(restText, restOffsets).slice(1);
+
+  var block0 = { lines: [], offsetsList: [] };
+  var current = block0;
+  var fieldsByName = {};
+  var fieldOrder = [];
+
+  for (var i = 0; i < allLines.length; i++) {
+    var line = allLines[i];
+    var m = _FIELD_LINE_REGEX.exec(line.text);
+    if (m && m[1].length <= _FIELD_NAME_MAX_LENGTH) {
+      var name  = m[1];
+      var value = m[2] || '';
+      var valueStart   = line.text.length - value.length;
+      var valueOffsets = line.offsets.slice(valueStart);
+      var block = fieldsByName[name];
+      if (!block) {
+        block = { lines: [], offsetsList: [] };
+        fieldsByName[name] = block;
+        fieldOrder.push(name);
+      }
+      block.lines.push(value);
+      block.offsetsList.push(valueOffsets);
+      current = block;
+    } else {
+      current.lines.push(line.text);
+      current.offsetsList.push(line.offsets);
+    }
+  }
+
+  var actionExtra = joinTrackedLines(block0.lines, block0.offsetsList);
+  var customFieldBlocks = fieldOrder.map(function (name) {
+    var block  = fieldsByName[name];
+    var joined = joinTrackedLines(block.lines, block.offsetsList);
+    return { name: name, text: joined.text, offsets: joined.offsets };
+  });
+
+  return {
+    actionTextExtra:        actionExtra.text,
+    actionTextExtraOffsets: actionExtra.offsets,
+    customFieldBlocks:      customFieldBlocks
+  };
+}
+
+/**
+ * Converts the {name, text, offsets} blocks from
+ * _parseFieldContinuationBlocksTracked into the custom_fields shape
+ * (ADR-0024 / ADR-0028 rule 6): {FieldName: {text, runs}}. `{}` when there
+ * are no blocks — the additive-optional convention `runs` established
+ * (gts-zocq), extended here to the whole field.
+ *
+ * @param {GoogleAppsScript.Document.Text} textEl  para.editAsText()
+ * @param {Array<{name: string, text: string, offsets: Array<number>}>} blocks
+ * @returns {Object<string, {text: string, runs: Array<Object>}>}
+ */
+function _buildCustomFieldsFromBlocks(textEl, blocks) {
+  var customFields = {};
+  for (var i = 0; i < blocks.length; i++) {
+    var b = blocks[i];
+    customFields[b.name] = { text: b.text, runs: _extractInlineRuns(textEl, b.text, b.offsets) };
+  }
+  return customFields;
+}
+
+/**
+ * ADR-0027 rules 1-4: the shared header-line parser.
+ *
+ * `text`/`offsets` are the tracked (gts-zocq) action body — everything after
+ * the ACT-N:/AI-N: token, INCLUDING any soft-return continuation lines. This
+ * helper owns the three header-line rules so the two paragraph parsers
+ * (_parseParagraphAsFloatingAction's single-token fast path and
+ * _parseSoftReturnParagraphActions' soft-return path) cannot drift on them —
+ * the same drift _extractStatusTokenTracked was extracted to prevent
+ * (gts-v0py, gts-q23h).
+ *
+ * Rule 1 — assignee: an optional leading '@' sigil is accepted and is NOT
+ * stored ('@jane@example.com' and 'jane@example.com' both yield
+ * assigneeEmail='jane@example.com'). The trailing '\s*' is deliberately
+ * whitespace-general, not '[ \t]*': a bare 'ACT-7: jane@example.com' followed
+ * by a continuation line has always consumed that line break here, and rule 7
+ * (strict superset) requires that output stay identical.
+ *
+ * Rule 4 — status scope: the status token is extracted from the HEADER LINE
+ * only (the text up to the first soft return, after the assignee strip), then
+ * the continuation remainder is re-appended verbatim. Scanning the whole
+ * paragraph, as this code did before, silently missed a header-line status
+ * once continuation lines existed and could read a field value's trailing
+ * parenthesis as the status. The position rule WITHIN the header line
+ * (gts-28q/v0py/1tbe) is unchanged — see _extractStatusTokenTracked.
+ *
+ * Rule 3 — '|' carries no meaning: it is literal text everywhere. There is no
+ * delimiter and no escape, so there is deliberately no pipe handling here or
+ * anywhere else in the scanner.
+ *
+ * A paragraph with no continuation lines takes the identical path it took
+ * before this helper existed (rest is empty), so rule 7 holds by construction.
+ *
+ * @param {string} text
+ * @param {Array<number>} offsets  same length as text
+ * @returns {{assigneeEmail: string, assigneeName: string, actionText: string,
+ *            offsets: Array<number>, status: string, hasExplicitStatus: boolean}}
+ */
+function _parseActionHeaderLineTracked(text, offsets) {
+  var assigneeEmail = '';
+  var assigneeName  = '';
+  var m = text.match(_ASSIGNEE_TEXT_REGEX);
+  if (m) {
+    assigneeEmail = m[1];
+    assigneeName  = _nameFromEmail(assigneeEmail);
+    text    = text.slice(m[0].length);
+    offsets = offsets.slice(m[0].length);
+  }
+
+  var breakIdx      = text.indexOf('\n');
+  var header        = breakIdx === -1 ? text : text.slice(0, breakIdx);
+  var headerOffsets = breakIdx === -1 ? offsets : offsets.slice(0, breakIdx);
+  var rest          = breakIdx === -1 ? '' : text.slice(breakIdx);
+  var restOffsets   = breakIdx === -1 ? [] : offsets.slice(breakIdx);
+
+  var tracked = _extractStatusTokenTracked(header, headerOffsets);
+
+  // gts-eezz: rest (continuation lines) is no longer appended to actionText
+  // verbatim. ADR-0027 rule 5a splits it into the action-text prose block
+  // (block 0, folded back in below — identical output to the old verbatim
+  // append for a paragraph with no Field: lines, preserving rule 7's
+  // strict-superset guarantee) and an ordered list of custom-field blocks.
+  var continuation  = _parseFieldContinuationBlocksTracked(rest, restOffsets);
+  var actionText    = tracked.actionText;
+  var actionOffsets = tracked.offsets;
+  if (continuation.actionTextExtra) {
+    actionText    = actionText + '\n' + continuation.actionTextExtra;
+    actionOffsets = actionOffsets.concat([-1], continuation.actionTextExtraOffsets);
+  }
+
+  return {
+    assigneeEmail:      assigneeEmail,
+    assigneeName:       assigneeName,
+    actionText:         actionText,
+    offsets:            actionOffsets,
+    status:             tracked.status,
+    hasExplicitStatus:  tracked.hasExplicitStatus,
+    customFieldBlocks:  continuation.customFieldBlocks
+  };
 }
 
 /**
@@ -1426,6 +1652,7 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
   var lines   = normalized.split('\n');
   var results = [];
   var curN    = null;
+  var curPrefix = null;
   var curLines = [];
   var curOffsets = []; // gts-zocq: parallel per-line offsets[], see below
 
@@ -1454,26 +1681,22 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
     rawText = trimmed.text;
     var offsets = trimmed.offsets;
 
-    var assigneeEmail = '';
-    var assigneeName  = '';
-    var emailMatch = rawText.match(/^([\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+)\s*/i);
-    if (emailMatch) {
-      assigneeEmail = emailMatch[1];
-      assigneeName  = _nameFromEmail(assigneeEmail);
-      rawText = rawText.slice(emailMatch[0].length);
-      offsets = offsets.slice(emailMatch[0].length);
-    }
-    var statusTracked     = _extractStatusTokenTracked(rawText, offsets);
-    var status            = statusTracked.status;
-    var hasExplicitStatus = statusTracked.hasExplicitStatus;
-    rawText               = statusTracked.actionText;
-    offsets               = statusTracked.offsets;
+    // gts-q23h: same shared header-line parser the single-token fast path uses.
+    var header            = _parseActionHeaderLineTracked(rawText, offsets);
+    var assigneeEmail     = header.assigneeEmail;
+    var assigneeName      = header.assigneeName;
+    var status            = header.status;
+    var hasExplicitStatus = header.hasExplicitStatus;
+    rawText               = header.actionText;
+    offsets               = header.offsets;
     var N = curN;
     var runs = _extractInlineRuns(para.editAsText(), rawText, offsets);
+    // gts-eezz: ADR-0027 rule 5/5a continuation fields, {} when none.
+    var customFields = _buildCustomFieldsFromBlocks(para.editAsText(), header.customFieldBlocks || []);
     results.push({
       bodyChildIndex:    bodyIdx,
       paragraph:         para,
-      globalId:          docId + '/AI-' + N,
+      globalId:          docId + '/' + curPrefix + '-' + N,
       N:                 N,
       assigneeEmail:     assigneeEmail,
       assigneeName:      assigneeName,
@@ -1481,7 +1704,8 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
       status:            status,
       hasExplicitStatus: hasExplicitStatus,
       isDuplicate:       seenN[N] === true,
-      runs:              runs
+      runs:              runs,
+      customFields:      customFields
     });
     seenN[N] = true;
   }
@@ -1489,12 +1713,14 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
     var lineOffsets = trackedLineOffsets[i];
-    var m = line.match(/^AI-(\d+):\s*/);
+    var m = _matchActionTokenPrefixed(line);
     if (m) {
       flush();
-      curN    = parseInt(m[1], 10);
-      curLines = [line.slice(m[0].length)];
-      curOffsets = [lineOffsets.slice(m[0].length)];
+      curN    = m.N;
+      curPrefix = m.prefix;
+      var consumed = m.match.length + (line.slice(m.match.length).match(/^\s*/) || [''])[0].length;
+      curLines = [line.slice(consumed)];
+      curOffsets = [lineOffsets.slice(consumed)];
     } else if (curN !== null) {
       curLines.push(line); // continuation line
       curOffsets.push(lineOffsets);
@@ -1512,15 +1738,28 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
  * multi-token pattern (new path, text-based assignee only).
  *
  * Appends any found actions to the `actions` array in place.
+ *
+ * @param {Array} [unparseableOut]  ADR-0027 rule 6 / gts-xvlu. When provided,
+ *   a paragraph whose text begins with a token (ACT|AI)-\d+ but does not
+ *   complete the grammar (no trailing colon — e.g. the gts-tis pipe-delimited
+ *   spelling) is pushed here as {bodyChildIndex, leadingText} instead of
+ *   being silently dropped. A prose paragraph with no token-like prefix is
+ *   never pushed. Optional and additive: omitted (every pre-existing caller)
+ *   is a no-op, unchanged from before this parameter existed.
  */
-function _collectActionsFromParagraph(para, bodyIdx, docId, seenN, actions) {
+function _collectActionsFromParagraph(para, bodyIdx, docId, seenN, actions, unparseableOut) {
   var raw  = para.getText();
   var text = _normalizeLineEndings(raw).replace(/\n$/, '');
-  var tokenCount = (text.match(/(?:^|\n)AI-\d+:/g) || []).length;
-  if (tokenCount === 0) return;
+  var tokenCount = (text.match(new RegExp('(?:^|\\n)(?:' + _ACTION_TOKEN_READ_PREFIXES.join('|') + ')-\\d+:', 'g')) || []).length;
+  if (tokenCount === 0) {
+    if (unparseableOut && _ACTION_TOKEN_LOOKS_LIKE_REGEX_ANCHORED.test(text)) {
+      unparseableOut.push({ bodyChildIndex: bodyIdx, leadingText: text.split('\n')[0] });
+    }
+    return;
+  }
 
   // Single token at paragraph start: use existing logic (handles PERSON chips).
-  if (tokenCount === 1 && /^AI-\d+:/.test(text)) {
+  if (tokenCount === 1 && _ACTION_TOKEN_REGEX_ANCHORED.test(text)) {
     var action = _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN);
     if (action) actions.push(action);
     return;
@@ -1541,9 +1780,12 @@ function _collectActionsFromParagraph(para, bodyIdx, docId, seenN, actions) {
  * one or more AI-N: tokens after soft-return (\n) lines.
  *
  * @param {GoogleAppsScript.Document.Document} doc
+ * @param {Array} [unparseableOut]  ADR-0027 rule 6 / gts-xvlu — optional
+ *   out-array; see _collectActionsFromParagraph. Top-level body paragraphs/
+ *   list items only, not table cells — out of scope for the frozen AC.
  * @returns {Array<{bodyChildIndex, paragraph, globalId, N, assigneeEmail, assigneeName, actionText, status, hasExplicitStatus, isDuplicate}>}
  */
-function _scanFloatingActions(doc) {
+function _scanFloatingActions(doc, unparseableOut) {
   var body    = doc.getBody();
   var docId   = doc.getId();
   var n       = body.getNumChildren();
@@ -1577,24 +1819,24 @@ function _scanFloatingActions(doc) {
     }
 
     var para = isPara ? child.asParagraph() : child.asListItem();
-    _collectActionsFromParagraph(para, i, docId, seenN, actions);
+    _collectActionsFromParagraph(para, i, docId, seenN, actions, unparseableOut);
   }
   return actions;
 }
 
 /**
- * Finds paragraphs starting with the bare "AI:" placeholder (no number) and
- * rewrites them as "AI-N:" using the next available N in the document.
- * Called in syncDocument before _scanFloatingActions so the scanner always
- * sees fully-formed AI-N: tokens.
+ * Finds paragraphs starting with the bare "AI:" or "ACT:" placeholder (no
+ * number) and rewrites them as canonical "ACT-N:" using the next available N
+ * in the document. Called in syncDocument before _scanFloatingActions so the
+ * scanner always sees fully-formed ACT-N:/AI-N: tokens.
  *
  * @param {GoogleAppsScript.Document.Document} doc
  * @returns {{ count: number, newGlobalIds: string[] }}
  */
 /**
  * Collects all paragraph elements (including those in table cells, excluding
- * the tracker table) that have AI-N: or AI: tokens, for use in
- * _assignPlaceholderTokens.
+ * the tracker table) that have a numbered token (ACT-N:/AI-N:) or a bare
+ * trigger (AI:/ACT:), for use in _assignPlaceholderTokens.
  *
  * @returns {{ numbered: number[], placeholders: GoogleAppsScript.Document.Paragraph[] }}
  */
@@ -1612,17 +1854,18 @@ function _collectTokenParagraphs(body) {
     var lineOffset = 0;
     for (var li = 0; li < lines.length; li++) {
       var line = lines[li];
-      var m = line.match(/^AI-(\d+):/);
+      var m = _ACTION_TOKEN_REGEX_ANCHORED.exec(line);
+      var bareTrigger = m ? null : _matchActionTokenBareTrigger(line);
       if (m) {
         numbered.push(parseInt(m[1], 10));
-      } else if (/^AI:/.test(line)) {
+      } else if (bareTrigger) {
         // lineOffset is the character offset into the normalized text.
         // The actual paragraph text may use different byte widths for the
         // line separator; editAsText offsets work on the raw getText() bytes.
         // Recompute offset from raw text using a search from lineOffset onward.
         var rawOffset = raw.indexOf(line, lineOffset);
         if (rawOffset === -1) rawOffset = lineOffset; // fallback
-        placeholders.push({ para: para, offset: rawOffset });
+        placeholders.push({ para: para, offset: rawOffset, triggerLen: bareTrigger.match.length });
       }
       lineOffset += lines[li].length + 1; // +1 for the normalized \n
     }
@@ -1685,13 +1928,18 @@ function _assignPlaceholderTokens(doc) {
     for (var k = groupStart; k < pi; k++) {
       maxN++;
       groupNs.push(maxN);
-      newGlobalIds.push(docId + '/AI-' + maxN);
+      newGlobalIds.push(docId + '/' + _actionTokenId(maxN));
       assigned++;
     }
-    // Insert '-N' right-to-left within the paragraph to avoid offset drift.
-    // offset+2 is the position between 'AI' and ':'.
+    // Replace the bare 'AI:'/'ACT:' placeholder right-to-left within the
+    // paragraph (to avoid offset drift) with the canonical 'ACT-N:' token —
+    // new actions are always written as ACT-N: (ADR-0023 rule 1), regardless
+    // of which bare-trigger spelling the user typed.
     for (var k = pi - 1; k >= groupStart; k--) {
-      groupPara.editAsText().insertText(found.placeholders[k].offset + 2, '-' + groupNs[k - groupStart]);
+      var offset = found.placeholders[k].offset;
+      var triggerLen = found.placeholders[k].triggerLen;
+      groupPara.editAsText().deleteText(offset, offset + triggerLen - 1);
+      groupPara.editAsText().insertText(offset, _actionTokenPrefix(groupNs[k - groupStart]));
     }
   }
 
@@ -2970,8 +3218,8 @@ function configFormat() {
 
   var sample = result.sample;
   ui.alert(
-    'Action format updated from AI-' + result.N + ' in "' + result.docName + '".\n\n' +
-    'AI-N: token — ' + sample.aiToken.fontFamily + ', ' + sample.aiToken.fontSize + 'pt, ' + sample.aiToken.color +
+    'Action format updated from ' + result.actionId + ' in "' + result.docName + '".\n\n' +
+    _actionTokenPrefix('N') + ' token — ' + sample.aiToken.fontFamily + ', ' + sample.aiToken.fontSize + 'pt, ' + sample.aiToken.color +
       (sample.aiToken.bold ? ', bold' : '') + (sample.aiToken.italic ? ', italic' : '') + (sample.aiToken.underline ? ', underline' : '') + '\n' +
     'Action text — ' + sample.actionText.fontFamily + ', ' + sample.actionText.fontSize + 'pt, ' + sample.actionText.color +
       (sample.actionText.bold ? ', bold' : '') + (sample.actionText.italic ? ', italic' : '') + (sample.actionText.underline ? ', underline' : '')
@@ -3012,13 +3260,14 @@ function _configFormatForDoc(docId) {
 
   var actions = _scanFloatingActions(doc);
   if (actions.length === 0) {
-    return { ok: false, message: 'No action items (AI-N:) found in that document.' };
+    return { ok: false, message: 'No action items (' + _actionTokenPrefix('N') + ') found in that document.' };
   }
 
-  var first  = actions[0];
-  var sample = _sampleActionItemStyle(first);
+  var first     = actions[0];
+  var firstToken = parseGlobalId(first.globalId).actionId;
+  var sample    = _sampleActionItemStyle(first);
   if (!sample) {
-    return { ok: false, message: 'Could not determine text style for the first action item (AI-' + first.N + ').' };
+    return { ok: false, message: 'Could not determine text style for the first action item (' + firstToken + ').' };
   }
 
   _writeActionFormatConfig(_openActionSheetSpreadsheet(), sample);
@@ -3028,7 +3277,7 @@ function _configFormatForDoc(docId) {
   GasLogger.log('configFormat.complete', { docId: docId, N: first.N, aiToken: sample.aiToken, actionText: sample.actionText });
   GasLogger.flush();
 
-  return { ok: true, docId: docId, N: first.N, docName: docName, sample: sample };
+  return { ok: true, docId: docId, N: first.N, actionId: firstToken, docName: docName, sample: sample };
 }
 
 /**
@@ -3045,11 +3294,15 @@ function _sampleActionItemStyle(action) {
   var para     = action.paragraph;
   var text     = para.editAsText();
   var fullText = para.getText();
-  var prefix   = 'AI-' + action.N + ':';
-  var tokenStart = fullText.indexOf(prefix);
+  var prefix = null, tokenStart = -1;
+  for (var pfxi = 0; pfxi < _ACTION_TOKEN_READ_PREFIXES.length; pfxi++) {
+    var candidate = _ACTION_TOKEN_READ_PREFIXES[pfxi] + '-' + action.N + ':';
+    var idx = fullText.indexOf(candidate);
+    if (idx >= 0) { prefix = candidate; tokenStart = idx; break; }
+  }
   if (tokenStart < 0) return null;
 
-  var tokenSampleOffset = tokenStart + 1; // safely inside "AI-"
+  var tokenSampleOffset = tokenStart + 1; // safely inside the token prefix
   var tokenEnd          = tokenStart + prefix.length; // just after ':'
   var afterToken         = fullText.slice(tokenEnd);
   var leadingSpace        = afterToken.match(/^\s*/)[0].length;
@@ -3142,7 +3395,15 @@ var _FLUSH_FIELDS = [
  */
 function _collectFlushOccurrences(items, N) {
   var found = [];
-  var prefix = 'AI-' + N + ':';
+  // ADR-0023 consequence: this exact-string paragraph lookup must try both
+  // prefixes or flush will fail to locate a pre-existing AI-N: paragraph.
+  var candidates = _ACTION_TOKEN_READ_PREFIXES.map(function (p) { return p + '-' + N + ':'; });
+  function prefixAt(text, idx) {
+    for (var ci = 0; ci < candidates.length; ci++) {
+      if (text.substr(idx, candidates[ci].length) === candidates[ci]) return candidates[ci];
+    }
+    return null;
+  }
   for (var ii = 0; ii < items.length; ii++) {
     var item = items[ii];
     if (item.paragraph) {
@@ -3160,15 +3421,14 @@ function _collectFlushOccurrences(items, N) {
         runMap.push({ startDocIdx: el.startIndex, startTextIdx: fullText.length, len: tc.length });
         fullText += tc;
       }
-      // Find AI-N: at position 0 or immediately after a soft-return char.
+      // Find the ACT-N:/AI-N: token at position 0 or immediately after a soft-return char.
       var tokenTextIdx = -1;
-      if (fullText.substr(0, prefix.length) === prefix) {
+      if (prefixAt(fullText, 0)) {
         tokenTextIdx = 0;
       } else {
-        for (var si = 0; si < fullText.length - prefix.length; si++) {
+        for (var si = 0; si < fullText.length; si++) {
           var ch = fullText[si];
-          if ((ch === '\n' || ch === '\r' || ch === '\v') &&
-              fullText.substr(si + 1, prefix.length) === prefix) {
+          if ((ch === '\n' || ch === '\r' || ch === '\v') && prefixAt(fullText, si + 1)) {
             tokenTextIdx = si + 1;
             break;
           }
@@ -3237,11 +3497,54 @@ function _collectFlushOccurrences(items, N) {
  *          assigneeEmail:string, assigneeName:string}} item
  * @returns {Array<Object>} requests to append to one batchUpdate call
  */
+/**
+ * ADR-0027 rules 4/5a, write side: renders an action body with its status
+ * token at the end of the HEADER LINE rather than at the end of the whole
+ * multi-line body.
+ *
+ * The read side (_parseActionHeaderLineTracked) extracts the status from the
+ * header line only, so a flush that appended '(Status)' after the last
+ * continuation line — as this code did before gts-q23h — would write a token
+ * the very next rescan could no longer see: the action would silently revert
+ * to 'Open' and accumulate a second token on the following flush. Placement
+ * and extraction have to agree, and the header line is where the grammar puts
+ * it (`actionBody := text [ statusToken ]`, rule 5a's "the action body's first
+ * line is the header line's text ... status token stripped").
+ *
+ * `text` is post-_toSoftReturnText, so its line breaks are U+000B.
+ * `splitIdx` is where the suffix was inserted, which run offsets (gts-zocq)
+ * relative to the un-suffixed body must be mapped across.
+ *
+ * @param {string} text    action body, soft-return spelling
+ * @param {string} status
+ * @returns {{text: string, splitIdx: number, suffixLen: number}}
+ */
+function _renderActionBodyWithStatus(text, status) {
+  text = text || '';
+  var suffix   = ' (' + status + ')';
+  var breakIdx = text.indexOf('\v');
+  var splitIdx = breakIdx === -1 ? text.length : breakIdx;
+  return {
+    text:      text.slice(0, splitIdx) + suffix + text.slice(splitIdx),
+    splitIdx:  splitIdx,
+    suffixLen: suffix.length
+  };
+}
+
 function _buildFlushRequests(occurrence, item) {
   var chipUrl    = _buildChipUrl(item.globalId);
   var imgUrl     = getStatusIconUrl(item.status);
   var validEmail = item.assigneeEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.assigneeEmail);
-  var tokenLen   = ('AI-' + item.N + ': ').length;
+  // Reproduce item.globalId's OWN prefix (ACT or legacy AI), not a freshly
+  // canonicalized one: globalId is the durable identity key stored in the
+  // sheet, and a rescan re-derives it from whatever token text is literally
+  // in the doc. Forcing ACT-N here on every reformat-flush of a pre-existing
+  // AI-N action would silently mint a NEW globalId on the next scan, losing
+  // the mapping to the sheet row this flush just updated. New tokens (chip
+  // create, placeholder assignment) still write canonical ACT-N — see
+  // _actionTokenText's other call sites.
+  var tokenText  = parseGlobalId(item.globalId).actionId + ': ';
+  var tokenLen   = tokenText.length;
   var pEnd       = occurrence.pEnd;
   // actionText arrives with two different line-break spellings depending on
   // its source: the document's raw soft-return character (\r or \v) on a live
@@ -3253,6 +3556,11 @@ function _buildFlushRequests(occurrence, item) {
   // gts-kkm7.5). This is the one place every flush call site funnels through,
   // so no caller has to know which spelling it holds.
   var actionText = _toSoftReturnText(item.actionText);
+  // gts-q23h / ADR-0027 rule 4: the status token goes at the end of the HEADER
+  // LINE, not after the last continuation line — see
+  // _renderActionBodyWithStatus for why placement and extraction must agree.
+  var rendered   = _renderActionBodyWithStatus(actionText, item.status);
+  var bodyText   = rendered.text;
   // insertAt: for simple paragraphs this equals pStart; for soft-return
   // paragraphs it is the document index right after the preceding \n, which
   // also clears any image placed there by a previous flush.
@@ -3265,13 +3573,13 @@ function _buildFlushRequests(occurrence, item) {
     requests.push({ deleteContentRange: { range: { startIndex: insertAt, endIndex: pEnd - 1 } } });
   }
   if (validEmail) {
-    requests.push({ insertText: { text: ' ' + actionText + ' (' + item.status + ')', location: { index: insertAt } } });
+    requests.push({ insertText: { text: ' ' + bodyText, location: { index: insertAt } } });
     // insertPerson rejects any name field in personProperties — email only
     requests.push({ insertPerson: { personProperties: { email: item.assigneeEmail }, location: { index: insertAt } } });
   } else {
-    requests.push({ insertText: { text: actionText + ' (' + item.status + ')', location: { index: insertAt } } });
+    requests.push({ insertText: { text: bodyText, location: { index: insertAt } } });
   }
-  requests.push({ insertText: { text: 'AI-' + item.N + ': ', location: { index: insertAt } } });
+  requests.push({ insertText: { text: tokenText, location: { index: insertAt } } });
   requests.push({ insertInlineImage: {
     uri: imgUrl, location: { index: insertAt },
     objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
@@ -3287,7 +3595,7 @@ function _buildFlushRequests(occurrence, item) {
   // when a Config 'action_text' row exists, else leave today's inherited
   // default formatting untouched. Uniform style no longer covers bold/italic
   // (ADR-0022/gts-zocq) — those are applied per-run immediately below.
-  var trailingText  = (validEmail ? ' ' : '') + actionText + ' (' + item.status + ')';
+  var trailingText  = (validEmail ? ' ' : '') + bodyText;
   // actionTextStart lands exactly at the first character of actionText itself
   // (past the image, token, and optional leading assignee-chip space) — the
   // same anchor gts-zocq's per-run requests below need.
@@ -3295,30 +3603,46 @@ function _buildFlushRequests(occurrence, item) {
   var actionTextStyleReq = _actionTextStyleRequest(actionTextStart, actionTextStart + trailingText.length);
   if (actionTextStyleReq) requests.push(actionTextStyleReq);
 
-  // gts-zocq FLUSH: reapply inline bold/italic runs sampled at scan time (or
-  // read back from the sheet's RichTextValue for a sheetWins flush), so this
-  // delete+reinsert does not flatten formatting the author actually typed.
-  // item.runs offsets are relative to item.actionText BEFORE _toSoftReturnText's
-  // own line-ending-normalize + trim (that trim can shift indices — see
-  // _extractInlineRuns' offsets contract); compute the same leading-whitespace
-  // shift _toSoftReturnText's trim() applies and adjust run offsets by it, then
-  // clip to the final actionText's bounds.
+  // gts-zocq FLUSH: reapply inline bold/italic/link runs sampled at scan time
+  // (or read back from the sheet's RichTextValue for a sheetWins flush), so
+  // this delete+reinsert does not flatten formatting the author actually
+  // typed (link extended by ADR-0028). item.runs offsets are relative to
+  // item.actionText BEFORE _toSoftReturnText's own line-ending-normalize +
+  // trim (that trim can shift indices — see _extractInlineRuns' offsets
+  // contract); compute the same leading-whitespace shift _toSoftReturnText's
+  // trim() applies and adjust run offsets by it, then clip to the final
+  // actionText's bounds. Ranges stay within [actionTextStart, actionTextStart
+  // + finalLen) — never widened past actionText, so a run link can never
+  // overwrite the chip link on the token (ADR-0028 rule 5).
   if (item.runs && item.runs.length) {
     var rawActionText   = item.actionText || '';
     var normalizedRuns  = _normalizeLineEndings(rawActionText);
     var leadingWsLen    = (normalizedRuns.match(/^\s*/) || [''])[0].length;
     var finalLen        = actionText.length;
+    var splitIdx        = rendered.splitIdx;
+    var suffixLen       = rendered.suffixLen;
     for (var rui = 0; rui < item.runs.length; rui++) {
       var run = item.runs[rui];
-      if (!run.bold && !run.italic) continue;
+      if (!run.bold && !run.italic && !run.link) continue;
       var rStart = Math.max(0, run.start - leadingWsLen);
       var rEnd   = Math.min(finalLen, run.end - leadingWsLen);
       if (rEnd <= rStart) continue;
-      requests.push({ updateTextStyle: {
-        range: { startIndex: actionTextStart + rStart, endIndex: actionTextStart + rEnd },
-        textStyle: { bold: !!run.bold, italic: !!run.italic },
-        fields: 'bold,italic'
-      }});
+      // gts-q23h: run offsets index the body WITHOUT the status suffix, which
+      // is now inserted mid-string at rendered.splitIdx. Map each run across
+      // that insertion; a run straddling the split emits two ranges so the
+      // status token itself is never swept into the author's formatting.
+      var style = { bold: !!run.bold, italic: !!run.italic, link: run.link ? { url: run.link } : null };
+      var segments = (rEnd <= splitIdx)   ? [[rStart, rEnd]]
+                   : (rStart >= splitIdx) ? [[rStart + suffixLen, rEnd + suffixLen]]
+                   : [[rStart, splitIdx], [splitIdx + suffixLen, rEnd + suffixLen]];
+      for (var segi = 0; segi < segments.length; segi++) {
+        if (segments[segi][1] <= segments[segi][0]) continue;
+        requests.push({ updateTextStyle: {
+          range: { startIndex: actionTextStart + segments[segi][0], endIndex: actionTextStart + segments[segi][1] },
+          textStyle: style,
+          fields: 'bold,italic,link'
+        }});
+      }
     }
   }
 

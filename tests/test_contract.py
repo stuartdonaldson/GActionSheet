@@ -41,3 +41,19 @@ def test_column_count_coherence():
         f"COLUMNS_BY_FIELD has {len(contract.COLUMNS_BY_FIELD)} entries "
         f"but SHEET_HEADERS has {len(contract.SHEET_HEADERS)} — they must match"
     )
+
+
+def test_custom_fields_column_in_lockstep():
+    # gts-nuur / ADR-0024 schema half. custom_fields rides alongside the
+    # existing stored columns in fields/headers/columnsByField — additive,
+    # optional, and never confused with action_text (which never carries JSON).
+    assert 'custom_fields' in contract.SHEET_ACTION_FIELDS
+    assert 'custom_fields' in contract.COLUMNS_BY_FIELD
+    assert 'Custom Fields' in contract.SHEET_HEADERS
+    # Position must agree across all three parallel structures (ADR-0024
+    # Consequences: fields / headers / columnsByField must be kept in lockstep).
+    header_index = contract.SHEET_HEADERS.index('Custom Fields')
+    assert contract.COLUMNS_BY_FIELD['custom_fields'] == header_index + 1
+    # Additive/optional: it must not displace any existing stored column index.
+    assert contract.COLUMNS_BY_FIELD['action_text'] == 6
+    assert contract.COLUMNS_BY_FIELD['sync_status'] == 11

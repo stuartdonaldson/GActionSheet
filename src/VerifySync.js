@@ -22,7 +22,8 @@ function verifyDocumentSync(docId) {
       floating: 0,
       tracker: 0,
       sheet: 0,
-      matched: 0
+      matched: 0,
+      unparseable: 0
     }
   };
 
@@ -30,9 +31,22 @@ function verifyDocumentSync(docId) {
     function () { return DocumentApp.openById(docId); });
   try {
     var docUrl = doc.getUrl();
-    var floatingActions = _collectFloatingActionState(doc);
+    var unparseableParagraphs = [];
+    var floatingActions = _collectFloatingActionState(doc, unparseableParagraphs);
     result.counts.floating = floatingActions.length;
     _verifyProgress(result, 'Scanned floating actions: ' + floatingActions.length);
+
+    // ADR-0027 rule 6 / gts-xvlu: a paragraph that starts a token but never
+    // completes the grammar (e.g. the gts-tis pipe-delimited spelling) is
+    // reported, not silently dropped from the scan.
+    result.counts.unparseable = unparseableParagraphs.length;
+    for (var upI = 0; upI < unparseableParagraphs.length; upI++) {
+      var up = unparseableParagraphs[upI];
+      _verifyIssue(
+        result,
+        'Paragraph looks like an action but does not parse (body index ' + up.bodyChildIndex + '): ' + up.leadingText
+      );
+    }
 
     var tracker = _readTrackerTableState(doc);
     result.counts.tracker = tracker.rows.length;
@@ -76,8 +90,8 @@ function _verifyProgress(result, message) {
   GasLogger.log('verify.progress', { msg: message });
 }
 
-function _collectFloatingActionState(doc) {
-  var floatingActions = _scanFloatingActions(doc);
+function _collectFloatingActionState(doc, unparseableOut) {
+  var floatingActions = _scanFloatingActions(doc, unparseableOut);
   var rows = [];
 
   for (var i = 0; i < floatingActions.length; i++) {

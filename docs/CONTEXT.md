@@ -49,7 +49,8 @@ actionBody      := text [ statusToken ]
 statusToken     := "(" [^)]* ")"        ; last qualifying group on the HEADER LINE only
 continuation    := "\n" ( fieldLine | prose )
 fieldLine       := fieldName ":" ( [ \t] inlineValue? | EOL )
-fieldName       := [A-Za-z] [A-Za-z0-9 _-]{0,31}
+fieldName       := fieldWord (" " fieldWord)*   ; ≤32 chars total (gts-eezz)
+fieldWord       := [A-Z] [A-Za-z0-9_-]*
 ```
 
 The **header line** is everything up to the first soft return. Continuation lines are soft returns
@@ -84,10 +85,10 @@ Rules:
   text. There is no escape mechanism because none is needed. The header line is not extensible;
   `Field: value` continuation lines are the sanctioned extension point (ADR-0024).
 - **Field lines.** A continuation line is a field line only if it matches `fieldLine` above — no
-  leading whitespace, an initial letter, a name of at most 32 characters, then a colon followed by
-  a space, a tab, or the end of the line (a bare `Consult With:` is a field line with an empty
-  inline value). A line matching the `token` production starts a new action and wins over
-  `fieldLine`.
+  leading whitespace, a name of at most 32 characters where every space-separated word starts with
+  an uppercase letter (`Consult With`, not `then he said`), then a colon followed by a space, a
+  tab, or the end of the line (a bare `Consult With:` is a field line with an empty inline value).
+  A line matching the `token` production starts a new action and wins over `fieldLine`.
 - **Prose attaches to the open block; order is retained.** The action body opens the first block
   and each field line opens a new one. A prose continuation line belongs to whichever block is
   open when it is read — `action_text` before any field line, otherwise the value of the most

@@ -85,6 +85,6 @@ function PROBE_log(surface, extraData) {
 function PROBE_docState(doc) {
   if (!doc) return 'unknown';
   try {
-    return /AI-\d+:/.test(doc.getBody().getText()) ? 'existing' : 'new';
+    return _ACTION_TOKEN_REGEX.test(doc.getBody().getText()) ? 'existing' : 'new';
   } catch (_) { return 'unknown'; }
 }

@@ -309,9 +309,9 @@ function _buildImportTabSection(docId, selectAll) {
 
     for (var a = 0; a < grp.actions.length; a++) {
       var action = grp.actions[a];
-      var n = parseGlobalId(action.global_id).N;
+      var actionId = parseGlobalId(action.global_id).actionId;
       selectionInput.addItem(
-        'AI-' + n + ' · ' + _escapeAddonHtml(action.action_text),
+        actionId + ' · ' + _escapeAddonHtml(action.action_text),
         action.global_id,
         !!selectAll
       );

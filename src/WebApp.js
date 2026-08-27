@@ -1075,14 +1075,15 @@ function _loadExistingRowsByGlobalId(actionsSheet, duplicatesOut) {
 
 /**
  * Parses a globalId into its components.
- * globalId format: {docFileId}/AI-{N}
- * Returns { docId, N, actionId } where actionId = 'AI-{N}'.
+ * globalId format: {docFileId}/ACT-{N} or, for pre-existing rows, {docFileId}/AI-{N}
+ * (ADR-0023 rule 2 — AI-N: globalIds remain valid indefinitely and are never rewritten).
+ * Returns { docId, N, actionId } where actionId preserves whichever prefix was stored.
  * If the format is unexpected, N is NaN and actionId/docId are empty.
  */
 function parseGlobalId(globalId) {
-  var parts = (globalId || '').split('/AI-');
-  if (parts.length < 2) return { docId: '', N: NaN, actionId: globalId || '' };
-  return { docId: parts[0], N: parseInt(parts[1], 10), actionId: 'AI-' + parts[1] };
+  var m = /^(.*)\/(ACT|AI)-(\d+)$/.exec(globalId || '');
+  if (!m) return { docId: '', N: NaN, actionId: globalId || '' };
+  return { docId: m[1], N: parseInt(m[3], 10), actionId: m[2] + '-' + m[3] };
 }
 
 function _extractActionId(globalId) {
@@ -1274,11 +1275,13 @@ function _handleSyncActionRows(payload) {
             existing.status !== row.status) {
           actionsSheet.getRange(rowIdx, _ACOL.assignee_email).setValue(row.assigneeEmail || '');
           actionsSheet.getRange(rowIdx, _ACOL.assignee_name).setValue(row.assigneeName  || '');
-          if (richTextForWrite) {
-            actionsSheet.getRange(rowIdx, _ACOL.action_text).setRichTextValue(richTextForWrite);
-          } else {
-            actionsSheet.getRange(rowIdx, _ACOL.action_text).setValue(normalizedActionText || '');
-          }
+          // gts-a8yh.2: setValue() does not reliably clear a cell's prior
+          // RichTextValue run formatting (bold/italic survives on read-back)
+          // — always route through setRichTextValue, using a plain builder
+          // for the no-runs case, same fix as the appendRow follow-up above.
+          actionsSheet.getRange(rowIdx, _ACOL.action_text).setRichTextValue(
+            richTextForWrite || SpreadsheetApp.newRichTextValue().setText(normalizedActionText || '').build()
+          );
           actionsSheet.getRange(rowIdx, _ACOL.status).setValue(row.status || 'Open');
           actionsSheet.getRange(rowIdx, _ACOL.modified_date).setValue(now);
           updated++;
@@ -1514,23 +1517,24 @@ function _handleVerifyChipIntegrity(payload) {
     if (!para) continue;
     var elements = para.elements || [];
 
-    // Build plain text from textRuns only to detect AI-N: token
+    // Build plain text from textRuns only to detect the ACT-N:/AI-N: token
     var builtText = '';
     for (var j = 0; j < elements.length; j++) {
       if (elements[j].textRun) builtText += elements[j].textRun.content || '';
     }
     var plainText = builtText.replace(/\n$/, '');
-    var tokenMatch = plainText.match(/^AI-(\d+):\s/);
-    if (!tokenMatch) continue;
+    var tokenMatch = _matchActionTokenPrefixed(plainText);
+    if (!tokenMatch || !/\s/.test(plainText.charAt(tokenMatch.match.length))) continue;
 
-    var N = tokenMatch[1];
+    var N = tokenMatch.N;
+    var tokenLabel = tokenMatch.prefix + '-' + N;
     checkedCount++;
-    var expectedGlobalId = docId + '/AI-' + N;
+    var expectedGlobalId = docId + '/' + tokenLabel;
 
     // Check 1: leading element must be inlineObjectElement with brand-NUUTS sourceUri
     var firstEl = elements[0] || {};
     if (!firstEl.inlineObjectElement) {
-      violations.push({ paragraph: 'AI-' + N, issue: 'no leading inlineObjectElement' });
+      violations.push({ paragraph: tokenLabel, issue: 'no leading inlineObjectElement' });
       continue;
     }
     var inlineObjId = firstEl.inlineObjectElement.inlineObjectId || '';
@@ -1538,17 +1542,17 @@ function _handleVerifyChipIntegrity(payload) {
     var sourceUri = (((inlineObj.inlineObjectProperties || {}).embeddedObject || {}).imageProperties || {}).sourceUri || '';
     var iconStatus = Object.prototype.hasOwnProperty.call(urlToStatus, sourceUri) ? urlToStatus[sourceUri] : null;
     if (iconStatus === null) {
-      violations.push({ paragraph: 'AI-' + N, issue: 'sourceUri not a brand-NUUTS image: ' + sourceUri });
+      violations.push({ paragraph: tokenLabel, issue: 'sourceUri not a brand-NUUTS image: ' + sourceUri });
     }
 
-    // Check 2: AI-N: textRun (element[1]) link.url must resolve to the
+    // Check 2: token textRun (element[1]) link.url must resolve to the
     // expected globalId — via either the current docId+ain params or the
     // legacy globalId= param (_globalIdFromChipUrl accepts both).
     var tokenEl = elements[1] || {};
     var linkUrl = (((tokenEl.textRun || {}).textStyle || {}).link || {}).url || '';
     var actualGlobalId = linkUrl ? _globalIdFromChipUrl(linkUrl) : null;
     if (actualGlobalId !== expectedGlobalId) {
-      violations.push({ paragraph: 'AI-' + N, issue: 'AI-N: link.url globalId mismatch — expected ' + expectedGlobalId + ', got: ' + linkUrl });
+      violations.push({ paragraph: tokenLabel, issue: 'token link.url globalId mismatch — expected ' + expectedGlobalId + ', got: ' + linkUrl });
     }
 
     // Check 3: trailing (Status) token must be consistent with icon
@@ -1558,7 +1562,7 @@ function _handleVerifyChipIntegrity(payload) {
         var docStatus = statusMatch[1].trim().toLowerCase();
         if (iconStatus !== 'other' && iconStatus !== docStatus) {
           violations.push({
-            paragraph: 'AI-' + N,
+            paragraph: tokenLabel,
             issue: 'icon status "' + iconStatus + '" != doc status "' + docStatus + '"'
           });
         }
@@ -2183,7 +2187,7 @@ function _handleForwardActionRows(payload) {
       if (isResolved(entry.status)) continue;     // already forwarded/resolved — no re-forward
       seen[f.sourceGlobalId] = true;
 
-      var newAiToken = parseGlobalId(f.newGlobalId).actionId; // 'AI-N'
+      var newAiToken = parseGlobalId(f.newGlobalId).actionId; // e.g. 'ACT-N' or legacy 'AI-N'
       var newText    = entry.action + ' [Forward:' + targetDocName + ' ' + newAiToken + ']';
 
       actionsSheet.getRange(entry.rowIndex, _ACOL.action_text).setValue(newText);
@@ -2918,7 +2922,7 @@ function _handleForwardActionRowsAtdd(payload) {
       if (isResolved(entry.status)) continue;     // already forwarded/resolved — no re-forward
       seen[f.sourceGlobalId] = true;
 
-      var newAiToken = parseGlobalId(f.newGlobalId).actionId; // 'AI-N'
+      var newAiToken = parseGlobalId(f.newGlobalId).actionId; // e.g. 'ACT-N' or legacy 'AI-N'
       var newText    = entry.action + ' [Forward:' + targetDocName + ' ' + newAiToken + ']';
 
       actionsSheet.getRange(entry.rowIndex, _ACOL.action_text).setValue(newText);

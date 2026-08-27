@@ -559,6 +559,17 @@ later and is not part of the mol06g 8-scenario sign-off baseline above.
 ### Web App URL changed after redeployment
 Visit the new Web App URL once in a browser tab — `doGet` auto-normalizes and stores the URL in `WEBAPP_URL`. No manual copy-paste required.
 
+### ActionSheet is missing a newly-added schema column (e.g. `Custom Fields`)
+`ensureSheetStructure()` (Setup submenu, `Extensions > Action Sync > Setup > Ensure Sheet
+Structure`) is idempotent and header-driven off `CONTRACT_SCHEMA.sheetAction.headers`
+(`SheetSetup.js`'s `_ensureHeaders`): it compares the sheet's header row against the current
+schema and rewrites it — growing the row to add any new trailing column — whenever they don't
+match. It is NOT run automatically by `syncDocument`/`syncAll`, so an existing ActionSheet
+created before a schema-additive change (e.g. gts-nuur's `custom_fields` column, ADR-0024) will
+not pick up the new header on its own. Run the menu item once per existing spreadsheet after
+deploying a schema-additive change. No data loss: existing rows are untouched, and the new
+column simply reads/writes blank until a caller populates it.
+
 ### testToken expired (tests fail with "test-token-expired")
 Run `pnpm run deploy:test`. The deployment script generates a fresh UUID, POSTs it to the Web App, stores it in script properties, and writes the new token and expiry to `local.settings.json`.
 

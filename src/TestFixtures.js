@@ -533,7 +533,7 @@ function _tfMintAssertion(opts) {
  * @returns {Array}  Row array aligned to SHEET_HEADERS.
  */
 function _tfSheetRow(opts) {
-  var fileId = opts.fileId || (opts.globalId ? opts.globalId.split('/AI-')[0] : '');
+  var fileId = opts.fileId || (opts.globalId ? parseGlobalId(opts.globalId).docId : '');
   return [
     opts.globalId || '',
     fileId,
@@ -643,7 +643,13 @@ function _tfSimplifyTextStyle(textStyle) {
  * @returns {{ok:boolean, aiToken:?Object, actionText:?Object, error:?string}}
  */
 function _tfExtractActionTextStyle(content, N) {
-  var prefix = 'AI-' + N + ':';
+  var candidates = _ACTION_TOKEN_READ_PREFIXES.map(function (p) { return p + '-' + N + ':'; });
+  function prefixAt(text, idx) {
+    for (var ci = 0; ci < candidates.length; ci++) {
+      if (text.substr(idx, candidates[ci].length) === candidates[ci]) return candidates[ci];
+    }
+    return null;
+  }
   for (var ii = 0; ii < content.length; ii++) {
     var item = content[ii];
     if (!item.paragraph) continue;
@@ -658,20 +664,19 @@ function _tfExtractActionTextStyle(content, N) {
       fullText += tc;
     }
     var tokenTextIdx = -1;
-    if (fullText.substr(0, prefix.length) === prefix) {
+    var matchedPrefix = prefixAt(fullText, 0);
+    if (matchedPrefix) {
       tokenTextIdx = 0;
     } else {
-      for (var si = 0; si < fullText.length - prefix.length; si++) {
+      for (var si = 0; si < fullText.length; si++) {
         var ch = fullText[si];
-        if ((ch === '\n' || ch === '\r' || ch === '\v') && fullText.substr(si + 1, prefix.length) === prefix) {
-          tokenTextIdx = si + 1;
-          break;
-        }
+        matchedPrefix = (ch === '\n' || ch === '\r' || ch === '\v') ? prefixAt(fullText, si + 1) : null;
+        if (matchedPrefix) { tokenTextIdx = si + 1; break; }
       }
     }
     if (tokenTextIdx < 0) continue;
 
-    var prefixEndTextIdx = tokenTextIdx + prefix.length;
+    var prefixEndTextIdx = tokenTextIdx + matchedPrefix.length;
     var tokenRun  = null;
     var actionRun = null;
     for (var ri = 0; ri < runs.length; ri++) {
@@ -691,7 +696,7 @@ function _tfExtractActionTextStyle(content, N) {
       actionText: actionRun ? _tfSimplifyTextStyle(actionRun.textStyle) : null
     };
   }
-  return { ok: false, error: 'AI-' + N + ': token paragraph not found' };
+  return { ok: false, error: candidates[0] + ' token paragraph not found' };
 }
 
 // ---------------------------------------------------------------------------
@@ -2494,7 +2499,7 @@ function setupTestFixtures(scenario, data) {
           if (darActions[dai].N === darN) { darScan = darActions[dai]; break; }
         }
 
-        var darGlobalId = darDocId + '/AI-' + darN;
+        var darGlobalId = darScan ? darScan.globalId : darDocId + '/' + _actionTokenId(darN);
         var darSheet = ss.getSheetByName('Actions');
         var darSheetRuns = [];
         var darSheetText = null;
@@ -3398,14 +3403,14 @@ function verifyConsistencyForTest(docId, expected) {
     GasLogger.log('verify.consistency.complete', {
       ok: false,
       issues: ['TEST_DOC_ID or TEST_SHEET_ID script properties not set'],
-      counts: { floating: 0, sheet: 0, tracker: 0, matched: 0 },
+      counts: { floating: 0, sheet: 0, tracker: 0, matched: 0, unparseable: 0 },
       docTitle: ''
     });
     GasLogger.flush();
     return {
       ok: false,
       issues: ['TEST_DOC_ID or TEST_SHEET_ID script properties not set'],
-      counts: { floating: 0, sheet: 0, tracker: 0, matched: 0 },
+      counts: { floating: 0, sheet: 0, tracker: 0, matched: 0, unparseable: 0 },
       docTitle: ''
     };
   }
@@ -3413,7 +3418,7 @@ function verifyConsistencyForTest(docId, expected) {
   var result = {
     ok: true,
     issues: [],
-    counts: { floating: 0, sheet: 0, tracker: 0, matched: 0 },
+    counts: { floating: 0, sheet: 0, tracker: 0, matched: 0, unparseable: 0 },
     docTitle: ''
   };
 
@@ -3422,8 +3427,20 @@ function verifyConsistencyForTest(docId, expected) {
     result.docTitle = doc.getName();
 
     // Collect floating actions with globalIds (reuses VerifySync.js helpers).
-    var floatingActions = _collectFloatingActionState(doc);
+    var unparseableParagraphs = [];
+    var floatingActions = _collectFloatingActionState(doc, unparseableParagraphs);
     result.counts.floating = floatingActions.length;
+
+    // ADR-0027 rule 6 / gts-xvlu: a paragraph that starts a token but never
+    // completes the grammar (e.g. the gts-tis pipe-delimited spelling) is
+    // reported, not silently dropped from the scan.
+    result.counts.unparseable = unparseableParagraphs.length;
+    for (var vcfUpI = 0; vcfUpI < unparseableParagraphs.length; vcfUpI++) {
+      var vcfUp = unparseableParagraphs[vcfUpI];
+      result.issues.push(
+        'Paragraph looks like an action but does not parse (body index ' + vcfUp.bodyChildIndex + '): ' + vcfUp.leadingText
+      );
+    }
 
     var tracker = _readTrackerTableState(doc);
     result.counts.tracker = tracker.rows.length;
@@ -3704,7 +3721,7 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
     var floatingByAIN = {};
     for (var fgid in floatingByNrId) {
       if (!Object.prototype.hasOwnProperty.call(floatingByNrId, fgid)) continue;
-      var ainMatch = fgid.match(/\/?(AI-\d+)$/);
+      var ainMatch = fgid.match(new RegExp('\\/?((?:' + _ACTION_TOKEN_READ_PREFIXES.join('|') + ')-\\d+)$'));
       if (ainMatch) floatingByAIN[ainMatch[1]] = true;
     }
     for (var tid in trackerById) {

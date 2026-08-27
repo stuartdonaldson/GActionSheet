@@ -89,7 +89,8 @@ var CONTRACT_SCHEMA = Object.freeze({
       'doc_name',
       'created_date',
       'modified_date',
-      'sync_status'
+      'sync_status',
+      'custom_fields'
     ]),
 
     headers: Object.freeze([
@@ -103,9 +104,19 @@ var CONTRACT_SCHEMA = Object.freeze({
       'Document',
       'Date Created',
       'Date Modified',
-      'Sync Status'
+      'Sync Status',
+      'Custom Fields'
     ]),
 
+    // gts-nuur / ADR-0024 (schema half): custom_fields is ADDITIVE and
+    // OPTIONAL, the same additive contract the `runs` field established
+    // (gts-zocq) -- every pre-existing code path (appendRow's positional
+    // arrays, SHEET_HEADERS.length-driven read ranges) keeps working
+    // unchanged with this column blank. Cell holds JSON of
+    // {FieldName: {text: string, runs: Array<{start,end,bold,italic,link}>}}
+    // per ADR-0028 rule 6 -- never a bare string, so a hyperlink or inline
+    // format inside a field value survives. action_text NEVER carries JSON;
+    // this column exists precisely so it doesn't have to.
     columnsByField: Object.freeze({
       global_id: 1,
       file_id: 2,
@@ -117,7 +128,8 @@ var CONTRACT_SCHEMA = Object.freeze({
       document_formula: 8,
       created_date: 9,
       modified_date: 10,
-      sync_status: 11
+      sync_status: 11,
+      custom_fields: 12
     })
   }),
 
