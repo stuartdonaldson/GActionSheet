@@ -14,7 +14,7 @@ import zoneinfo
 from scn.contacts import TEST_CONTACTS, expected_name
 from scn.engine import Surface
 
-_AI_N_RE = re.compile(r"^AI-\d+$")
+_AI_N_RE = re.compile(r"^(?:ACT|AI)-\d+$")  # ADR-0023: dual-prefix, ACT-N canonical on write
 
 # Test ActionSheet's spreadsheet timezone (confirmed empirically: xlsx-exported
 # created_date/modified_date cells run exactly 7h behind the webapp's ISO-8601
@@ -78,7 +78,7 @@ def check_present_consistent(
     """Check that a matching action exists on `surface` and its fields are correct (§16.6).
 
     Matching key: expected['action_id'] if set, else expected['action'] text.
-    Checks: action text; action_id (exact if set, else valid AI-N); status (if set);
+    Checks: action text; action_id (exact if set, else valid ACT-N/AI-N); status (if set);
     assignee email (if set); assignee_name (if reader set it, via expected_name());
     global_id, created_date, modified_date (GTaskSheet-k1g9) -- compared only when
     present in `expected` AND the reader populated the same attribute on `actual`
@@ -123,7 +123,7 @@ def check_present_consistent(
         else:
             if not actual.action_id or not _AI_N_RE.match(actual.action_id):
                 return (
-                    f"[{tag}] UI: expected a valid AI-N, got: {actual.action_id!r}"
+                    f"[{tag}] UI: expected a valid ACT-N/AI-N, got: {actual.action_id!r}"
                 )
         if "status" in expected:
             if actual.status != expected["status"]:
@@ -140,7 +140,7 @@ def check_present_consistent(
             f"expected={expected['action']!r}, actual={actual.action!r}"
         )
 
-    # action_id: exact match if pinned, else any valid AI-N
+    # action_id: exact match if pinned, else any valid ACT-N/AI-N
     if "action_id" in expected:
         if actual.action_id != expected["action_id"]:
             return (
@@ -150,7 +150,7 @@ def check_present_consistent(
     else:
         if not actual.action_id or not _AI_N_RE.match(actual.action_id):
             return (
-                f"[{tag}] {surface.value}: expected a valid AI-N, got: {actual.action_id!r}"
+                f"[{tag}] {surface.value}: expected a valid ACT-N/AI-N, got: {actual.action_id!r}"
             )
 
     # status (checked only when set in expected)

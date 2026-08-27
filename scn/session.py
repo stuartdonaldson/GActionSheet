@@ -818,7 +818,7 @@ class ScenarioSession:
         chip = self._post_route("verify_chip_integrity", {"docId": self.doc_id})
         if self._appended_actions > 0:
             assert chip.get("checked_count", 0) > 0, (
-                f"verify_chip_integrity scanned 0 AI-N: paragraphs but "
+                f"verify_chip_integrity scanned 0 AI-N:/ACT-N: paragraphs but "
                 f"{self._appended_actions} action(s) were appended this session"
             )
         violations = chip.get("violations", [])

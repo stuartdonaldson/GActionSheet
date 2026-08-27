@@ -23,7 +23,7 @@ from scn.session import ScenarioSession
 from scn.surfaces import SheetReader
 from tests.helpers.download import download_xlsx
 
-_GLOBAL_ID_RE = re.compile(r'^[A-Za-z0-9_-]{25,44}/AI-\d+$')
+_GLOBAL_ID_RE = re.compile(r'^[A-Za-z0-9_-]{25,44}/ACT-\d+$')  # ADR-0023: new-write tokens are canonical ACT-N
 
 DOC = Surface.DOC
 SHEET = Surface.SHEET
@@ -86,14 +86,17 @@ def test_b7_write_routes(scn):
     scn.verify(target_edit, on=SHEET, tag="[rz4k.2 sync_action_rows]", entry_point="sync_action_rows")
     scn.checkpoint(STEP)
 
-    # AC2 (sjj): verify the auto-assigned globalIds match the expected format {docId}/AI-{N}
-    # action_id holds only the AI-N suffix; the session assembles the full globalId as
+    # AC2 (sjj): verify the auto-assigned globalIds match the expected format {docId}/ACT-{N}.
+    # These three actions were seeded tokenless (as_text() emits bare 'AI:', the
+    # unnumbered trigger) — sync assigns them a brand-new token, which ADR-0023 rule 1
+    # makes canonically ACT-N regardless of the bare trigger spelling. action_id holds
+    # only the ACT-N suffix; the session assembles the full globalId as
     # "{doc_id}/{action_id}" when addressing write routes (§16.11 #3).
     for label, a in [("edit", target_edit), ("status", target_status), ("delete", target_delete)]:
         assembled = f"{scn.doc_id}/{a.action_id or ''}"
         assert _GLOBAL_ID_RE.match(assembled), (
             f"[B7 AC2] {label} assembled globalId format invalid: {assembled!r} "
-            "(expected '{docId}/AI-{N}')"
+            "(expected '{docId}/ACT-{N}')"
         )
 
     # ── ACT A — edit_sheet: Dirty stamp + sheet-wins on next sync ────────────────

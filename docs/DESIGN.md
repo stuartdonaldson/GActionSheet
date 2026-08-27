@@ -8,7 +8,7 @@ GActionSheet is **one** GAS project (`scriptId 12EKX…`), container-bound to th
 - The **Web App** (`doPost`) is a proxy endpoint. Because the add-on surfaces run as the active user — who may not have edit access to the restricted ActionSheet — all sheet writes are routed through `doPost`, which runs as the **deployer** (`executeAs: USER_DEPLOYING`) and holds sheet-write authority.
 - The **container-bound automation** (`onActionSheetEdit` installable trigger, 30-minute `syncAll` sweep, archive job, async `ACTION_SHEET_QUEUE` drain) runs as the **sheet owner** via installable/time-based triggers on the ActionSheet.
 
-Stable action identity is an **in-text `AI-N:` token** at the start of each floating-action paragraph; the cross-document key is `globalId = {docFileId}/AI-{N}`, stored in ActionSheet column 1. DocumentApp is used for read-side traversal (the token is visible to `getText()`, and PERSON chips are exposed ergonomically); the Docs REST API `batchUpdate` is used for write-side paragraph rewrites and tracker-table mutation. **No named ranges are created for actions** — the only named range in a document is the tracker-table heading anchor.
+Stable action identity is an **in-text `ACT-N:`/`AI-N:` token** at the start of each floating-action paragraph (`ACT-N:` canonical for all new writes, `AI-N:` permanently read-compatible for pre-existing documents, sharing one `N` namespace with no renumbering — ADR-0023); the cross-document key is `globalId = {docFileId}/{token}`, stored in ActionSheet column 1. DocumentApp is used for read-side traversal (the token is visible to `getText()`, and PERSON chips are exposed ergonomically); the Docs REST API `batchUpdate` is used for write-side paragraph rewrites and tracker-table mutation. **No named ranges are created for actions** — the only named range in a document is the tracker-table heading anchor.
 
 > **Identity history.** Earlier designs anchored actions with Docs REST *named ranges* (ADR-0005); this was abandoned because smart-chip / rich-link pill elements are invisible to `getText()`, forcing a text-token scanner. The current model is recorded in **ADR-0008**, the single-project architecture in **ADR-0007**, and conflict resolution in **ADR-0009**. The in-code field and ActionSheet column header are both `globalId`.
 
@@ -199,7 +199,7 @@ An action's data lives on three surfaces but only **two are authoritative** (the
 ```mermaid
 graph LR
     subgraph docside["Document — active-user contexts ① ②"]
-        FA["Floating action paragraph<br/>[img] AI-N: [chip] text (Status)"]
+        FA["Floating action paragraph<br/>[img] ACT-N: [chip] text (Status)"]
         SCAN["_scanFloatingActions<br/>→ globalId · assignee · text · status"]
         FLUSH["_flushActionParagraph<br/>REST batchUpdate rewrite"]
         TRK["Tracker table<br/>(rendered view — overwritten on refresh)"]
@@ -244,16 +244,16 @@ Grouped by execution context (see §Runtime Architecture).
 
 | Component | Responsibility |
 |-----------|---------------|
-| Create-action card | `@`-menu entry (`createActionTrigger`); form for action text, optional assignee (People-API suggestions), and status. On submit, inserts the branded `AI-N:` fragment at the cursor via REST, then upserts the row through the Web App |
+| Create-action card | `@`-menu entry (`createActionTrigger`); form for action text, optional assignee (People-API suggestions), and status. On submit, inserts the branded `ACT-N:` fragment at the cursor via REST, then upserts the row through the Web App |
 | Smart-chip preview | `onLinkPreview` matches the action URL pattern and renders a card with the action's current state plus status icon buttons; a tap rewrites the doc paragraph and enqueues the sheet update on `ACTION_SHEET_QUEUE`, drained asynchronously by context ④ |
 
 ### Shared sync engine (used by ①, ②, ④)
 
 | Component | Responsibility |
 |-----------|---------------|
-| Action Scanner | `_scanFloatingActions` walks the doc body; a floating action is any paragraph/list-item whose text starts with the token `AI-N:` (an optional leading inline image is ignored). After the token it extracts an optional assignee (PERSON chip, or a leading email whose name is derived from the local-part), the action text, and the trailing `(Status)` token. Duplicate `AI-N` paragraphs (copy/paste) are flagged `isDuplicate` |
-| Token Manager | `_assignPlaceholderTokens` finds bare `AI:` placeholders and assigns the next free `N`. The global key `globalId = {docId}/AI-{N}` is the durable identity; there is **no** named-range bookkeeping for actions |
-| Paragraph flush | `_flushActionParagraph` rewrites every occurrence of an `AI-N:` paragraph in place via one REST `batchUpdate` (image → token → optional chip → text → status badge), keeping copies consistent with the canonical row |
+| Action Scanner | `_scanFloatingActions` walks the doc body; a floating action is any paragraph/list-item whose text starts with the token `ACT-N:` or legacy `AI-N:` (an optional leading inline image is ignored). After the token it extracts an optional assignee (PERSON chip, or a leading email whose name is derived from the local-part), the action text, and the trailing `(Status)` token. Duplicate `ACT-N`/`AI-N` paragraphs sharing the same `N` (copy/paste, or both spellings present) are flagged `isDuplicate` |
+| Token Manager | `_assignPlaceholderTokens` finds bare `AI:`/`ACT:` placeholders and assigns the next free `N` (scanning both prefixes as one shared namespace), always writing the canonical `ACT-N:` spelling. The global key `globalId = {docId}/{token}` is the durable identity; there is **no** named-range bookkeeping for actions |
+| Paragraph flush | `_flushActionParagraph` rewrites every occurrence of an `ACT-N:`/`AI-N:` paragraph in place via one REST `batchUpdate` (image → token → optional chip → text → status badge), keeping copies consistent with the canonical row. The paragraph's own stored token spelling is preserved on rewrite — flush never renumbers or converts a pre-existing `AI-N:` to `ACT-N:` (ADR-0023 rule 5) |
 | Tracker Table Renderer | Inserts/refreshes the in-doc tracker table anchored by its heading named range (`gactionsheet-tracker-anchor`), preceded by a read-only-notice paragraph; uses REST `batchUpdate` for in-place replacement |
 
 ### ③ Web App — `doPost` (deployer)
@@ -327,7 +327,7 @@ erDiagram
     DocData ||--o{ ActionSheetRow : "FileId →"
 ```
 
-The cross-doc key is `globalId = {docId}/AI-{N}`, stored in ActionSheet column 1. The doc-scoped `id` (column 2) is the human-facing `AI-N` derived from that key; `N` is assigned once per document by the Token Manager and then persists in the paragraph text — it is stable, not recomputed from document order.
+The cross-doc key is `globalId = {docId}/{token}` (`ACT-{N}` canonical, `AI-{N}` legacy-compatible — ADR-0023), stored in ActionSheet column 1. The doc-scoped `id` (column 2) is the human-facing token derived from that key; `N` is assigned once per document by the Token Manager, shared across both spellings, and then persists in the paragraph text — it is stable, not recomputed from document order and never renumbered when a legacy `AI-N` action is otherwise touched.
 
 > The field in all three entities is `globalId`. The ActionSheet column heading is `globalId`.
 
@@ -463,9 +463,9 @@ flowchart TD
 The async chip-tap path (Scenario A) and the editor **Create action** path do **not** enter conflict resolution: the click/submit captures user intent at one instant, so the sheet write is an unconditional upsert (the sheet follows the doc).
 
 ### Identity
-`globalId = {docId}/AI-{N}` is the durable identity, stored on every ActionSheet row (column 1) and embedded as the literal `AI-N:` token at the start of the action paragraph. During scan the engine reads the token straight from `getText()` — there is **no** index intersection and no named-range lookup. A paragraph bearing a token not yet in the sheet becomes a new row; a sheet row whose `globalId` is no longer present in the doc becomes a candidate orphan — deleted as a duplicate if the same action text + assignee now appears under a different token, otherwise stamped `Deleted`.
+`globalId = {docId}/{token}` (`ACT-{N}` canonical, `AI-{N}` legacy-compatible — ADR-0023) is the durable identity, stored on every ActionSheet row (column 1) and embedded as the literal `ACT-N:`/`AI-N:` token at the start of the action paragraph. During scan the engine reads the token straight from `getText()` — there is **no** index intersection and no named-range lookup. A paragraph bearing a token not yet in the sheet becomes a new row; a sheet row whose `globalId` is no longer present in the doc becomes a candidate orphan — deleted as a duplicate if the same action text + assignee now appears under a different token, otherwise stamped `Deleted`.
 
-Bare `AI:` placeholders are upgraded to `AI-N:` on the next sync (Token Manager). Copy/pasted duplicates of a token are detected (`isDuplicate`) and rewritten to the canonical content on flush, keeping a 1:1 row-per-action pairing.
+Bare `AI:`/`ACT:` placeholders are upgraded to a canonical `ACT-N:` on the next sync (Token Manager); a pre-existing `AI-N:` paragraph is never renumbered or rewritten to `ACT-N:` — it keeps its own N and spelling for life (ADR-0023 rule 5). Copy/pasted duplicates of a token (same `N` under either spelling) are detected (`isDuplicate`) and rewritten to the canonical content on flush, keeping a 1:1 row-per-action pairing.
 
 ### Checked state is unreadable
 DocumentApp returns `null` for `isChecked()` on every task / checklist item, and the REST API exposes no equivalent field. The visual checkbox is **decorative only**. The truthful status is the trailing `(Status)` parenthesized token on the action paragraph. Components must never branch on visual checked state.
@@ -633,9 +633,9 @@ Focused tests isolate root causes that would otherwise cascade through the slow 
 |---|---|
 | Chip extraction | A PERSON chip as the first inline child resolves to `(email, name)`; a paragraph without a chip is correctly rejected |
 | Status token parsing | `... (Open)`, `... (In Review)`, `...   (  Closed  )`, missing token, multiple parens — all parse to the right `(status, actionText)` pair |
-| Token survival | After an edit inserts text above an action, the `AI-N:` token is still scanned from the paragraph and resolves to the same `globalId` |
+| Token survival | After an edit inserts text above an action, the `ACT-N:`/`AI-N:` token is still scanned from the paragraph and resolves to the same `globalId` |
 | Free-form status preservation | `(In Review)` round-trips through Sync without normalization to `Open` or `Closed` |
-| Duplicate / orphan reconciliation | A row whose `globalId` is gone from the doc but whose `(assigneeEmail, actionText)` reappears under a different `AI-N` is removed as a stale duplicate; a genuinely removed action is stamped `Deleted` |
+| Duplicate / orphan reconciliation | A row whose `globalId` is gone from the doc but whose `(assigneeEmail, actionText)` reappears under a different `ACT-N`/`AI-N` is removed as a stale duplicate; a genuinely removed action is stamped `Deleted` |
 | Write Guard | A programmatic ActionSheet write performed with `WriteGuard.wrap()` does not fire `onActionSheetEdit` |
 
 ### Anti-Patterns

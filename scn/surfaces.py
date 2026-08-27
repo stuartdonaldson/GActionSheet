@@ -21,7 +21,7 @@ from scn.ai import ai
 from scn import contract as _contract
 
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-_AI_TOKEN_RE = re.compile(r"^(AI-\d+):\s*")
+_AI_TOKEN_RE = re.compile(r"^((?:ACT|AI)-\d+):\s*")  # ADR-0023: dual-prefix read, ACT-N canonical on write
 _EMAIL_RE = re.compile(r"[\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+", re.IGNORECASE)
 _STATUS_RE = re.compile(r"\s*\(([^)]+)\)\s*$")
 _HYPERLINK_FORMULA_RE = re.compile(r'^=HYPERLINK\("([^"]+)"(?:,"([^"]*)")?\)', re.IGNORECASE)
@@ -113,7 +113,9 @@ def _find_action_url_in_cell(cell) -> str | None:
 class DocReader:
     """Read floating-action ai records from a .docx (DOC surface, §16.5).
 
-    Detection uses the AI-N: text token (ADR-0008). Returns all matching
+    Detection uses the ACT-N:/AI-N: text token (ADR-0008; dual-prefix per
+    ADR-0023 — ACT-N: canonical on write, AI-N: permanently read-compatible).
+    Returns all matching
     paragraphs including multiple occurrences of the same action_id — the
     engine/assertions enforce the identical-occurrence invariant.
     """
@@ -161,7 +163,7 @@ class DocReader:
 
         non_chip_text = "".join(non_chip_parts).strip()
 
-        # Detect AI-N: token
+        # Detect ACT-N:/AI-N: token
         m_token = _AI_TOKEN_RE.match(non_chip_text)
         if not m_token:
             return None
