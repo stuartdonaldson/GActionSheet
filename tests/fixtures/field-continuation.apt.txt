@@ -1,0 +1,67 @@
+<!-- kind: golden -->
+<!-- name: field-continuation -->
+<!-- serves: gts-82s2 -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Case 9/10 (gts-82s2, ADR-0027 rule 5a): block-scoping worked example -- a bare 'Consult With:' field line with a bulleted continuation block, and its own inline value starts blank.
+
+ACT-1: {{chip:jane@example.com}} Draft the Q3 budget memo (In Progress)<SR>
+- pull last year's actuals<SR>
+- and this is **bold** - circulate before Friday<SR>
+- _and this is italic_<SR>
+Consult With:<SR>
+- Stuart<SR>
+- John<SR>
+Due: Tuesday
+
+Case 1 (gts-82s2): the CONTEXT.md worked example -- multiple continuation fields (Target/Progress/Consult With/Notes) parsed off one header paragraph.
+
+ACT-2: jane@example.com Draft the Q4 board deck and circulate (In Progress)<SR>
+- pull last year's actuals<SR>
+Target: September 12 board meeting<SR>
+Progress: outline done, needs the revenue section<SR>
+Consult With:<SR>
+- Stuart<SR>
+- John<SR>
+Notes: Peter wants the a|b test results folded in
+
+Case 5 (gts-82s2): a continuation field value ending in a parenthesized word ('(blocked)') is not misread as the header status.
+
+ACT-11: jane@example.com header status with continuation lines following (In Progress)<SR>
+Notes: revenue section drafted, expenses pending (blocked)
+
+Case 4 (gts-82s2, rule 5): prose before the first field-colon line goes into action text, not into a field.
+
+[**ACT-12: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=1PYIU022o5dWNhIkyErjUzF6TRg--r4QrH-h-JbPNO-E&ain=ACT-12){{chip:jane@example.com}} prose before any field starts (Open)<SR>
+just a continuation sentence, no colon<SR>
+**Target**:	next week
+
+Case 2 (gts-82s2): a continuation line with a lowercase word before its colon ('then he said:') stays prose, not a field.
+
+[**ACT-13: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=1PYIU022o5dWNhIkyErjUzF6TRg--r4QrH-h-JbPNO-E&ain=ACT-13){{chip:jane@example.com}} edge case sentence (Open)<SR>
+then he said: we should ship it
+
+Case 3 (gts-82s2), part 1: adjacent action paragraphs are not merged into one.
+
+ACT-14: jane@example.com wrap up the sprint (Open)
+
+Case 3 (gts-82s2), part 2: the second of two adjacent action paragraphs.
+
+ACT-15: jane@example.com kick off the next one (Open)
+
+Case 8 (gts-82s2, rule 9): an over-long field name (\>50 chars) degrades to prose instead of becoming a field.
+
+[**ACT-16: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=1PYIU022o5dWNhIkyErjUzF6TRg--r4QrH-h-JbPNO-E&ain=ACT-16){{chip:jane@example.com}} field name too long test (Open)<SR>
+This Is A Really Very Long Field Name Indeed Here: value
+
+Case 11 (gts-82s2): a repeated field name ('Due:' twice) appends its values in document order rather than overwriting.
+
+[**ACT-17: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=1PYIU022o5dWNhIkyErjUzF6TRg--r4QrH-h-JbPNO-E&ain=ACT-17){{chip:jane@example.com}} repeated field test (Open)<SR>
+**Due**:	Monday<SR>
+Tuesday<SR>
+**Notes**:	first note
+
+Case 6 (gts-82s2): a field value's own hyperlink survives round-trip.
+
+[**ACT-18: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=1PYIU022o5dWNhIkyErjUzF6TRg--r4QrH-h-JbPNO-E&ain=ACT-18){{chip:jane@example.com}} link in a field value test (Open)<SR>
+**Notes**:	see the Q3 deck for context

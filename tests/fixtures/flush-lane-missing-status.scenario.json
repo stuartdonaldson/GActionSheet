@@ -1,0 +1,12 @@
+{
+  "name": "flush-lane-missing-status",
+  "input": "flush-lane-missing-status",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "flush-lane-missing-status-expected",
+  "serves": [
+    "gts-iz9i"
+  ],
+  "batch": "apt-lanes-flush"
+}

@@ -1,0 +1,17 @@
+<!-- kind: golden -->
+<!-- name: dual-prefix -->
+<!-- serves: gts-nrxn -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Case 4 (gts-nrxn, ADR-0023), part 1: ACT-9 precedes the legacy-spelled token below in document order.
+
+[**ACT-9: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=1PYIU022o5dWNhIkyErjUzF6TRg--r4QrH-h-JbPNO-E&ain=ACT-9) (Open)
+
+Case 1/4 (gts-nrxn): a legacy AI-N token reads unrewritten, sharing the same N sequence as the ACT- spelling.
+
+AI-10: jane@example.com legacy spelling still works (Open)
+
+Case 4 (gts-nrxn), part 2: ACT-11 follows the legacy-spelled token above in document order -- one shared N sequence, not per-prefix.
+
+ACT-11: jane@example.com header status with continuation lines following (In Progress)<SR>
+Notes: revenue section drafted, expenses pending (blocked)

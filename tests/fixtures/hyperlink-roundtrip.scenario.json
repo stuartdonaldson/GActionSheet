@@ -1,0 +1,11 @@
+{
+  "name": "hyperlink-roundtrip",
+  "input": "hyperlink-roundtrip",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "hyperlink-roundtrip",
+  "serves": [
+    "gts-tz5x"
+  ]
+}

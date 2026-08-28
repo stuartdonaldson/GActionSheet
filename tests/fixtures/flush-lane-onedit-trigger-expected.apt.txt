@@ -1,0 +1,8 @@
+<!-- kind: golden -->
+<!-- name: flush-lane-onedit-trigger-expected -->
+<!-- serves: gts-iz9i -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Case (gts-iz9i, entry point 7): the onEdit-trigger path (_syncSheetRowToDoc) has no customFields source. KNOWN GAP (test_field_continuation_flush.py's own ep7 marker): the field line is DROPPED, not preserved, by this specific flush.
+
+[**AI-107: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=AI-107)ep7 onedit lane base (Done)

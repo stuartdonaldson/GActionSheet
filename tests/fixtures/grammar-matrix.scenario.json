@@ -1,0 +1,11 @@
+{
+  "name": "grammar-matrix",
+  "input": "grammar-matrix",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "grammar-matrix",
+  "serves": [
+    "gts-ucdz"
+  ]
+}

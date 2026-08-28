@@ -219,8 +219,30 @@ def settings():
     return _load_settings()
 
 
+def _session_is_no_live_session(session: pytest.Session) -> bool:
+    """gts-2moy: True only when EVERY collected item carries
+    `@pytest.mark.no_live_session`.
+
+    Opt-in-to-skip, not opt-in-to-run (gts-85x3.1's safety net stays the
+    default): a plain `pytest` invocation of an offline-only module (e.g.
+    tests/test_document_export_harness.py) needs no live Google/GAS session
+    and must not block on one, but a mixed run that pulls in even one
+    unmarked (live-session) test still gets the full live-session preflight
+    -- marking one file doesn't opt the whole suite out.
+
+    `session.items` is only fully populated after collection; every caller
+    here is a session-scoped autouse fixture, which pytest runs during the
+    test-execution phase, after collection completes -- so this is always
+    reading a finished list, never a partial one.
+    """
+    items = session.items
+    if not items:
+        return False
+    return all(item.get_closest_marker("no_live_session") is not None for item in items)
+
+
 @pytest.fixture(scope="session", autouse=True)
-def _check_auth_session_alive():
+def _check_auth_session_alive(request):
     """Probe the shared Playwright auth session once, before any other
     session fixture or test runs, and hard-abort the whole run if it's
     signed out (gts-85x3.1).
@@ -241,6 +263,8 @@ def _check_auth_session_alive():
     already fail loudly on their own in that case, this check just isn't the
     right layer for that particular gap.
     """
+    if _session_is_no_live_session(request.session):
+        return
     try:
         import playwright  # noqa: F401
     except ImportError:
@@ -263,7 +287,7 @@ def _check_auth_session_alive():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _reset_test_state(settings):
+def _reset_test_state(request, settings):
     """Clear transient '_TEST_*' script-property toggles before this session's
     first test runs (gts-rvwu follow-up).
 
@@ -277,13 +301,15 @@ def _reset_test_state(settings):
     memoized fixture caches meant to persist across sessions (see
     'reset_test_state' in src/TestFixtures.js for the full rationale).
     """
+    if _session_is_no_live_session(request.session):
+        return
     from tests.helpers.fixture_invoke import invoke_fixture
 
     invoke_fixture("reset_test_state", "", settings, timeout=60)
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _purge_stale_test_docs(settings, _reset_test_state):
+def _purge_stale_test_docs(request, settings, _reset_test_state):
     """Bound the shared TEST corpus's growth by evicting aged-out 'Doc Not
     Found' rows before this session's first test runs (gts-4m7l).
 
@@ -298,6 +324,8 @@ def _purge_stale_test_docs(settings, _reset_test_state):
     Found' Actions row past the 24h window and then runs the unmodified
     production ArchiveManager.archive() sweep.
     """
+    if _session_is_no_live_session(request.session):
+        return
     from tests.helpers.fixture_invoke import invoke_fixture
 
     invoke_fixture("purge_stale_test_docs", "", settings, timeout=120)

@@ -441,6 +441,92 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
 }
 
 /**
+ * gts-ogev/gts-mt39: appends ONE plain (non-bulleted) body-level paragraph of
+ * the form `[beforeText '\v'] tokenPrefix ' ' <PERSON chip> [' ' afterText]`,
+ * via the Docs REST API only (no DocumentApp), so the chip and the soft
+ * return are both created with the exact same mechanism the fast-path chip
+ * fixtures above use for the chip itself.
+ *
+ * '\v' (U+000B), not '\n', is the separator between beforeText and the token
+ * line: this is what makes it a genuine same-paragraph soft return rather
+ * than a new paragraph — see _toSoftReturnText's doc comment in
+ * SyncManager.js for why U+000B specifically (InsertTextRequest strips
+ * U+000B<0x1F control chars except this one, and treats literal '\n' as a
+ * hard paragraph break).
+ *
+ * Omitting beforeText ('') produces a single-line paragraph with the token at
+ * position 0 — the single-token fast path's shape
+ * (_parseParagraphAsFloatingAction) — so the SAME helper can seed both sides
+ * of a same-chip fast-path-vs-soft-return-path comparison.
+ *
+ * @param {string} token       OAuth2 access token from ScriptApp.getOAuthToken()
+ * @param {string} docId       Document ID
+ * @param {string} beforeText  Text on the line(s) before the token; '' for none
+ * @param {string} tokenPrefix e.g. 'AI-9:' or 'ACT-3:' (colon included)
+ * @param {string} email       Assignee email for the PERSON chip
+ * @param {string} afterText   Text after the chip on the token's own line; '' for none
+ */
+function _tfAppendChipHeaderParagraph(token, docId, beforeText, tokenPrefix, email, afterText) {
+  var baseUrl    = 'https://docs.googleapis.com/v1/documents/';
+  var authHeader = { 'Authorization': 'Bearer ' + token };
+
+  var getResp = UrlFetchApp.fetch(
+    baseUrl + docId + '?fields=body.content',
+    { headers: authHeader, muteHttpExceptions: true }
+  );
+  if (getResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendChipHeaderParagraph GET failed: HTTP ' + getResp.getResponseCode());
+  }
+  var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
+
+  var lastParaEndIndex = null;
+  for (var ci = content.length - 1; ci >= 0; ci--) {
+    if (content[ci].paragraph) {
+      lastParaEndIndex = content[ci].endIndex;
+      break;
+    }
+  }
+  if (lastParaEndIndex === null) {
+    throw new Error('_tfAppendChipHeaderParagraph: no paragraph found in doc body');
+  }
+
+  var insertAt = lastParaEndIndex - 1;
+  var header    = (beforeText ? beforeText + '\v' : '') + tokenPrefix + ' ';
+  var headerLen = header.length;
+
+  var requests = [
+    { insertText: { location: { index: insertAt }, text: '\n' } },
+    { insertText: { location: { index: lastParaEndIndex }, text: header } },
+    { insertPerson: {
+        personProperties: { email: email },
+        location: { index: lastParaEndIndex + headerLen }
+      }
+    }
+  ];
+  if (afterText) {
+    requests.push({ insertText: {
+      location: { index: lastParaEndIndex + headerLen + 1 },
+      text: ' ' + afterText
+    }});
+  }
+
+  var batchResp = UrlFetchApp.fetch(
+    baseUrl + docId + ':batchUpdate',
+    {
+      method: 'post',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeader),
+      payload: JSON.stringify({ requests: requests }),
+      muteHttpExceptions: true
+    }
+  );
+  if (batchResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendChipHeaderParagraph batchUpdate failed: HTTP ' +
+                    batchResp.getResponseCode() + ': ' +
+                    batchResp.getContentText().substring(0, 200));
+  }
+}
+
+/**
  * Test-harness signer for gts-79dw.4.18's assertion verifier
  * (_verifySignedAssertion, src/AccessControl.js). Mirrors NUUC-Dispatch's
  * own Assertion_issue (../NUUC-Dispatch/src/Assertion.js) exactly on the
@@ -2063,6 +2149,30 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'append_doc_paragraph_with_chip':
+      case 'append_doc_soft_paragraph_with_chip': {
+        // gts-ogev/gts-mt39: seeds a PERSON-chip action header via the Docs
+        // REST API (_tfAppendChipHeaderParagraph). 'append_doc_paragraph_with_chip'
+        // (data.before omitted/'') puts the token at paragraph position 0 —
+        // the single-token fast path's shape. 'append_doc_soft_paragraph_with_chip'
+        // (data.before non-empty) puts context text before the token, joined
+        // by a genuine soft return — the soft-return path's shape. The same
+        // helper builds both so a test can seed one chip email through each
+        // path and compare the resolved assignee.
+        doc.saveAndClose();
+        var chipParaToken = ScriptApp.getOAuthToken();
+        _tfAppendChipHeaderParagraph(
+          chipParaToken, testDocId,
+          data.before || '',
+          data.token || 'AI:',
+          data.email,
+          data.after || ''
+        );
+        docAlreadyClosed = true;
+        _TF_RESULT = { tag: 'fixture.' + resolvedScenario, data: { ok: true } };
+        break;
+      }
+
       case 'append_tracker_cell_text': {
         // Appends an AI: token into the LAST data row's first cell of the
         // existing Action Item Tracker table (must already exist via
@@ -2446,6 +2556,37 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'seed_link_action': {
+        // gts-tz5x: seeds this invocation's doc (testDocId, or data.docId
+        // when provided) with a floating action whose actionText carries a
+        // hyperlink over one phrase, deliberately isolated from any
+        // bold/italic span (ADR-0027 rule 12's hasFormatting gate must fire
+        // on link alone -- a link-only action must not be misread as
+        // unformatted and dropped). No status token, so the first sync's
+        // "materialize missing explicit status" flush path exercises the
+        // link's updateTextStyle request immediately, same as
+        // seed_formatted_action does for bold/italic.
+        //
+        // Accepts {n, url}; url defaults to one with encodable characters
+        // (query string) so the same fixture covers gts-tz5x case 3 without
+        // a second seed helper -- pass a plain https://host/path url to
+        // isolate the encodable-URL behavior from the base round-trip case.
+        var slaN     = (data && data.n) || 1;
+        var slaUrl   = (data && data.url) || 'https://example.com/docs?x=1&y=2';
+        var slaText  = 'AI-' + slaN + ': Please see the Q3 deck for context today';
+        var slaPara  = body.appendParagraph(slaText);
+        var slaTextEl = slaPara.editAsText();
+        var slaLinkWord  = 'Q3 deck';
+        var slaLinkStart = slaText.indexOf(slaLinkWord);
+        var slaLinkEnd   = slaLinkStart + slaLinkWord.length - 1;
+        slaTextEl.setLinkUrl(slaLinkStart, slaLinkEnd, slaUrl);
+        _TF_RESULT = { tag: 'fixture.seed_link_action', data: {
+          ok: true, n: slaN, text: slaText, url: slaUrl,
+          linkWord: slaLinkWord
+        } };
+        break;
+      }
+
       case 'replace_action_plain_text': {
         // gts-a8yh.2 state probe: rewrites an existing floating action's
         // paragraph (previously seeded by e.g. seed_formatted_action) with
@@ -2478,6 +2619,66 @@ function setupTestFixtures(scenario, data) {
         _TF_RESULT = { tag: 'fixture.replace_action_plain_text', data: {
           ok: raptFound, n: raptN, text: raptText
         } };
+        break;
+      }
+
+      case 'create_canonical_reference_doc': {
+        // gts-colw AC#3: creates a NEW, permanent Doc (not the throwaway
+        // testDocId this dispatcher always opens/closes) and decodes
+        // data.apt into it — the one-time step that produces the canonical
+        // reference doc's fixed Drive location. Requires testDocId only to
+        // satisfy this function's own entry guard; that doc is untouched.
+        var ccrdApt = data && data.apt;
+        if (!ccrdApt) {
+          _TF_RESULT = { tag: 'fixture.create_canonical_reference_doc', data: { ok: false, error: 'data.apt is required' } };
+          break;
+        }
+        var ccrdName = (data && data.name) || 'GActionSheet — ADR-0027 Canonical Reference (gts-colw)';
+        var ccrdDoc = DocumentApp.create(ccrdName);
+        var ccrdDocId = ccrdDoc.getId();
+        decodeAptIntoDoc(ccrdDoc, ccrdApt); // saves and closes ccrdDoc internally
+        _TF_RESULT = { tag: 'fixture.create_canonical_reference_doc', data: {
+          ok: true, docId: ccrdDocId, docUrl: 'https://docs.google.com/document/d/' + ccrdDocId + '/edit'
+        } };
+        break;
+      }
+
+      case 'encode_reference_document': {
+        // gts-colw: encodes this invocation's doc (testDocId, or data.docId
+        // when provided) to Action Portable Text (docs/interfaces/action-
+        // portable-text.md). Used both for the round-trip check
+        // (encode(decode(x)) == x) and to regenerate the checked-in APT
+        // file from the human-maintained canonical reference doc.
+        var erdDocId = (data && data.docId) || testDocId;
+        var erdDoc = erdDocId === testDocId ? doc : DocumentApp.openById(erdDocId);
+        var erdApt = encodeDocToApt(erdDoc);
+        if (erdDoc === doc) { doc.saveAndClose(); docAlreadyClosed = true; }
+        _TF_RESULT = { tag: 'fixture.encode_reference_document', data: { ok: true, apt: erdApt } };
+        break;
+      }
+
+      case 'decode_reference_document': {
+        // gts-colw: decodes Action Portable Text (data.apt, required) into
+        // this invocation's doc (testDocId, or data.docId when provided).
+        // decodeAptIntoDoc is append-only (targets an EMPTY body), so this
+        // case clears the target doc's body first — makes the call a true
+        // "regenerate whole" regardless of whatever the doc held before
+        // (a fresh scn.new_doc() test seed, or the canonical Doc after a
+        // human hand-edited or a live sync flushed it). Without this,
+        // re-pushing a correction to an already-populated doc APPENDS a
+        // second copy instead of replacing the first (caught live 2026-08-27
+        // pushing a correction back to the canonical Doc).
+        var drdApt = data && data.apt;
+        if (!drdApt) {
+          _TF_RESULT = { tag: 'fixture.decode_reference_document', data: { ok: false, error: 'data.apt is required' } };
+          break;
+        }
+        var drdDocId = (data && data.docId) || testDocId;
+        var drdDoc = drdDocId === testDocId ? doc : DocumentApp.openById(drdDocId);
+        drdDoc.getBody().clear();
+        decodeAptIntoDoc(drdDoc, drdApt); // saves and closes drdDoc internally
+        if (drdDoc === doc) docAlreadyClosed = true;
+        _TF_RESULT = { tag: 'fixture.decode_reference_document', data: { ok: true, docId: drdDocId } };
         break;
       }
 
@@ -2530,6 +2731,12 @@ function setupTestFixtures(scenario, data) {
           globalId: darGlobalId,
           scanActionText: darScan ? darScan.actionText : null,
           scanRuns:       darScan ? darScan.runs : null,
+          // gts-po8t: additive — ADR-0027 rule 5a custom fields as scanned
+          // FRESH off the doc, {FieldName:{text,runs}}, so a test can assert
+          // the write-side render (_renderCustomFieldLines) reparses as the
+          // same field(s)/value(s)/formatting on the next scan, independent
+          // of sheet custom_fields persistence (not yet shipped, gts-t6xs).
+          scanCustomFields: darScan ? darScan.customFields : null,
           sheetActionText: darSheetText,
           sheetRuns:       darSheetRuns
         } };
@@ -3078,6 +3285,24 @@ function setupTestFixtures(scenario, data) {
         }
         SpreadsheetApp.flush();
         _TF_RESULT = { tag: 'fixture.menu_sync_active_doc', data: { docId: testDocId } };
+        break;
+      }
+
+      case 'menu_force_refresh_active_doc': {
+        // menuForceRefreshActiveDoc() -> syncDocument(docId, {force:true}) —
+        // Docs-menu "Force Refresh Style" wrapper call-site (gts-t78c),
+        // distinct from the plain menuSyncActiveDoc() case above. See
+        // 'menu_sync_active_doc' above for why _TEST_ACTIVE_DOC_ID exists.
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        props.setProperty('_TEST_ACTIVE_DOC_ID', testDocId);
+        try {
+          menuForceRefreshActiveDoc();
+        } finally {
+          props.deleteProperty('_TEST_ACTIVE_DOC_ID');
+        }
+        SpreadsheetApp.flush();
+        _TF_RESULT = { tag: 'fixture.menu_force_refresh_active_doc', data: { docId: testDocId } };
         break;
       }
 

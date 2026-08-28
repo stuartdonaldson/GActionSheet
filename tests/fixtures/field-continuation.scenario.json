@@ -1,0 +1,11 @@
+{
+  "name": "field-continuation",
+  "input": "field-continuation",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "field-continuation",
+  "serves": [
+    "gts-82s2"
+  ]
+}

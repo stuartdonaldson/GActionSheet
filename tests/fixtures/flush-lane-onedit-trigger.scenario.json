@@ -1,0 +1,15 @@
+{
+  "name": "flush-lane-onedit-trigger",
+  "input": "flush-lane-onedit-trigger",
+  "mutation": {
+    "kind": "trigger",
+    "token": "AI-107",
+    "field": "status",
+    "value": "Done"
+  },
+  "expected": "flush-lane-onedit-trigger-expected",
+  "serves": [
+    "gts-iz9i"
+  ],
+  "batch": "apt-lanes-flush"
+}

@@ -1,0 +1,8 @@
+<!-- kind: golden -->
+<!-- name: unparseable-reporting -->
+<!-- serves: gts-thwh -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Case 1 (gts-thwh, ADR-0027 rule 6): a malformed token line (no colon after the token digits) is reported as unparseable, not silently skipped.
+
+ACT-77 | someone | do the thing

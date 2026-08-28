@@ -1,0 +1,16 @@
+{
+  "name": "flush-lane-sheetwin",
+  "input": "flush-lane-sheetwin",
+  "mutation": {
+    "kind": "sheetEdit",
+    "token": "AI-101",
+    "fields": {
+      "status": "In Progress"
+    }
+  },
+  "expected": "flush-lane-sheetwin-expected",
+  "serves": [
+    "gts-iz9i"
+  ],
+  "batch": "apt-lanes-flush"
+}

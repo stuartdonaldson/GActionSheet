@@ -1,0 +1,11 @@
+{
+  "name": "unparseable-reporting",
+  "input": "unparseable-reporting",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "unparseable-reporting",
+  "serves": [
+    "gts-thwh"
+  ]
+}

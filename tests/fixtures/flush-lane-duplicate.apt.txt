@@ -1,0 +1,13 @@
+<!-- kind: golden -->
+<!-- name: flush-lane-duplicate -->
+<!-- serves: gts-iz9i -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Case (gts-iz9i, entry point 3), canonical: the first occurrence of a duplicated explicit token carries the field line.
+
+AI-103: ep3 duplicate lane base (Open)<SR>
+Target: ep3 lane value
+
+Case (gts-iz9i, entry point 3), duplicate: the second occurrence of the SAME token has no field line of its own -- reconciliation must propagate the canonical's.
+
+AI-103: ep3 duplicate lane base (Open)

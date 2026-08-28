@@ -1,0 +1,16 @@
+<!-- kind: golden -->
+<!-- name: create-lane-middle-expected -->
+<!-- serves: gts-pi1s -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Filler context action, unrelated to the create boundary under test.
+
+ACT-211: filler@example.com create-middle filler one (Open)
+
+Case (gts-pi1s, @create in the middle of existing content): a bare AI: trigger between two already-established actions -- the occurrence scanner must not assume the create-token sits at any fixed offset.
+
+[**ACT-999: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-999)create lane middle token (Open)
+
+Filler context action, unrelated to the create boundary under test.
+
+ACT-212: filler@example.com create-middle filler two (Open)

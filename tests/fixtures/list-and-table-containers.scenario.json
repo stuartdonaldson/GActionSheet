@@ -1,0 +1,7 @@
+{
+  "name": "list-and-table-containers",
+  "input": "list-and-table-containers",
+  "mutation": { "kind": "sync" },
+  "expected": "list-and-table-containers",
+  "serves": ["gts-83s5"]
+}
