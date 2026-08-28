@@ -1,8 +1,16 @@
 """
 test_floating_action_scanner.py — floating action scanner: table cells,
 bulleted lists, mixed placement, tracker-table exclusion (GTaskSheet-dq6t
-AC-1 through AC-6), and soft-return single-AI-per-paragraph model
-(GTaskSheet-cn5v AC-T1 through AC-T4).
+AC-4 and AC-6; AC-1/AC-2/AC-3/AC-5 retired gts-45fg/act-retire, see below),
+and soft-return single-AI-per-paragraph model (GTaskSheet-cn5v AC-T1
+through AC-T4).
+
+AC-1/AC-2 (bulleted list, body level), AC-3 (table, multiple cells,
+distinct actionText) and AC-5 (list item inside a table cell) are
+structural container-detection cases, retired gts-45fg/act-retire in favor
+of tests/fixtures/list-and-table-containers.apt.txt (Cases 1/3/3b) run
+through tests/test_apt_corpus_check.py — decode into a fresh doc, sync,
+diff clean against the golden. See the removal notes inline below.
 
 AC-7/AC-8 (@create mid-cell caret placement, Playwright-driven) need a new
 UiDriver capability for placing the caret inside a specific table cell —
@@ -47,45 +55,15 @@ def _assert_action_absent(scn, action_text):
 
 
 # ---------------------------------------------------------------------------
-# AC-1/AC-2 — bulleted list, body level
+# AC-1/AC-2 (bulleted list, body level) and AC-3 (table, multiple cells,
+# distinct actionText) retired gts-45fg/act-retire: both are structural
+# container detection, now covered by tests/fixtures/list-and-table-
+# containers.apt.txt Case 1 (LI) / Case 3 (2x2 TABLE, distinct cells) via
+# tests/test_apt_corpus_check.py::TestScenarioRoundTrip — decode into a
+# fresh doc, sync, and diff clean against the golden proves the same
+# detection this pair asserted, at lower cost per case (gts-83s5's own
+# description named these as the retirement target).
 # ---------------------------------------------------------------------------
-
-def test_bulleted_list_body_level_action_detected(settings, request):
-    """A bare AI: token in a body-level bulleted list item is assigned a
-    number by _assignPlaceholderTokens and produces a correct AI-N: row."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        action_text = "dq6t bulleted list body-level action"
-        scn._post_fixture("append_doc_list_item", {"text": f"AI: {action_text}"})
-        scn.sync()
-
-        row = _find_action(scn, action_text)
-        assert row.action_id is not None
-    finally:
-        scn.close()
-
-
-# ---------------------------------------------------------------------------
-# AC-3 — table, multiple cells, distinct actionText
-# ---------------------------------------------------------------------------
-
-def test_table_cell_actions_distinct(settings, request):
-    """A 2x2 table with AI: tokens in cell(0,0) and cell(1,1) produces two
-    distinct rows after sync — the scanner does not confuse the two cells."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        scn._post_fixture("append_doc_table", {"rows": [
-            [{"text": "AI: cell-0-0 task"}, {"text": ""}],
-            [{"text": ""}, {"text": "AI: cell-1-1 task"}],
-        ]})
-        scn.sync()
-
-        row00 = _find_action(scn, "cell-0-0 task")
-        row11 = _find_action(scn, "cell-1-1 task")
-        assert row00.global_id != row11.global_id
-    finally:
-        scn.close()
-
 
 # ---------------------------------------------------------------------------
 # AC-4 — table cell, surrounding text
@@ -122,26 +100,12 @@ def test_table_cell_action_prefix_text_not_detected(settings, request):
 
 
 # ---------------------------------------------------------------------------
-# AC-5 — bulleted list item inside a table cell
+# AC-5 (bulleted list item inside a table cell) retired gts-45fg/act-retire:
+# structural container detection, now covered by tests/fixtures/list-and-
+# table-containers.apt.txt Case 3b (<LI> nested inside <CELL>) via
+# tests/test_apt_corpus_check.py::TestScenarioRoundTrip — same rationale as
+# the AC-1/AC-2/AC-3 pair above.
 # ---------------------------------------------------------------------------
-
-def test_list_item_inside_table_cell_detected(settings, request):
-    """A list-item paragraph inside a table cell with an AI: token is scanned
-    and produces a sheet row (exercises the LIST_ITEM branch in
-    _collectTableCellActions)."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        action_text = "dq6t list-item inside table cell"
-        scn._post_fixture("append_doc_table", {"rows": [
-            [{"text": f"AI: {action_text}", "listItem": True}, {"text": ""}],
-        ]})
-        scn.sync()
-
-        row = _find_action(scn, action_text)
-        assert row.action_id is not None
-    finally:
-        scn.close()
-
 
 # ---------------------------------------------------------------------------
 # AC-6 — tracker table exclusion
@@ -507,5 +471,74 @@ def test_xvlu_prose_paragraph_not_reported(settings, request):
         issues = data.get("issues") or []
         assert not any("does not parse" in i for i in issues), f"unexpected unparseable report: {issues!r}"
         assert data.get("counts", {}).get("unparseable") == 0
+    finally:
+        scn.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-ogev — PERSON-chip parity between the single-token fast path
+# (_parseParagraphAsFloatingAction) and the soft-return path
+# (_parseSoftReturnParagraphActions). Twin [TST]: gts-mt39.
+# ---------------------------------------------------------------------------
+
+# A real Google contact resolvable by the Docs REST API's insertPerson (same
+# account used as a chip target elsewhere, e.g. test_view_b.py's CALLER_EMAIL).
+_OGEV_CHIP_EMAIL = "stuart.donaldson@gmail.com"
+
+
+def test_ogev_soft_return_person_chip_matches_fast_path(settings, request):
+    """gts-ogev frozen AC: a PERSON chip placed immediately after the token in
+    a multi-line (soft-return) paragraph resolves assignee_email/assignee_name
+    from the chip, matching what the single-token fast path resolves for the
+    SAME chip email — the frozen AC's own wording ("matching the single-token
+    fast path's output for the same chip"), so the assertion compares the two
+    paths directly rather than hard-coding Google's contact-resolved display
+    name.
+    """
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture("append_doc_paragraph_with_chip", {
+            "token": "ACT-80:", "email": _OGEV_CHIP_EMAIL, "after": "fast path chip parity",
+        })
+        scn._post_fixture("append_doc_soft_paragraph_with_chip", {
+            "before": "context intro", "token": "ACT-81:",
+            "email": _OGEV_CHIP_EMAIL, "after": "soft return chip parity",
+        })
+        scn.sync()
+
+        fast_row = _find_by_global_id(scn, f"{scn.doc_id}/ACT-80")
+        soft_row = _find_by_global_id(scn, f"{scn.doc_id}/ACT-81")
+
+        assert fast_row.assignee == _OGEV_CHIP_EMAIL, (
+            f"fast path did not resolve the chip email: {fast_row.assignee!r}"
+        )
+        assert soft_row.assignee == _OGEV_CHIP_EMAIL, (
+            f"soft-return path lost the chip's assignee email (pre-fix behavior): "
+            f"{soft_row.assignee!r}"
+        )
+        assert soft_row.assignee_name == fast_row.assignee_name, (
+            f"soft-return path's chip-resolved name {soft_row.assignee_name!r} does not "
+            f"match the fast path's {fast_row.assignee_name!r} for the same chip"
+        )
+        assert soft_row.action == "soft return chip parity"
+    finally:
+        scn.close()
+
+
+def test_ogev_soft_return_text_email_assignee_unchanged(settings, request):
+    """gts-ogev frozen AC regression guard: the soft-return path's existing
+    text-based email assignee detection (no PERSON chip involved) is
+    unchanged by the chip-detection fix."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn._post_fixture("append_doc_soft_paragraph", {
+            "text": "context intro\nACT-82: jane.doe@example.com text email continuation",
+        })
+        scn.sync()
+
+        row = _find_by_global_id(scn, f"{scn.doc_id}/ACT-82")
+        assert row.assignee == "jane.doe@example.com"
+        assert row.assignee_name == "Jane Doe"
+        assert row.action == "text email continuation"
     finally:
         scn.close()
