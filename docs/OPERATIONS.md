@@ -317,6 +317,37 @@ restricted view point it directly at the `test.u2`/`test.u3` account file.
 
 **One-browser-per-journey fixture.** All UI sidebar acts within a journey share a single module-scoped browser instance, launched once at the journey start and torn down at the end. This pattern amortizes the Chromium cold-start cost across multiple acts. The canonical fixture is `browser_page` in `tests/test_journey.py` (scope="module"), with `.auth/user.json` storage state for authentication. Non-UI acts remain entirely on the HTTP/fixture path and do not touch the browser.
 
+### APT Corpus Tooling (`scripts/apt.py`)
+
+Format spec + tool contract: `docs/interfaces/action-portable-text.md`. `scripts/apt.py` is the
+one entry point for authoring/reviewing `.apt.txt` corpora under `tests/fixtures/`, sharing its
+differ (`scripts/apt_lib.py::diff_apt`) with `tests/test_apt_corpus_check.py` (decision 8 — one
+implementation, not a CLI copy and a pytest copy).
+
+```bash
+# Diff two files directly -- no network, no corpus resolution.
+python scripts/apt.py diff a.apt.txt b.apt.txt
+
+# Capture the canonical Doc, diff against the checked-in golden, exit 0 on a clean tree.
+python scripts/apt.py pull action-reference
+
+# Materialise a corpus file into its Doc (overwrites; refuses on drift unless --force).
+python scripts/apt.py push action-reference
+
+# Promote the LAST capture (not a fresh re-capture) into the golden.
+# --accept-presentational auto-accepts only when presentational is the highest class present;
+# structural changes always need an overall y/N; every preservation-tier entry needs a reason.
+python scripts/apt.py bless action-reference --accept-presentational
+```
+
+Exit codes mirror `apt_lib.AptDiffResult.exit_code()`: 0 clean, 1 presentational, 2 structural,
+3 preservation — script the exit code, don't parse the printed diff. Doc-id resolution for
+`push`/`pull`/`bless`: `--doc` > the golden's own `<!-- doc: ... -->` header > (canonical
+`action-reference` corpus only) `referenceDocId` in `local.settings.json`. A scenario corpus under
+`tests/fixtures/` (anything with a `.scenario.json` sibling) is doc-less by design (materialises
+into a fresh `ScenarioSession.new_doc()`) — `push`/`pull`/`bless` against one without `--doc` or a
+golden `doc:` header errors naming that.
+
 ### Running the Tests
 
 ```bash

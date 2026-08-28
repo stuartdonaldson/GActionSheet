@@ -116,6 +116,42 @@ homes. File these as `[TST]` beads tagged with the principle they discharge:
 | `contract.py` | loads authoritative contract export | `I6` |
 | `assertions.py` | standalone per-surface comparison helpers | `T5`, `T10` |
 
+## APT corpus/scenario lane — where it sits in the testing model
+
+Staged plan `knowledge-base/staging/apt-testing.md` (all 7 stages complete, doc retired) moved the
+ADR-0027 floating-action grammar's regression surface from six near-duplicate paragraph builders
+in `src/TestFixtures.js` into data (`.apt.txt` corpora, `docs/interfaces/action-portable-text.md`)
+plus one comparator (`scripts/apt_lib.py::diff_apt`, four-class classification — decision 4 in that
+now-deleted doc). It does not introduce a new `T`/`I` principle; it is a `T15`
+(Act/Expect/Checkpoint) realization specialized to one domain (a Doc's portable-text body) with its
+own Expect: `apt_lib.diff_apt(expected, captured).clean` in place of a per-field assertion list.
+
+- **`tests/test_apt_differ.py` / `test_apt_fixtures_lint.py` / `test_apt_scenario_format.py` /
+  `test_apt_cli.py`** — offline, `no_live_session`-marked (`T2`-style fast unit coverage; the
+  `gts-2moy` fixture unblocks these by no-op'ing the session-scoped autouse live-auth fixtures when
+  every collected item in a run carries the marker).
+- **`tests/test_apt_corpus_check.py`** — the generic "apt check" pytest lane: decode a corpus into a
+  fresh Doc, sync once (the degenerate `"sync"` mutation), re-encode, assert clean diff. One
+  scenario per `*.scenario.json` under `tests/fixtures/`; `T17`'s entry-point-coverage invariant is
+  satisfied per corpus by that corpus's own `serves:` bead, not by this file.
+- **`tests/test_apt_flush_lane.py` / `test_apt_create_lane.py`** — batched scenario runners
+  (`tests/support/apt_lane_runner.py`) for non-degenerate mutations (`sheetEdit`, `trigger`,
+  `@create` insertion) that need a live per-item action between the establishing sync and capture.
+  Materialise-once/sync-once-or-twice/capture-once/slice-back is the `T13`-style batching this
+  module applies to keep a multi-scenario lane cheap (measured: batching flush entry points 1–4/7
+  and the `@create` boundary lane avoided repeating `begin_journey_session`/`sync`/
+  `end_journey_session` per scenario — see `knowledge-base/staging/suite-ensemble.md`'s own
+  sequencing note against this lane).
+- **`tests/test_adr0027_reference_document.py`** — deliberately NOT superseded by the corpus-check
+  lane (`act-retire`/gts-45fg decision): it asserts field-by-field semantics (assignee_name
+  resolution, `scanCustomFields` values, link-run detection via `debug_action_runs`) that a text
+  diff does not independently verify. Both coexist; `action-reference.apt.txt` remains the
+  `apt.py push/pull/bless` canonical golden.
+- **`test_floating_action_scanner.py`'s structural cases (AC-1/AC-2/AC-3/AC-5)** — retired
+  (`gts-45fg`), superseded by `tests/fixtures/list-and-table-containers.apt.txt` (Cases 1/3/3b) via
+  the corpus-check lane above. AC-4 (text-anchoring) and AC-6 (tracker-table exclusion) are not
+  structural container detection and were kept — no APT-corpus replacement exists for either.
+
 ## Open follow-ups (not done by this re-base)
 
 Tracked under gts-k22t. Status as of 2026-06-11:
