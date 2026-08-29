@@ -236,8 +236,8 @@ class SheetReader:
 
             def _cell_val(field: str):
                 idx = col.get(field)
-                if idx is None:
-                    return None
+                if idx is None or idx > len(row):
+                    return None  # short row: a trailing optional column (custom_fields)
                 c = row[idx - 1]
                 v = c.value
                 return str(v) if v is not None else None
@@ -252,6 +252,10 @@ class SheetReader:
             obj.global_id = _cell_val("global_id")
             obj.assignee_name = _cell_val("assignee_name")
             obj.sync_status = _cell_val("sync_status") or ""
+            # ADR-0027 rule 9: additive, optional column; raw JSON text here, decoded
+            # by the consumer (tests/helpers/doc_sheet_agreement.py) rather than in
+            # this reader, which stays a plain cell-to-record mapper.
+            obj.custom_fields = _cell_val("custom_fields")
             obj.doc_id = derived_doc_id
             obj.doc_name = derived_doc_name
             # created_date/modified_date: keep the raw cell value (a naive datetime,
