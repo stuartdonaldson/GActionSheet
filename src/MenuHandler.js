@@ -57,6 +57,7 @@ function onOpen() {
     DocumentApp.getUi()
       .createMenu('Action Sync')
       .addItem('Sync', 'menuSyncActiveDoc')
+      .addItem('Force Refresh Style', 'menuForceRefreshActiveDoc')
       .addItem('Insert Tracker', 'menuInsertTrackerActiveDoc')
       .addItem('Export…', 'menuShowExportDialog')
       .addToUi();
@@ -114,6 +115,18 @@ function menuSyncActiveDoc() {
   if (docId) syncDocument(docId);
 }
 
+/**
+ * Force refresh (gts-t78c): re-renders every ACT/AI action paragraph in the
+ * active doc to current style, even when sheet and doc data already agree
+ * (syncDocument()'s normal diff finds nothing to flush for it). Use after a
+ * rendering-only change (chip URL scheme, badge, run/field formatting) that
+ * a plain Sync won't propagate to unchanged action items.
+ */
+function menuForceRefreshActiveDoc() {
+  var docId = _activeOrTestDocId();
+  if (docId) syncDocument(docId, { force: true });
+}
+
 function menuInsertTrackerActiveDoc() {
   var docId = _activeOrTestDocId();
   if (docId) insertTrackerTable(docId);
@@ -121,12 +134,12 @@ function menuInsertTrackerActiveDoc() {
 
 /**
  * Opens the Export progress dialog (gts-s7ut, Procedure-Exporter.js's
- * showGovernanceExportDialog_ + ExportProgressDialog.html). Only reachable
+ * showDocumentExportDialog_ + ExportProgressDialog.html). Only reachable
  * from this classic menu — showModalDialog is unavailable from CardService
  * action handlers, which is why export isn't a sidebar button.
  */
 function menuShowExportDialog() {
-  showGovernanceExportDialog_();
+  showDocumentExportDialog_();
 }
 
 // [PROBE] — dedicated identity probe callable from the sheet menu and Playwright.

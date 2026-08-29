@@ -39,11 +39,11 @@ import pytest
 from scn.session import ScenarioSession
 
 _EXPECTED_RUNS = [
-    {"start": 0, "end": 7, "bold": False, "italic": False},
-    {"start": 7, "end": 16, "bold": True, "italic": False},
-    {"start": 16, "end": 21, "bold": False, "italic": False},
-    {"start": 21, "end": 32, "bold": False, "italic": True},
-    {"start": 32, "end": 38, "bold": False, "italic": False},
+    {"start": 0, "end": 7, "bold": False, "italic": False, "link": None},
+    {"start": 7, "end": 16, "bold": True, "italic": False, "link": None},
+    {"start": 16, "end": 21, "bold": False, "italic": False, "link": None},
+    {"start": 21, "end": 32, "bold": False, "italic": True, "link": None},
+    {"start": 32, "end": 38, "bold": False, "italic": False, "link": None},
 ]
 _EXPECTED_TEXT = "Please bold this and italic that today"
 

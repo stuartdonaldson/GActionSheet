@@ -141,11 +141,12 @@ function _releaseDocSyncLock(docId) {
 // Public entry points
 // ---------------------------------------------------------------------------
 
-function syncDocument(docId) {
+function syncDocument(docId, opts) {
   if (!docId) {
     GasLogger.log('sync.error', { msg: 'docId is required' });
     return;
   }
+  var force = !!(opts && opts.force);
   if (!_acquireDocSyncLock(docId)) {
     GasLogger.log('sync.locked.skip', {
       docId: docId,
@@ -221,6 +222,32 @@ function syncDocument(docId) {
     // Duplicates (same AI-N copied) are excluded from the sheet sync to avoid
     // duplicate rows; they are flushed to doc separately so the copy paragraph
     // matches the canonical content.
+
+    // Builds one toFlush[] entry from a canonical (doc-scanned) action record,
+    // shared by every path below that adds to toFlush (sheetWin, newly-
+    // assigned, duplicate copy, missing-status materialize, force refresh —
+    // gts-t78c) so the object shape lives in one place instead of five.
+    // `overrides` lets the sheetWin path substitute the sheet's own action/
+    // status/assignee/runs values while still sourcing customFields from cf
+    // (the doc-canonical record) — gts-t6xs: the sheet does not persist
+    // custom_fields yet, so a sheetWin flush must preserve whatever field
+    // lines the doc scan (cf, not the sheet win) just found for this
+    // globalId; the doc is the only source of truth for them until sheet
+    // persistence ships.
+    function _buildFlushEntry(cf, globalId, overrides) {
+      overrides = overrides || {};
+      return {
+        N:             cf.N,
+        globalId:      globalId,
+        action:        overrides.action !== undefined ? overrides.action : cf.actionText,
+        status:        overrides.status !== undefined ? overrides.status : cf.status,
+        assigneeEmail: overrides.assigneeEmail !== undefined ? overrides.assigneeEmail : cf.assigneeEmail,
+        assigneeName:  overrides.assigneeName !== undefined ? overrides.assigneeName : cf.assigneeName,
+        runs:          (overrides.runs !== undefined ? overrides.runs : cf.runs) || [],
+        customFields:  cf.customFields || {}
+      };
+    }
+
     var canonicalByGlobalId = {};
     var hasDuplicateN       = {};
     for (var fi = 0; fi < floatingActions.length; fi++) {
@@ -259,51 +286,24 @@ function syncDocument(docId) {
       var win = sheetWins[si];
       var cf  = canonicalByGlobalId[win.globalId];
       if (!cf) continue;
-      toFlush[win.globalId] = {
-        N:             cf.N,
-        globalId:      win.globalId,
-        action:        win.action,
-        status:        win.status,
-        assigneeEmail: win.assigneeEmail,
-        assigneeName:  win.assigneeName,
-        runs:          win.runs || [], // gts-zocq: read back from the sheet's RichTextValue
-        // gts-t6xs: the sheet does not persist custom_fields yet, so a
-        // sheetWin flush preserves whatever field lines the doc scan (cf,
-        // not win) just found for this globalId -- the doc is the only
-        // source of truth for them until sheet persistence ships.
-        customFields:  cf.customFields || {}
-      };
+      // gts-zocq: win.runs is read back from the sheet's RichTextValue.
+      toFlush[win.globalId] = _buildFlushEntry(cf, win.globalId, {
+        action: win.action, status: win.status,
+        assigneeEmail: win.assigneeEmail, assigneeName: win.assigneeName, runs: win.runs
+      });
     }
     for (var ni = 0; ni < assignResult.newGlobalIds.length; ni++) {
       var ngId = assignResult.newGlobalIds[ni];
       if (toFlush[ngId]) continue; // sheetWin already covers it
       var cfn = canonicalByGlobalId[ngId];
       if (!cfn) continue;
-      toFlush[ngId] = {
-        N:             cfn.N,
-        globalId:      ngId,
-        action:        cfn.actionText,
-        status:        cfn.status,
-        assigneeEmail: cfn.assigneeEmail,
-        assigneeName:  cfn.assigneeName,
-        runs:          cfn.runs || [],
-        customFields:  cfn.customFields || {} // gts-t6xs
-      };
+      toFlush[ngId] = _buildFlushEntry(cfn, ngId);
     }
     for (var gId in hasDuplicateN) {
       if (toFlush[gId]) continue; // sheetWin or new-assign already covers it
       var cf2 = canonicalByGlobalId[gId];
       if (!cf2) continue;
-      toFlush[gId] = {
-        N:             cf2.N,
-        globalId:      gId,
-        action:        cf2.actionText,
-        status:        cf2.status,
-        assigneeEmail: cf2.assigneeEmail,
-        assigneeName:  cf2.assigneeName,
-        runs:          cf2.runs || [],
-        customFields:  cf2.customFields || {} // gts-t6xs
-      };
+      toFlush[gId] = _buildFlushEntry(cf2, gId);
     }
 
     // Materialize missing explicit status tokens as '(Open)' in the doc.
@@ -311,16 +311,24 @@ function syncDocument(docId) {
       if (toFlush[gId3]) continue;
       var cfm = canonicalByGlobalId[gId3];
       if (!cfm.hasExplicitStatus) {
-        toFlush[gId3] = {
-          N:             cfm.N,
-          globalId:      gId3,
-          action:        cfm.actionText,
-          status:        cfm.status,
-          assigneeEmail: cfm.assigneeEmail,
-          assigneeName:  cfm.assigneeName,
-          runs:          cfm.runs || [],
-          customFields:  cfm.customFields || {} // gts-t6xs
-        };
+        toFlush[gId3] = _buildFlushEntry(cfm, gId3);
+      }
+    }
+
+    // Force refresh (gts-t78c): re-render every canonical (non-duplicate)
+    // action paragraph to current rendering style, even when sheet and doc
+    // data already agree and the natural diff above found nothing to flush.
+    // Reuses the same toFlush map / _flushActionParagraphs path — force only
+    // changes which globalIds land in it, not how they're flushed.
+    var forceAddedCount = 0;
+    if (force) {
+      for (var gIdX in canonicalByGlobalId) {
+        if (toFlush[gIdX]) continue;
+        toFlush[gIdX] = _buildFlushEntry(canonicalByGlobalId[gIdX], gIdX);
+        forceAddedCount++;
+      }
+      if (forceAddedCount > 0) {
+        GasLogger.log('sync.forceFlush', { docId: docId, count: forceAddedCount });
       }
     }
 
@@ -364,7 +372,8 @@ function syncDocument(docId) {
     GasLogger.log('sync.complete', {
       docId:    docId,
       upserted: syncResult.upserted || 0,
-      updated:  syncResult.updated  || 0
+      updated:  syncResult.updated  || 0,
+      forced:   force
     });
   } finally {
     GasLogger.flush();
@@ -1653,14 +1662,65 @@ function _collectTableCellActions(table, tableBodyIdx, docId, actions, seenN) {
 }
 
 /**
+ * gts-ogev: looks for a PERSON chip structurally adjacent to `rawOffset` — a
+ * character index into this SAME paragraph's raw para.getText() string (the
+ * offset space _normalizeLineEndingsTracked/_splitTrackedLines already track
+ * everywhere else in this file).
+ *
+ * PERSON (like INLINE_IMAGE) contributes zero characters to getText(), so a
+ * chip can never be located BY a text offset — only by which two TEXT
+ * children straddle it. This walks the paragraph's structural children
+ * (para.getChild(ci)), accumulating TEXT lengths until the running total
+ * equals rawOffset (i.e. we are exactly at the boundary rawOffset points to),
+ * then checks the immediately following non-TEXT-before-it sibling(s) for a
+ * PERSON element. This is the same walk _parseParagraphAsFloatingAction uses
+ * (skip to the first TEXT child, then look at what comes after it) — just
+ * entered at an arbitrary boundary instead of always the first TEXT child,
+ * which is what a multi-line soft-return paragraph requires (see ADR-0027
+ * open question / this bead's design note).
+ *
+ * @param {GoogleAppsScript.Document.Paragraph|GoogleAppsScript.Document.ListItem} para
+ * @param {number} rawOffset  index into para.getText(); null skips the search
+ * @returns {{email: string, name: string}|null}
+ */
+function _personChipAtParaOffset(para, rawOffset) {
+  if (rawOffset === null || rawOffset === undefined) return null;
+  var numChildren = para.getNumChildren();
+  var cum = 0;
+  for (var ci = 0; ci < numChildren; ci++) {
+    var ch = para.getChild(ci);
+    if (ch.getType() === DocumentApp.ElementType.TEXT) {
+      var len = ch.asText().getText().length;
+      if (cum + len === rawOffset) {
+        for (var ni = ci + 1; ni < numChildren; ni++) {
+          var nc = para.getChild(ni);
+          var nt = nc.getType();
+          if (nt === DocumentApp.ElementType.PERSON) {
+            return { email: nc.asPerson().getEmail() || '', name: nc.asPerson().getName() || '' };
+          }
+          if (nt === DocumentApp.ElementType.TEXT) break; // next line's text starts here first — no chip at this boundary
+        }
+        return null;
+      }
+      cum += len;
+    }
+    // PERSON / INLINE_IMAGE contribute 0 chars — do not advance cum.
+  }
+  return null;
+}
+
+/**
  * Handles paragraphs containing one or more AI-N: tokens that appear after
  * soft-return (\n) lines — the pattern where the user writes contextual text
  * on the first line(s) and AI-N: tokens on subsequent lines within a single
  * paragraph element.
  *
  * Returns an array of action objects (one per AI-N: token found).
- * Text-based email assignee detection only; PERSON chips are handled by the
- * single-token fast path in _collectActionsFromParagraph.
+ *
+ * gts-ogev: a PERSON chip placed immediately after the AI-N: token (same
+ * position the single-token fast path reads it from) is detected via
+ * _personChipAtParaOffset and takes priority over a text-based email, exactly
+ * as on the fast path — see flush()'s chip-vs-header-text precedence below.
  */
 function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText) {
   var normalized = _normalizeLineEndings(fullText);
@@ -1670,6 +1730,7 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
   var curPrefix = null;
   var curLines = [];
   var curOffsets = []; // gts-zocq: parallel per-line offsets[], see below
+  var curChip = null;  // gts-ogev: {email, name} PERSON chip found right after this action's token, or null
 
   // gts-zocq: independently re-derive a tracked (text, offsets) view of this
   // SAME paragraph's raw text so each line's characters can be traced back to
@@ -1704,6 +1765,12 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
     var hasExplicitStatus = header.hasExplicitStatus;
     rawText               = header.actionText;
     offsets               = header.offsets;
+    // gts-ogev: a PERSON chip wins over a text-based assignee, matching the
+    // single-token fast path's precedence (_parseParagraphAsFloatingAction).
+    if (curChip) {
+      assigneeEmail = curChip.email;
+      assigneeName  = curChip.name;
+    }
     var N = curN;
     var runs = _extractInlineRuns(para.editAsText(), rawText, offsets);
     // gts-eezz: ADR-0027 rule 5/5a continuation fields, {} when none.
@@ -1736,6 +1803,16 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
       var consumed = m.match.length + (line.slice(m.match.length).match(/^\s*/) || [''])[0].length;
       curLines = [line.slice(consumed)];
       curOffsets = [lineOffsets.slice(consumed)];
+      // gts-ogev: locate a PERSON chip sitting right after the token, the
+      // same position the fast path reads it from. rawOffset is the raw
+      // para.getText() index of the first character following the
+      // token+whitespace on this line — or, when the token consumed the
+      // entire line (no trailing text before the paragraph's own line
+      // break), one past the line's last raw character.
+      var chipRawOffset = consumed < lineOffsets.length
+        ? lineOffsets[consumed]
+        : (lineOffsets.length > 0 ? lineOffsets[lineOffsets.length - 1] + 1 : null);
+      curChip = _personChipAtParaOffset(para, chipRawOffset);
     } else if (curN !== null) {
       curLines.push(line); // continuation line
       curOffsets.push(lineOffsets);
@@ -1749,8 +1826,8 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
 /**
  * Collects floating actions from a single paragraph/list-item, dispatching
  * to the correct parser based on whether the paragraph has a single leading
- * AI-N: token (fast path, PERSON chip support) or uses the soft-return
- * multi-token pattern (new path, text-based assignee only).
+ * AI-N: token (fast path) or uses the soft-return multi-token pattern (new
+ * path). gts-ogev: both paths detect a PERSON chip after the token.
  *
  * Appends any found actions to the `actions` array in place.
  *
@@ -1773,7 +1850,7 @@ function _collectActionsFromParagraph(para, bodyIdx, docId, seenN, actions, unpa
     return;
   }
 
-  // Single token at paragraph start: use existing logic (handles PERSON chips).
+  // Single token at paragraph start: use existing logic.
   if (tokenCount === 1 && _ACTION_TOKEN_REGEX_ANCHORED.test(text)) {
     var action = _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN);
     if (action) actions.push(action);
@@ -3555,25 +3632,31 @@ function _renderActionBodyWithStatus(text, status) {
 
 /**
  * ADR-0027 rule 5a, write side (gts-t6xs fix): serializes action.customFields
- * back into the doc as indented 'FieldName:<TAB>value' soft-return
- * continuation lines, mirroring the read side
- * (_parseFieldContinuationBlocksTracked / _buildCustomFieldsFromBlocks) so
- * flush is a real round trip instead of a silent delete. Without this, any
- * flush of a paragraph carrying a field-line continuation rebuilds the
- * paragraph from actionText alone (_buildFlushRequests/_applyActionFragment)
- * and permanently drops the field lines from the document (gts-t6xs).
+ * back into the doc as 'FieldName:<TAB>value' soft-return continuation
+ * lines, mirroring the read side (_parseFieldContinuationBlocksTracked /
+ * _buildCustomFieldsFromBlocks) so flush is a real round trip instead of a
+ * silent delete. Without this, any flush of a paragraph carrying a
+ * field-line continuation rebuilds the paragraph from actionText alone
+ * (_buildFlushRequests/_applyActionFragment) and permanently drops the
+ * field lines from the document (gts-t6xs).
  *
- * Layout decision (user, 2026-08-26): each field opens on its own
- * soft-return line indented two tabs -- one tab further than the header's
- * own body-start tab stop ([image][token][TAB]actionText) -- so a field
- * line reads as visually subordinate to the header rather than a plain
- * wrapped continuation. A value that itself spans multiple original lines
- * gets a third tab on its continuation lines, indented under the value's
- * own start rather than back under the field name. The field name is
- * bolded; the colon is followed by a literal tab (U+0009, not a space)
- * before the value -- this exactly reproduces _FIELD_LINE_REGEX's own
- * `[ \t]inlineValue?` production, so a written field line still parses as
- * one on the next scan (round trip, not one-way formatting).
+ * gts-po8t correction (2026-08-27): the original layout indented each field
+ * line two tabs (three on wrapped continuation lines) for visual
+ * subordination under the header. That directly violated the documented
+ * fieldLine grammar's "no leading whitespace" rule (docs/CONTEXT.md, ADR-0027
+ * rule 5a) and _FIELD_LINE_REGEX's own `^[A-Z]` anchor -- a field line
+ * written that way could never be recognized as a field line on the NEXT
+ * scan, so it silently degraded into fused actionText prose one flush cycle
+ * later (confirmed live: seed a field line -> sync -> sync again -> the
+ * field vanishes from custom_fields and reappears merged into action_text).
+ * Field lines are now written flush-left, matching the grammar exactly, so a
+ * written field line parses as the same field again on the next scan. The
+ * field name is bolded; the colon is followed by a literal tab (U+0009, not
+ * a space) before the value -- this exactly reproduces _FIELD_LINE_REGEX's
+ * own `[ \t]inlineValue?` production. A value spanning multiple original
+ * lines is written back with no added indentation on its continuation
+ * lines either, so a multi-line value round-trips byte-for-byte (any
+ * indentation was never part of the stored value to begin with).
  *
  * @param {Object<string,{text:string}>} customFields  Object.keys() order
  *   is first-appearance order -- see _buildCustomFieldsFromBlocks.
@@ -3592,13 +3675,13 @@ function _renderCustomFieldLines(customFields) {
     var name  = names[i];
     var raw   = (customFields[name] && customFields[name].text) || '';
     var lines = _normalizeLineEndings(raw).split('\n');
-    text += '\v\t\t';
+    text += '\v';
     var labelStart = text.length;
     text += name + ':';
     boldRanges.push([labelStart, text.length]);
     text += '\t' + lines[0];
     for (var li = 1; li < lines.length; li++) {
-      text += '\v\t\t\t' + lines[li];
+      text += '\v' + lines[li];
     }
   }
   return { text: text, boldRanges: boldRanges };

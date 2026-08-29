@@ -225,3 +225,62 @@ def test_menuInsertTrackerActiveDoc_inserts_tracker(scn):
         tag="[ez2e menuInsertTrackerActiveDoc]", entry_point="menuInsertTrackerActiveDoc",
     )
     scn.checkpoint(STEP)
+
+
+# ---------------------------------------------------------------------------
+# menuForceRefreshActiveDoc -> syncDocument(docId, {force:true}) — Docs menu
+# "Force Refresh Style" (gts-t78c)
+# ---------------------------------------------------------------------------
+
+def test_menuForceRefreshActiveDoc_flushes_converged_action(scn, gas_log_dir):
+    """menuForceRefreshActiveDoc() must rewrite an action paragraph's rendering
+    even when sheet and doc data already agree (no pending delta) -- the whole
+    point of "force" is bypassing the diff a plain sync relies on. A plain
+    second sync of an already-converged doc is a no-op for that item, so the
+    only observable proof force actually did something extra is the
+    sync.forceFlush {docId,count} GAS log line (gts-t78c AC-5)."""
+    if not gas_log_dir:
+        pytest.skip("gas_log_dir not configured — force-flush proof requires GAS log access")
+
+    from tests.helpers.gas_log import assert_log, clear_logs
+
+    seed = ai(action="menuForceRefreshActiveDoc converged floating action")
+    scn.append_paragraph(seed.as_text())
+    scn.sync()  # converge doc <-> sheet: no pending delta remains for this item
+
+    fence = clear_logs(gas_log_dir)
+    scn._post_fixture("menu_force_refresh_active_doc")  # menuForceRefreshActiveDoc()
+
+    assert_log(
+        gas_log_dir, fence,
+        lambda e: e.get("tag") == "sync.forceFlush"
+        and e.get("data", {}).get("docId") == scn.doc_id
+        and (e.get("data", {}).get("count") or 0) >= 1,
+        "[t78c menuForceRefreshActiveDoc] expected sync.forceFlush with count>=1 for a "
+        "converged doc (proves force bypassed the diff, not just re-ran a no-op sync)",
+    )
+    scn.checkpoint(STEP)
+
+
+def test_menuSyncActiveDoc_converged_doc_emits_no_forceFlush(scn, gas_log_dir):
+    """Non-regression (gts-t78c AC-2): the default (non-forced) menuSyncActiveDoc
+    path on an already-converged doc must stay diff-only -- no sync.forceFlush
+    line, proving force is opt-in and did not change default sync behavior."""
+    if not gas_log_dir:
+        pytest.skip("gas_log_dir not configured — force-flush proof requires GAS log access")
+
+    from tests.helpers.gas_log import assert_no_log, clear_logs
+
+    seed = ai(action="menuSyncActiveDoc no-force converged floating action")
+    scn.append_paragraph(seed.as_text())
+    scn.sync()  # converge doc <-> sheet
+
+    fence = clear_logs(gas_log_dir)
+    scn._post_fixture("menu_sync_active_doc")  # menuSyncActiveDoc() -- force defaults false
+
+    assert_no_log(
+        gas_log_dir, fence,
+        lambda e: e.get("tag") == "sync.forceFlush" and e.get("data", {}).get("docId") == scn.doc_id,
+        "[t78c menuSyncActiveDoc] non-forced sync of a converged doc must not emit sync.forceFlush",
+    )
+    scn.checkpoint(STEP)
