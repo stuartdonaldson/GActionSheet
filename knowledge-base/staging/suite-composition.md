@@ -190,3 +190,8 @@ is what makes a separate tracker and a separate test suite viable under any of t
   ordering property; doing it first means the menu conversion inherits a proven pattern.
 - **Decision after seams.** The whole point: stages 1-7 are the work that is worth doing whether
   the answer is split, library, or stay.
+
+# Revsion Log
+
+- **Revised 2026-08-27 20:49** added a revision log to contain a summary of updates applied to this staged plan.
+

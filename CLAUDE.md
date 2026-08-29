@@ -240,6 +240,10 @@ test structure is not required; the entry point may be exercised as part of any 
   `regression=verified` once `pytest -x` is run clean against that bead's changes. `bd-run-beads.py`
   does this automatically (`--partial-gate` marks `regression=pending`; a full unrestricted
   `test_cmd` marks `regression=verified`; `-t ''` always implies `pending`).
+  **Default to this path: never run the full `pytest -x` sweep on your own initiative — it is
+  expensive against the live GAS backend. Close on the targeted gate with `regression=pending`,
+  and only run the full sweep (to flip it to `regression=verified`) when the user explicitly asks
+  for it.**
 - Merge-gate (or manual merge to master) still requires every bead in scope to be
   `regression=verified` — i.e. full `pytest -x` clean — before it passes. A bead closed with
   `regression=pending` is not itself blocking further implementation work in the same tree; it

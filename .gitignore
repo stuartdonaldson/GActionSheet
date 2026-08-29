@@ -65,3 +65,9 @@ static-portal/dist/
 
 # Beads / Dolt files (added by bd init)
 .beads/proxieddb/
+
+# APT (Action Portable Text) capture store (gts-x9un) — scratch `pull`
+# captures, last-N retained locally per corpus. `bless` (scripts/apt.py,
+# stage apt-cli) is the only path from here into tests/fixtures/; nothing
+# under here is ever a golden.
+.apt-captures/
