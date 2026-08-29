@@ -68,48 +68,41 @@ _AUTH_COOKIE_DOMAINS = {"script.google.com", ".google.com", "accounts.google.com
 
 
 _SETTINGS_PATH = pathlib.Path(__file__).parent.parent / "local.settings.json"
-_DEFAULT_PLAYWRIGHT_AUTH_DIR = pathlib.Path.home() / ".playwright"
-_warned_missing_roles: set[str] = set()
+_PROJECT_ROOT = pathlib.Path(__file__).parent.parent
+
+
+def _devstandard_playwright_auth_dir() -> pathlib.Path:
+    devstandard = os.environ.get("DEVSTANDARD")
+    if not devstandard:
+        raise RuntimeError(
+            "$DEVSTANDARD is not set -- required to resolve the shared Playwright auth "
+            "resolver (see /home/stuar/.claude/CLAUDE.md §10a: export DEVSTANDARD=/mnt/c/dev/DevStandard "
+            "in your shell profile)."
+        )
+    d = pathlib.Path(devstandard) / "tools" / "playwright-auth"
+    if not d.is_dir():
+        raise RuntimeError(f"$DEVSTANDARD is set to {devstandard!r} but {d} does not exist.")
+    return d
+
+
+_devstandard_dir = _devstandard_playwright_auth_dir()
+if str(_devstandard_dir) not in sys.path:
+    sys.path.insert(0, str(_devstandard_dir))
+from playwright_auth import resolve_auth_file as _ds_resolve_auth_file  # noqa: E402
 
 
 def resolve_auth_file(role: str = "primary") -> pathlib.Path:
     """Resolve a Playwright storageState file for a project role.
 
-    Account identity files are shared across projects under
-    $PLAYWRIGHT_AUTH_DIR (.envrc; default ~/.playwright), named by the real
-    Google account they hold (e.g. sdonaldson.json) rather than by role — see
-    tests/playwright/auth.setup.js and its accounts.json identity registry.
-    This project assigns accounts to roles via local.settings.json's
-    "playwrightAccounts" map, e.g. {"primary": "sdonaldson.json"}.
-
-    Falls back to the project-local .auth/<role>.json when unconfigured (with
-    a one-time-per-role stderr warning, so the fallback doesn't silently mask
-    that the shared-auth feature was never wired up), so the harness keeps
-    working before local.settings.json is updated.
+    Delegates to DevStandard's canonical resolver
+    ($DEVSTANDARD/tools/playwright-auth/playwright_auth.py) so this project
+    carries no forked copy of the resolution logic to drift out of sync --
+    see docs/standards/playwright-shared-auth.md. Kept as a same-signature
+    wrapper (role-only, no project_root) so every existing call site in this
+    project (scn.session, tests/helpers/download.py, tests/helpers/auth_probe.py,
+    scripts/export_gas.py) is unaffected.
     """
-    auth_dir = pathlib.Path(
-        os.environ.get("PLAYWRIGHT_AUTH_DIR", str(_DEFAULT_PLAYWRIGHT_AUTH_DIR))
-    ).expanduser()
-    slug = None
-    try:
-        settings = json.loads(_SETTINGS_PATH.read_text())
-        slug = settings.get("playwrightAccounts", {}).get(role)
-    except Exception:
-        pass
-    if slug:
-        return auth_dir / slug
-    fallback_name = "user.json" if role == "primary" else f"{role}.json"
-    fallback = pathlib.Path(__file__).parent.parent / ".auth" / fallback_name
-    if role not in _warned_missing_roles:
-        _warned_missing_roles.add(role)
-        print(
-            f"⚠️  local.settings.json has no \"playwrightAccounts\" entry for role "
-            f"\"{role}\" — falling back to project-local {fallback}. See .auth/README.md "
-            f"and tests/playwright/auth.setup.js to migrate this role to the shared, "
-            f"cross-project auth location (DevStandard docs/standards/playwright-shared-auth.md).",
-            file=sys.stderr,
-        )
-    return fallback
+    return _ds_resolve_auth_file(role, project_root=_PROJECT_ROOT)
 
 
 _AUTH_FILE = resolve_auth_file()

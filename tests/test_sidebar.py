@@ -265,9 +265,12 @@ def test_sidebar_shell_controls(settings, browser_page, request):
         ).count() == 0
         assert card.frame.get_by_text("Sort", exact=True).count() == 0
         assert card.frame.get_by_text("Filter", exact=True).count() == 0
-        # Version label present
+        # Version label present. BUILD_INFO.version is stamped bare (no leading
+        # "v") since the gas-static conversion (manage-deployments.js's
+        # stamper comment, GAS-Core-rgh) -- accept an optional "v" so this
+        # doesn't re-break if the wire contract ever adds the prefix back.
         card.frame.get_by_text(
-            re.compile(r"v\d+\.\d+\.\d+"), exact=False
+            re.compile(r"v?\d+\.\d+\.\d+"), exact=False
         ).wait_for(state="visible", timeout=10000)
     finally:
         s.engine.close()  # trashing via request finalizer, not here (gts-3zl5)

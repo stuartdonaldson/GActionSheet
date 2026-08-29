@@ -12,8 +12,8 @@ importers:
         specifier: ^8.4.1
         version: 8.4.3
       gas-deploy:
-        specifier: github:stuartdonaldson/GAS-Core#gas-deploy-v1.4.0&path:/packages/gas-deploy
-        version: https://codeload.github.com/stuartdonaldson/GAS-Core/tar.gz/ba84473d2fd88deedb4b8116877b6788894cd404#path:/packages/gas-deploy
+        specifier: github:stuartdonaldson/GAS-Core#gas-deploy-v1.4.1&path:/packages/gas-deploy
+        version: https://codeload.github.com/stuartdonaldson/GAS-Core/tar.gz/be0a23a5eb81decf4200c22c8b140293e57bd922#path:/packages/gas-deploy
       gas-static:
         specifier: github:stuartdonaldson/GAS-Core#gas-static-v1.3.1&path:/packages/gas-static
         version: https://codeload.github.com/stuartdonaldson/GAS-Core/tar.gz/60cbd3249a6b5c49c428b23ab5d9968aa1c6795b#path:/packages/gas-static
@@ -209,9 +209,9 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
-  gas-deploy@https://codeload.github.com/stuartdonaldson/GAS-Core/tar.gz/ba84473d2fd88deedb4b8116877b6788894cd404#path:/packages/gas-deploy:
-    resolution: {gitHosted: true, path: /packages/gas-deploy, tarball: https://codeload.github.com/stuartdonaldson/GAS-Core/tar.gz/ba84473d2fd88deedb4b8116877b6788894cd404}
-    version: 1.4.0
+  gas-deploy@https://codeload.github.com/stuartdonaldson/GAS-Core/tar.gz/be0a23a5eb81decf4200c22c8b140293e57bd922#path:/packages/gas-deploy:
+    resolution: {gitHosted: true, integrity: sha512-xJ05xW50P/TdppnJaqZuVagqDqE02MahTNRYMFIX2Y2W4LsPsuZZBUF6YXW98cceWA2Ai/AL/e/JFxKDS+CGBg==, path: /packages/gas-deploy, tarball: https://codeload.github.com/stuartdonaldson/GAS-Core/tar.gz/be0a23a5eb81decf4200c22c8b140293e57bd922}
+    version: 1.4.1
     engines: {node: '>=18'}
     hasBin: true
 
@@ -388,7 +388,7 @@ snapshots:
   fsevents@2.3.2:
     optional: true
 
-  gas-deploy@https://codeload.github.com/stuartdonaldson/GAS-Core/tar.gz/ba84473d2fd88deedb4b8116877b6788894cd404#path:/packages/gas-deploy: {}
+  gas-deploy@https://codeload.github.com/stuartdonaldson/GAS-Core/tar.gz/be0a23a5eb81decf4200c22c8b140293e57bd922#path:/packages/gas-deploy: {}
 
   gas-static@https://codeload.github.com/stuartdonaldson/GAS-Core/tar.gz/60cbd3249a6b5c49c428b23ab5d9968aa1c6795b#path:/packages/gas-static: {}
 
