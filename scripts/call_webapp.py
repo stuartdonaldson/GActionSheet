@@ -64,7 +64,7 @@ _ENV_URL_KEY = {
 # append_doc_paragraph, verify_*, import_selected_for_test,
 # forward_action_rows_test) defaults to testToken instead.
 _SECRET_ROUTES = {
-    "upsert_action_rows", "sync_action_rows", "mark_doc_not_found",
+    "upsert_action_rows", "sync_action_rows", "sync_document", "mark_doc_not_found",
     "delete_action_row", "forward_action_rows", "list_importable_actions",
     "get_test_config", "bootstrap", "set_test_token", "set_axiom_config", "axiom_probe",
     "set_export_config",

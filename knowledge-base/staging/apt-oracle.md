@@ -44,8 +44,8 @@ audit) and its *Deliverable* line corrected below.
 |---|---|---|---|---|
 | 1 | `apt-oracle-parser` | `gts-e5cl` | ✓ | [TST] doc_inspect: parse the ADR-0027 floating-action grammar |
 | 1 | `apt-oracle-parser` | `gts-9o61` | ✓ | [TST] doc↔sheet agreement assertion, both directions |
-| 2 | `act-force-refresh` | `gts-366c` | ○ | [IMP] WebApp force parameter on the document-sync route |
-| 2 | `act-force-refresh` | `gts-gssn` | ○ | [TST] Force-refresh route coverage and force entry-point audit |
+| 2 | `act-force-refresh` | `gts-366c` | ✓ | [IMP] WebApp force parameter on the document-sync route |
+| 2 | `act-force-refresh` | `gts-gssn` | ✓ | [TST] Force-refresh route coverage and force entry-point audit |
 | 3 | `apt-repair` | `gts-imai` | ○ | [FIX] Repair the canonical reference Doc and its ActionSheet rows |
 | 3 | `apt-repair` | `gts-a7ko` | ○ | [TST] Re-bless action-reference.apt.txt from the repaired doc |
 | 4 | `apt-lane-guards` | `gts-p150` | ○ | [TST] Pristine-restore fixture for the reference corpus |
@@ -58,6 +58,8 @@ audit) and its *Deliverable* line corrected below.
 | 7 | `doc-truth` | `gts-blia` | ○ | [INF] CONTEXT.md: correct the user-facing surface model |
 | 7 | `doc-truth` | `gts-c9dd` | ○ | [INF] Resolve dangling decision-number citations |
 | 8 | `plan-retention` | `gts-flu4` | ○ | [INF] Staged-plan retirement must preserve the plan |
+| — | *(filed at stage 2)* | `gts-c7fp` | ○ | [FIX] doPost's terminal else-branch writes junk rows for any unrecognised secret-gated action |
+| — | *(filed at stage 2)* | `gts-pl2k` | ○ | [INF] doPost's unauthorized response is plain text, so every harness caller reports it as deployment lag |
 | — | *(filed at stage 1)* | `gts-1ej4` | ○ | [TST] Converge scn/surfaces.py DocReader onto the doc_inspect grammar oracle |
 
 **Verify:** `bdls --stages` · `bdls --check` · `bdls --goals --stage <name>`
@@ -86,7 +88,9 @@ circularity in a new place.
 ### 2 — act-force-refresh
 **Deliverable:** the force-flush path reachable over the WebApp route, and covered — plus an
 audit naming every force-capable entry point and the test whose call-site exercises it.
-*(Corrected at Stage 0: the Docs menu item is already covered; the WebApp route is the gap.)*
+*(Corrected at Stage 0: the Docs menu item is already covered; the WebApp route is the gap.
+Corrected again at close: there was no WebApp route to thread `force` through — a new
+secret-gated doPost route `sync_document` was created. See the handoff.)*
 **Why paired:** twin-ticket — the `[IMP]` route and its `[TST]` coverage freeze one contract.
 **Model:** sonnet — the shape is settled; `force` already exists in `SyncManager.js:324`.
 **Work-log:** per-stage.
@@ -276,4 +280,104 @@ red and the agreeing case green.
 - No live lane calls `assert_doc_sheet_agreement` yet. Wiring it in is stage `apt-lane-guards`
   (`gts-lu13`, noted): doing it here would tune the assertion to a state stage `apt-repair` has
   not yet fixed — the 3-with-4 anti-pairing applied one stage early.
+- Full `pytest -x`. Both beads carry `regression=pending`.
+
+### 2 — act-force-refresh
+
+**Closed 2026-08-29.** Beads `gts-366c` ✓ and `gts-gssn` ✓, both `regression=pending`.
+
+**Done**
+
+A new WEBAPP_SECRET-gated doPost route `sync_document` — `src/WebApp.js`'s
+`_handleSyncDocument(payload)`, dispatched beside `sync_action_rows` — reaches
+`syncDocument(docId, {force: payload.force === true})`. Registered in
+`src/ContractSchema.js` (`webApp.routeNames` + `webApp.messages.sync_document`) and in
+`scripts/call_webapp.py`'s `_SECRET_ROUTES`. Deployed TEST **v0.2.3.38** (deployment
+`AKfycbzVloY3co…`, revision `@509`).
+
+The AC-verification command from the frozen contract, run live:
+
+```
+$ python scripts/call_webapp.py sync_document --data '{"force": true}'
+{"ok": false, "error": "docId required", "serverVersion": "0.2.3.38"}
+```
+
+That one call proves three things at once: the CLI picked the `secret` auth field (a missing
+`_SECRET_ROUTES` entry would have answered `unauthorized`), the route is on the deployed
+build, and AC-5 refuses without dispatching into `syncDocument('')`.
+
+Red, before the route existed (v0.2.3.37) — **5 failed in 410.09s**, every call falling
+through `doPost` to the legacy-POC branch and returning the plain-text body `'ok'`:
+
+```
+FAILED test_sync_document_route_force_flushes_converged_action
+FAILED test_sync_document_route_without_force_does_not_force_flush
+FAILED test_sync_document_route_non_boolean_force_is_not_forced
+FAILED test_sync_document_route_requires_doc_id
+FAILED test_sync_document_route_rejects_a_bad_secret
+E  RuntimeError: Non-JSON response (action='sync_document') …: 'ok' (after 5 attempts)
+```
+
+Green, after deploy: `tests/test_force_refresh_route.py` + `tests/test_menu_entry_points.py`
+→ **12 passed in 455.76s**.
+
+**Found**
+
+- **The route this stage was written against does not exist.** `gts-366c` said "thread an
+  opt-in force flag through doPost to [the `syncDocument` call at] WebApp.js:445". That line
+  is inside `_handleRegister` — the **doGet** `?cmd=register` browser-form route, neither
+  doPost nor secret-gated. The only doPost paths to `syncDocument()` were
+  `team_sync_document` (OAuth assertion + EDIT tier) and the testToken `run_fixture`
+  fixture, neither usable by `call_webapp.py`. **Fixed now:** owner decision taken before
+  any code was written — a *new* secret-gated doPost route, rather than forcing `register`
+  (which has no converged state to re-flush) or the harness fixture (not a WebApp route).
+  `gts-366c`'s AC was rewritten to the frozen contract first; the *Deliverable* line above
+  is corrected in place.
+- **`doPost`'s terminal `else` branch silently mutates the spreadsheet.** Any action name
+  that passes the secret gate but matches no route appends
+  `[new Date(), payload.email||'', payload.message||'']` to the bound spreadsheet's *active*
+  sheet and returns plain-text `'ok'`. A typo'd or not-yet-deployed action therefore writes
+  instead of erroring, and the harness — which retries a non-JSON body 5× — writes five rows
+  per call. The red run above put **20 rows into TEST `SyncState!A912:A932`**, a sheet whose
+  column A is a Doc ID and which `_loadSyncState` reads. **Bead `gts-c7fp`** (root-cause fix
+  *and* the row cleanup; not fixed here — the stage's *Must not* forbids widening).
+- **`doPost`'s `unauthorized` is plain text, not JSON.** Every sanctioned caller treats a
+  non-JSON body as the GAS deployment-propagation symptom, so an auth failure costs ~90s of
+  backoff and then reports itself as propagation lag. **Bead `gts-pl2k`.**
+- Two of the five tests must assert on *exceptions* rather than responses, because that is
+  what the WebApp actually sends: a missing `docId` surfaces as `scn.session.FixtureError`
+  (`_post` raises on any response carrying an `error` key) and a bad secret as `RuntimeError`
+  on the plain-text body. **Fixed now** — both stated in the test docstrings rather than
+  papered over with an invented JSON envelope; `gts-pl2k` covers the second.
+- The force entry-point audit came back **complete with no gap**: exactly two production
+  call-sites pass `{force}` into `syncDocument()` — `MenuHandler.js:127`
+  (`menuForceRefreshActiveDoc`, covered since gts-t78c) and the new route (covered now). The
+  full table, including every *non*-forcing `syncDocument()` call-site so the audit is
+  falsifiable, is on `gts-gssn` as a note. **Deliberately dropped:** no bead is owed, because
+  the audit found nothing uncovered.
+
+**Next stages must know**
+
+- **Stage `apt-repair` now has its tool.** Forcing a re-render of the canonical reference Doc
+  from the command line is
+  `python scripts/call_webapp.py sync_document --data '{"docId": "<id>", "force": true}'`.
+  Check `result` in the response: `'locked-skip'` means it lost the per-doc lock to a
+  concurrent execution and **did nothing** — retry rather than believe `ok:true`.
+- `force` is compared `=== true`. A shell-quoted `"force": "true"` is silently *not* forced,
+  and the response's `forced` field is the only thing that says so. This is deliberate (a
+  whole-document re-render is not something a quoting slip should trigger) and is asserted by
+  `test_sync_document_route_non_boolean_force_is_not_forced`.
+- On an already-converged doc the response proves nothing — a no-op sync also returns
+  `ok:true`. `sync.forceFlush {docId, count>=1}` is the oracle. Stage `apt-lane-guards`
+  (`gts-lu13`) wants the same log line for its short-scan guard.
+- Do not POST an action name that is not on the deployed build until `gts-c7fp` lands: it
+  will write junk rows into whichever sheet is active, five per call.
+
+**Deliberately not done**
+
+- The `doPost` fallthrough fix and the `SyncState!A912:A932` cleanup — `gts-c7fp`. Cleaning
+  the rows needs a sheet mutation with no sanctioned wrapper; left for an owner decision.
+- The plain-text `unauthorized` envelope — `gts-pl2k`.
+- Threading `force` through `_handleRegister`, `team_sync_document`, or the `run_fixture`
+  fixture. Audited, force-incapable by design, not by omission; enumerated on `gts-gssn`.
 - Full `pytest -x`. Both beads carry `regression=pending`.

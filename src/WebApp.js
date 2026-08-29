@@ -680,8 +680,8 @@ function doPost(e) {
   if (payload.action === 'dump_raw_docs_api') {
     return _handleDumpRawDocsApi(payload);
   }
-  if (payload.action === 'export_governance_json') {
-    return _handleExportGovernanceJson(payload);
+  if (payload.action === 'export_document_json') {
+    return _handleExportDocumentJson(payload);
   }
   if (payload.action === 'run_export_for_dialog_test') {
     return _handleRunExportForDialogTest(payload);
@@ -784,6 +784,8 @@ function doPost(e) {
     result = _handleUpsertActionRows(payload);
   } else if (payload.action === 'sync_action_rows') {
     result = _handleSyncActionRows(payload);
+  } else if (payload.action === 'sync_document') {
+    result = _handleSyncDocument(payload);
   } else if (payload.action === 'verify_action_rows') {
     result = _handleVerifyActionRows(payload);
   } else if (payload.action === 'mark_doc_not_found') {
@@ -1626,6 +1628,48 @@ function _loadRowsForDocUrl(actionsSheet, docUrl) {
 }
 
 /**
+ * sync_document — WEBAPP_SECRET-gated document sync, with an opt-in force flush
+ * (gts-366c, stage `act-force-refresh` of knowledge-base/staging/apt-oracle.md).
+ *
+ * syncDocument(docId, {force:true}) re-renders every canonical action paragraph
+ * to the current rendering style even when sheet and doc already agree
+ * (SyncManager.js's force block). Before this route that path was reachable only
+ * from the Docs menu (menuForceRefreshActiveDoc, MenuHandler.js) and from the
+ * GAS-side test fixture — i.e. only from a browser. This route makes it callable
+ * by scripts/call_webapp.py and the pytest harness, which is what a corpus repair
+ * (stage `apt-repair`) needs.
+ *
+ * `force` is compared strictly against `true`, mirroring _handleSyncActionRows'
+ * `scanned === true` gate: a JSON string "true" — the shape a hand-rolled shell
+ * caller most easily produces — must not silently re-render a whole document.
+ *
+ * Payload shape:  { secret, action: 'sync_document', docId, force }
+ * Response shape: { ok, docId, forced, result }
+ *   `result` is syncDocument()'s own return: 'locked-skip' when it lost the
+ *   per-doc lock to a concurrent execution and deliberately did nothing, else
+ *   null. Surfaced rather than swallowed so a caller can tell "forced" apart
+ *   from "raced and no-opped" — the distinction TestFixtures.js's sync_document
+ *   fixture retries on (gts-kkm7).
+ *   Completion signal: sync.complete {docId, upserted, updated, forced};
+ *   sync.forceFlush {docId, count} additionally when force flushed >= 1.
+ */
+function _handleSyncDocument(payload) {
+  var docId = payload.docId || '';
+  if (!docId) {
+    return _jsonResponse({ ok: false, error: 'docId required' });
+  }
+  var force = payload.force === true;
+  var result = syncDocument(docId, { force: force });
+  GasLogger.flush();
+  return _jsonResponse({
+    ok:     true,
+    docId:  docId,
+    forced: force,
+    result: result || null
+  });
+}
+
+/**
  * Marks all Actions rows whose Document formula references any of docIds as
  * 'Doc Not Found' in the Sync Status column. One sheet read + one batched
  * write regardless of how many docIds are passed (gts-kkm7.1) — a
@@ -2461,28 +2505,28 @@ function _handleDumpRawDocsApi(payload) {
 }
 
 // ---------------------------------------------------------------------------
-// export_governance_json handler  (testToken-gated, gts-2glm)
+// export_document_json handler  (testToken-gated, gts-2glm)
 // ---------------------------------------------------------------------------
 
 /**
- * Headless call-site into src/Procedure-Exporter.js's exportGovernance_(),
- * for the [TST] twin (gts-2glm) of the governance-exporter feature
- * (gts-ipoy). exportGovernance_ only accepted DocumentApp.getActiveDocument()
+ * Headless call-site into src/Procedure-Exporter.js's exportDocument_(),
+ * for the [TST] twin (gts-2glm) of the document-exporter feature
+ * (gts-ipoy). exportDocument_ only accepted DocumentApp.getActiveDocument()
  * (add-on-UI-session-only) before this bead added the options.docId seam —
  * this route is the seam's only caller; the real UI entry points
- * (onGovernanceExportMenu/onGovernanceExportAndPdfMenu, the Extensions-menu
+ * (onDocumentExportMenu/onDocumentExportAndPdfMenu, the Extensions-menu
  * universalActions in Procedure-Exporter.js) never pass docId and always
  * resolve the active document, unchanged. The Extensions-menu Export dialog
  * (runExportForDialog, gts-s7ut) also never passes onProgress through this
- * route — it calls exportGovernance_ directly via google.script.run.
+ * route — it calls exportDocument_ directly via google.script.run.
  *
  * Does NOT write the JSON/PDF file to Drive-as-observable-state beyond what
- * exportGovernance_ itself always does (it writes a Drive file as a side
+ * exportDocument_ itself always does (it writes a Drive file as a side
  * effect regardless of caller) — this route additionally returns the JSON
  * body inline so a test can assert against it without a second Drive round
  * trip.
  *
- * Payload: { action:'export_governance_json', testToken, docId,
+ * Payload: { action:'export_document_json', testToken, docId,
  *   exportPdf? (default false), includeWholeDocumentViews? (default false) }
  * Response: { ok, json, jsonFileId, exportFolderId, pdfFileId? } | { error }
  *
@@ -2492,7 +2536,7 @@ function _handleDumpRawDocsApi(payload) {
  * parent folder as a fallback otherwise. Exposed so tests can assert export
  * isolation without a direct Drive API call.
  */
-function _handleExportGovernanceJson(payload) {
+function _handleExportDocumentJson(payload) {
   var tokenError = _checkTestToken(payload.testToken || '');
   if (tokenError) return tokenError;
 
@@ -2500,7 +2544,7 @@ function _handleExportGovernanceJson(payload) {
   if (!docId) return _jsonResponse({ error: 'docId required' });
 
   try {
-    var result = exportGovernance_({
+    var result = exportDocument_({
       docId: docId,
       exportPdf: !!payload.exportPdf,
       includeWholeDocumentViews: !!payload.includeWholeDocumentViews
@@ -2511,7 +2555,7 @@ function _handleExportGovernanceJson(payload) {
     if (result.pdfFile) response.pdfFileId = result.pdfFile.getId();
     return _jsonResponse(response);
   } catch (ex) {
-    GasLogger.log('test.export_governance_json.error', { docId: docId, msg: ex.message });
+    GasLogger.log('test.export_document_json.error', { docId: docId, msg: ex.message });
     return _jsonResponse({ error: ex.message });
   }
 }
@@ -2526,7 +2570,7 @@ function _handleExportGovernanceJson(payload) {
  * the google.script.run entry point ExportProgressDialog.html invokes to
  * start a classic-menu export. runExportForDialog is a plain function (not
  * CardService/Ui-bound), so it is directly callable here the same way
- * exportGovernance_ is via export_governance_json (gts-2glm) — no dialog/UI
+ * exportDocument_ is via export_document_json (gts-2glm) — no dialog/UI
  * session needed.
  *
  * Payload: { action:'run_export_for_dialog_test', testToken, docId, exportPdf? }
@@ -2670,7 +2714,7 @@ function _handleDumpExportIndexForTest(payload) {
 
 /**
  * Drive-comment seeding passthrough (testToken-gated, gts-2glm). The
- * governance exporter's comment-to-document traceability (associate
+ * document exporter's comment-to-document traceability (associate
  * CommentsToBlocks_) needs real Drive comments with quoted_text to test
  * against — DriveV3.Comments.create (unlike Docs suggested-edits, which the
  * public API cannot create) is fully supported, so this is a direct

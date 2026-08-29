@@ -140,6 +140,7 @@ var CONTRACT_SCHEMA = Object.freeze({
       'set_export_config',
       'upsert_action_rows',
       'sync_action_rows',
+      'sync_document',
       'verify_action_rows',
       'mark_doc_not_found',
       'delete_action_row',
@@ -213,6 +214,22 @@ var CONTRACT_SCHEMA = Object.freeze({
         request:  Object.freeze(['action', 'testToken', 'docId']),
         response: Object.freeze(['ok', 'sheetWins', 'docWins', 'queueDrained']),
         completionSignal: 'synchronous response after ACTION_SHEET_QUEUE drains (§16.11 #4)'
+      }),
+
+      // sync_document — WEBAPP_SECRET-gated document sync with an opt-in force
+      // flush (gts-366c). The only non-browser route to syncDocument(docId,
+      // {force:true}); before it, force was reachable only from the Docs menu.
+      // `force` is compared strictly against true (same gate discipline as
+      // sync_action_rows' `scanned`), so a JSON string "true" does NOT force.
+      // `result` carries syncDocument()'s own return — 'locked-skip' when it
+      // raced a concurrent execution for the per-doc lock and did nothing,
+      // else null — so a caller can tell a forced sync apart from a no-op.
+      //   Completion signal: sync.complete {docId, upserted, updated, forced};
+      //   additionally sync.forceFlush {docId, count} when force flushed >= 1.
+      sync_document: Object.freeze({
+        request:  Object.freeze(['action', 'secret', 'docId', 'force']),
+        response: Object.freeze(['ok', 'docId', 'forced', 'result']),
+        completionSignal: "synchronous response; GasLogger 'sync.complete' with forced=<force>"
       }),
 
       // edit_action_row — simulate a user editing one ActionSheet field over the API.
