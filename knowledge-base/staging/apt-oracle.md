@@ -112,6 +112,9 @@ froze the defect last time.
 
 ### 4 — apt-lane-guards
 **Deliverable:** a lane that goes red on a stale deployment, a short scan, or a *Deleted* row.
+*(Corrected at close: 2 of 3 beads delivered this — `gts-omoy` and `gts-lu13`. `gts-p150`
+(pristine-restore fixture) did not: it depends on `gts-a7ko`, still open and blocked on the P0
+`gts-1ibp` from stage 3. See the handoff.)*
 **Why paired:** three small guards in the same conftest/lane plumbing.
 **Model:** sonnet.
 **Work-log:** per-stage.
@@ -495,3 +498,82 @@ AC5: nothing blessed.
 - Fixing `_buildFlushRequests` here. The stage's *Must not* forbids widening, and the fix is a P0
   with its own oracle (two pulls with a flush between must be byte-identical).
 - Full `pytest -x`. `gts-imai` carries `regression=pending`.
+
+### 4 — apt-lane-guards
+
+**Partially closed 2026-08-29.** Beads `gts-omoy` ✓ and `gts-lu13` ✓, both `regression=pending`.
+`gts-p150` remains **open and blocked** (depends on `gts-a7ko`, itself blocked on the stage-3 P0
+`gts-1ibp`). The stage does not close — same shape as stage 3's partial close, same upstream
+blocker.
+
+**Done**
+
+`gts-omoy`: `tests/helpers/version.py` gained `read_expected_target()` and
+`check_deployed_build(webapp_url)`, wired as a new session-scoped autouse fixture
+`_check_deployed_build` in `tests/conftest.py` (runs before `_check_auth_session_alive`, gated
+by `_session_is_no_live_session` like the other pre-flight fixtures). It GETs `?cmd=version` —
+answered ahead of every auth gate on both `doGet`/`doPost` (`src/WebApp.js`
+`_handleVersionRequest`) — and `pytest.exit`s the whole run on a version *or* target mismatch,
+naming expected vs. actual and `pnpm run deploy:test`. Proven red offline
+(`tests/test_deployed_build_guard.py`, 6 passed): stale version, wrong target, and a non-JSON
+body (propagation lag) each raise a diagnosable `RuntimeError`. Live-verified directly (one GET,
+no pytest) against the real TEST deployment — matches — and against a bogus URL — diagnosable
+`HTTPError`, not a bare traceback.
+
+`gts-lu13`: the guard is wired directly into `ScenarioSession.sync()` (`scn/session.py`), not a
+lane opt-in — every live lane (a real `Reporter`, gated by `isinstance(self._reporter,
+NullReporter)`) inherits it automatically. Pure core is
+`tests/helpers/sync_coverage.py` (`scan_coverage_problems`/`deleted_row_problems`), unit-tested
+offline in `tests/test_sync_coverage.py` (13 passed), including two direct reproductions of the
+2026-08-29 state (scanned count=1 vs. 21 declared; 20/21 sheet rows Deleted) and an op-id
+correlation test (gts-obry.1's `matches_op`) proving a concurrent session's log entry cannot
+satisfy this call's claim. The live wrapper (`assert_sync_coverage`) correlates `sync.scanned` by
+a freshly generated `opId` threaded through `_post_fixture`'s `extra` — confirmed live by reading
+`src/WebApp.js:543-544`: `doPost` calls `GasLogger.startOp(payload.opId)` for every route, so the
+adopted op id chains to `SyncManager.js`'s `sync.scanned` regardless of action name — and calls
+`find_sheet_actions` for the Deleted-row check (no doc parse; the design note's "without a doc
+parse" cheap guard, distinct from `assert_doc_sheet_agreement`). `expected_min` is
+`session._appended_actions`, mirroring the existing `chip.checked_count > 0` convention already
+in `verify_all_expectations`.
+
+Both design questions from the bead descriptions are answered by this wiring, not left open:
+"where do the guards live so a new lane inherits them by default" → `ScenarioSession.sync()` /
+`conftest.py` autouse fixture, not per-lane opt-in. "source of the expected version" →
+`src/Version.js` (via `read_expected_version`/`read_expected_target`), the same file the deploy
+stamper writes.
+
+**Found**
+
+- `tests/test_scn_session.py` (42 tests, mocked `_http_post`, no `request` passed →
+  `NullReporter`) has no `no_live_session` marker, so a real pytest session collecting it also
+  ran the new `_check_deployed_build`/`_check_auth_session_alive` autouse fixtures live. Both
+  passed silently — **fixed now** by observing rather than editing: this incidentally
+  corroborates `gts-omoy`'s guard against the real environment beyond the offline proof, and
+  confirms `gts-lu13`'s `NullReporter` gate keeps the mocked-HTTP unit tests from being reached
+  by the new `find_sheet_actions`/log-query calls (none of which appear in the mocked
+  `captured` payload assertions, which would otherwise have broken).
+- No live lane has been observed failing `gts-lu13`'s guard for real: the 2026-08-29 conditions
+  no longer reproduce live (stage `apt-repair`'s handoff — the failure was already gone before
+  that session began). The plan's AC3 explicitly allows "a synthetic reproduction" for exactly
+  this reason; **deliberately not** forced live by re-breaking a shared TEST document.
+
+**Next stages must know**
+
+- `gts-p150` cannot proceed until `gts-1ibp` (stage 3's P0) lands and `gts-a7ko` re-blesses the
+  corpus. Nothing in this stage's work depends on that in the other direction — `gts-omoy` and
+  `gts-lu13` are unaffected by the drifted inline runs.
+- Every `scn.sync()` call in the live suite now makes one extra `find_sheet_actions` HTTP call
+  and (when `gasLogDir` is set) one extra log query, scoped by a fresh `opId` per sync. This is
+  the same call/query shape `assert_doc_sheet_agreement` already uses elsewhere, so no new
+  Axiom/WebApp load pattern — but it is a per-sync cost across the whole suite, not validated
+  against a full-suite timing run (full `pytest -x` not run).
+- `_check_deployed_build` fires before `_check_auth_session_alive` — a stale TEST deployment now
+  aborts the run before Playwright even launches, rather than failing test-by-test.
+
+**Deliberately not done**
+
+- `gts-p150` (pristine-restore fixture). Blocked, not attempted — its own dependency chain
+  (`gts-a7ko` → `gts-1ibp`) is stage 3's unresolved P0, outside this session's *Must not*.
+- A real live demonstration of `gts-lu13`'s guard failing (as opposed to the offline synthetic
+  one) — the failure conditions it detects no longer exist in the live environment to reproduce.
+- Full `pytest -x`. Both `gts-omoy` and `gts-lu13` carry `regression=pending`.

@@ -242,6 +242,33 @@ def _session_is_no_live_session(session: pytest.Session) -> bool:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _check_deployed_build(request):
+    """gts-omoy: fail the whole run fast, before any lane does work, unless
+    the TEST deployment reachable at webappTestUrl is serving the version and
+    target this checkout last stamped via `pnpm run deploy:test`.
+
+    The 2026-08-29 proximate cause was a stale bound script predating
+    ADR-0023's ACT- read support, and the suite ran against it green-ish
+    (`sync.scanned count:1`). `?cmd=version` answers ahead of every auth
+    gate on both doGet and doPost (src/WebApp.js), so this is a bare HTTP GET
+    -- no browser, no test token, no secret -- and runs before the (heavier,
+    Playwright-based) auth-session probe below.
+    """
+    if _session_is_no_live_session(request.session):
+        return
+    settings = _load_settings()
+    url = settings.get("webappTestUrl") or ""
+    if not url:
+        return
+    from tests.helpers.version import check_deployed_build
+
+    try:
+        check_deployed_build(url)
+    except RuntimeError as exc:
+        pytest.exit(f"Deployed-build pre-flight check failed: {exc}", returncode=1)
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _check_auth_session_alive(request):
     """Probe the shared Playwright auth session once, before any other
     session fixture or test runs, and hard-abort the whole run if it's

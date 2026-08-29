@@ -634,14 +634,27 @@ class ScenarioSession:
         calls GAS syncDocument() internally, which in turn POSTs sync_action_rows with
         WEBAPP_SECRET and drains ACTION_SHEET_QUEUE before responding (§16.11 #4).
         A following sync() is how the scenario forces an async act to convergence.
+
+        gts-lu13: every live lane (a real Reporter, not the NullReporter used by
+        harness unit tests / test doubles) also asserts sync.scanned's logged count
+        against this session's appended-action count, and that no sheet row for this
+        doc is marked Deleted — the two signals that were visible and unchecked on
+        2026-08-29.
         """
+        op_id = str(uuid.uuid4())
+        fence = time.time() - 2.0
         with self._act("sync"):
-            resp = self._post_fixture("sync_document")
+            resp = self._post_fixture("sync_document", extra={"opId": op_id})
             data = resp.get("data") or {}
             if not data.get("synced"):
                 raise RuntimeError(
                     f"sync_document fixture returned unexpected response: {resp}"
                 )
+        if not isinstance(self._reporter, NullReporter):
+            from tests.helpers.sync_coverage import assert_sync_coverage
+            assert_sync_coverage(
+                self, op_id=op_id, fence=fence, expected_min=self._appended_actions
+            )
 
     def edit_sheet(self, target: ai, **fields) -> None:
         """Edit one or more sheet fields for target (addressed by globalId, §16.11 #3).
