@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = pathlib.Path(args.out_dir) if args.out_dir else pathlib.Path("exports") / default_dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    json_path = out_dir / f"{stem}-document.json"
+    json_path = out_dir / f"{stem}-docx.json"
     json_path.write_text(json.dumps(artifact, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # contract §4: images are written alongside the JSON, named by

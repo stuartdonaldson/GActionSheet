@@ -39,7 +39,7 @@ def main() -> None:
     doc_id = settings["exportTestDocId"]
     scn = ScenarioSession(doc_id=doc_id, sheet_id=settings.get("testSheetId", ""), settings=settings)
 
-    resp = scn._post_route("export_governance_json", {
+    resp = scn._post_route("export_document_json", {
         "docId": doc_id,
         "exportPdf": False,
         "includeWholeDocumentViews": True,

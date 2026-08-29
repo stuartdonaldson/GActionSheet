@@ -1,12 +1,12 @@
 """
-test_governance_export.py — gts-2glm, [TST] twin of gts-ipoy (governance
+test_document_export.py — gts-2glm, [TST] twin of gts-ipoy (document
 JSON exporter, src/Procedure-Exporter.js).
 
-Entry point: WebApp.js's 'export_governance_json' route -> exportGovernance_()
-via the options.docId testability seam this bead added (exportGovernance_
+Entry point: WebApp.js's 'export_document_json' route -> exportDocument_()
+via the options.docId testability seam this bead added (exportDocument_
 otherwise only resolves DocumentApp.getActiveDocument(), which is add-on-UI-
 session-only and has no headless call-site). Production entry points
-(onGovernanceExportMenu/onGovernanceExportAndPdfMenu, the Extensions-menu
+(onDocumentExportMenu/onDocumentExportAndPdfMenu, the Extensions-menu
 universalActions in Procedure-Exporter.js) never pass docId and are
 unaffected by the seam. The classic-menu Export dialog's google.script.run
 path (runExportForDialog/getExportProgressForDialog, gts-s7ut) is a
@@ -26,7 +26,7 @@ suggestion_groups/possible_authors and autoText run preservation are NOT
 covered here. The Docs API has no public way to create a Google Docs
 Suggested-edit or an autoText page-number field via batchUpdate (read-only
 for both), so they cannot be seeded live. See
-tests/test_governance_export_pure.js for the pure-function track that
+tests/test_document_export_pure.js for the pure-function track that
 covers those two ACs against hand-built Docs-API-shaped fixture objects.
 Also out of scope this session: table mid-cell unit-switch tagging, and the
 prefix/cross-paragraph/fuzzy comment-match tiers beyond exact — flagged as
@@ -161,7 +161,7 @@ def _create_comment(scn: ScenarioSession, content: str, quoted_text: str | None 
 
 
 def _export(scn: ScenarioSession, export_pdf: bool = False, include_whole_document_views: bool = False) -> dict:
-    resp = scn._post_route("export_governance_json", {
+    resp = scn._post_route("export_document_json", {
         "docId": scn.doc_id,
         "exportPdf": export_pdf,
         "includeWholeDocumentViews": include_whole_document_views,
@@ -175,8 +175,8 @@ def _export_raw(scn: ScenarioSession, doc_id: str | None = None) -> dict:
     jsonFileId) instead of unwrapping to just the JSON payload — gts-es3l's
     export-folder-isolation assertions need the envelope, not the document
     content. doc_id defaults to scn.doc_id; pass explicitly for a second doc
-    that isn't scn's own (see test_export_governance_folder_isolation_*)."""
-    resp = scn._post_route("export_governance_json", {"docId": doc_id or scn.doc_id})
+    that isn't scn's own (see test_export_document_folder_isolation_*)."""
+    resp = scn._post_route("export_document_json", {"docId": doc_id or scn.doc_id})
     assert resp.get("ok"), resp
     return resp
 
@@ -209,8 +209,8 @@ def _unit_by_kind(doc_json: dict, kind: str) -> dict:
 # Entry-point call-site + basic output shape
 # ---------------------------------------------------------------------------
 
-def test_export_governance_entry_point_basic_shape(settings, request):
-    """Call-site coverage for exportGovernance_() via export_governance_json
+def test_export_document_entry_point_basic_shape(settings, request):
+    """Call-site coverage for exportDocument_() via export_document_json
     (WebApp.js) — the entry point itself is the call-site, per this project's
     entry-point coverage invariant."""
     scn = ScenarioSession.new_doc(settings, request=request)
@@ -219,7 +219,7 @@ def test_export_governance_entry_point_basic_shape(settings, request):
 
     doc = _export(scn)
 
-    assert doc["schema_version"] == "2.4"
+    assert doc["schema_version"] == "2.5"
     assert doc["document"]["id"] == scn.doc_id
     assert doc["diagnostics"]["tabs_processed"] == 1
     assert doc["diagnostics"]["units"] >= 1
@@ -234,7 +234,7 @@ def test_export_governance_entry_point_basic_shape(settings, request):
 # unit.parent_unit_id hierarchy (rank-based containment)
 # ---------------------------------------------------------------------------
 
-def test_export_governance_parent_unit_id_hierarchy(settings, request):
+def test_export_document_parent_unit_id_hierarchy(settings, request):
     """A procedure (rank 3) nested under a policy (rank 2) records the
     policy as its parent; a following plain paragraph belongs to the
     procedure unit (deepest open unit at that point in traversal)."""
@@ -263,7 +263,7 @@ def test_export_governance_parent_unit_id_hierarchy(settings, request):
 # location.page_approximate under explicit page breaks
 # ---------------------------------------------------------------------------
 
-def test_export_governance_page_approximate_transitions_on_explicit_break(settings, request):
+def test_export_document_page_approximate_transitions_on_explicit_break(settings, request):
     scn = ScenarioSession.new_doc(settings, request=request)
     _insert_text(scn, "Before any explicit page break.\n")
     _insert_page_break(scn)
@@ -284,7 +284,7 @@ def test_export_governance_page_approximate_transitions_on_explicit_break(settin
 # text_pattern / style_pattern evidence emission
 # ---------------------------------------------------------------------------
 
-def test_export_governance_semantic_state_text_pattern_evidence(settings, request):
+def test_export_document_semantic_state_text_pattern_evidence(settings, request):
     """SEMANTIC_STATE_PATTERNS ('(OLD)' prefix) is recorded as text_pattern
     evidence on both the unit (heading line) and a plain historical block."""
     scn = ScenarioSession.new_doc(settings, request=request)
@@ -308,7 +308,7 @@ def test_export_governance_semantic_state_text_pattern_evidence(settings, reques
     assert doc["diagnostics"]["historical_blocks"] >= 1
 
 
-def test_export_governance_bold_colon_label_style_pattern(settings, request):
+def test_export_document_bold_colon_label_style_pattern(settings, request):
     """A bold `Intent:` prefix is detected via detectBoldColonLabel_ and
     surfaces as block.label / kind 'labeled_paragraph'."""
     scn = ScenarioSession.new_doc(settings, request=request)
@@ -324,7 +324,7 @@ def test_export_governance_bold_colon_label_style_pattern(settings, request):
 # unit.color_signals scoping (no cross-unit leakage)
 # ---------------------------------------------------------------------------
 
-def test_export_governance_color_signals_scoped_per_unit(settings, request):
+def test_export_document_color_signals_scoped_per_unit(settings, request):
     scn = ScenarioSession.new_doc(settings, request=request)
     _insert_heading(scn, "Board Policy 4: Unit A", level=1)
     a_start, a_end = _insert_text(scn, "Highlighted text in unit A.\n")
@@ -350,7 +350,7 @@ def test_export_governance_color_signals_scoped_per_unit(settings, request):
 # Comment-to-document traceability (associateCommentsToBlocks_)
 # ---------------------------------------------------------------------------
 
-def test_export_governance_comment_association_exact_match(settings, request):
+def test_export_document_comment_association_exact_match(settings, request):
     scn = ScenarioSession.new_doc(settings, request=request)
     _insert_heading(scn, "Board Policy 6: Commented Policy", level=1)
     _insert_text(scn, "This sentence will be quoted by a review comment.\n")
@@ -376,7 +376,7 @@ def test_export_governance_comment_association_exact_match(settings, request):
     assert comment["id"] in policy["comment_ids"]
 
 
-def test_export_governance_comment_association_unmatched(settings, request):
+def test_export_document_comment_association_unmatched(settings, request):
     """A comment whose quoted text was subsequently edited/removed from the
     doc gets the first-class 'unmatched' terminal state (proves the miss
     case isn't silently indistinguishable from an empty not-yet-processed
@@ -403,7 +403,7 @@ def test_export_governance_comment_association_unmatched(settings, request):
 # §13.3 conditional block-text emission (gts-6cq2)
 # ---------------------------------------------------------------------------
 
-def test_export_governance_unchanged_block_emits_canonical_text_only(settings, request):
+def test_export_document_unchanged_block_emits_canonical_text_only(settings, request):
     """revision_summary='unchanged' -> single canonical `text` field; the
     all_text/baseline_text/proposed_text trio is omitted entirely (they
     would be byte-identical copies)."""
@@ -419,7 +419,7 @@ def test_export_governance_unchanged_block_emits_canonical_text_only(settings, r
     assert "proposed_text" not in block
 
 
-def test_export_governance_revised_block_emits_view_trio_only(settings, request):
+def test_export_document_revised_block_emits_view_trio_only(settings, request):
     """A block with revision activity (here: strikethrough, seedable live
     per makeTextRun_'s bare-strikethrough='deleted' rule) emits
     all_text/baseline_text/proposed_text and omits the canonical `text`
@@ -442,7 +442,7 @@ def test_export_governance_revised_block_emits_view_trio_only(settings, request)
     assert "struck text." not in block["proposed_text"]
 
 
-def test_export_governance_comment_matching_falls_back_to_canonical_text(settings, request):
+def test_export_document_comment_matching_falls_back_to_canonical_text(settings, request):
     """associateCommentsToBlocks_ (quoted-text exact match) reads
     blockAllText_(), which must fall back to `text` on an unchanged block
     that no longer carries `all_text`."""
@@ -456,7 +456,7 @@ def test_export_governance_comment_matching_falls_back_to_canonical_text(setting
     assert len(comment["associated_block_ids"]) == 1
 
 
-def test_export_governance_views_fallback_to_canonical_text(settings, request):
+def test_export_document_views_fallback_to_canonical_text(settings, request):
     """buildDocumentViews_'s baseline_text/proposed_text reconstructions
     must include unchanged blocks (which only carry `text`) as well as
     revised blocks (which carry the baseline_text/proposed_text trio).
@@ -475,18 +475,18 @@ def test_export_governance_views_fallback_to_canonical_text(settings, request):
     assert "struck." not in doc["views"]["proposed_text"]
 
 
-def test_export_governance_schema_version_is_2_4(settings, request):
+def test_export_document_schema_version_is_2_5(settings, request):
     scn = ScenarioSession.new_doc(settings, request=request)
     _insert_text(scn, "Version check paragraph.\n")
     doc = _export(scn)
-    assert doc["schema_version"] == "2.4"
+    assert doc["schema_version"] == "2.5"
 
 
 # ---------------------------------------------------------------------------
 # §13.4 structural-field presence (id/kind/... stay present even when null)
 # ---------------------------------------------------------------------------
 
-def test_export_governance_scalar_structural_fields_stay_present_when_null(settings, request):
+def test_export_document_scalar_structural_fields_stay_present_when_null(settings, request):
     """label/list/parent_unit_id etc. are never omitted, even when null —
     only the five array fields in §13.4 are conditionally dropped."""
     scn = ScenarioSession.new_doc(settings, request=request)
@@ -507,7 +507,7 @@ def test_export_governance_scalar_structural_fields_stay_present_when_null(setti
 # docstring); this covers only the no-TOC-present omission side.
 # ---------------------------------------------------------------------------
 
-def test_export_governance_toc_omitted_when_no_toc_present(settings, request):
+def test_export_document_toc_omitted_when_no_toc_present(settings, request):
     scn = ScenarioSession.new_doc(settings, request=request)
     _insert_heading(scn, "Board Policy 7: No TOC Here", level=1)
     _insert_text(scn, "A document with no table of contents.\n")
@@ -521,7 +521,7 @@ def test_export_governance_toc_omitted_when_no_toc_present(settings, request):
 # §13.5 control-character normalization (derived text only)
 # ---------------------------------------------------------------------------
 
-def test_export_governance_derived_text_normalizes_nbsp_and_vertical_tab(settings, request):
+def test_export_document_derived_text_normalizes_nbsp_and_vertical_tab(settings, request):
     """NBSP and vertical-tab (Docs' Shift+Enter soft-break marker) are
     normalized in the derived `text` field but left byte-exact in
     runs[].text."""
@@ -545,7 +545,7 @@ def test_export_governance_derived_text_normalizes_nbsp_and_vertical_tab(setting
 # §13.1/13.2 includeWholeDocumentViews opt-in
 # ---------------------------------------------------------------------------
 
-def test_export_governance_whole_document_views_default_omitted(settings, request):
+def test_export_document_whole_document_views_default_omitted(settings, request):
     scn = ScenarioSession.new_doc(settings, request=request)
     _insert_text(scn, "Default-export views paragraph.\n")
 
@@ -556,7 +556,7 @@ def test_export_governance_whole_document_views_default_omitted(settings, reques
     assert "proposed_additions" in doc["views"]
 
 
-def test_export_governance_whole_document_views_opt_in(settings, request):
+def test_export_document_whole_document_views_opt_in(settings, request):
     scn = ScenarioSession.new_doc(settings, request=request)
     _insert_text(scn, "Opted-in views paragraph.\n")
 
@@ -567,7 +567,7 @@ def test_export_governance_whole_document_views_opt_in(settings, request):
 # ---------------------------------------------------------------------------
 # gts-es3l — export folder isolation (gts-z6j0's getExportFolder_ contract).
 # Hardening tests authored against gts-z6j0's frozen pre-code contract only
-# (entry point export_governance_json / exportFolderId response field / the
+# (entry point export_document_json / exportFolderId response field / the
 # docId-keyed sheetExportIndex row) — see docs/procedure-exporter.md §15.1.
 # Skips (not fails) when EXPORT_ROOT_FOLDER_ID isn't configured on the target
 # deployment, since isolation is deliberately best-effort/optional (§15.1) —
@@ -581,7 +581,7 @@ def _require_export_isolation_configured(scn: ScenarioSession) -> None:
                     "isolation is best-effort (docs/procedure-exporter.md §15.1); nothing to harden.")
 
 
-def test_export_governance_folder_isolation_new_doc_gets_isolated_folder(settings, request):
+def test_export_document_folder_isolation_new_doc_gets_isolated_folder(settings, request):
     """AC(a): a fresh docId's export lands in a folder distinct from the doc's
     own source-folder parent, and that folder is recorded in the index under
     this docId (durable state, not just the response)."""
@@ -599,7 +599,7 @@ def test_export_governance_folder_isolation_new_doc_gets_isolated_folder(setting
     assert rows[0]["docId"] == scn.doc_id
 
 
-def test_export_governance_folder_isolation_repeat_export_is_idempotent(settings, request):
+def test_export_document_folder_isolation_repeat_export_is_idempotent(settings, request):
     """AC(b): exporting the same docId twice reuses the same folder and does
     not append a second index row."""
     scn = ScenarioSession.new_doc(settings, request=request)
@@ -613,7 +613,7 @@ def test_export_governance_folder_isolation_repeat_export_is_idempotent(settings
     assert len(rows) == 1, f"repeat export must upsert, not append, the index row: {rows}"
 
 
-def test_export_governance_folder_isolation_title_collision_stays_distinct(settings, request):
+def test_export_document_folder_isolation_title_collision_stays_distinct(settings, request):
     """AC(c): two different docIds sharing the same document title still get
     two distinct export folders — the index is keyed by docId, never by
     name, precisely because titles are not unique (this project's docs can
@@ -639,7 +639,7 @@ def test_export_governance_folder_isolation_title_collision_stays_distinct(setti
     assert len(rows_b) == 1 and rows_b[0]["folderId"] == folder_b
 
 
-def test_export_governance_folder_isolation_falls_back_without_raising_when_unconfigured(settings, request):
+def test_export_document_folder_isolation_falls_back_without_raising_when_unconfigured(settings, request):
     """AC(d): proves the pre-fix fallback contract still holds — this doesn't
     flip EXPORT_ROOT_FOLDER_ID off (that's shared deployment state, not
     something a single test should mutate), it instead proves the *shape* of

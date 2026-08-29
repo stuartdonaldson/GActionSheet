@@ -50,11 +50,11 @@
       "universalActions": [
         {
           "label": "Export JSON",
-          "runFunction": "onGovernanceExportMenu"
+          "runFunction": "onDocumentExportMenu"
         },
         {
           "label": "Export JSON + PDF Snapshot",
-          "runFunction": "onGovernanceExportAndPdfMenu"
+          "runFunction": "onDocumentExportAndPdfMenu"
         }
       ]
     },

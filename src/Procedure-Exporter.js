@@ -39,7 +39,7 @@
  *   records the basis/limitations in the JSON.
  */
 
-const GOV_EXPORT_SCHEMA_VERSION = '2.4'; // gts-283i.4 — new 'image' block kind + document.images[]
+const DOC_EXPORT_SCHEMA_VERSION = '2.5'; // gts-284o — governance->document terminology rename (identifiers, log tags, output filename); no schema shape change
 
 /* ========================================================================== *
  * TEXT-PATTERN INFERENCE RULES (heuristic — tune here)
@@ -51,7 +51,7 @@ const GOV_EXPORT_SCHEMA_VERSION = '2.4'; // gts-283i.4 — new 'image' block kin
  * ========================================================================== */
 
 /**
- * Governance-unit recognition. Matched against normalized paragraph text
+ * Document-unit recognition. Matched against normalized paragraph text
  * regardless of Google Docs heading style — e.g. "Board Safety Procedure
  * 03-03: Emergency Preparedness, Response and Recovery" is recognized as a
  * `procedure` unit even when the paragraph carries no HEADING_* style.
@@ -61,7 +61,7 @@ const GOV_EXPORT_SCHEMA_VERSION = '2.4'; // gts-283i.4 — new 'image' block kin
  * the nearest preceding unit with a strictly lower rank). It is inherently
  * approximate for documents that mix conventions — tune per-project here.
  */
-const GOVERNANCE_UNIT_PATTERNS = [
+const DOC_UNIT_PATTERNS = [
   {
     name: 'policy_numbered',
     kind: 'policy',
@@ -96,7 +96,7 @@ const SEMANTIC_STATE_PATTERNS = [
   // non-word characters, so \b never matches there — a prior version of
   // this regex (`/^\(OLD\)\b/i`) only matched the unrealistic glued form
   // "(OLD)Something" and silently never fired on real "(OLD) Something"
-  // text. Found via gts-2glm hardening test (test_export_governance_
+  // text. Found via gts-2glm hardening test (test_export_document_
   // semantic_state_text_pattern_evidence).
   { name: 'old_paren_prefix', state: 'historical', re: /^\(OLD\)/i },
   { name: 'old_dash_prefix', state: 'historical', re: /^OLD\s*[-:]/i },
@@ -127,36 +127,36 @@ const COMMENT_FUZZY_MIN_MARGIN = 0.15; // required lead over the second-best can
  * (registered in appsscript.json addOns.common.universalActions)
  * ========================================================================== */
 
-function onGovernanceExportMenu(e) { // eslint-disable-line no-unused-vars
+function onDocumentExportMenu(e) { // eslint-disable-line no-unused-vars
   return CardService.newUniversalActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().pushCard(_exportGovernanceAndGetCard_({ exportPdf: false })))
+    .setNavigation(CardService.newNavigation().pushCard(_exportDocumentAndGetCard_({ exportPdf: false })))
     .build();
 }
 
-function onGovernanceExportAndPdfMenu(e) { // eslint-disable-line no-unused-vars
+function onDocumentExportAndPdfMenu(e) { // eslint-disable-line no-unused-vars
   return CardService.newUniversalActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().pushCard(_exportGovernanceAndGetCard_({ exportPdf: true })))
+    .setNavigation(CardService.newNavigation().pushCard(_exportDocumentAndGetCard_({ exportPdf: true })))
     .build();
 }
 
 /**
  * Runs the export synchronously and returns the result/error card. Used
- * only by the Extensions-menu universalActions above (onGovernanceExportMenu
- * / onGovernanceExportAndPdfMenu) — that's a single already-blocking
+ * only by the Extensions-menu universalActions above (onDocumentExportMenu
+ * / onDocumentExportAndPdfMenu) — that's a single already-blocking
  * platform round trip with no other card to show interim state in. The
- * classic-menu dialog (gts-s7ut, showGovernanceExportDialog_ /
- * ExportProgressDialog.html) does NOT call this; it runs exportGovernance_
+ * classic-menu dialog (gts-s7ut, showDocumentExportDialog_ /
+ * ExportProgressDialog.html) does NOT call this; it runs exportDocument_
  * via google.script.run instead, avoiding this path's ~30s ceiling on
  * documents like the Governance Manual.
  */
-function _exportGovernanceAndGetCard_(options) {
+function _exportDocumentAndGetCard_(options) {
   try {
-    const result = exportGovernance_(options);
-    return _buildGovernanceExportResultCard_(result.jsonFile, result.pdfFile);
+    const result = exportDocument_(options);
+    return _buildDocumentExportResultCard_(result.jsonFile, result.pdfFile);
   } catch (err) {
-    GasLogger.log('governance_export.error', { msg: err.message, stack: err.stack || '' });
+    GasLogger.log('document_export.error', { msg: err.message, stack: err.stack || '' });
     GasLogger.flush();
-    return _buildGovernanceExportErrorCard_(err.message);
+    return _buildDocumentExportErrorCard_(err.message);
   }
 }
 
@@ -174,7 +174,7 @@ function onExportBackToHome(e) { // eslint-disable-line no-unused-vars
     .build();
 }
 
-function _buildGovernanceExportResultCard_(jsonFile, pdfFile) {
+function _buildDocumentExportResultCard_(jsonFile, pdfFile) {
   return CardService.newCardBuilder()
     .setHeader(
       CardService.newCardHeader()
@@ -186,7 +186,7 @@ function _buildGovernanceExportResultCard_(jsonFile, pdfFile) {
     .build();
 }
 
-function _buildGovernanceExportErrorCard_(message) {
+function _buildDocumentExportErrorCard_(message) {
   return CardService.newCardBuilder()
     .setHeader(
       CardService.newCardHeader()
@@ -200,7 +200,7 @@ function _buildGovernanceExportErrorCard_(message) {
 
 /**
  * 'Export complete.' section, built from the live GAS File objects the
- * synchronous universalAction path (_exportGovernanceAndGetCard_) returns.
+ * synchronous universalAction path (_exportDocumentAndGetCard_) returns.
  */
 function _buildExportResultSection_(result) {
   const jsonId = result.jsonFile.getId();
@@ -231,13 +231,13 @@ function _buildExportErrorSection_(message) {
 }
 
 /** Manual-invocation wrappers (Apps Script editor / ad hoc runs). Not wired
- * to any UI trigger themselves — see onGovernanceExportMenu above. */
-function exportGovernanceJson() {
-  return exportGovernance_({ exportPdf: false });
+ * to any UI trigger themselves — see onDocumentExportMenu above. */
+function exportDocumentJson() {
+  return exportDocument_({ exportPdf: false });
 }
 
-function exportGovernanceJsonAndPdf() {
-  return exportGovernance_({ exportPdf: true });
+function exportDocumentJsonAndPdf() {
+  return exportDocument_({ exportPdf: true });
 }
 
 /* ========================================================================== *
@@ -254,7 +254,7 @@ function exportGovernanceJsonAndPdf() {
  * indicator. Removed in favor of this: a modal dialog
  * (DocumentApp.getUi().showModalDialog, only reachable from the classic
  * bound-script menu below, not from a CardService action) running
- * exportGovernance_() via google.script.run. That RPC path has Apps
+ * exportDocument_() via google.script.run. That RPC path has Apps
  * Script's normal ~6-minute execution ceiling (not the ~30s CardService
  * card-action ceiling that made the Extensions-menu universalActions above
  * risky on this same document), so the work can run synchronously inside
@@ -274,7 +274,7 @@ function exportGovernanceJsonAndPdf() {
 
 const _EXPORT_STATUS_PROP_PREFIX = 'EXPORT_STATUS_';
 
-/** Ordered stage labels reported via options.onProgress in exportGovernance_
+/** Ordered stage labels reported via options.onProgress in exportDocument_
  * below — kept in one place so the dialog's poll and the progress callback
  * agree on totalStages. */
 function _exportStageList_(exportPdf) {
@@ -305,7 +305,7 @@ function _writeExportStatus_(docId, status) {
  * classic bound-script authorization path — showModalDialog is unavailable
  * to CardService action handlers.
  */
-function showGovernanceExportDialog_() {
+function showDocumentExportDialog_() {
   const doc = DocumentApp.getActiveDocument();
   const docId = doc ? doc.getId() : '';
   const template = HtmlService.createTemplateFromFile('ExportProgressDialog');
@@ -317,7 +317,7 @@ function showGovernanceExportDialog_() {
 
 /**
  * google.script.run entry point (ExportProgressDialog.html). Runs
- * exportGovernance_() synchronously — safe here specifically because this
+ * exportDocument_() synchronously — safe here specifically because this
  * is not a CardService action handler (no ~30s ceiling), just Apps
  * Script's normal per-execution limit. Returns a plain JSON-serializable
  * object (google.script.run cannot marshal a live DriveApp File back to
@@ -346,7 +346,7 @@ function runExportForDialog(docId, exportPdf) { // eslint-disable-line no-unused
   });
 
   try {
-    const result = exportGovernance_({
+    const result = exportDocument_({
       docId: docId,
       exportPdf: exportPdf,
       onProgress: (stageIndex, totalStages, stageLabel) => {
@@ -370,7 +370,7 @@ function runExportForDialog(docId, exportPdf) { // eslint-disable-line no-unused
       pdfFileId: result.pdfFile ? result.pdfFile.getId() : undefined
     });
 
-    // Reuse the string exportGovernance_ already serialized/wrote to Drive
+    // Reuse the string exportDocument_ already serialized/wrote to Drive
     // (result.jsonString) rather than re-running JSON.stringify(result.json)
     // here — for a large document that second full stringify measurably
     // slowed this entry point (gts-283i.2 regression caught by
@@ -415,26 +415,26 @@ function getExportProgressForDialog(docId) { // eslint-disable-line no-unused-va
  *   docId is an optional testability seam (gts-2glm): when supplied, the
  *   export runs against that document instead of
  *   DocumentApp.getActiveDocument(), which only resolves inside a live
- *   add-on UI session. Production entry points (onGovernanceExportMenu et
+ *   add-on UI session. Production entry points (onDocumentExportMenu et
  *   al.) never pass docId — they always omit it and rely on the
  *   active-document default. Only a headless test-support caller (WebApp.js's
- *   export_governance_json route) sets it.
+ *   export_document_json route) sets it.
  *   onProgress(stageIndex, totalStages, stageLabel) is an optional seam
  *   (gts-s7ut, formerly gts-7ca7) called at each stage boundary below, in
  *   the same order as _exportStageList_(options.exportPdf). Omitted by
- *   every existing synchronous caller (exportGovernanceJson/
- *   exportGovernanceJsonAndPdf, the universalActions handlers, the WebApp
- *   export_governance_json route) — only runExportForDialog (the
+ *   every existing synchronous caller (exportDocumentJson/
+ *   exportDocumentJsonAndPdf, the universalActions handlers, the WebApp
+ *   export_document_json route) — only runExportForDialog (the
  *   Extensions-menu export dialog) passes it, so its absence is a no-op and
  *   behavior for those callers is unchanged.
  *
  *   Stage timing is logged unconditionally (export.stage / export.complete,
  *   see _reportStage below) regardless of caller — this is what showed the
  *   dur_s spread (single digits to 250s+ across the gts-2glm run) in the
- *   Axiom python-side export_governance_json events had no GAS-side
+ *   Axiom python-side export_document_json events had no GAS-side
  *   breakdown to explain; this instrumentation is that breakdown.
  */
-function exportGovernance_(options) {
+function exportDocument_(options) {
   const documentId = options.docId || DocumentApp.getActiveDocument().getId();
   const _stages = _exportStageList_(options.exportPdf);
   const _t0 = Date.now();
@@ -465,7 +465,7 @@ function exportGovernance_(options) {
   // 'Extracting content' log line instead of 'Reading document').
 
   const out = {
-    schema_version: GOV_EXPORT_SCHEMA_VERSION,
+    schema_version: DOC_EXPORT_SCHEMA_VERSION,
     generated_at: new Date().toISOString(),
     document: {
       id: documentId,
@@ -480,7 +480,7 @@ function exportGovernance_(options) {
       baseline: 'Text against which proposed revisions are evaluated.',
       proposed: 'Unchanged baseline plus proposed insertions, excluding deletions.',
       historical: 'Old or superseded material retained for reference.',
-      editorial: 'Drafting/reviewer material not intended as governance text.'
+      editorial: 'Drafting/reviewer material not intended as document text.'
     },
     page_numbering: {
       exact_rendered_page_map_available: false,
@@ -585,7 +585,7 @@ function exportGovernance_(options) {
   const jsonBlob = Utilities.newBlob(
     jsonString,
     'application/json',
-    `${sanitizeFilename_(out.document.title)}-governance.json`
+    `${sanitizeFilename_(out.document.title)}-gas.json`
   );
 
   // folder resolved up front, before traversal — see the driveState comment
@@ -625,8 +625,8 @@ function exportGovernance_(options) {
   });
   // Flushed here (not left to the caller) so export.stage/export.complete
   // reach Axiom for every entry point — several existing callers only flush
-  // on their own error path (_exportGovernanceAndGetCard_,
-  // _handleExportGovernanceJson), which would otherwise strand these events
+  // on their own error path (_exportDocumentAndGetCard_,
+  // _handleExportDocumentJson), which would otherwise strand these events
   // in GasLogger's in-memory buffer for the rest of that execution.
   GasLogger.flush();
 
@@ -661,11 +661,11 @@ function processStructuralContent_(content, ctx) {
     }
 
     if (se.tableOfContents) {
-      // §7.5: TOC entries are navigation aids, not governance content — they
+      // §7.5: TOC entries are navigation aids, not document content — they
       // must NOT go through processParagraph_/createUnit_/createBlock_ (that
-      // was gts-6cq2-era behavior and produced duplicate fake governance
+      // was gts-6cq2-era behavior and produced duplicate fake document
       // units, since TOC line text like "Board Policy 1: X\t9" matches
-      // GOVERNANCE_UNIT_PATTERNS same as a real heading). Diverted entirely
+      // DOC_UNIT_PATTERNS same as a real heading). Diverted entirely
       // to document.toc instead; ctx.sourceOrder/allBlocks/currentUnit are
       // untouched by TOC content.
       processTableOfContents_(se.tableOfContents.content || [], ctx);
@@ -785,7 +785,7 @@ function processParagraph_(structuralElement, ctx) {
 
   const namedStyle = p.paragraphStyle?.namedStyleType || 'NORMAL_TEXT';
   const headingLevel = headingLevel_(namedStyle);
-  const semanticUnit = detectGovernanceUnit_(allText, namedStyle);
+  const semanticUnit = detectDocumentUnit_(allText, namedStyle);
 
   if (semanticUnit) {
     ctx.currentUnit = createUnit_(semanticUnit, structuralElement, ctx);
@@ -1004,11 +1004,11 @@ function processTable_(table, ctx) {
 }
 
 /* ========================================================================== *
- * GOVERNANCE UNIT RECOGNITION
+ * DOCUMENT UNIT RECOGNITION
  * ========================================================================== */
 
 // Leading semantic-state markers ("(OLD) ", "OLD - ", "END: ", "FYI - ") are
-// stripped before GOVERNANCE_UNIT_PATTERNS matching only — a heading like
+// stripped before DOC_UNIT_PATTERNS matching only — a heading like
 // "(OLD) Board Policy 3: Superseded Policy" must still be recognized as a
 // `policy` unit (with `historical` semantic_state) rather than falling
 // through to the generic heading-style `section` fallback. Only patterns
@@ -1024,11 +1024,11 @@ function stripLeadingStateMarker_(t) {
   return t;
 }
 
-function detectGovernanceUnit_(text, namedStyle) {
+function detectDocumentUnit_(text, namedStyle) {
   const t = normalizeLine_(text);
   const kindMatchText = stripLeadingStateMarker_(t);
 
-  for (const pattern of GOVERNANCE_UNIT_PATTERNS) {
+  for (const pattern of DOC_UNIT_PATTERNS) {
     if (pattern.re.test(kindMatchText)) {
       const semantic = detectSemanticState_(t);
       return {
@@ -1109,7 +1109,7 @@ function createSyntheticRootUnit_(ctx) {
 
 /** Maintains ctx.unitStack (a rank-ordered containment stack) and sets
  * unit.parent_unit_id to the nearest preceding unit with a strictly lower
- * rank. See GOVERNANCE_UNIT_PATTERNS / HEADING_FALLBACK_BASE_RANK for how
+ * rank. See DOC_UNIT_PATTERNS / HEADING_FALLBACK_BASE_RANK for how
  * rank is assigned. */
 function pushUnitOntoStack_(unit, rank, ctx) {
   while (ctx.unitStack.length && ctx.unitStack[ctx.unitStack.length - 1].rank >= rank) {
@@ -1330,7 +1330,7 @@ function makeAutoTextRun_(pe, ctx) {
 /** Merges adjacent `text`-kind runs that share identical revision/format.
  * `auto_text`-kind runs are never merged into a neighbor — they pass through
  * standalone so they survive into block.runs (previously dropped entirely;
- * see the file-level comment on onGovernanceExportMenu / makeAutoTextRun_). */
+ * see the file-level comment on onDocumentExportMenu / makeAutoTextRun_). */
 function mergeAdjacentRuns_(runs) {
   const out = [];
   runs.forEach(run => {
@@ -1352,7 +1352,7 @@ function equivalentRunSemantics_(a, b) {
 
 function buildViewText_(runs, view, semanticState) {
   // Historical/editorial content is preserved in all_text but excluded from
-  // baseline/proposed governance views by default.
+  // baseline/proposed document views by default.
   if (view !== 'all' && ['historical', 'editorial'].includes(semanticState)) return '';
 
   const joined = runs

@@ -305,11 +305,11 @@ Example:
 
 ### 7.4 Pattern rules (implementation pointer)
 
-All text-pattern/heading heuristics referenced in this section — governance-unit recognition (§7.1), historical/editorial detection (§11) — live together in one bannered code region in `src/Procedure-Exporter.js`: `GOVERNANCE_UNIT_PATTERNS`, `HEADING_FALLBACK_BASE_RANK`, and `SEMANTIC_STATE_PATTERNS`, immediately following the schema-version constant. Each rule has a stable `name`/`rule` identifier that appears verbatim in the exported `text_pattern`/`style_pattern` evidence (§6.3), so any classification in the JSON can be traced back to exactly one line in that region. Keep this doc's examples and that region in sync — do not add a new pattern in one without the other.
+All text-pattern/heading heuristics referenced in this section — governance-unit recognition (§7.1), historical/editorial detection (§11) — live together in one bannered code region in `src/Procedure-Exporter.js`: `DOC_UNIT_PATTERNS`, `HEADING_FALLBACK_BASE_RANK`, and `SEMANTIC_STATE_PATTERNS`, immediately following the schema-version constant. Each rule has a stable `name`/`rule` identifier that appears verbatim in the exported `text_pattern`/`style_pattern` evidence (§6.3), so any classification in the JSON can be traced back to exactly one line in that region. Keep this doc's examples and that region in sync — do not add a new pattern in one without the other.
 
 ### 7.5 Table of contents (`document.toc`, gts-6cq2 follow-up)
 
-A Google Docs `tableOfContents` structural element's lines must **not** be run through §7.1's governance-unit recognition — a TOC line's rendered text (`"Board Policy 1: X<TAB>9"`) matches the same `GOVERNANCE_UNIT_PATTERNS` as the real heading it points to, and would otherwise be emitted as a second, fake `policy`/`procedure` unit at the TOC's location in the document (confirmed live: a real 9.27MB sample export had 8 duplicate unit titles from exactly this cause before the fix). TOC lines are diverted entirely to a separate `document.toc` array and never enter `units`/`blocks`.
+A Google Docs `tableOfContents` structural element's lines must **not** be run through §7.1's governance-unit recognition — a TOC line's rendered text (`"Board Policy 1: X<TAB>9"`) matches the same `DOC_UNIT_PATTERNS` as the real heading it points to, and would otherwise be emitted as a second, fake `policy`/`procedure` unit at the TOC's location in the document (confirmed live: a real 9.27MB sample export had 8 duplicate unit titles from exactly this cause before the fix). TOC lines are diverted entirely to a separate `document.toc` array and never enter `units`/`blocks`.
 
 Each entry:
 
@@ -608,7 +608,7 @@ users with access to the source folder should not see export byproducts.
   source document's own parent folder (the pre-gts-z6j0 behavior) rather than
   failing — isolation is best-effort, not a hard requirement of the export
   path.
-- `export_governance_json`'s WebApp response carries `exportFolderId` so a
+- `export_document_json`'s WebApp response carries `exportFolderId` so a
   caller (including a test) can confirm which folder — isolated or fallback —
   received the output, without a direct Drive API call.
 
@@ -771,7 +771,7 @@ not capturing metadata nothing downstream reads (§17 principle 7 notwithstandin
 
 ### 19.2 Direct browser download (replace Drive-link delivery)
 
-**Current state (§15).** `exportGovernance_` always writes the JSON (and,
+**Current state (§15).** `exportDocument_` always writes the JSON (and,
 optionally, the PDF snapshot) to a Drive folder. Every entry point then hands
 the user a *link to the Drive file* — the CardService result card's "Open
 JSON in Drive" button (`_buildExportResultSection_`) and the classic-menu
@@ -782,7 +782,7 @@ the user's machine requires a second, manual step inside Drive's own viewer
 directly.
 
 **Gap this proposal closes.** The classic-menu dialog path
-(`showGovernanceExportDialog_` / `runExportForDialog`, §15's
+(`showDocumentExportDialog_` / `runExportForDialog`, §15's
 `HtmlService.showModalDialog`) is not sandboxed the way CardService
 universal-action cards are and can serve a real client-side download: the
 server function returns the file's bytes to the page, and the page's own JS
@@ -815,7 +815,7 @@ existing `jsonFileId`/`pdfFileId`:
   not replaced — the local post-processing tool (§19.3) and any later manual
   reference both still want the artifact to persist in the source folder;
   this proposal only adds a second, more direct delivery path alongside it.
-- The CardService universal-actions path (`onGovernanceExportMenu` /
+- The CardService universal-actions path (`onDocumentExportMenu` /
   `_buildExportResultSection_`) is **out of scope** — CardService action
   handlers cannot serve a client-side Blob download, so that path keeps the
   Drive-link-only behavior it has today (§15 point 4 is unchanged for that

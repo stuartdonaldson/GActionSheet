@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-export_governance.py — run a governance export against a live Google Doc and
+export_gas.py — run the frozen GAS document export against a live Google Doc and
 download the JSON (and optionally PDF) artifacts to local disk (gts-283i.2).
 
 Calls the same run_export_for_dialog_test WebApp route the pytest suite uses
@@ -17,13 +17,13 @@ export folder, or the source doc's parent folder as a fallback) — this
 script's local copy is an additional convenience, not a replacement.
 
 Usage:
-    python scripts/export_governance.py [DOC_ID] [--pdf] [--images] [--out-dir DIR] [--env test|prod|dev]
+    python scripts/export_gas.py [DOC_ID] [--pdf] [--images] [--out-dir DIR] [--env test|prod|dev]
 
 DOC_ID is optional: if omitted, defaults to exportTestDocId in local.settings.json.
 
 Examples:
-    python scripts/export_governance.py
-    python scripts/export_governance.py 1zQkRAczbRjB0iRD2OhpHsqXvHsmskE8VI7VNx8vE5yE --pdf --images --out-dir /tmp/exports
+    python scripts/export_gas.py
+    python scripts/export_gas.py 1zQkRAczbRjB0iRD2OhpHsqXvHsmskE8VI7VNx8vE5yE --pdf --images --out-dir /tmp/exports
 """
 import argparse
 import base64
@@ -37,7 +37,7 @@ import requests
 from call_webapp import call_action, _load_settings  # scripts/ is the CWD-relative import root
 
 # scn/ lives at the project root, not under scripts/ -- running this script as
-# `python scripts/export_governance.py` puts scripts/ (not the project root)
+# `python scripts/export_gas.py` puts scripts/ (not the project root)
 # on sys.path[0], so the plain `from scn.session import ...` silently
 # ModuleNotFoundErrors and (if caught broadly) masks itself as "auth not
 # configured" instead of "path wrong". Add the project root explicitly.
@@ -121,13 +121,13 @@ def export_and_download(doc_id: str, *, export_pdf: bool, export_images: bool,
     doc_json = json.loads(result["jsonContent"])
 
     # Name local files after the document's own title (matching the Drive
-    # file names exportGovernance_ already gave the same bytes:
-    # "<title>-governance.json" / "<title>-snapshot.pdf") rather than the
+    # file names exportDocument_ already gave the same bytes:
+    # "<title>-gas.json" / "<title>-snapshot.pdf") rather than the
     # docId, so the local copy is identifiable at a glance.
     title = doc_json.get("document", {}).get("title") or doc_id
     stem = _sanitize_filename(title)
 
-    json_path = out_dir / f"{stem}-governance.json"
+    json_path = out_dir / f"{stem}-gas.json"
     json_path.write_text(result["jsonContent"], encoding="utf-8")
     written = {"json": json_path}
 

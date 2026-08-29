@@ -10,14 +10,14 @@ ExportProgressDialog.html (no-shared-context rule).
 Entry points: runExportForDialog(docId, exportPdf) and
 getExportProgressForDialog(docId) in src/Procedure-Exporter.js. Both are
 plain functions (not CardService/Ui-bound), so — per the pre-code contract —
-they're callable headlessly the same way exportGovernance_ already is
-(gts-2glm's export_governance_json route): this bead adds two mirroring
+they're callable headlessly the same way exportDocument_ already is
+(gts-2glm's export_document_json route): this bead adds two mirroring
 WebApp.js test-support routes, run_export_for_dialog_test and
 get_export_progress_for_dialog_test, that call them directly rather than
 via google.script.run (which has no headless client outside a live HtmlService
 dialog session).
 
-Concurrency note: runExportForDialog runs exportGovernance_() synchronously
+Concurrency note: runExportForDialog runs exportDocument_() synchronously
 end-to-end, so observing the durable 'running' EXPORT_STATUS_ state requires
 polling from a second, concurrent HTTP request while the first is still in
 flight (mirroring how the real dialog polls while google.script.run's
@@ -35,7 +35,7 @@ from scn.session import FixtureError, ScenarioSession
 
 # ---------------------------------------------------------------------------
 # Seed-content helpers (Docs API batchUpdate passthrough; test-only — mirrors
-# tests/test_governance_export.py's helpers so this file needs no shared
+# tests/test_document_export.py's helpers so this file needs no shared
 # context with gts-s7ut's implementation, only the existing seed routes).
 # ---------------------------------------------------------------------------
 
@@ -85,7 +85,7 @@ def _get_export_progress(scn: ScenarioSession, doc_id: str) -> dict:
 
 def _pad_with_stage_latency(scn: ScenarioSession, n: int = 25) -> None:
     """Enough real content that runExportForDialog's synchronous
-    exportGovernance_() call spans multiple real Docs-API round trips, giving
+    exportDocument_() call spans multiple real Docs-API round trips, giving
     the concurrent poll below a realistic window to observe the 'running'
     EXPORT_STATUS_ state before it flips to 'done'."""
     for i in range(n):

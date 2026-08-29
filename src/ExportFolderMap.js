@@ -1,7 +1,7 @@
 /**
  * ExportFolderMap.js — gts-z6j0
  *
- * Keeps governance-exporter output (JSON export, PDF snapshot, and future
+ * Keeps document-exporter output (JSON export, PDF snapshot, and future
  * image-extraction/docx-cache artifacts, gts-283i epic) out of the source
  * document's own folder. Previously Procedure-Exporter.js's
  * getSourceFolder_() wrote export output directly into the source doc's
@@ -34,7 +34,7 @@ var _EXPORT_INDEX_SHEET_NAME = 'GActionSheet Export Index';
 /**
  * Resolves (creating if necessary) the Drive folder that export output for
  * `documentId` should be written into. Same return contract as the
- * getSourceFolder_() it replaces at the exportGovernance_() call site:
+ * getSourceFolder_() it replaces at the exportDocument_() call site:
  * a Drive Folder, or null if none could be resolved.
  *
  * @param {string} documentId
@@ -180,7 +180,7 @@ function _findExportIndexRow_(sheet, cols, documentId) {
  * Test-only diagnostic (gts-es3l): returns every export-index row matching
  * `documentId`, so a test can assert the index stays at exactly one row per
  * doc (idempotent upsert, not append-on-every-export) — durable state the
- * WebApp's export_governance_json response alone can't reveal. Never called
+ * WebApp's export_document_json response alone can't reveal. Never called
  * by production code.
  *
  * @param {string} documentId

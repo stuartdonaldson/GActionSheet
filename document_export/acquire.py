@@ -21,7 +21,7 @@ import sys
 # document_export/ sits at the project root, sibling to scn/ and tests/ —
 # add the project root to sys.path so `from tests.helpers.download import
 # download_docx` and `from scn.session import ...` resolve regardless of the
-# caller's CWD (mirrors scripts/export_governance.py's same guard).
+# caller's CWD (mirrors scripts/export_gas.py's same guard).
 _PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))

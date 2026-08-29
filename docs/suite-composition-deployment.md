@@ -149,7 +149,7 @@ Each route is a record, not a position in a chain:
 
 | Field | Meaning |
 |---|---|
-| `action` | the wire string — **unchanged by any stage**, bound by `call_webapp.py`, `export_governance.py` and the test suite |
+| `action` | the wire string — **unchanged by any stage of *this* plan** (gts-284o's governance→document rename, resolved before stage 1, already moved `export_governance_json` → `export_document_json`; that is the last change this string sees), bound by `call_webapp.py`, `export_gas.py` and the test suite |
 | `gate` | `secret` · `testToken` · `open` — was implicit in statement order |
 | `handler` | function name |
 | `owner` | `core` or a sub-app id — new, and what makes provenance reportable |
@@ -179,9 +179,12 @@ Stage 2's step-5 assertion is widened to cover all four kinds, which converts th
 from silent-runtime to deploy-time failure. That assert is why the rename sits after the
 composer rather than first.
 
-**Not renamed, in any stage:** WebApp `action` strings and GasLogger tags. Both are wire
-contract, bound by `scripts/call_webapp.py`, `scripts/export_governance.py`, the Axiom queries
-and the test suite.
+**Not renamed by any stage of *this* plan:** WebApp `action` strings and GasLogger tags. Both are
+wire contract, bound by `scripts/call_webapp.py`, `scripts/export_gas.py`, the Axiom queries and
+the test suite. gts-284o already renamed them once (`export_governance_json` →
+`export_document_json`, `governance_export.*` → `document_export.*` log tags) as part of retiring
+'governance' terminology — that is the baseline stages 1-8 build on, not a name these stages
+touch again.
 
 ---
 

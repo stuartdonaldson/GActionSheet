@@ -21,4 +21,5 @@ addopts = "--alluredir=test-results/allure-results --junitxml=test-results/junit
 markers = [
     "smoke: fast (<1 min) high-risk UI-surface scenario (GTaskSheet-80mo.17)",
     "hroj_backstop: gts-hroj diagnostics-ordering backstop tool (always fails by design; skipped by default, see tests/test_hroj_diagnostics_backstop.py)",
+    "no_live_session: network-free test needing no live GAS/Google session (gts-2moy) — the whole collected run must be marked for the session-scoped live-auth autouse fixtures to skip; mixed with any unmarked test, they still run.",
 ]

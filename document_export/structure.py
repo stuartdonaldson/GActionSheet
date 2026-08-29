@@ -3,7 +3,7 @@ stage docx-structure, gts-pmga).
 
 Mirrors src/Procedure-Exporter.js's structural-walk region one-for-one per
 the contract's "Standing constraint: architectural alignment for back-port" —
-GOVERNANCE_UNIT_PATTERNS / HEADING_FALLBACK_BASE_RANK are the same rules,
+DOC_UNIT_PATTERNS / HEADING_FALLBACK_BASE_RANK are the same rules,
 unchanged, moved here rather than reinvented. ADR-0029 removes the
 SEMANTIC_STATE_PATTERNS classifier entirely (see below) -- it predates the
 DOCX rewrite and was never a GAS-mirroring concern to preserve.
@@ -60,7 +60,7 @@ def _local(tag: str) -> str:
 # source without recording why (contract "Standing constraint").
 # ============================================================================
 
-GOVERNANCE_UNIT_PATTERNS = [
+DOC_UNIT_PATTERNS = [
     {
         "name": "policy_numbered", "kind": "policy", "rank": 2,
         "re": re.compile(
@@ -101,7 +101,7 @@ HEADING_FALLBACK_BASE_RANK = 3
 # this path -- it predates the DOCX rewrite and guessed document *intent*
 # from surface markers, exactly the kind of heuristic ADR-0026's rationale
 # already argued for retiring. What survives is a narrower, unrelated
-# concern: GOVERNANCE_UNIT_PATTERNS kind-matching ignores a handful of
+# concern: DOC_UNIT_PATTERNS kind-matching ignores a handful of
 # leading prose markers ("(OLD)", "OLD -", "END -", "FYI -") so a title like
 # "(OLD) Church Policy 5: ..." still matches the policy pattern -- that
 # stripping has nothing to do with semantic_state and is kept.
@@ -135,11 +135,11 @@ def _strip_leading_marker(t: str) -> str:
     return t
 
 
-def _detect_governance_unit(text: str, heading_level: int | None, has_image: bool = False) -> dict | None:
+def _detect_document_unit(text: str, heading_level: int | None, has_image: bool = False) -> dict | None:
     t = normalize_line(text)
     kind_match_text = _strip_leading_marker(t)
 
-    for pattern in GOVERNANCE_UNIT_PATTERNS:
+    for pattern in DOC_UNIT_PATTERNS:
         if pattern["re"].search(kind_match_text):
             return {
                 "kind": pattern["kind"],
@@ -580,13 +580,13 @@ def _process_paragraph(p_el, ctx: _Ctx) -> None:
     has_image = images.has_drawing(p_el)
 
     # Unit detection runs against allText unconditionally -- including an
-    # empty string, which no GOVERNANCE_UNIT_PATTERNS entry matches and
+    # empty string, which no DOC_UNIT_PATTERNS entry matches and
     # which only reaches the heading-fallback branch for a heading-styled
     # paragraph that is otherwise empty of text, and then only when it
     # carries an image (mirrors GAS's own detectSemanticUnit_(allText, ...)
     # -> allText.trim() ordering, unchanged since before stage docx-images;
-    # gts-pczo.1 AC #3 narrowed this further -- see _detect_governance_unit).
-    unit_info = _detect_governance_unit(all_text, heading_level, has_image)
+    # gts-pczo.1 AC #3 narrowed this further -- see _detect_document_unit).
+    unit_info = _detect_document_unit(all_text, heading_level, has_image)
     opened_unit_this_paragraph = False
     if unit_info:
         ctx.current_unit = _create_unit(unit_info, ctx)

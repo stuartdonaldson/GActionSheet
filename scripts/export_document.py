@@ -6,7 +6,7 @@ Builds the LLM-ingestion export JSON from a Google Doc or a Drive-hosted
 native .docx, parsed locally in Python from a downloaded .docx (ADR-0026,
 schema 3.0) rather than via the Docs API. See
 docs/interfaces/document-export-contract.md for the full contract, and
-scripts/export_governance.py for the older schema-2.4 GAS-side exporter,
+scripts/export_gas.py for the older schema-2.4 GAS-side exporter,
 preserved frozen as the differential-oracle baseline (ADR-0026 Decision 7).
 
 Usage:
@@ -20,7 +20,7 @@ Examples:
 import pathlib
 import sys
 
-# scripts/ is not the project root -- see export_governance.py's identical
+# scripts/ is not the project root -- see export_gas.py's identical
 # guard for why this must be inserted before the document_export import.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 

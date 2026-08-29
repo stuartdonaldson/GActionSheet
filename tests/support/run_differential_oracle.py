@@ -10,8 +10,8 @@ test" — do not drive it to zero). Run directly:
 Builds a fresh Google-native fixture doc via ScenarioSession (headings, a
 table with a mid-cell unit switch, comments with quoted_text, a strikethrough
 revision-activity signal, a bold label, a highlight, a page break — the same
-seeding vocabulary tests/test_governance_export.py uses), runs
-export_governance_json (GAS, schema 2.4) and document_export.build_export
+seeding vocabulary tests/test_document_export.py uses), runs
+export_document_json (GAS, schema 2.4) and document_export.build_export
 (Python, schema 3.0) against it, and writes:
 
   /tmp/claude-.../scratchpad/differential-oracle/gas.json
@@ -179,7 +179,7 @@ def build_fixture(scn: ScenarioSession) -> None:
 
 
 def run_gas_export(scn: ScenarioSession) -> dict:
-    resp = scn._post_route("export_governance_json", {
+    resp = scn._post_route("export_document_json", {
         "docId": scn.doc_id,
         "exportPdf": False,
         "includeWholeDocumentViews": True,

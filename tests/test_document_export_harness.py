@@ -27,6 +27,8 @@ import sys
 
 import pytest
 
+pytestmark = pytest.mark.no_live_session
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "document_export" / "fixtures"
 GOLDEN = FIXTURES_DIR / "golden.docx"
@@ -67,8 +69,8 @@ class TestCliEndToEndOffline:
         result = _run_cli("--docx", str(GOLDEN), "--out-dir", str(tmp_path), cwd=REPO_ROOT)
         assert result.returncode == 0, result.stderr
 
-        json_files = list(tmp_path.glob("*-document.json"))
-        assert len(json_files) == 1, f"expected exactly one *-document.json, got {json_files}"
+        json_files = list(tmp_path.glob("*-docx.json"))
+        assert len(json_files) == 1, f"expected exactly one *-docx.json, got {json_files}"
         artifact = json.loads(json_files[0].read_text(encoding="utf-8"))
 
         assert artifact["schema_version"] == "3.0"
@@ -87,13 +89,13 @@ class TestCliEndToEndOffline:
         monkeypatch.setattr(cli_module, "acquire_docx_by_id", _fail)
         exit_code = cli_module.main(["--docx", str(GOLDEN), "--out-dir", str(tmp_path)])
         assert exit_code == 0
-        assert list(tmp_path.glob("*-document.json"))
+        assert list(tmp_path.glob("*-docx.json"))
 
     def test_cli_json_only_suppresses_cached_docx(self, tmp_path):
         result = _run_cli("--docx", str(GOLDEN), "--out-dir", str(tmp_path), "--json-only", cwd=REPO_ROOT)
         assert result.returncode == 0, result.stderr
         assert not list(tmp_path.glob("*.docx"))
-        assert list(tmp_path.glob("*-document.json"))
+        assert list(tmp_path.glob("*-docx.json"))
 
     def test_cli_rejects_doc_id_and_docx_together(self, tmp_path):
         result = _run_cli("someDocId", "--docx", str(GOLDEN), "--out-dir", str(tmp_path), cwd=REPO_ROOT)
@@ -104,7 +106,7 @@ class TestCliEndToEndOffline:
         bad.write_bytes(b"PK\x03\x04not a real docx")
         result = _run_cli("--docx", str(bad), "--out-dir", str(tmp_path), cwd=REPO_ROOT)
         assert result.returncode == 1
-        assert not list(tmp_path.glob("*-document.json"))
+        assert not list(tmp_path.glob("*-docx.json"))
 
 
 class TestBuildExportPure:
@@ -374,7 +376,7 @@ def _minimal_docx_with_headings(body_xml: str, *, with_drawing_rels: bool = Fals
     `with_drawing_rels=True` additionally wires a rels part + a fake
     word/media/image1.png so a heading paragraph's `w:drawing` can resolve
     (the "image-only heading still opens its own unit" case
-    `_detect_governance_unit`'s docstring names)."""
+    `_detect_document_unit`'s docstring names)."""
     import io
     import zipfile
 
@@ -498,7 +500,7 @@ class TestHierarchyAndUnitBoundaries:
 
     # Companion positive case: an image-only heading (no text, but a real
     # w:drawing) is the documented, intentional exception -- _detect_
-    # governance_unit's docstring names it explicitly -- so it must still
+    # document_unit's docstring names it explicitly -- so it must still
     # open its own unit even after AC #3's blank-heading suppression.
 
     def test_image_only_heading_still_opens_its_own_unit(self):
@@ -1343,8 +1345,8 @@ class TestEndToEndAcceptance:
 
     @pytest.fixture(scope="class")
     def artifact(self, export_dir):
-        json_files = list(export_dir.glob("*-document.json"))
-        assert len(json_files) == 1, f"expected exactly one *-document.json, got {json_files}"
+        json_files = list(export_dir.glob("*-docx.json"))
+        assert len(json_files) == 1, f"expected exactly one *-docx.json, got {json_files}"
         return json.loads(json_files[0].read_text(encoding="utf-8"))
 
     def _all_blocks(self, artifact):
@@ -1449,7 +1451,7 @@ class TestEndToEndAcceptance:
             assert result.returncode == 0, result.stderr
         refs = []
         for out_dir in (out_dir_1, out_dir_2):
-            artifact = json.loads(next(out_dir.glob("*-document.json")).read_text(encoding="utf-8"))
+            artifact = json.loads(next(out_dir.glob("*-docx.json")).read_text(encoding="utf-8"))
             refs.append([e["image_ref"] for e in artifact["document"]["images"]])
         assert refs[0] == refs[1]
 
@@ -1474,7 +1476,7 @@ class TestEndToEndAcceptance:
         out_dir = tmp_path_factory.mktemp("gts-0rho-no-images")
         result = _run_cli("--docx", str(GOLDEN_NO_IMAGES), "--out-dir", str(out_dir), cwd=REPO_ROOT)
         assert result.returncode == 0, result.stderr
-        artifact = json.loads(next(out_dir.glob("*-document.json")).read_text(encoding="utf-8"))
+        artifact = json.loads(next(out_dir.glob("*-docx.json")).read_text(encoding="utf-8"))
         assert "images" not in artifact["document"]  # key absent, not [].
         assert not list(out_dir.glob("*-images"))  # no images dir written at all.
 
@@ -1488,7 +1490,7 @@ class TestEndToEndAcceptance:
             cwd=REPO_ROOT,
         )
         assert result.returncode == 0, result.stderr
-        artifact = json.loads(next(out_dir.glob("*-document.json")).read_text(encoding="utf-8"))
+        artifact = json.loads(next(out_dir.glob("*-docx.json")).read_text(encoding="utf-8"))
         views = artifact["views"]
         baseline_lines = views["baseline_text"].split("\n")
         proposed_lines = views["proposed_text"].split("\n")

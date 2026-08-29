@@ -60,7 +60,7 @@
 </head>
 <body>
   <div id="step-choose" class="visible">
-    <p class="sub">Export this document's governance data.</p>
+    <p class="sub">Export this document's data.</p>
     <button id="jsonBtn">Export JSON</button>
     <button id="jsonPdfBtn" class="secondary">Export JSON + PDF Snapshot</button>
   </div>
@@ -152,11 +152,11 @@
           stopPolling();
           progressBar.style.width = '100%';
           jsonLink.href = 'https://drive.google.com/file/d/' + result.jsonFileId + '/view';
-          triggerDownload_(jsonDownload, docId + '-governance-export', 'json', 'application/json', result.jsonContent, false);
+          triggerDownload_(jsonDownload, docId + '-document-export', 'json', 'application/json', result.jsonContent, false);
           if (result.pdfFileId) {
             pdfLink.href = 'https://drive.google.com/file/d/' + result.pdfFileId + '/view';
             pdfLink.style.display = 'block';
-            triggerDownload_(pdfDownload, docId + '-governance-export', 'pdf', 'application/pdf', result.pdfBase64, true);
+            triggerDownload_(pdfDownload, docId + '-document-export', 'pdf', 'application/pdf', result.pdfBase64, true);
           } else {
             pdfLink.style.display = 'none';
             pdfDownload.style.display = 'none';

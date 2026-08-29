@@ -438,12 +438,14 @@ Default `--out-dir` is `./exports/<doc_id>/` (or `./exports/<filename-stem>/` un
 
 | Artifact | Name |
 |---|---|
-| JSON | `<sanitized-title>-document.json` |
+| JSON | `<sanitized-title>-docx.json` |
 | images | `<sanitized-title>-images/img-main-<ordinal>.<ext>` |
 | cached source | `<sanitized-title>.docx` (suppressed by `--json-only`) |
 
-`-document.json` deliberately parallels the GAS side's `-governance.json` so both artifacts can sit
-in one directory for the differential oracle without colliding.
+`-docx.json` names this side's actual source format (a downloaded `.docx`, ADR-0026) and
+deliberately parallels the GAS side's `-gas.json` (Docs-API source, frozen schema-2.5 baseline)
+so both artifacts can sit in one directory for the differential oracle without colliding
+(gts-284o — both were `-document.json`/`-governance.json` before the terminology migration).
 
 ### 7.5 Exit codes and warnings
 

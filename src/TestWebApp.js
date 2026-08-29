@@ -120,7 +120,12 @@ function _handleRunFixture(payload) {
         fixtureData[_k] = payload[_k];
       }
     }
-    fixtureData.docId = testDocId;
+    // gts-8gev: don't clobber a caller-supplied docId (e.g. move_doc_to_folder
+    // callers that pass {docId: ...} directly instead of testDocId) with an
+    // empty testDocId -- only backfill when the caller didn't already set one.
+    if (!fixtureData.docId) {
+      fixtureData.docId = testDocId;
+    }
 
     var result = setupTestFixtures(fixtureName, fixtureData);
     var response = result || { tag: 'fixture.' + fixtureName, data: {} };
