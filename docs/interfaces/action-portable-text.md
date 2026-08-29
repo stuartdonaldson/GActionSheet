@@ -284,7 +284,15 @@ capture and reads as a spurious presentational diff.
 A **scenario** (staging doc Terminology) is `(input corpus, mutation, expected corpus)` — the
 read-only reference is the degenerate case: `mutation: {"kind": "sync"}` ("sync once"), input and
 expected are the same corpus, and the assertion is that a golden corpus survives a decode + sync +
-re-encode unchanged. A non-degenerate `"sync"` scenario (different input/expected corpora) needs no
+re-encode unchanged. **The degenerate shape is now a lint error unless it is explicitly and
+reasonedly exempted** (`apt_lib.DEGENERATE_SCENARIO_ALLOWLIST`, `python scripts/apt.py lint`,
+gts-5st5): `encode(sync(decode(X))) == X` is satisfied by a sync that scans nothing, which is how a
+1-of-21 short scan passed every APT lane on 2026-08-29. A scenario earns the exemption only when
+the mutation cannot change the document by the spec — today just `unparseable-reporting`, whose
+paragraph ADR-0027 rule 6 reports rather than syncs. Every other corpus is authored in its
+*pre-sync* form (a record missing its `(Status)` token, or a bare `AI:` trigger) so the
+establishing sync has real work to do, with the post-sync state in a distinct
+`<name>-expected.apt.txt`. A non-degenerate `"sync"` scenario (different input/expected corpora) needs no
 extra machinery either — the input corpus's own content (a bare `AI:` trigger, a duplicate
 occurrence, a missing status token, an insertion position) is what triggers the flush; the single
 establishing sync resolves it. Two further mutation kinds (stage `apt-lanes`, gts-iz9i) need a
@@ -341,9 +349,12 @@ Because every scenario shares ONE Doc, a chip-badge preview link a fresh flush p
 (decision 7: batched-lane corpora are doc-less) — unpredictable at golden-authoring time.
 `run_lane` normalises this one substitution before diffing: the captured text's literal `doc_id`
 is replaced with the placeholder `DOC_ID`, and a golden whose scenario forces a re-flush spells its
-own chip URL with `docId=DOC_ID` rather than a real id. Golden corpora whose token is never
-re-flushed (nothing in the scenario requires it — see the `dual-prefix`/`hyperlink-roundtrip`
-corpora above) need no such placeholder: their content is byte-identical whichever Doc it lives in.
+own chip URL with `docId=DOC_ID` rather than a real id. `tests/test_apt_corpus_check.py` applies
+the same single substitution for the same reason — the batched lane needed it first only because
+every scenario in it forces a re-flush, and stage `apt-corpora-rebuild` (gts-ru4c) made the
+un-batched scenarios force one too. A record that is *not* re-flushed keeps whatever chip URL it
+was authored with, real doc id and all, so a corpus copied out of the canonical reference can
+still carry a literal `docId=1PYIU…` that no run rewrites.
 
 `tests/test_apt_flush_lane.py` (gts-iz9i) expresses flush entry points 1–4 and 7
 (`flush-lane-*.apt.txt`/`.scenario.json`, `batch: "apt-lanes-flush"`) — sheetWin, newly-assigned,

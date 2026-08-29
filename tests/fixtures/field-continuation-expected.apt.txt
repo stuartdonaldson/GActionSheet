@@ -1,5 +1,5 @@
 <!-- kind: golden -->
-<!-- name: field-continuation -->
+<!-- name: field-continuation-expected -->
 <!-- serves: gts-82s2 -->
 <!-- generated: 2026-08-28T00:00:00.000Z -->
 
@@ -16,14 +16,14 @@ Due: Tuesday
 
 Case 1 (gts-82s2, ADR-0027 rules 5/5a/8): the CONTEXT.md worked example -- multiple continuation fields (Target/Progress/Consult With/Notes) parsed off one header paragraph, plus a leading prose line that belongs to the action-text block and a bare field line whose inline value is empty. Authored statusless so the establishing sync must re-render the whole paragraph, which is the only way rule 8's field rendering is observable.
 
-ACT-2: jane@example.com Draft the Q4 board deck and circulate<SR>
+[**ACT-2: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-2){{chip:jane@example.com}} Draft the Q4 board deck and circulate (Open)<SR>
 - pull last year's actuals<SR>
-Target: September 12 board meeting<SR>
-Progress: outline done, needs the revenue section<SR>
-Consult With:<SR>
+**Target:**	September 12 board meeting<SR>
+**Progress:**	outline done, needs the revenue section<SR>
+**Consult With:**	<SR>
 - Stuart<SR>
 - John<SR>
-Notes: Peter wants the a|b test results folded in
+**Notes:**	Peter wants the a|b test results folded in
 
 Case 5 (gts-82s2): a continuation field value ending in a parenthesized word ('(blocked)') is not misread as the header status.
 

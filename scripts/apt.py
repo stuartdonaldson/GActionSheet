@@ -11,6 +11,9 @@ script in this repo).
     push  <name>   file  -> Doc   (materialise; overwrites the Doc)
     pull  <name>   Doc   -> capture file + classified diff against the golden
     bless <name>   promote the last reviewed capture -> golden
+    lint           scenario-triple hygiene: a state-changing mutation whose
+                    input and expected corpora are identical (modulo N) is an
+                    error unless reasonedly allowlisted (gts-5st5)
     diff  A B      direct file x file diff (decision 3's "free" CLI — no
                     network, no corpus resolution, just two paths)
 
@@ -333,6 +336,28 @@ def cmd_diff(path_a: pathlib.Path, path_b: pathlib.Path) -> int:
 
 
 # ---------------------------------------------------------------------------
+# lint -- scenario-triple hygiene (gts-5st5), offline like `diff`
+# ---------------------------------------------------------------------------
+
+def cmd_lint(fixtures_dir: pathlib.Path) -> int:
+    """Reports every scenario whose declared mutation cannot change anything
+    the assertion can see (input and expected carry identical records modulo
+    N), unless it is on apt_lib's reasoned degenerate allowlist. Exits 2 --
+    `structural`, the class a record-level content difference would carry --
+    so a CI caller can treat it exactly like a failing `diff`."""
+    problems = apt_lib.lint_scenarios(fixtures_dir)
+    if not problems:
+        print(f"apt lint: {fixtures_dir} -- no degenerate scenarios")
+        for name, reason in sorted(apt_lib.DEGENERATE_SCENARIO_ALLOWLIST.items()):
+            print(f"  allowlisted: {name} -- {reason}")
+        return 0
+    print(f"apt lint: {len(problems)} problem(s) in {fixtures_dir}", file=sys.stderr)
+    for problem in problems:
+        print(f"  {problem}", file=sys.stderr)
+    return apt_lib._STRICTNESS[apt_lib.STRUCTURAL]
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -367,6 +392,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_diff.add_argument("a", type=pathlib.Path)
     p_diff.add_argument("b", type=pathlib.Path)
 
+    p_lint = sub.add_parser("lint", help="scenario-triple hygiene -- no network")
+    p_lint.add_argument("--fixtures-dir", type=pathlib.Path, default=FIXTURES_DIR,
+                        help=f"directory of *.scenario.json (default {FIXTURES_DIR})")
+
     return parser
 
 
@@ -381,6 +410,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_bless(args.name, accept_presentational=args.accept_presentational, assume_yes=args.assume_yes)
         if args.verb == "diff":
             return cmd_diff(args.a, args.b)
+        if args.verb == "lint":
+            return cmd_lint(args.fixtures_dir)
     except AptCliError as exc:
         print(str(exc), file=sys.stderr)
         return 1

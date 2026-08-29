@@ -1,5 +1,5 @@
 <!-- kind: golden -->
-<!-- name: dual-prefix -->
+<!-- name: dual-prefix-expected -->
 <!-- serves: gts-nrxn -->
 <!-- generated: 2026-08-28T00:00:00.000Z -->
 
@@ -9,7 +9,7 @@ Case 4 (gts-nrxn, ADR-0023), part 1: ACT-9 precedes the legacy-spelled token bel
 
 Case 1/4 (gts-nrxn, ADR-0023): a legacy AI-N token reads unrewritten and is still spelled AI-10 after a flush rewrites the paragraph -- ACT- is canonical for newly ASSIGNED tokens, not a renaming applied to established ones. Authored statusless so the establishing sync must rewrite this record; a record it never touches could not show the spelling surviving.
 
-AI-10: jane@example.com legacy spelling still works
+[**AI-10: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=AI-10){{chip:jane@example.com}} legacy spelling still works (Open)
 
 Case 4 (gts-nrxn), part 2: ACT-11 follows the legacy-spelled token above in document order -- one shared N sequence, not per-prefix.
 

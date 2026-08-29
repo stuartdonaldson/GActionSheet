@@ -403,6 +403,140 @@ def load_scenario(path) -> Scenario:
 
 
 # ---------------------------------------------------------------------------
+# Degenerate-scenario lint (gts-5st5, stage `apt-corpora-rebuild`)
+#
+# The failure this exists to make impossible: all 15 scenario triples once had
+# `input == expected` under `mutation: sync`, so every assertion reduced to
+# `encode(sync(decode(X))) == X` -- which a sync that scans NOTHING satisfies.
+# On 2026-08-29 a sync that scanned 1 of 21 actions went undetected for exactly
+# that reason (knowledge-base/staging/apt-oracle.md, "Why this plan exists").
+#
+# Identity is compared on the corpora's RECORDS, after `_normalize_n`, not on
+# raw file bytes. Two reasons, both about matching the check to the assertion
+# it protects:
+#
+#   * Raw bytes would be trivially defeated by the preamble. A `<name>` and a
+#     `<name>-expected` corpus always differ in their own `<!-- name: ... -->`
+#     line, so a byte comparison of whole files reports "different" even for a
+#     verbatim copy -- the exact case this lint has to catch.
+#   * `diff_apt` normalises N positionally (decision 5), so a pair differing
+#     ONLY in its N digits is indistinguishable, to the assertion, from a pair
+#     that is identical. Comparing raw N here would pass a scenario the lane
+#     still cannot fail. Normalising is therefore strictly the stronger test,
+#     and it is the same normalisation the differ itself applies.
+# ---------------------------------------------------------------------------
+
+#: Scenarios whose post-mutation state genuinely equals their input, each with
+#: the reason that makes it so (gts-5st5 AC3: an exemption without a stated
+#: reason is how the vacuous shape returns). Re-verified live per entry by
+#: gts-ru4c -- an entry here is a claim about the SPEC, not a record of what
+#: the implementation happens to do today.
+DEGENERATE_SCENARIO_ALLOWLIST = {
+    "unparseable-reporting": (
+        "ADR-0027 rule 6: a paragraph opening with a token but failing the "
+        "grammar is REPORTED as unparseable-action-paragraph and is neither "
+        "synced nor rewritten, so its post-sync document state is its input by "
+        "definition. The corpus's non-vacuous assertion is the report itself "
+        "(tests/test_doc_oracle_reference.py), not this text diff, which can "
+        "only ever assert that the paragraph was left alone."
+    ),
+}
+
+
+def normalized_records(text: str) -> list[str]:
+    """A corpus's records with N normalised — the unit the degenerate-scenario
+    lint compares, and the same normalisation `diff_apt` applies before it
+    decides two records are equal."""
+    return [_normalize_n(r) for r in split_records(text)]
+
+
+def corpora_are_equivalent(input_text: str, expected_text: str) -> bool:
+    """True when the two corpora carry the same records modulo N — i.e. when
+    `diff_apt(expected, capture)` could not tell a real mutation from a no-op
+    for this pair."""
+    return normalized_records(input_text) == normalized_records(expected_text)
+
+
+def degenerate_scenario_problems(
+    scenario: "Scenario",
+    input_text: str,
+    expected_text: str,
+    allowlist: dict | None = None,
+) -> list[str]:
+    """Returns the lint problems for ONE scenario triple, empty when clean.
+
+    Three problems are reported, not one — an allowlist that rots silently is
+    the same defect in a new place:
+
+      * a non-allowlisted scenario whose input and expected are equivalent;
+      * an allowlist entry with no (or blank) stated reason;
+      * an allowlist entry for a scenario that is no longer degenerate, which
+        would otherwise keep a real mutation exempt forever.
+    """
+    allowlist = DEGENERATE_SCENARIO_ALLOWLIST if allowlist is None else allowlist
+    equivalent = corpora_are_equivalent(input_text, expected_text)
+    exempt = scenario.name in allowlist
+    problems = []
+    if exempt:
+        reason = (allowlist.get(scenario.name) or "").strip()
+        if not reason:
+            problems.append(
+                f"{scenario.name}: allowlisted as degenerate with no stated "
+                "reason (gts-5st5 AC3 — every exemption states why)."
+            )
+        if not equivalent:
+            problems.append(
+                f"{scenario.name}: allowlisted as degenerate, but its input "
+                f"({scenario.input_corpus}) and expected "
+                f"({scenario.expected_corpus}) corpora now differ — remove the "
+                "DEGENERATE_SCENARIO_ALLOWLIST entry rather than leaving a real "
+                "mutation exempt."
+            )
+    elif equivalent:
+        problems.append(
+            f"{scenario.name}: mutation {scenario.mutation.get('kind')!r} is "
+            f"state-changing, but input ({scenario.input_corpus}) and expected "
+            f"({scenario.expected_corpus}) carry identical records (modulo N), "
+            "so the lane asserts encode(sync(decode(X))) == X — a sync that "
+            "scans nothing passes it. Re-author the expected corpus as the "
+            "real post-mutation state, or add a reasoned "
+            "DEGENERATE_SCENARIO_ALLOWLIST entry."
+        )
+    return problems
+
+
+def lint_scenarios(fixtures_dir, allowlist: dict | None = None) -> list[str]:
+    """Runs `degenerate_scenario_problems` over every `*.scenario.json` under
+    `fixtures_dir`, plus one whole-directory check: an allowlist entry naming a
+    scenario that does not exist. Shared by `scripts/apt.py lint` and the
+    pytest lane (gts-5st5 AC1) so there is one implementation, not two —
+    decision 8's rule for the differ, applied to the lint."""
+    allowlist = DEGENERATE_SCENARIO_ALLOWLIST if allowlist is None else allowlist
+    fixtures_dir = pathlib.Path(fixtures_dir)
+    problems: list[str] = []
+    seen = set()
+    for path in sorted(fixtures_dir.glob("*.scenario.json")):
+        scenario = load_scenario(path)
+        seen.add(scenario.name)
+        input_path = fixtures_dir / f"{scenario.input_corpus}.apt.txt"
+        expected_path = fixtures_dir / f"{scenario.expected_corpus}.apt.txt"
+        if not input_path.exists() or not expected_path.exists():
+            continue  # corpus existence is test_apt_scenario_format's lint
+        problems.extend(degenerate_scenario_problems(
+            scenario,
+            input_path.read_text(encoding="utf-8"),
+            expected_path.read_text(encoding="utf-8"),
+            allowlist=allowlist,
+        ))
+    for name in sorted(set(allowlist) - seen):
+        problems.append(
+            f"{name}: DEGENERATE_SCENARIO_ALLOWLIST names a scenario with no "
+            f"{name}.scenario.json under {fixtures_dir} — a stale exemption."
+        )
+    return problems
+
+
+# ---------------------------------------------------------------------------
 # Decision-9 annotation lint
 #
 # "Every corpus record added for test purposes carries a prose annotation

@@ -91,7 +91,16 @@ class TestScenarioRoundTrip:
             resp = scn._post_fixture("encode_reference_document")
             data = resp.get("data") or {}
             assert data.get("ok"), f"{path.name}: encode_reference_document failed: {resp}"
-            captured_text = data["apt"]
+            # A chip-badge preview link on any token this sync flushed carries
+            # THIS run's own randomly-generated doc id (decision 7: a scenario
+            # corpus is doc-less and materialises into a fresh new_doc() every
+            # run), so a golden cannot hardcode it and spells the placeholder
+            # DOC_ID instead. Same single substitution point, for the same
+            # reason, as tests/support/apt_lane_runner.py::run_lane — the
+            # batched lane needed it first only because every scenario in it
+            # forces a re-flush; stage `apt-corpora-rebuild` (gts-ru4c) made
+            # the scenarios in THIS lane force one too.
+            captured_text = data["apt"].replace(scn.doc_id, "DOC_ID")
         finally:
             scn.close()
 

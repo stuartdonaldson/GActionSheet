@@ -4,7 +4,7 @@
   "mutation": {
     "kind": "sync"
   },
-  "expected": "grammar-matrix",
+  "expected": "grammar-matrix-expected",
   "serves": [
     "gts-ucdz"
   ]

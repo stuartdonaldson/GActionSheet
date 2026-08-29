@@ -47,13 +47,13 @@ audit) and its *Deliverable* line corrected below.
 | 2 | `act-force-refresh` | `gts-366c` | ✓ | [IMP] WebApp force parameter on the document-sync route |
 | 2 | `act-force-refresh` | `gts-gssn` | ✓ | [TST] Force-refresh route coverage and force entry-point audit |
 | 3 | `apt-repair` | `gts-imai` | ✓ | [FIX] Repair the canonical reference Doc and its ActionSheet rows |
-| 3 | `apt-repair` | `gts-a7ko` | ⊘ | [TST] Re-bless action-reference.apt.txt from the repaired doc *(blocked on `gts-1ibp`)* |
-| 3 | `apt-repair` | `gts-1ibp` | ○ | [FIX] Flush shifts every inline bold/italic/link run one character left, cumulatively **(P0, filed at stage 3)** |
-| 4 | `apt-lane-guards` | `gts-p150` | ○ | [TST] Pristine-restore fixture for the reference corpus |
-| 4 | `apt-lane-guards` | `gts-lu13` | ○ | [TST] Assert sync.scanned count and zero Deleted rows in every live lane |
-| 4 | `apt-lane-guards` | `gts-omoy` | ○ | [INF] Deployed-build guard for live lanes |
-| 5 | `apt-corpora-rebuild` | `gts-ru4c` | ○ | [TST] Re-author every scenario's expected corpus as the post-sync state |
-| 5 | `apt-corpora-rebuild` | `gts-5st5` | ○ | [TST] Lint: input == expected is an error for a non-degenerate mutation |
+| 3 | `apt-repair` | `gts-a7ko` | ✓ | [TST] Re-bless action-reference.apt.txt from the repaired doc |
+| 3 | `apt-repair` | `gts-1ibp` | ✓ | [FIX] Flush shifts every inline bold/italic/link run one character left, cumulatively **(P0, filed at stage 3)** |
+| 4 | `apt-lane-guards` | `gts-p150` | ✓ | [TST] Pristine-restore fixture for the reference corpus |
+| 4 | `apt-lane-guards` | `gts-lu13` | ✓ | [TST] Assert sync.scanned count and zero Deleted rows in every live lane |
+| 4 | `apt-lane-guards` | `gts-omoy` | ✓ | [INF] Deployed-build guard for live lanes |
+| 5 | `apt-corpora-rebuild` | `gts-ru4c` | ✓ | [TST] Re-author every scenario's expected corpus as the post-sync state |
+| 5 | `apt-corpora-rebuild` | `gts-5st5` | ✓ | [TST] Lint: input == expected is an error for a non-degenerate mutation |
 | 6 | `apt-presentation` | `gts-dxgo` | ○ | [TST] Doc-side presentation assertions: person chip, ACT-N link run, status icon |
 | 6 | `apt-presentation` | `gts-gkcy` | ○ | [TST] Sparse expected-parse annotation on hard records |
 | 7 | `doc-truth` | `gts-blia` | ✓ | [INF] CONTEXT.md: correct the user-facing surface model |
@@ -112,10 +112,12 @@ typographically drifted. The bless is blocked until that lands. See the handoff.
 froze the defect last time.
 
 ### 4 — apt-lane-guards
-**Deliverable:** a lane that goes red on a stale deployment, a short scan, or a *Deleted* row.
-*(Corrected at close: 2 of 3 beads delivered this — `gts-omoy` and `gts-lu13`. `gts-p150`
-(pristine-restore fixture) did not: it depends on `gts-a7ko`, still open and blocked on the P0
-`gts-1ibp` from stage 3. See the handoff.)*
+**Deliverable:** a lane that goes red on a stale deployment, a short scan, or a *Deleted* row,
+plus a pristine-restore fixture so a lane can start from the reference corpus without touching
+the shared canonical Doc.
+*(Corrected twice: first at the stage's partial close — `gts-omoy`/`gts-lu13` delivered the
+red-lane guards, `gts-p150` stayed blocked on `gts-a7ko`/`gts-1ibp`. Both landed since, so
+`gts-p150` closed in a later session once its dependency chain cleared. See the handoffs.)*
 **Why paired:** three small guards in the same conftest/lane plumbing.
 **Model:** sonnet.
 **Work-log:** per-stage.
@@ -395,8 +397,69 @@ Green, after deploy: `tests/test_force_refresh_route.py` + `tests/test_menu_entr
 
 ### 3 — apt-repair
 
-**Partially closed 2026-08-29.** Bead `gts-imai` ✓ (`regression=pending`); `gts-a7ko` remains
-**open and blocked** on the P0 filed by this stage, `gts-1ibp`. The stage does not close.
+**Closed 2026-08-29.** Beads `gts-imai` ✓, `gts-1ibp` ✓ (P0), `gts-a7ko` ✓, all `regression=pending`.
+This continues the partial-close block below — read that first — then the correction that follows.
+
+**Correction to the partial-close (this session, 2026-08-29 ~16:30):**
+
+`gts-1ibp`'s close reason claimed AC3 ("the four drifted records restored to their intended run
+boundaries") was already satisfied via `gts-imai`'s scope. **That claim was wrong** — `gts-imai`
+closed hours earlier, before the fix existed, and never touched ACT-1/19/20/21. Verified before
+touching anything: a fresh `apt pull` was byte-identical (mod timestamp) to the pre-fix
+`20260829T081611329139Z` capture — the doc was still sitting at its 2-flush-drifted state when
+this session began, code fix notwithstanding (the fix stops *future* drift; it cannot retroactively
+correct offsets a scan already re-derived from drifted text — see `gts-1ibp`'s own note for why).
+
+AC3 was completed here instead: a corrected corpus file was built (current capture, with only
+ACT-1/19/20/21's bold/italic/link ranges rewritten to match the pre-any-flush
+`20260829T043523844581Z` capture — the sole "authored, never touched by a flush" ground truth),
+diffed against the current capture to confirm exactly those 5 lines changed, then pushed with
+`apt.py push action-reference --file <repaired> --force` (`push` refuses a drifted live Doc by
+default — `--force` is the documented override for exactly this "hand-repair a known-drifted Doc"
+case, not a way around review). A follow-up `apt pull` came back byte-identical to the pushed file
+(mod timestamp) — `push`'s `decode_reference_document` path re-materializes text, not the buggy
+`_buildFlushRequests` reapply path, so this write path itself could not reintroduce the drift.
+`bd note` on `gts-1ibp` records the correction; the bead is not reopened since the code-level AC1/2/4
+were genuinely done and proven — only its AC3 status line was wrong.
+
+With the doc genuinely restored, `gts-a7ko`'s bless proceeded (see below) using the now-correct
+capture — the alternative (blessing the still-drifted state) is exactly the failure mode this whole
+plan exists to stop, and is why the stage stayed open rather than closing on the partial state.
+
+**gts-a7ko — the bless:**
+
+AC1: `tests/test_doc_oracle_reference.py` green (4 passed) immediately before the bless, same
+session — same gate as `gts-imai`'s pre-repair check, now against the restored doc.
+
+AC2/AC3: `apt.py bless action-reference` run interactively. Highest diff class present was
+structural + 7 preservation entries; each preservation entry got a reason (the index-shift already
+reviewed and classified in `gts-a7ko`'s own note — new `<EMPTY>` separator records shift every
+positional index after them, so "record N" in golden vs. capture stopped naming the same ACT once
+the counts diverged at 23 vs. 27 records; nothing was actually lost). Post-bless: `apt.py diff` of
+the capture against the new golden reports "no difference"; `grep -c` for `ACT-N:`/`AI-N:` headers
+on the golden returns 21/21.
+
+AC4: the golden's header carries a `bless_notes` provenance line (visible in the file); "gated on
+the parser" is recorded here and on the bead rather than as a dedicated header field — `apt.py`'s
+header schema has no such field, and adding one was out of this bead's scope.
+
+Targeted gate (project rule: never run full `pytest -x` on own initiative) —
+`test_apt_scenario_format` + `test_apt_cli` + `test_apt_corpus_check` + `test_apt_differ` +
+`test_apt_fixtures_lint` + `test_adr0027_reference_document`: **201 passed, 2 failed, 9 skipped**.
+Both failures are pre-existing, out-of-scope gaps already named in stage 1's handoff and assigned
+to stage `apt-presentation` (`gts-dxgo`) — `test_case3_person_chip_identity_wins` (ACT-5's chip
+carries no display name, the known email-vs-name gap) and `test_case6_field_value_hyperlink_survives`
+(ACT-18's `custom_fields` loses its link run, the known plain-text-only `custom_fields` gap).
+Neither ACT-5 nor ACT-18 was touched by this bead's repair (ACT-1/19/20/21 only), and both failure
+modes were already documented before this session started — not a regression from the bless.
+
+**Still true from the partial close below:** the code-writer fix, its proof, and the found/deferred
+items are unchanged by this correction. Only AC3's status and the downstream bless were open; both
+are closed now.
+
+---
+
+**Superseded partial-close text, retained for the record (2026-08-29 earlier in the session):**
 
 **Done**
 
@@ -504,10 +567,73 @@ AC5: nothing blessed.
 
 ### 4 — apt-lane-guards
 
-**Partially closed 2026-08-29.** Beads `gts-omoy` ✓ and `gts-lu13` ✓, both `regression=pending`.
-`gts-p150` remains **open and blocked** (depends on `gts-a7ko`, itself blocked on the stage-3 P0
-`gts-1ibp`). The stage does not close — same shape as stage 3's partial close, same upstream
-blocker.
+**Closed 2026-08-29.** Beads `gts-omoy` ✓, `gts-lu13` ✓ and `gts-p150` ✓, all `regression=pending`.
+This continues the partial-close block below — read that first — then the `gts-p150` close that
+follows.
+
+**`gts-p150` close (this session):**
+
+By the time this session started, `gts-a7ko` (blocked on stage 3's P0 `gts-1ibp`) had already
+closed, so `gts-p150`'s dependency chain was clear — no anti-pairing or blocker applied to this
+bead directly.
+
+**Done**
+
+`tests/helpers/reference_corpus.py`: `materialize_reference_corpus(settings, *, request=None,
+sync=True)` decodes the checked-in golden (`tests/fixtures/action-reference.apt.txt`) into a
+fresh `ScenarioSession.new_doc()` — never the shared canonical `referenceDocId` every other stage
+of this plan repairs and guards by hand — then verifies completeness independently, via the same
+`doc_inspect.floating_actions` grammar parse the oracle uses (not via the sheet, and not by
+trusting the decode route that might itself be the bug), before handing the session back.
+`golden_token_count()` reads the expected count from the golden's own record grammar
+(`apt_lib.split_records`/`record_token`) rather than a hard-coded 21, so a future re-bless can't
+silently desync the guard from the corpus it checks. A short landing raises
+`IncompleteMaterialization` and trashes the partial doc itself (via `_deferred_trash`, not
+`close()` — `close()`'s drain-invariant assertion would mask the real error).
+
+AC3 (an existing APT lane switched onto it): `tests/test_adr0027_reference_document.py`'s
+module-scoped `reference` fixture — previously its own bespoke `new_doc()` +
+`decode_reference_document` call — now calls `materialize_reference_corpus` directly.
+
+New `tests/test_reference_corpus_fixture.py`, live gate (`PYTHONPATH=. pytest
+tests/test_reference_corpus_fixture.py tests/test_adr0027_reference_document.py`), **31 passed,
+2 failed** (33 collected):
+- AC1: `test_materialize_yields_a_fresh_doc_distinct_from_the_canonical_one` — materialized
+  `doc_id` differs from `settings['referenceDocId']`, 21/21 tokens land.
+- AC2 (idempotency): `test_materialize_is_idempotent_across_two_calls_in_one_session` — two
+  independent calls in one session, each its own fresh doc, same token set, and matching
+  `assignee_email`/`action_text`/`status` on ACT-1 and ACT-19.
+- AC4 (fails loudly, proven to actually fire — Backstop rules): `test_materialize_fails_loudly_
+  on_an_incomplete_decode` monkeypatches `golden_token_count` to an inflated value and asserts
+  `IncompleteMaterialization` is raised (rather than corrupting the golden or the decode route
+  live, since the decode path has no known way to reproduce a real short landing on demand — this
+  proves the completeness *check* fires, which is what this bead owns).
+- `test_adr0027_reference_document.py`: 27/29 passed on the refactored fixture. The 2 failures
+  (`test_case3_person_chip_identity_wins`, `test_case6_field_value_hyperlink_survives`) are
+  **pre-existing, not a regression** — both are the same known gaps stage 1's and stage 3's
+  handoffs already named and assigned to stage `apt-presentation` (`gts-dxgo`): ACT-5's PERSON
+  chip carries no display name, ACT-18's `custom_fields` loses its link run. Neither is touched by
+  this bead.
+
+**Found**
+
+- Nothing new. The completeness check and the refactor both behaved as designed on first live run.
+
+**Next stages must know**
+
+- `materialize_reference_corpus(settings, request=<pytest FixtureRequest>)` is the reusable entry
+  point for any future lane that wants to start from the reference corpus in a disposable doc
+  rather than build paragraphs by hand or touch the shared canonical Doc. Pass `request=` from a
+  pytest fixture so `new_doc()`'s own finalizer trashes the doc; call `.close()` explicitly
+  otherwise (idempotent either way — `_deferred_trash` guards a second invocation).
+- `golden_token_count()` is corpus-agnostic — it reads whatever `.apt.txt` text it's given (or the
+  reference golden by default) via `apt_lib.split_records`/`record_token`, so stage
+  `apt-corpora-rebuild` (which changes the golden's `input == expected` shape) does not require an
+  update here.
+
+**Deliberately not done**
+
+- Full `pytest -x`. `gts-p150` carries `regression=pending`.
 
 **Done**
 
@@ -580,6 +706,138 @@ stamper writes.
 - A real live demonstration of `gts-lu13`'s guard failing (as opposed to the offline synthetic
   one) — the failure conditions it detects no longer exist in the live environment to reproduce.
 - Full `pytest -x`. Both `gts-omoy` and `gts-lu13` carry `regression=pending`.
+
+### 5 — apt-corpora-rebuild
+
+**Closed 2026-08-29.** Beads `gts-ru4c` ✓ and `gts-5st5` ✓, both `regression=pending`.
+
+#### gts-ru4c — re-author every scenario's expected corpus
+
+**Done**
+
+Live-verified first, decided second. A throwaway probe decoded each of the six un-batched scenario corpora into a fresh `ScenarioSession.new_doc()`, synced once, re-encoded, and diffed the capture against the corpus. All six came back a **total no-op**:
+
+```
+dual-prefix: entries=0                 field-continuation: entries=0
+grammar-matrix: entries=0              hyperlink-roundtrip: entries=0
+list-and-table-containers: entries=0   unparseable-reporting: entries=0
+```
+
+The plan's premise held in its strongest form: every un-batched APT scenario was `encode(sync(decode(X))) == X` against a corpus already in post-sync form, and a sync that scanned nothing would have passed all six.
+
+A second probe established *which* records a sync rewrites, from nine purpose-built records in one doc. **The establishing sync flushes exactly the records missing an explicit status token**; a record carrying one is registered and left untouched (probes 2/6/9 unchanged; 1/3/4/5/7/8 rewritten). A flush produces four things together: the chip-badge token link `[**ACT-N: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=<doc>&ain=ACT-N)`, the assignee as a PERSON chip, `(Open)` materialized at the end of the header line, and field lines re-rendered as `**Name:**<TAB>value`.
+
+Five corpora were re-authored by de-converging the **input** — removing the status token from the record whose own annotation already claimed a mutation, or whose bead's core claim was unobservable without one — with a distinct `<name>-expected.apt.txt` as the post-sync state:
+
+| corpus | de-converged | what the expectation now asserts | rule |
+|---|---|---|---|
+| `hyperlink-roundtrip` | ACT-19, ACT-20, ACT-3 | a link mid action text, and a link-only action, survive a **flush** (not merely decode/encode); a plain action's token gains the chip badge | ADR-0027 rules 10–15, rule 12; APT spec §Batched lanes |
+| `grammar-matrix` | ACT-8, ACT-9 | `(draft)` is not adopted as status, `(Open)` is materialized at end of header line; a bare token is a valid empty-body action | rule 4 as refined by gts-v0py; grammar `actionBody`, gts-jxrw |
+| `dual-prefix` | AI-10 | a legacy `AI-N` token stays `AI-10` through a flush — including in the badge's `ain=` param — rather than being rewritten to `ACT-10` | ADR-0023 |
+| `field-continuation` | ACT-2 | rule 8's field rendering: bold `Name:` label + tab, a bare field line's empty inline value, prose staying in the open block | rules 5/5a/8 |
+| `list-and-table-containers` | ACT-60, ACT-62 | the flush's occurrence scanner reaches a token inside a `LIST_ITEM`, and inside a `LIST_ITEM` nested in a table `CELL` | gts-83s5 / dq6t AC-3, AC-5 |
+
+**AC2, demonstrated not asserted.** With the OLD (identical) expected value the lane's own differ reports a non-clean diff for every rebuilt scenario. Because the live run below proves `capture == expected` for each, `diff input expected` *is* the failure the lane would have produced:
+
+```
+$ python3 scripts/apt.py diff tests/fixtures/dual-prefix.apt.txt tests/fixtures/dual-prefix-expected.apt.txt
+[structural] 1 record(s)
+  record 3: content changed (prose/field reclassification or edit)
+exit=2
+field-continuation        -> [structural] record 3: field(s) removed: Consult With, Notes, Progress, Target   exit=2
+grammar-matrix            -> [structural] records 11, 13: content changed                                     exit=2
+hyperlink-roundtrip       -> [structural] records 1, 3, 5: content changed                                     exit=2
+list-and-table-containers -> [structural] records 1, 14: content changed                                      exit=2
+```
+
+**AC4, the exemption list** (consumed by `gts-5st5`'s `apt_lib.DEGENERATE_SCENARIO_ALLOWLIST`) — one entry:
+
+- **`unparseable-reporting`** — ADR-0027 rule 6: a paragraph opening with a token but failing the grammar is *reported* as `unparseable-action-paragraph` and is neither synced nor rewritten, so its post-sync document state is its input by definition. The corpus's non-vacuous assertion is the report itself (`tests/test_doc_oracle_reference.py`), not this text diff, which can only ever assert the paragraph was left alone.
+
+**The ACT-9 / gts-jxrw no-body decision** (recorded in `grammar-matrix`'s Case 7 annotation): a bare `ACT-9:` with no assignee and no body is a **valid action** — not an error, and not a rule-6 unparseable paragraph. ADR-0027's `actionBody := text [statusToken]` admits empty text, and rule 6 is scoped to a paragraph that *fails* the grammar, which this does not. It is registered with an empty action text and no assignee, and, being statusless in its author-typed form, the establishing sync treats it like any other statusless record: it gains the chip-badge token link and `(Open)`, and gains no PERSON chip because none was typed. Live-confirmed: `ACT-9:` → `[**ACT-9: **](...&ain=ACT-9) (Open)`.
+
+**Method note.** Every expected corpus was written from the spec **before** the live run and saved to scratchpad first; the run was the comparison, not the source. All five were correct on the first live attempt — no line of any golden came from a capture, so nothing was blessed from the system under test (§"Why this plan exists").
+
+**Gate:** `PYTHONPATH=. pytest tests/test_apt_corpus_check.py` → **7 passed, 9 skipped in 352.90s** (the 9 skips are the batched create-lane/flush-lane scenarios).
+
+**Found**
+
+- **All six un-batched scenarios were total no-ops, not "mostly converged".** Zero diff entries each. **Fixed now** (five rebuilt, one reasonedly exempted).
+- **`hyperlink-roundtrip`'s Case 4 annotation was aspirational and false.** It claimed "a plain (non-link) action's token still gets a chip-badge link on sync" while ACT-3 carried an explicit `(Open)` and was therefore never flushed. Not a stale comment about a lost behaviour — the behaviour exists; the corpus was written so it could not fire. **Fixed now.**
+- **`tests/test_apt_corpus_check.py` had no `doc_id → DOC_ID` normalisation**, so no corpus in that lane could ever have contained a freshly produced chip badge. **Fixed now**, mirroring the single substitution point in `apt_lane_runner.py::run_lane`.
+- **ADR-0027 rule 8's mandated 5-space continuation indent is not applied by the flush.** The spec-derived expected corpus was authored *without* indents and passed; an indented prediction would have been reported by `diff_apt` as presentational and failed. **Bead `gts-9a4j`** (P2): either the flush is non-conformant or rule 8's indent clause is stale (gts-po8t may already have superseded it in practice).
+- **`field-continuation`'s frozen ACT-12/17/18 spell the field label `**Name**:`** (colon outside the bold); a fresh flush spells `**Name:**` (colon inside), which is what rule 8 says. Those three carry a status token so nothing re-flushes them and the discrepancy was invisible; the same file now holds both spellings. **Bead `gts-xgms`** (P3).
+- **`hyperlink-roundtrip`'s ACT-20 golden carried gts-1ibp's formatting drift frozen into it** (`[ Q3 dec](url)k`). **Fixed now**: re-authored to the intended `[Q3 deck](url)`, which then survived a real live flush byte-exact — an independent corroboration that gts-1ibp's writer fix holds on a fresh doc.
+- Every record left alone is a complete, already-established action whose grammar case is about *parsing*, not flush rendering. **Deliberately dropped** as a source of further beads.
+
+**Next stages must know**
+
+- **The flush trigger, stated once so nobody re-derives it:** on the establishing sync of a fresh doc, a record is rewritten iff something must be materialized — a bare `AI:` needs an N, a token with no `(Status)` needs one. A record with token + explicit status is registered in the sheet and left byte-identical in the doc. That is why an author-typed `ACT-N: someone text (Open)` is idempotent, and why every corpus copied out of the already-synced canonical reference was vacuous.
+- **A golden expecting a freshly produced chip badge must spell `docId=DOC_ID`**, in this lane as well as the batched ones. An already-badged record copied from the canonical corpus keeps its literal `docId=1PYIU…` and is *not* rewritten.
+- Stage `apt-presentation` (`gts-dxgo`/`gts-gkcy`) now has five corpora where the badge, the PERSON chip and the materialized status are *produced by the run under test* rather than pre-baked — per-record presentation assertions can be written against those records without first de-converging anything.
+- `gts-c9dd` (stage `doc-truth`) is unblocked by this close.
+
+**Deliberately not done**
+
+- De-converging every record. One or two per corpus is what makes each scenario non-degenerate; converting all 30-odd would re-render records whose cases are about parsing, and would have made the rule-8 / label-spelling findings harder to isolate.
+- Fixing `gts-9a4j` or `gts-xgms` — both filed, both outside this bead's AC.
+- Full `pytest -x`. `regression=pending`.
+
+#### gts-5st5 — lint: input == expected is an error
+
+**Done**
+
+`apt_lib.lint_scenarios(fixtures_dir, allowlist=None)` is the one implementation (decision 8's rule for the differ, applied to the lint), called from both sides per AC1:
+
+- **APT tooling:** a new `python scripts/apt.py lint [--fixtures-dir DIR]` verb — offline like `diff`, exits 2 (`structural`) so CI treats it exactly like a failing `diff`.
+- **pytest lane:** `tests/test_apt_fixtures_lint.py::TestCheckedInScenariosAreNotDegenerate`, in the file that already owns the `kind: capture` lint, with a proven-to-fail class alongside the existing `TestLintCatchesAViolation` — that file's own pattern, not a new one.
+
+Three problems are reported, not one: a non-exempt scenario whose sides are equivalent; an exemption with a blank reason (AC3); and an exemption that has outlived its degeneracy or names no scenario at all.
+
+**The byte-vs-normalised design question, answered: neither raw bytes nor whole files — the corpora's RECORDS, after `_normalize_n`.** Two independent reasons, both about matching the check to the assertion it protects:
+
+1. **Whole-file byte identity is trivially defeated by the preamble.** A `<name>` and a `<name>-expected` corpus always differ in their own `<!-- name: … -->` line, so a byte comparison reports "different" for a verbatim copy — precisely the case the lint exists to catch. `test_a_copied_expected_file_is_still_reported` asserts the bytes differ *and* the lint still fires.
+2. **N must be normalised because `diff_apt` normalises it (decision 5).** A pair differing only in its N digits is indistinguishable, *to the assertion this lint protects*, from a pair that is identical — the lane still could not fail. Raw-N comparison would pass a scenario that is vacuous in practice, so normalising is strictly the stronger test, and it is the same normalisation the differ applies. `test_an_n_only_difference_is_still_reported`.
+
+**AC4, proven to fail — twice, two ways.** Against the real pre-rebuild corpora reconstructed from git (`git show HEAD:tests/fixtures/…` into a temp dir, then the same `apt_lib.lint_scenarios`):
+
+```
+ - dual-prefix: mutation 'sync' is state-changing, but input (dual-prefix) and expected
+   (dual-prefix) carry identical records (modulo N), so the lane asserts
+   encode(sync(decode(X))) == X — a sync that scans nothing passes it. …
+ - field-continuation: …
+ - grammar-matrix: …
+ - hyperlink-roundtrip: …
+ - list-and-table-containers: …
+```
+
+Five of six red; `unparseable-reporting` correctly silent on the allowlist. And permanently, as `tmp_path` fixtures (git history is not a durable oracle): the three above plus `test_an_allowlist_entry_without_a_reason_is_reported`, `test_a_stale_allowlist_entry_is_reported`, `test_an_allowlist_entry_naming_no_scenario_is_reported` — plus the complement `test_a_real_mutation_is_not_reported`, so the lint is shown not to be noise.
+
+Green post-rebuild:
+
+```
+$ python3 scripts/apt.py lint
+apt lint: /home/stuar/proj/GActionSheet/tests/fixtures -- no degenerate scenarios
+  allowlisted: unparseable-reporting -- ADR-0027 rule 6: …
+exit=0
+```
+
+**Gate:** `PYTHONPATH=. pytest tests/test_apt_corpus_check.py tests/test_apt_scenario_format.py tests/test_apt_fixtures_lint.py -v` → **146 passed, 9 skipped in 212.06s (0:03:32)**, zero failures. No pre-existing failure appeared in this scope (the two known `apt-presentation` failures live in `tests/test_adr0027_reference_document.py`, which is not in this gate).
+
+**Found**
+
+- Nothing new about the lint; it behaved as designed on first run. One shaping detail: the lint deliberately does **not** key off `mutation.kind`. Every kind in use (`sync`, `sheetEdit`, `trigger`) is state-changing and `sync` is the one that was vacuous, so a "state-changing kinds" list would have been an empty distinction a future kind could quietly fall outside of. Degeneracy is a property of the *corpus pair*; the exemption is per scenario. **Deliberately dropped** as a source of a follow-up bead.
+- `apt_lib.Scenario.is_degenerate` (pre-existing) tests `input_corpus == expected_corpus` by **name**, which is weaker than this lint and would miss a copied file. Left in place — its only consumer is `test_apt_scenario_format.py`'s loader tests, where the name comparison is what is under test. **Deliberately dropped**, noted so a later reader does not mistake it for the lint.
+
+**Next stages must know**
+
+- Adding a new scenario now costs a decision: either its expected corpus differs from its input (records, modulo N), or it needs a `DEGENERATE_SCENARIO_ALLOWLIST` entry with a written reason. `python scripts/apt.py lint` answers it offline in a second, before any live run.
+- `apt_lib.normalized_records` / `corpora_are_equivalent` are public and reusable — a future lane wanting "did this mutation change anything the differ can see?" should call them rather than re-derive the comparison.
+
+**Deliberately not done**
+
+- Wiring `apt.py lint` into `pull`/`bless` as a pre-flight. Those verbs operate on a single corpus, not a scenario triple; a directory-wide lint would surprise their caller, and AC1 is already satisfied.
+- Full `pytest -x`. Both beads carry `regression=pending`.
 
 ### 7 — doc-truth
 

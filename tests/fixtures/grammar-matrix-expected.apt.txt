@@ -1,5 +1,5 @@
 <!-- kind: golden -->
-<!-- name: grammar-matrix -->
+<!-- name: grammar-matrix-expected -->
 <!-- serves: gts-ucdz -->
 <!-- generated: 2026-08-28T00:00:00.000Z -->
 
@@ -25,11 +25,11 @@ ACT-7: jane@example.com ship it (Open) - done
 
 Case 6 (gts-ucdz, ADR-0027 rule 4 as refined by gts-v0py): no status token is present -- the parenthesized word in the action text is literal, since what follows it begins with a word character. Authored in its statusless form, so the establishing sync must materialize (Open) at the end of the header line rather than adopt (draft).
 
-ACT-8: {{chip:jane@example.com}} (draft) proposal
+[**ACT-8: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-8){{chip:jane@example.com}} (draft) proposal (Open)
 
 Case 7 (gts-ucdz, gts-jxrw): a bare token line with nothing else. ADR-0027's actionBody production admits empty text, so this is a VALID action, not a rule-6 unparseable paragraph: it is registered with an empty action text and no assignee, and the establishing sync materializes its status the same way it does for any other statusless record.
 
-ACT-9:
+[**ACT-9: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-9) (Open)
 
 Case 8 (gts-ucdz, ADR-0023): the legacy AI- prefix is still accepted.
 

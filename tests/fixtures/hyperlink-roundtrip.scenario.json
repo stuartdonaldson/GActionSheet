@@ -4,7 +4,7 @@
   "mutation": {
     "kind": "sync"
   },
-  "expected": "hyperlink-roundtrip",
+  "expected": "hyperlink-roundtrip-expected",
   "serves": [
     "gts-tz5x"
   ]

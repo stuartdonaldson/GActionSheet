@@ -4,7 +4,7 @@
   "mutation": {
     "kind": "sync"
   },
-  "expected": "dual-prefix",
+  "expected": "dual-prefix-expected",
   "serves": [
     "gts-nrxn"
   ]
