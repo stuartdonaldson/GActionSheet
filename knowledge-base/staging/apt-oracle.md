@@ -56,12 +56,13 @@ audit) and its *Deliverable* line corrected below.
 | 5 | `apt-corpora-rebuild` | `gts-5st5` | ○ | [TST] Lint: input == expected is an error for a non-degenerate mutation |
 | 6 | `apt-presentation` | `gts-dxgo` | ○ | [TST] Doc-side presentation assertions: person chip, ACT-N link run, status icon |
 | 6 | `apt-presentation` | `gts-gkcy` | ○ | [TST] Sparse expected-parse annotation on hard records |
-| 7 | `doc-truth` | `gts-blia` | ○ | [INF] CONTEXT.md: correct the user-facing surface model |
-| 7 | `doc-truth` | `gts-c9dd` | ○ | [INF] Resolve dangling decision-number citations |
+| 7 | `doc-truth` | `gts-blia` | ✓ | [INF] CONTEXT.md: correct the user-facing surface model |
+| 7 | `doc-truth` | `gts-c9dd` | ○ | [INF] Resolve dangling decision-number citations *(blocked on `gts-ru4c`)* |
 | 8 | `plan-retention` | `gts-flu4` | ○ | [INF] Staged-plan retirement must preserve the plan |
 | — | *(filed at stage 2)* | `gts-c7fp` | ○ | [FIX] doPost's terminal else-branch writes junk rows for any unrecognised secret-gated action |
 | — | *(filed at stage 2)* | `gts-pl2k` | ○ | [INF] doPost's unauthorized response is plain text, so every harness caller reports it as deployment lag |
 | — | *(filed at stage 1)* | `gts-1ej4` | ○ | [TST] Converge scn/surfaces.py DocReader onto the doc_inspect grammar oracle |
+| — | *(filed at stage 7)* | `gts-wxz1` | ○ | [INF] security-architecture.md predates ADR-0021, doesn't document the verified-portal identity boundary |
 
 **Verify:** `bdls --stages` · `bdls --check` · `bdls --goals --stage <name>`
 Status above mirrors the tracker, which stays the authority. Audit at authoring
@@ -145,6 +146,8 @@ annotation on the records that are hard to reason about.
 ### 7 — doc-truth
 **Deliverable:** a CONTEXT.md whose stated surface model matches the system, and no citations
 pointing at a deleted document.
+*(Corrected at close: the CONTEXT.md half delivered — `gts-blia`. The citation half does not —
+`gts-c9dd` is open and blocked on stage `apt-corpora-rebuild`'s `gts-ru4c`. See the handoff.)*
 **Why paired:** both are corrections to documents that are currently wrong, not new work.
 **Model:** opus — the surface model touches the security boundary.
 **Work-log:** per-stage.
@@ -577,3 +580,73 @@ stamper writes.
 - A real live demonstration of `gts-lu13`'s guard failing (as opposed to the offline synthetic
   one) — the failure conditions it detects no longer exist in the live environment to reproduce.
 - Full `pytest -x`. Both `gts-omoy` and `gts-lu13` carry `regression=pending`.
+
+### 7 — doc-truth
+
+**Partially closed 2026-08-29.** Bead `gts-blia` ✓ (`regression=pending`); `gts-c9dd` remains
+**open and blocked** — it depends on `gts-ru4c` (stage `apt-corpora-rebuild`), still open. The
+stage does not close.
+
+**Done**
+
+`docs/CONTEXT.md` corrected (`gts-blia`), all four ACs:
+
+1. Purpose paragraph now names the **verified team portal** (ADR-0021) alongside the Add-on
+   sidebar as user-facing surfaces, and states the ActionSheet is edited directly only by an
+   administrator.
+2. Stakeholders table: `Action owner` and `Reviewer / manager` rows rewritten to name the
+   portal (View A team list / View B doc view) as their actual surface — not the ActionSheet,
+   which per this bead's premise they never had — with the ActionSheet path kept only as an
+   administrator's alternate route.
+3. Organizational Constraints gained a bullet: the ActionSheet is administrator-only; team
+   visibility for everyone else is the portal's per-team `NONE`/`VIEW`/`EDIT` tier
+   (`src/AccessControl.js`), not spreadsheet sharing.
+4. Core Capabilities gained a bullet for the portal (GitHub Pages static frontend,
+   `list_team_actions`/`get_document_actions` routes, GIS + NUUC-Dispatch signed-assertion
+   identity, ADR-0021), distinct from the existing anonymous chip-preview-notice bullet, which
+   is now named as the portal's unauthenticated fallback (per ADR-0021's Decision §4).
+
+Full note (the same text) is on `gts-blia`.
+
+**Found**
+
+- **`docs/security-architecture.md` predates ADR-0021 and is silent on the verified-portal
+  identity path.** Its §1 identity table and §2 trust-boundary diagram cover only
+  Add-on(end-user)/WebApp(deployer) — nothing about the GIS-verified external caller whose
+  signed NUUC-Dispatch assertion bypasses `WEBAPP_SECRET` by design
+  (`_verifySignedAssertion`/`src/AccessControl.js`, ADR-0021). No contradiction was found with
+  what was written into CONTEXT.md — the security doc simply says nothing on the subject, so
+  AC4's "the two documents agree" is satisfied only in the weak sense of non-contradiction, not
+  active agreement. **Bead `gts-wxz1`** (not fixed here: extending the threat-model findings
+  list is a larger piece of judgment than this bead's AC scope).
+- **`docs/verified-team-portal-plan.md`'s own header still says "Draft / assumptions unproven —
+  do not propagate to CONTEXT.md ... until Spikes S1 + S2 pass,"** but the portal is fully
+  built and shipped (ADR-0021, Accepted 2026-07-31; live routes in `src/WebApp.js`,
+  `src/AccessControl.js`, `src/DocView.js`, `src/TeamActionWrite.js`). The header is stale.
+  **Deliberately dropped, because** the working plan is a spike-planning artifact whose
+  retirement is stage `plan-retention`'s general concern (`gts-flu4`), not a fresh finding
+  needing its own bead — flagging it here so that stage does not have to rediscover it.
+- **UC-B's `Actor: Action owner (ActionSheet side)` line** carries the same stale assumption
+  this bead was filed to fix, but AC1–4 scope `gts-blia` to Stakeholders/Constraints/Core
+  Capabilities, not Use Cases. **Deliberately dropped** — left as a note for whoever next
+  touches UC-B; `use-case-quality-check` applies then, not here.
+
+**Next stages must know**
+
+- `gts-c9dd` cannot proceed until `gts-ru4c` (stage `apt-corpora-rebuild`) closes. Nothing in
+  `gts-blia`'s work depends on that in the other direction.
+- The corrected surface model's authoritative source, if a later session needs to re-verify it,
+  is ADR-0021 plus the live `src/WebApp.js` route list (`verify_and_resolve_access`,
+  `list_team_actions`, `list_my_teams`, `team_sync_document`, `get_document_actions`,
+  `team_edit_action`, `team_patch_status`) — not `docs/verified-team-portal-plan.md`, which is
+  the superseded working draft those routes grew out of.
+
+**Deliberately not done**
+
+- `gts-c9dd` (dangling decision-number citations). Blocked on `gts-ru4c`, outside this session's
+  *Must not*.
+- Extending `docs/security-architecture.md` for the ADR-0021 gap — `gts-wxz1`.
+- Retiring the stale header on `docs/verified-team-portal-plan.md` — left for stage
+  `plan-retention`.
+- Full `pytest -x` — not applicable; this stage's change is documentation-only.
+  `gts-blia` carries `regression=pending`.

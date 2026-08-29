@@ -3,7 +3,7 @@
 ## Introduction & Goals
 
 ### Purpose
-GActionSheet captures and tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Authors create actions natively — a checklist item that begins with a Google Docs person chip is an action assigned to that person. Each action is identified by an in-text `ACT-N:` token (or its legacy `AI-N:` spelling, permanently read-compatible — ADR-0023) so its identity survives edits. The Workspace Add-on homepage card is the user-facing surface for the active document; the ActionSheet is the cross-doc store.
+GActionSheet captures and tracks action items inside Google Docs and aggregates them in a central spreadsheet (the **ActionSheet**) for cross-doc roll-up. Authors create actions natively — a checklist item that begins with a Google Docs person chip is an action assigned to that person. Each action is identified by an in-text `ACT-N:` token (or its legacy `AI-N:` spelling, permanently read-compatible — ADR-0023) so its identity survives edits. The Workspace Add-on homepage card is the user-facing surface for the active document; the **verified team portal** (ADR-0021) is the user-facing surface for cross-doc, per-team action lists and edits, including for people outside the domain; the ActionSheet spreadsheet itself is the cross-doc store, edited directly only by an administrator.
 
 ### Quality Goals
 | Priority | Quality Goal | Scenario |
@@ -18,8 +18,8 @@ GActionSheet captures and tracks action items inside Google Docs and aggregates 
 |-------------|-------------|
 | Administrator | One-time deploy of the add-on (private or admin-deployed) and the container-bound automation; clear errors when configuration is missing |
 | Document author | Capture and update actions in a Doc without leaving the document; the sidebar reflects the doc's current state |
-| Action owner | Edit status, action text, or assignee in the ActionSheet; changes propagate to the doc on the next Sync |
-| Reviewer / manager | Filter and search all open actions across all docs from the ActionSheet |
+| Action owner | Edit status, action text, or assignee for their own action via the verified team portal (ADR-0021), reached from an `ACT-N:`/`AI-N:` chip link or a team URL; changes propagate to the doc on the next Sync. An administrator with direct ActionSheet access may also edit there |
+| Reviewer / manager | Filter and search all open actions across a team from the verified team portal's team list (View A); an administrator with direct ActionSheet access may also filter/search there across all teams |
 
 ---
 
@@ -137,6 +137,11 @@ the `Consult With` value, so a tabular view of these records shows both under th
 ### Organizational Constraints
 - No external service dependencies; both projects run entirely within Google Workspace
 - No server infrastructure
+- **The ActionSheet spreadsheet is administrator-only** — direct read/write access to it is not
+  extended to action owners, reviewers, or managers, and spreadsheet sharing is not the mechanism
+  for cross-team visibility control. Team-scoped visibility for everyone else is enforced by the
+  verified team portal's per-team access tier (`NONE`/`VIEW`/`EDIT`, resolved server-side by
+  `src/AccessControl.js` from a signed identity assertion — ADR-0021)
 
 ---
 
@@ -191,6 +196,7 @@ The tracker table is located by a sentinel heading paragraph so refresh can repl
 - Team Scope: on first sync, auto-assign a document to a team by walking its Drive folder ancestry for a `TeamData` match; the assignment is sticky (stored as the `teamScope` Drive file property) and survives the document being moved to another team's folder, unless explicitly overridden via `DocData.SyncStatus = UpdateDoc`
 - Anonymous chip-preview notice (ADR-0017 Phase 1): any recipient who clicks an action-token chip's link (`ACT-N` or legacy `AI-N`) lands on `doGet ?cmd=preview&docId&ain`, a branded page showing only non-confidential metadata (document name, team, the token, status) and a Drive-ACL-gated link to open the document — never the action text. Unknown/missing actions render a non-leaking not-found page
 - Import tab: the active doc's author can pull an open action from any other doc on the same team into the active doc as a new floating action with a new `globalId`; the source row is left in place and marked `Forwarded` so it drops out of future import lists
+- **Verified team portal** (ADR-0021): a statically-hosted web surface (GitHub Pages) — View A, a per-team filterable action list (`list_team_actions`), and View B, a single-document action view (`get_document_actions`) reached from an `ACT-N:`/`AI-N:` chip link — that lets a person, including one outside the domain, view and (per their resolved access tier) edit actions and trigger a sync without ActionSheet access. Identity is a GIS sign-in on the separate NUUC-Dispatch project, handed off as a signed assertion GActionSheet verifies server-side (`_verifySignedAssertion`, `src/AccessControl.js`); the anonymous chip-preview notice (above) is the fallback for a caller who is not signed in or does not resolve to team access
 
 ---
 
