@@ -48,7 +48,7 @@ email           := [\w.+-]+ "@" [\w-]+ ("." [a-z]{2,})+
 actionBody      := text [ statusToken ]
 statusToken     := "(" [^)]* ")"        ; last qualifying group on the HEADER LINE only
 continuation    := "\n" ( fieldLine | prose )
-fieldLine       := fieldName ":" ( [ \t] inlineValue? | EOL )
+fieldLine       := [ \t]* fieldName ":" ( [ \t] inlineValue? | EOL )
 fieldName       := fieldWord (" " fieldWord)*   ; ≤32 chars total (gts-eezz)
 fieldWord       := [A-Z] [A-Za-z0-9_-]*
 ```
@@ -83,12 +83,15 @@ Rules:
   continuation prose are always literal.
 - **No field delimiter.** `|` carries no meaning anywhere in an action paragraph and is literal
   text. There is no escape mechanism because none is needed. The header line is not extensible;
-  `Field: value` continuation lines are the sanctioned extension point (ADR-0024).
-- **Field lines.** A continuation line is a field line only if it matches `fieldLine` above — no
-  leading whitespace, a name of at most 32 characters where every space-separated word starts with
-  an uppercase letter (`Consult With`, not `then he said`), then a colon followed by a space, a
-  tab, or the end of the line (a bare `Consult With:` is a field line with an empty inline value).
-  A line matching the `token` production starts a new action and wins over `fieldLine`.
+  `Field: value` continuation lines are the sanctioned extension point (ADR-0027 rule 9).
+- **Field lines.** A continuation line is a field line only if, once leading whitespace is
+  stripped, it matches `fieldLine` above — a name of at most 32 characters where every
+  space-separated word starts with an uppercase letter (`Consult With`, not `then he said`), then
+  a colon followed by a space, a tab, or the end of the line (a bare `Consult With:` is a field
+  line with an empty inline value). Leading whitespace itself is neither required nor forbidden —
+  the parser strips it before testing the shape, both to read its own flush output back (rule 8)
+  and to tolerate an author's own indent. A line matching the `token` production starts a new
+  action and wins over `fieldLine`.
 - **Prose attaches to the open block; order is retained.** The action body opens the first block
   and each field line opens a new one. A prose continuation line belongs to whichever block is
   open when it is read — `action_text` before any field line, otherwise the value of the most
@@ -97,15 +100,21 @@ Rules:
   cell and re-render on flush: a soft return is a `\n` in the stored value and a soft return again
   on flush. A repeated field name appends rather than overwrites.
 - **Inline formatting.** Bold, italic and hyperlinks are author-owned and survive round-trip as
-  per-character runs (ADR-0022, ADR-0028). Config's uniform `action_text` style owns font family,
-  size, colour and underline only.
+  per-character runs (ADR-0022, ADR-0027 rules 10–15). Config's uniform `action_text` style owns
+  font family, size, colour and underline only.
+- **Continuation rendering.** On flush, every continuation line is indented 5 spaces; a field's
+  `Name:` label is additionally bold with a tab (not a space) before the value. Both are
+  system-applied presentation, stripped back off on read and never stored as part of the value's
+  text or its `runs` (ADR-0027 rule 8).
 - **Unparseable input is reported.** A paragraph beginning `(ACT|AI)-\d+` that does not complete
   the grammar is recorded by VerifySync as `unparseable-action-paragraph`. It is not synced and
   not silently skipped.
 - **Dates** are stored in the ActionSheet as native sheet date values; in the in-doc tracker table
   they are written using the sheet's locale-formatted date.
 
-Example with continuation fields:
+Example with continuation fields (as typed by an author; on flush each continuation line below is
+re-rendered with a 5-space indent, and each `Name:` label bold with a tab after it — ADR-0027
+rule 8):
 
 ```
 [img] ACT-7: [Jane Smith] draft the Q4 board deck and circulate (In Progress)
@@ -119,10 +128,11 @@ Notes: Peter wants the a|b test results folded in
 ```
 
 parses to `action_text` = `draft the Q4 board deck and circulate\n- pull last year's actuals` and
-`custom_fields` = `{"Target": "September 12 board meeting", "Progress": "outline done, needs the
-revenue section", "Consult With": "\n- Stuart\n- John", "Notes": "Peter wants the a|b test results
-folded in"}` (each value carried as `{text, runs}` per ADR-0028) — `Stuart` and `John` are the
-`Consult With` value, so a tabular view of these records shows both under that column.
+`custom_fields` = `{"Target": {"text": "September 12 board meeting", "runs": []}, "Progress":
+{"text": "outline done, needs the revenue section", "runs": []}, "Consult With": {"text": "\n-
+Stuart\n- John", "runs": []}, "Notes": {"text": "Peter wants the a|b test results folded in",
+"runs": []}}` (each value carried as `{text, runs}` per ADR-0027 rule 15) — `Stuart` and `John` are
+the `Consult With` value, so a tabular view of these records shows both under that column.
 
 ### Organizational Constraints
 - No external service dependencies; both projects run entirely within Google Workspace

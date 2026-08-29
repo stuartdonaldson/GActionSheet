@@ -8,6 +8,8 @@ comparison baseline (Decision 7); it is no longer an open question.
 preserved") for `document.suggestion_groups` (renamed `revision_groups`), `semantic_state`/
 `semantics` (removed), and run-level `revision.state` (removed). Decision 4's default — schema
 shape otherwise preserved — stands.
+**Amended:** 2026-08-27 — gts-284o completed the governance→document terminology migration this
+ADR's §Terminology anticipated; see that section for the identifier mapping.
 **Relates to:** gts-283i (epic), gts-283i.1 (design spike — this resolves its AC #3), gts-6ls9
 (comment-position spike, the dead end this supersedes), gts-11rq (multi-tab export behavior,
 deferred), gts-284o (terminology migration), ADR-0025 (image-description sidecar — unaffected),
@@ -23,9 +25,20 @@ forward; the rename of existing identifiers, filenames, log tags and docs is tra
 **gts-284o** and deliberately not folded into this decision.
 
 Consequently, identifiers cited below in their current form — `GOV_EXPORT_SCHEMA_VERSION`,
-`exportGovernance_`, `<title>-governance.json`, `docs/procedure-exporter.md` — are accurate
-descriptions of today's code, not the intended names. "Governance Manual" where it appears is a
-proper noun naming an actual document and stays.
+`exportGovernance_`, `<title>-governance.json`, `docs/procedure-exporter.md` — were accurate
+descriptions of the code as of this ADR's acceptance date, not the intended names. "Governance
+Manual" where it appears is a proper noun naming an actual document and stays.
+
+**gts-284o completed (2026-08-27):** the rename this section anticipates has landed. Read every
+identifier above by its migration mapping — `GOV_EXPORT_SCHEMA_VERSION` → `DOC_EXPORT_SCHEMA_VERSION`,
+`exportGovernance_` → `exportDocument_`, `<title>-governance.json` → `<title>-gas.json` (renamed
+again from the initially-landed `-document.json`, to keep it distinct from the Python side's
+`<title>-docx.json` — see `docs/interfaces/document-export-contract.md` §7.4). The WebApp `action`
+string and GasLogger tag prefix were included in the rename (`export_governance_json` →
+`export_document_json`, `governance_export.*` → `document_export.*`) — see
+`docs/suite-composition-deployment.md` §A.5. `docs/procedure-exporter.md`'s rename to
+`docs/document-exporter.md` and its content restructuring remain open, tracked separately as
+gts-fadg.
 
 ## Context
 
