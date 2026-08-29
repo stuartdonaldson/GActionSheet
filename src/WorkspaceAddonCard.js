@@ -152,7 +152,7 @@ function _buildTopButtonsSection() {
 // Export is not on this card (gts-s7ut, superseding gts-7ca7's sidebar
 // button): it's reachable only from the classic Docs 'Action Sync' menu
 // (MenuHandler.js -> menuShowExportDialog -> Procedure-Exporter.js's
-// showGovernanceExportDialog_), since a live progress dialog requires
+// showDocumentExportDialog_), since a live progress dialog requires
 // Ui.showModalDialog, which CardService action handlers can't call. See
 // the design note atop Procedure-Exporter.js's export-dialog entry points.
 
