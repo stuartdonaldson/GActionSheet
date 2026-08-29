@@ -383,7 +383,7 @@ function render(){
 function rowHtml(r){
   return `
     <div class="row">
-      <div class="aiN">${escape(r.action_id ? ('AI-' + String(r.action_id).replace(/^AI-/,'')) : '')}</div>
+      <div class="aiN">${escape(r.action_id || '')}</div>
       <div class="rowmain">
         <div class="action">${escape(r.action_text)}</div>
         <div class="rowmeta">
