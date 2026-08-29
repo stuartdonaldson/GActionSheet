@@ -46,8 +46,9 @@ audit) and its *Deliverable* line corrected below.
 | 1 | `apt-oracle-parser` | `gts-9o61` | ✓ | [TST] doc↔sheet agreement assertion, both directions |
 | 2 | `act-force-refresh` | `gts-366c` | ✓ | [IMP] WebApp force parameter on the document-sync route |
 | 2 | `act-force-refresh` | `gts-gssn` | ✓ | [TST] Force-refresh route coverage and force entry-point audit |
-| 3 | `apt-repair` | `gts-imai` | ○ | [FIX] Repair the canonical reference Doc and its ActionSheet rows |
-| 3 | `apt-repair` | `gts-a7ko` | ○ | [TST] Re-bless action-reference.apt.txt from the repaired doc |
+| 3 | `apt-repair` | `gts-imai` | ✓ | [FIX] Repair the canonical reference Doc and its ActionSheet rows |
+| 3 | `apt-repair` | `gts-a7ko` | ⊘ | [TST] Re-bless action-reference.apt.txt from the repaired doc *(blocked on `gts-1ibp`)* |
+| 3 | `apt-repair` | `gts-1ibp` | ○ | [FIX] Flush shifts every inline bold/italic/link run one character left, cumulatively **(P0, filed at stage 3)** |
 | 4 | `apt-lane-guards` | `gts-p150` | ○ | [TST] Pristine-restore fixture for the reference corpus |
 | 4 | `apt-lane-guards` | `gts-lu13` | ○ | [TST] Assert sync.scanned count and zero Deleted rows in every live lane |
 | 4 | `apt-lane-guards` | `gts-omoy` | ○ | [INF] Deployed-build guard for live lanes |
@@ -99,6 +100,10 @@ secret-gated doPost route `sync_document` was created. See the handoff.)*
 ### 3 — apt-repair
 **Deliverable:** a canonical reference Doc where all 21 actions render correctly, with the sheet
 agreeing — the pristine baseline every later stage restores from.
+*(Corrected at close: the scan/sheet half was already correct on arrival and is now verified;
+the render half is **not** delivered — `gts-1ibp` found the flush walking every inline
+bold/italic/link run one character left per flush, so the Doc is structurally pristine and
+typographically drifted. The bless is blocked until that lands. See the handoff.)*
 **Why paired:** re-blessing is only trustworthy in the same session that verified the repair.
 **Model:** sonnet.
 **Work-log:** per-stage.
@@ -381,3 +386,112 @@ Green, after deploy: `tests/test_force_refresh_route.py` + `tests/test_menu_entr
 - Threading `force` through `_handleRegister`, `team_sync_document`, or the `run_fixture`
   fixture. Audited, force-incapable by design, not by omission; enumerated on `gts-gssn`.
 - Full `pytest -x`. Both beads carry `regression=pending`.
+
+### 3 — apt-repair
+
+**Partially closed 2026-08-29.** Bead `gts-imai` ✓ (`regression=pending`); `gts-a7ko` remains
+**open and blocked** on the P0 filed by this stage, `gts-1ibp`. The stage does not close.
+
+**Done**
+
+AC1, before touching anything — `?cmd=version` → `{"ok":true,"version":"0.2.3.38",
+"versionDate":"2026-08-29T07:42:32.259Z","target":"TEST"}`, matching `package.json`'s stamp, on a
+clean tree. Pre-mutation capture (the *design* question's "capture first"):
+`apt pull action-reference` → `.apt-captures/action-reference/20260829T081258811302Z.apt.txt`.
+
+**The 2026-08-29 defect was already gone before this session began.** Read-only oracle, run
+*before* any repair action: `tests/test_doc_oracle_reference.py` → **4 passed** — 21 tokened
+actions, all 21 link-headed, zero pending, one deliberate rule-6 paragraph. Sheet side:
+
+```
+doc actions=22 sheet rows for doc=21
+ACT-1..ACT-9, AI-10, ACT-11..ACT-21   sync_status='' on every row
+--- 1 problems ---
+  doc paragraph 20: unparseable-action-paragraph — 'ACT-77 | someone | do the thing'
+```
+
+Raw audit of the whole `Actions` tab: 499 non-empty rows, exactly **21** mention the reference
+doc id, and the string `Deleted` appears nowhere in the sync-status column (`Counter({None: 278,
+'Doc Not Found': 230})`). AC3 was therefore satisfied on arrival — **this bead deleted no rows**;
+it proved there were none to delete. The non-vacuity of that claim is stage 1's
+`test_red_against_the_2026_08_29_state`, which shows the same comparator reporting exactly 20
+*Deleted* problems against the failure state.
+
+AC2, the force flush over the new stage-2 route:
+
+```
+$ python scripts/call_webapp.py sync_document --data '{"docId": "1PYIU…NO-E", "force": true}'
+{"ok": true, "docId": "1PYIU…NO-E", "forced": true, "result": null, "serverVersion": "0.2.3.38"}
+
+axiom op=b2be59e1  sync.scanned count=21 · sync.forceFlush count=21
+                   flush.done batchSize=21 copies=21 · sync.complete forced=True upserted=0
+```
+
+Post-flush render check — all 21 tokens `token_linked=True`, all 21 carrying a status token,
+**20** carrying a person chip; `ACT-9` has none by design (bare-token case, gts-jxrw), so AC2's
+"person chip" reads 20/21 and the AC is over-stated, not failed. AC4 post-flush: oracle **4
+passed**, comparator back to the single deliberate rule-6 line, no token-level disagreement.
+AC5: nothing blessed.
+
+**Found**
+
+- **The flush walks every inline bold/italic/link run one character LEFT, and it compounds.**
+  **Bead `gts-1ibp` (P0).** Three captures of the same corpus, one flush apart:
+
+  ```
+  20260829T043523Z (intended)   - and this is **bold** - circulate before Friday
+  20260829T081258Z (1 flush)    - and this is** bol**d - circulate before Friday
+  20260829T081611Z (2 flushes)  - and this i**s bo**ld - circulate before Friday
+  ```
+
+  Same −1 walk on italic and on hyperlinks (`ACT-19` `'the[ Q3 dec]k'` → `'th[e Q3 de]ck'`;
+  `ACT-20`, `ACT-21`). The raw `.docx` runs confirm it is the **document**, not the APT encoder:
+  `ACT-21` exports as `[bold]'e bold th'`, not `[bold]'bold this'`. A constant −1 *write* error
+  plus a faithful *read-back* by the next scan is exactly a cumulative left walk; suspected site
+  is `actionTextStart + segment` in `src/SyncManager.js` `_buildFlushRequests` (the gts-zocq
+  reapply block). This is a live-data defect, not a test-fixture one — it drifts any doc with
+  inline formatting, on ordinary dirty flushes as well as forced ones.
+- **The forced flush AC2 mandated added the second character of that drift.** Disclosed rather
+  than quietly absorbed: the canonical Doc is now two characters off intent on `ACT-1`, `ACT-19`,
+  `ACT-20`, `ACT-21`. **AC of `gts-1ibp`** (item 3: restore the four records).
+- The plan's premise — *13 records missing their `ACT-N:` link header were frozen as expected
+  output* — is **true of the corpus file** and was never true of the Doc this session.
+  Stage 1 flagged the ambiguity; it is now settled. **Fixed now** in the record: the golden
+  `tests/fixtures/action-reference.apt.txt` carries the header on only 2 of 21 records.
+- `compare_doc_sheet` counts the corpus's deliberate rule-6 paragraph as a *problem*, so the
+  canonical Doc can never reach zero problems. **AC of stage `apt-lane-guards`** (noted on
+  `gts-lu13`): the lane needs an allowance for expected rule-6 records, the same way
+  `allow_pending` works — otherwise the guard is red on a healthy corpus.
+- Another session was driving TEST concurrently during this stage (`begin_test_session`,
+  `debug_action_runs`, `encode_reference_document` under unrelated `parentOp`s, interleaved with
+  our `op=b2be59e1`). Nothing collided — the reference Doc is not a scenario clone — but a lane
+  guard that asserts on "the last N log events" will be flaky. **Deliberately dropped, because**
+  every guard stage 4 plans is scoped by `docId`/`op`, not by recency.
+
+**Next stages must know**
+
+- **Do not flush the canonical reference Doc again until `gts-1ibp` lands.** Every flush costs
+  another character of formatting drift on the four records that carry inline runs. Read-only
+  work against it (`tests/test_doc_oracle_reference.py`, `compare_doc_sheet`, `apt pull`) is safe
+  and unlimited.
+- The bless diff is already reviewed record by record and written onto `gts-a7ko` as a note,
+  split into the changes that are legitimate (link headers on all 21, bold+tab field names,
+  `@`-spelling and chip convergence on ACT-3/4/5, ACT-7's status moving to end of line per
+  gts-v0py, `<EMPTY>` records between actions) and the one group that is not (the drifted runs).
+  A later session re-pulls and confirms only that second group moved — it does not have to
+  re-derive the classification.
+- `apt pull action-reference` exits **3** (preservation) purely because the golden is stale; that
+  exit code is not evidence about the Doc.
+- `sync_document` answered `result: null` on a successful forced flush — the stage-2 handoff's
+  `'locked-skip'` sentinel is the only value worth checking; `null` is the ordinary success shape.
+
+**Deliberately not done**
+
+- **The bless (`gts-a7ko`).** In scope for this stage on paper. Blessing now would freeze
+  `gts-1ibp`'s drift into the golden — the precise failure mode this plan was written to stop —
+  so the bead is open, blocked, and carries the reviewed diff.
+- Repairing the four drifted records by hand. It has to follow the writer fix, or the next flush
+  re-drifts it; it is item 3 of `gts-1ibp`'s AC.
+- Fixing `_buildFlushRequests` here. The stage's *Must not* forbids widening, and the fix is a P0
+  with its own oracle (two pulls with a flush between must be byte-identical).
+- Full `pytest -x`. `gts-imai` carries `regression=pending`.
