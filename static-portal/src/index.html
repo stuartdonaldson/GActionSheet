@@ -257,11 +257,19 @@ if (STATIC_BUILD_VERSION_ || STATIC_ENV_LABEL_) {
   $buildBadge_.textContent = 'unbuilt source';
 }
 
+// gts-zm8w: sentinel teamId value for the 'All teams' aggregate view —
+// mirrors TEAM_LISTING_ALL_TEAMS_ID (src/TeamListing.js). Never a real
+// TeamData teamId.
+const ALL_TEAMS_ID = 'ALL';
+
 const state = {
   idToken: null, assertion: null, sub: '', email: '',
   teams: [],           // [{teamId, teamName, tier}] from list_my_teams
   teamId: null,
   tier: 'NONE',
+  teamTiers: {},       // {teamId: tier} — populated in ALL-teams mode from res.teams,
+                        // used to gate each row/doc-group's Sync/Edit controls per its
+                        // OWN team rather than one blended state.tier (gts-zm8w)
   status: 'open', scope: 'all', windowDays: 60,
   rows: [], statusOptions: [],
   busy: false,
@@ -467,7 +475,12 @@ function loadTeams(){
       $('filtersRow').classList.remove('hidden');
 
       $('teamField').classList.toggle('hidden', state.teams.length <= 1);
-      $('teamSel').innerHTML = state.teams.map(t =>
+      // gts-zm8w: 'All teams' aggregate option, only meaningful with 2+ teams
+      // to choose among (with exactly one team it would just duplicate that
+      // team's own listing).
+      const allTeamsOption = state.teams.length > 1
+        ? `<option value="${ALL_TEAMS_ID}">All teams</option>` : '';
+      $('teamSel').innerHTML = allTeamsOption + state.teams.map(t =>
         `<option value="${escape(t.teamId)}">${escape(t.teamName)} (${t.tier})</option>`).join('');
       // ?team= preselects only if the caller actually has access to that
       // team (list_my_teams already scoped this to the caller — a ?team=
@@ -514,6 +527,11 @@ function refreshActions(){
       state.rows = res.actions || [];
       state.statusOptions = res.statusOptions || [];
       state.tier = res.tier || 'NONE';
+      // gts-zm8w: only the ALL-teams response carries `teams` — a per-team
+      // tier map so each doc group can gate Sync/Edit by ITS OWN team's
+      // tier rather than the single blended state.tier above.
+      state.teamTiers = {};
+      (res.teams || []).forEach(t => { state.teamTiers[t.teamId] = t.tier; });
       render();
     })
     .catch(err => {
@@ -548,12 +566,34 @@ function statusChip(row, editable){
 function isMine(row){ return state.email && row.assignee_email &&
   row.assignee_email.toLowerCase() === state.email.toLowerCase(); }
 
+// gts-zm8w: every write route (team_edit_action/team_patch_status/
+// team_sync_document) authorizes against ONE real teamId
+// (_resolveIdentityAndAccessTier -> _authorizeDocWrite) — the ALL_TEAMS_ID
+// sentinel matches no TeamData row server-side and would make every write
+// fail closed. In ALL-teams mode, look up the row/doc's OWN team_id (carried
+// on every row of the aggregate response) instead of sending state.teamId
+// verbatim.
+function teamIdForWrite(row){
+  return state.teamId === ALL_TEAMS_ID ? (row && row.team_id) || '' : state.teamId;
+}
+function rowByGlobalId(globalId){ return state.rows.find(r => r.global_id === globalId); }
+function rowByDocId(docId){ return state.rows.find(r => r.doc_id === docId); }
+
 // ---- render ---------------------------------------------------------------
 function render(){
-  $('sub').textContent = state.teamId + ' • signed in';
-  $('tierTag').textContent = state.tier === 'EDIT' ? 'EDIT — can sync and edit'
-                            : state.tier === 'VIEW' ? 'VIEW — read only' : 'NONE';
-  $('tierTag').className = 'tag ' + state.tier.toLowerCase();
+  const isAllTeams = state.teamId === ALL_TEAMS_ID;
+  $('sub').textContent = (isAllTeams ? 'All teams' : state.teamId) + ' • signed in';
+  // gts-zm8w: ALL-teams tier varies per document (state.teamTiers), so the
+  // single title-line tag can't say EDIT/VIEW for the whole page — each doc
+  // group's own controls are gated individually below instead.
+  if (isAllTeams) {
+    $('tierTag').textContent = 'MULTIPLE — permissions vary by team';
+    $('tierTag').className = 'tag view';
+  } else {
+    $('tierTag').textContent = state.tier === 'EDIT' ? 'EDIT — can sync and edit'
+                              : state.tier === 'VIEW' ? 'VIEW — read only' : 'NONE';
+    $('tierTag').className = 'tag ' + state.tier.toLowerCase();
+  }
   $('windowField').style.display = state.status === 'open' ? 'none' : '';
 
   const rows = state.rows;
@@ -574,14 +614,18 @@ function render(){
   const byDoc = new Map();
   rows.forEach(r => { if(!byDoc.has(r.doc_id)) byDoc.set(r.doc_id, []); byDoc.get(r.doc_id).push(r); });
 
-  const tier = state.tier;
   byDoc.forEach((docRows, docId) => {
     const first = docRows[0];
+    // gts-zm8w: in ALL-teams mode each doc belongs to exactly one team
+    // (uniform team_id across a doc's rows), so gate this group's controls
+    // by THAT team's own tier rather than the blended state.tier.
+    const tier = isAllTeams ? (state.teamTiers[first.team_id] || 'NONE') : state.tier;
+    const teamBadge = isAllTeams ? `<span class="tag">${escape(first.team_id)}</span>` : '';
     const group = document.createElement('div');
     group.className = 'docgroup';
     group.innerHTML = `
       <div class="dochead">
-        <div class="docname"><a href="${first.doc_url}" target="_blank" rel="noopener"
+        <div class="docname">${teamBadge}<a href="${first.doc_url}" target="_blank" rel="noopener"
           >${escape(first.doc_name || '(untitled document)')}</a></div>
         <div class="controls">
           <span class="tag">${docRows.length} shown</span>
@@ -661,7 +705,7 @@ function onSaveEditClick(e){
   };
   btn.disabled = true;
   postJson(GACTIONSHEET_URL, {
-    action: 'team_edit_action', assertion: state.assertion, teamId: state.teamId,
+    action: 'team_edit_action', assertion: state.assertion, teamId: teamIdForWrite(rowByGlobalId(globalId)),
     global_id: globalId, fields: fields
   })
     .then(res => {
@@ -686,7 +730,7 @@ function onSyncClick(e){
   btn.textContent = 'Syncing…';
 
   postJson(GACTIONSHEET_URL, {
-    action: 'team_sync_document', assertion: state.assertion, teamId: state.teamId, docId
+    action: 'team_sync_document', assertion: state.assertion, teamId: teamIdForWrite(rowByDocId(docId)), docId
   })
     .then(res => {
       if (res.ok) {
@@ -696,7 +740,12 @@ function onSyncClick(e){
       toast('Sync did not run: ' + (res.outcome || 'unknown'));
     })
     .catch(err => toast('Sync failed: ' + (err.message || err)))
-    .finally(() => { btn.disabled = (state.tier !== 'EDIT'); btn.textContent = prevLabel; });
+    .finally(() => {
+      const row = rowByDocId(docId);
+      const tier = state.teamId === ALL_TEAMS_ID ? (state.teamTiers[row && row.team_id] || 'NONE') : state.tier;
+      btn.disabled = (tier !== 'EDIT');
+      btn.textContent = prevLabel;
+    });
 }
 
 // ---- assignee status control (gts-79dw.4.22 — LIVE, calls team_patch_status) -
@@ -724,7 +773,7 @@ function openStatusMenu(e){
 }
 function submitStatusChange(globalId, newStatus){
   postJson(GACTIONSHEET_URL, {
-    action: 'team_patch_status', assertion: state.assertion, teamId: state.teamId,
+    action: 'team_patch_status', assertion: state.assertion, teamId: teamIdForWrite(rowByGlobalId(globalId)),
     global_id: globalId, status: newStatus
   })
     .then(res => {

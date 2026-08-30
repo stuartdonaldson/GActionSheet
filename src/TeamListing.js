@@ -37,6 +37,13 @@
 var TEAM_LISTING_DEFAULT_WINDOW_DAYS = 60;
 
 /**
+ * Sentinel teamId (gts-zm8w) requesting the aggregate 'All teams' view:
+ * every action across every team the caller has ANY (VIEW-or-better) access
+ * to, in one call. Not a real TeamData teamId -- never matches a row.
+ */
+var TEAM_LISTING_ALL_TEAMS_ID = 'ALL';
+
+/**
  * @param {Object} payload { assertion, teamId, statusFilter, scope, windowDays }
  * @returns {GoogleAppsScript.Content.TextOutput}
  */
@@ -49,11 +56,40 @@ function _handleListTeamActions(payload) {
   var windowDays  = Number(payload.windowDays);
   if (!(windowDays > 0)) windowDays = TEAM_LISTING_DEFAULT_WINDOW_DAYS;
 
-  var ss       = _openActionSheetSpreadsheet();
-  var resolved = _resolveIdentityAndAccessTier(assertion, teamId);
+  // gts-zm8w: read TeamData ONCE here and pass it into
+  // _resolveIdentityAndAccessTier below instead of letting it open the
+  // spreadsheet and re-read TeamData a second time internally.
+  var ss           = _openActionSheetSpreadsheet();
+  var teamDataRows = _readTeamDataRows(ss);
+
+  var resolved;
+  var teams = null; // only populated for the ALL-teams aggregate response
+
+  if (teamId === TEAM_LISTING_ALL_TEAMS_ID) {
+    var identity = _verifySignedAssertion(assertion);
+    teams = identity.verified ? _resolveAllVisibleTeams(identity.email, teamDataRows) : [];
+    resolved = {
+      verified: identity.verified,
+      sub:      identity.sub,
+      email:    identity.email,
+      tier:     teams.length ? 'VIEW' : 'NONE'
+    };
+  } else {
+    resolved = _resolveIdentityAndAccessTier(assertion, teamId, ss, teamDataRows);
+  }
 
   var actions = [];
-  if (resolved.tier !== 'NONE') {
+  if (teamId === TEAM_LISTING_ALL_TEAMS_ID) {
+    if (teams.length) {
+      var allReadOpts = {
+        statusFilter: statusFilter, windowDays: windowDays, ss: ss,
+        teamIds: teams.map(function (t) { return t.teamId; }),
+        fields:  TEAM_ACTION_FIELDS_WITH_TEAM
+      };
+      if (scope === 'mine') allReadOpts.assigneeEmail = resolved.email;
+      actions = _readTeamActions(null, allReadOpts);
+    }
+  } else if (resolved.tier !== 'NONE') {
     var readOpts = { statusFilter: statusFilter, windowDays: windowDays, ss: ss };
     if (scope === 'mine') readOpts.assigneeEmail = resolved.email;
     actions = _readTeamActions(teamId, readOpts);
@@ -64,14 +100,18 @@ function _handleListTeamActions(payload) {
     tier:         resolved.tier,
     statusFilter: statusFilter,
     scope:        scope,
-    count:        actions.length
+    count:        actions.length,
+    teamCount:    teams ? teams.length : 1
   });
   GasLogger.flush();
 
-  return _jsonResponse({
+  var response = {
     tier:          resolved.tier,
     teamId:        teamId,
     actions:       actions,
     statusOptions: getStatusIconButtons()
-  }, 200);
+  };
+  if (teams) response.teams = teams;
+
+  return _jsonResponse(response, 200);
 }

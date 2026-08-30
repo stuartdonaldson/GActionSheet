@@ -85,13 +85,21 @@ function _handleVerifyAndResolveAccess(payload) {
  * Fails closed (R6): a bad/expired/tampered assertion, an unresolvable team,
  * zero folders, or no resolvable folder access all yield tier NONE.
  *
+ * gts-zm8w: `ss`/`teamDataRows` are optional pre-fetched values -- a caller
+ * that already opened the spreadsheet and read TeamData this request (e.g.
+ * TeamListing.js's _handleListTeamActions) passes them through instead of
+ * paying a second SpreadsheetApp.openById + full TeamData sheet read for the
+ * same request. Absent, behavior is unchanged (opens/reads here).
+ *
  * @param {string} assertion
  * @param {string} teamId
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} [ss]
+ * @param {Array<{teamId: string, folderId: string}>} [teamDataRows]
  * @returns {{verified: boolean, sub: string, email: string,
  *   tier: 'NONE'|'VIEW'|'EDIT', method: string,
  *   folderTiers: Object<string, 'NONE'|'VIEW'|'EDIT'>}}
  */
-function _resolveIdentityAndAccessTier(assertion, teamId) {
+function _resolveIdentityAndAccessTier(assertion, teamId, ss, teamDataRows) {
   var identity = _verifySignedAssertion(assertion);
   if (!identity.verified) {
     return { verified: false, sub: '', email: '', tier: 'NONE', method: 'getAccess', folderTiers: {} };
@@ -99,9 +107,9 @@ function _resolveIdentityAndAccessTier(assertion, teamId) {
 
   var teamResolved = { tier: 'NONE', method: 'getAccess', folderTiers: {} };
   if (teamId) {
-    var ss           = _openActionSheetSpreadsheet();
-    var teamDataRows = _readTeamDataRows(ss);
-    teamResolved     = _resolveTeamTierForVerifiedIdentity(identity.email, teamId, teamDataRows);
+    ss           = ss || _openActionSheetSpreadsheet();
+    teamDataRows = teamDataRows || _readTeamDataRows(ss);
+    teamResolved = _resolveTeamTierForVerifiedIdentity(identity.email, teamId, teamDataRows);
   }
 
   return {
@@ -130,10 +138,20 @@ function _resolveIdentityAndAccessTier(assertion, teamId) {
  * @param {string} teamId
  * @param {Array<{teamId: string, folderId: string}>} teamDataRows all
  *   TeamData rows (caller reads once and reuses across teams).
+ * @param {Object<string, {tier: string, method: string}>} [folderAccessMemo]
+ *   gts-zm8w: optional per-request memo, keyed by folderId, shared across
+ *   MULTIPLE calls to this function for the SAME verified email within one
+ *   execution (e.g. _resolveAllVisibleTeams's per-team loop). A folder
+ *   backing more than one team (a real, documented scenario -- see
+ *   SyncManager.js's _walkFolderForTeam) is resolved via Drive/Admin-SDK
+ *   only once instead of once per team that references it. Safe only
+ *   because it's a fresh object scoped to one request for one already-
+ *   verified email -- never a cross-request or cross-user cache (R8).
  * @returns {{tier: 'NONE'|'VIEW'|'EDIT', method: string,
  *   folderTiers: Object<string, 'NONE'|'VIEW'|'EDIT'>}}
  */
-function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows) {
+function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows, folderAccessMemo) {
+  folderAccessMemo = folderAccessMemo || {};
   var tier        = 'NONE';
   var method      = 'getAccess';
   var folderTiers = {};
@@ -146,7 +164,18 @@ function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows) {
   }
 
   for (var f = 0; f < folderIds.length; f++) {
-    var folderId     = folderIds[f];
+    var folderId = folderIds[f];
+
+    if (Object.prototype.hasOwnProperty.call(folderAccessMemo, folderId)) {
+      var memoed = folderAccessMemo[folderId];
+      folderTiers[folderId] = memoed.tier;
+      if (_tierRank(memoed.tier) > _tierRank(tier)) {
+        tier   = memoed.tier;
+        method = memoed.method;
+      }
+      continue;
+    }
+
     var folderTier   = 'NONE';
     var folderMethod = 'getAccess';
 
@@ -159,14 +188,23 @@ function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows) {
       GasLogger.log('webapp.team.access.error', { where: 'folder.getAccess', folderId: folderId, message: String(e) });
     }
 
-    if (folderTier === 'NONE') {
+    // gts-zm8w: run the group-membership fallback whenever the direct check
+    // hasn't already reached EDIT, not only when it's NONE. A Shared Drive
+    // member gets a baseline VIEW straight from drive membership regardless
+    // of role, which makes folderTier resolve to VIEW via getAccess() even
+    // when the caller's actual group role (e.g. Shared-Drive-level Manager)
+    // confers EDIT -- skipping the fallback at VIEW would silently cap that
+    // caller below their real access.
+    if (folderTier !== 'EDIT') {
       var fallback = _spikeAdminSdkFolderAccess(folderId, email);
-      if (fallback.level !== 'NONE') {
-        folderTier   = _accessLevelToTier(fallback.level);
+      var fallbackTier = _accessLevelToTier(fallback.level);
+      if (_tierRank(fallbackTier) > _tierRank(folderTier)) {
+        folderTier   = fallbackTier;
         folderMethod = 'adminSdk';
       }
     }
 
+    folderAccessMemo[folderId] = { tier: folderTier, method: folderMethod };
     folderTiers[folderId] = folderTier;
     if (_tierRank(folderTier) > _tierRank(tier)) {
       tier   = folderTier;
@@ -175,6 +213,42 @@ function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows) {
   }
 
   return { tier: tier, method: method, folderTiers: folderTiers };
+}
+
+/**
+ * Resolves every team the verified caller has ANY access to (tier != NONE),
+ * de-duplicating folder-access checks for folders shared across teams via a
+ * single per-call folderAccessMemo (gts-zm8w). Factored out of
+ * _handleListMyTeams so the 'ALL teams' aggregate view
+ * (list_team_actions, teamId:'ALL', src/TeamListing.js) can reuse the exact
+ * same visible-teams resolution instead of a second copy of this loop (I12).
+ *
+ * @param {string} email verified caller email
+ * @param {Array<{teamId: string, folderId: string}>} teamDataRows
+ * @returns {Array<{teamId: string, tier: 'VIEW'|'EDIT'}>}
+ */
+function _resolveAllVisibleTeams(email, teamDataRows) {
+  var folderAccessMemo = {};
+
+  var teamIds = [];
+  var seen    = {};
+  for (var i = 0; i < teamDataRows.length; i++) {
+    var teamId = teamDataRows[i].teamId;
+    if (teamId && !seen[teamId]) {
+      seen[teamId] = true;
+      teamIds.push(teamId);
+    }
+  }
+
+  var visible = [];
+  for (var t = 0; t < teamIds.length; t++) {
+    var resolved = _resolveTeamTierForVerifiedIdentity(email, teamIds[t], teamDataRows, folderAccessMemo);
+    if (resolved.tier !== 'NONE') {
+      visible.push({ teamId: teamIds[t], tier: resolved.tier });
+    }
+  }
+
+  return visible;
 }
 
 /**
@@ -211,22 +285,10 @@ function _handleListMyTeams(payload) {
     var ss           = _openActionSheetSpreadsheet();
     var teamDataRows = _readTeamDataRows(ss);
 
-    var teamIds = [];
-    var seen    = {};
-    for (var i = 0; i < teamDataRows.length; i++) {
-      var teamId = teamDataRows[i].teamId;
-      if (teamId && !seen[teamId]) {
-        seen[teamId] = true;
-        teamIds.push(teamId);
-      }
-    }
-
-    for (var t = 0; t < teamIds.length; t++) {
-      var teamResolved = _resolveTeamTierForVerifiedIdentity(identity.email, teamIds[t], teamDataRows);
-      if (teamResolved.tier !== 'NONE') {
-        teams.push({ teamId: teamIds[t], teamName: teamIds[t], tier: teamResolved.tier });
-      }
-    }
+    var visible = _resolveAllVisibleTeams(identity.email, teamDataRows);
+    teams = visible.map(function (v) {
+      return { teamId: v.teamId, teamName: v.teamId, tier: v.tier };
+    });
 
     teams.sort(function (a, b) {
       if (a.teamName < b.teamName) return -1;

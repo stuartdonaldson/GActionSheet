@@ -1974,6 +1974,15 @@ var TEAM_ACTION_FIELDS = Object.freeze([
 ]);
 
 /**
+ * team_id is deliberately NOT in TEAM_ACTION_FIELDS (gts-zm8w) — every
+ * existing caller's frozen projection (TEAM_ACTION_FIELDS,
+ * IMPORTABLE_ACTION_FIELDS) is unaffected. Only the multi-team
+ * ('list_team_actions' teamId:'ALL') caller opts into this wider field to
+ * label which team each aggregated row belongs to.
+ */
+var TEAM_ACTION_FIELDS_WITH_TEAM = Object.freeze(TEAM_ACTION_FIELDS.concat(['team_id']));
+
+/**
  * The frozen list_importable_actions row projection (ContractSchema.js
  * messages.list_importable_actions). Kept explicit so a new field added to
  * TEAM_ACTION_FIELDS cannot silently widen that contract.
@@ -2021,6 +2030,16 @@ function _resolveTeamIdForDoc(ss, docId) {
  *   assigneeEmail omit rows not assigned to this address (case-insensitive).
  *   fields        subset of TEAM_ACTION_FIELDS to project; default all.
  *   ss            already-open spreadsheet to read from; opened if absent.
+ *   teamIds       (gts-zm8w) array of teamIds to match instead of the single
+ *                 positional `teamId` -- used by the 'ALL teams' aggregate
+ *                 view (list_team_actions, teamId:'ALL') to return every
+ *                 visible team's actions from ONE full-sheet scan rather than
+ *                 one scan per team. When present and non-empty, `teamId` is
+ *                 ignored for matching purposes (pass null/''). Each returned
+ *                 row's `team_id` names which team it belongs to -- only
+ *                 emitted when explicitly requested via opts.fields (e.g.
+ *                 TEAM_ACTION_FIELDS_WITH_TEAM); existing single-team callers
+ *                 are unaffected.
  *
  * Rows are sorted by doc_name ASC then AI-N ASC.
  *
@@ -2030,7 +2049,7 @@ function _resolveTeamIdForDoc(ss, docId) {
  */
 function _readTeamActions(teamId, opts) {
   opts = opts || {};
-  if (!teamId) return [];
+  if (!teamId && !(opts.teamIds && opts.teamIds.length)) return [];
 
   var statusFilter  = opts.statusFilter || 'open';
   var windowDays    = Number(opts.windowDays) > 0 ? Number(opts.windowDays)
@@ -2039,6 +2058,11 @@ function _readTeamActions(teamId, opts) {
   var assigneeEmail = (opts.assigneeEmail || '').toLowerCase();
   var fields        = opts.fields || TEAM_ACTION_FIELDS;
   var ss            = opts.ss || _openActionSheetSpreadsheet();
+  var teamIdSet     = null;
+  if (opts.teamIds && opts.teamIds.length) {
+    teamIdSet = {};
+    for (var ti = 0; ti < opts.teamIds.length; ti++) teamIdSet[opts.teamIds[ti]] = true;
+  }
 
   // Snapshot the window cutoff before the (corpus-size-scaling, gts-kkm7)
   // DocData/Actions reads below, not after — those getValues() calls can
@@ -2070,7 +2094,8 @@ function _readTeamActions(teamId, opts) {
     if (!fileId || fileId === excludeDocId) continue;
 
     var docData = docDataByFileId[fileId];
-    if (!docData || docData.teamId !== teamId) continue;
+    if (!docData) continue;
+    if (teamIdSet ? !teamIdSet[docData.teamId] : docData.teamId !== teamId) continue;
     if (docData.syncStatus === 'Deleted' || docData.syncStatus === 'Doc Not Found') continue;
 
     if (assigneeEmail &&
@@ -2101,6 +2126,7 @@ function _readTeamActions(teamId, opts) {
       doc_id:         fileId,
       doc_name:       docData.docName || '',
       doc_url:        'https://docs.google.com/document/d/' + fileId + '/edit',
+      team_id:        docData.teamId || '',
       created_date:   createdRaw  instanceof Date ? createdRaw.toISOString()  : (createdRaw  || ''),
       modified_date:  modifiedRaw instanceof Date ? modifiedRaw.toISOString() : (modifiedRaw || '')
     });

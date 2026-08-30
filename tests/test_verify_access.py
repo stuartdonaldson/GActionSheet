@@ -254,6 +254,91 @@ def test_no_access_to_any_team_folder_resolves_none(settings):
     assert resp.get("tier") == "NONE", f"[4.12 AC NONE] expected tier=NONE, got {resp!r}"
 
 
+# ---------------------------------------------------------------------------
+# Shared-Drive-inherited group access (gts-zm8w, regression coverage
+# gts-s1j5). A group's role granted at the containing SHARED DRIVE level
+# (e.g. Manager/Content Manager) is never visible as a permission entry on
+# any one file/folder inside that drive -- it's inherited, not re-granted per
+# item. Before gts-zm8w, _spikeAdminSdkFolderAccess only scanned
+# Drive.Permissions.list(folderId), so an identity whose ONLY path to EDIT
+# was such an inherited group role resolved VIEW (the Shared-Drive-membership
+# baseline every member gets) instead of EDIT. Google's own Share UI declines
+# to write a redundant/weaker override on the subfolder for a principal that
+# already has higher effective access via the drive, so there is no
+# Drive-side workaround -- this must be handled server-side.
+#
+# Same live-fixture constraint as the matrix above (no test-support bypass
+# for the real GIS verify path, R2): requires a Shared Drive team folder
+# (TeamData folderId) where a domain-managed group holds its role ONLY at the
+# Shared Drive level (not re-granted directly on the folder), plus a live
+# GIS ID token for a member of that group. SKIP individually when
+# unconfigured.
+#
+# Settings keys (local.settings.json):
+#   sharedDriveInheritedTeamId        -- TeamData teamId whose folder lives in
+#                                        a Shared Drive with a group granted
+#                                        role ONLY at the drive level
+#   sharedDriveInheritedEditIdToken   -- GIS ID token for a member of a group
+#                                        holding Manager/writer at the drive
+#                                        level (expect tier=EDIT)
+#   sharedDriveInheritedViewIdToken   -- GIS ID token for a member of a
+#                                        DIFFERENT group holding only
+#                                        Content Viewer/reader at the drive
+#                                        level (expect tier=VIEW, not EDIT --
+#                                        proves the fallback doesn't just
+#                                        blanket-grant EDIT to any drive
+#                                        member)
+# ---------------------------------------------------------------------------
+
+def test_shared_drive_inherited_group_edit_resolves_edit_tier(settings):
+    """[gts-zm8w AC1] An identity whose only path to EDIT on a TeamData
+    folder is a group role granted at the CONTAINING SHARED DRIVE level (not
+    re-granted directly on the folder) resolves tier=EDIT -- the drive-level
+    fallback scan added by gts-zm8w."""
+    team_id = settings.get("sharedDriveInheritedTeamId")
+    id_token = settings.get("sharedDriveInheritedEditIdToken")
+    if not team_id or not id_token:
+        pytest.skip(
+            "sharedDriveInheritedTeamId/sharedDriveInheritedEditIdToken not "
+            "configured in local.settings.json -- requires a TeamData folder "
+            "inside a Shared Drive where a domain-managed group holds "
+            "Manager/writer ONLY at the drive level, + a live-obtained GIS "
+            "ID token for a member of that group"
+        )
+    resp = _verify_and_resolve_team(settings, id_token, team_id)
+    assert resp.get("verified") is True, (
+        f"[gts-zm8w AC1] expected verified=True, got {resp!r}"
+    )
+    assert resp.get("tier") == "EDIT", (
+        f"[gts-zm8w AC1] expected tier=EDIT via Shared-Drive-inherited group "
+        f"role, got {resp!r}"
+    )
+
+
+def test_shared_drive_inherited_group_view_resolves_view_tier(settings):
+    """[gts-zm8w AC1 negative] An identity in a DIFFERENT group holding only
+    Content Viewer/reader at the Shared Drive level resolves tier=VIEW, not
+    EDIT -- the drive-level fallback must respect the group's actual role,
+    not blanket-grant EDIT to any Shared Drive member."""
+    team_id = settings.get("sharedDriveInheritedTeamId")
+    id_token = settings.get("sharedDriveInheritedViewIdToken")
+    if not team_id or not id_token:
+        pytest.skip(
+            "sharedDriveInheritedTeamId/sharedDriveInheritedViewIdToken not "
+            "configured in local.settings.json -- requires a live-obtained "
+            "GIS ID token for a member of a group holding only Content "
+            "Viewer/reader at the Shared Drive level"
+        )
+    resp = _verify_and_resolve_team(settings, id_token, team_id)
+    assert resp.get("verified") is True, (
+        f"[gts-zm8w AC1 negative] expected verified=True, got {resp!r}"
+    )
+    assert resp.get("tier") == "VIEW", (
+        f"[gts-zm8w AC1 negative] expected tier=VIEW (not EDIT) via "
+        f"Shared-Drive-inherited group role, got {resp!r}"
+    )
+
+
 def test_unresolvable_team_id_fails_closed(settings):
     """[4.12 AC R6] A teamId with zero matching TeamData rows must fail
     closed to tier=NONE, not throw -- exercises the "unresolvable team" fail-

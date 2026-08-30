@@ -238,6 +238,17 @@ var _SPIKE_ACCESS_RANK = { NONE: 0, VIEW: 1, COMMENT: 2, EDIT: 3, OWNER: 4 };
  * member of. Requires the Drive (v2) and AdminDirectory advanced services
  * enabled in appsscript.json + the matching APIs enabled on the GCP project.
  *
+ * gts-zm8w: a group's ROLE GRANTED AT THE SHARED DRIVE LEVEL (e.g. Manager)
+ * is never returned by Drive.Permissions.list(folderId) when it is inherited
+ * rather than re-granted directly on the folder -- Shared Drive membership
+ * roles live on the drive resource, not as a per-file permission entry, and
+ * Google's own Share UI declines to write a redundant/weaker override onto a
+ * subfolder for a principal that already has higher effective access via the
+ * drive. So after the folder-level scan, also resolve the folder's
+ * containing Shared Drive (if any) and repeat the same group+membership scan
+ * against Drive.Permissions.list(driveId) -- the union of both, MAX by rank,
+ * is `email`'s true effective access for this folder.
+ *
  * @param {string} folderId
  * @param {string} email
  * @returns {{level: string, groupsChecked: Array<string>}}
@@ -245,12 +256,50 @@ var _SPIKE_ACCESS_RANK = { NONE: 0, VIEW: 1, COMMENT: 2, EDIT: 3, OWNER: 4 };
 function _spikeAdminSdkFolderAccess(folderId, email) {
   var result = { level: 'NONE', groupsChecked: [] };
 
+  _spikeScanResourceGroupPermissions(folderId, email, result);
+
+  var driveId = _spikeContainingDriveId(folderId);
+  if (driveId) {
+    _spikeScanResourceGroupPermissions(driveId, email, result);
+  }
+
+  return result;
+}
+
+/**
+ * Resolves the Shared Drive id containing `folderId`, or null for a plain
+ * My Drive folder / on any lookup failure (fails closed to "no drive-level
+ * check" rather than throwing -- gts-zm8w AC3).
+ *
+ * @param {string} folderId
+ * @returns {?string}
+ */
+function _spikeContainingDriveId(folderId) {
+  try {
+    var file = Drive.Files.get(folderId, { supportsAllDrives: true, fields: 'teamDriveId' });
+    return file.teamDriveId || null;
+  } catch (e) {
+    GasLogger.log('webapp.spike.access.error', { where: 'Drive.Files.get', message: String(e) });
+    return null;
+  }
+}
+
+/**
+ * Scans one Drive resource's (folder OR Shared Drive) group-type permissions
+ * and folds any confirmed membership into `result` (MAX by rank across
+ * however many resources are scanned for the same `email`).
+ *
+ * @param {string} resourceId a folderId or a Shared Drive id
+ * @param {string} email
+ * @param {{level: string, groupsChecked: Array<string>}} result mutated in place
+ */
+function _spikeScanResourceGroupPermissions(resourceId, email, result) {
   var perms;
   try {
-    perms = Drive.Permissions.list(folderId, { supportsAllDrives: true }).items || [];
+    perms = Drive.Permissions.list(resourceId, { supportsAllDrives: true }).items || [];
   } catch (e) {
     GasLogger.log('webapp.spike.access.error', { where: 'Drive.Permissions.list', message: String(e) });
-    return result;
+    return;
   }
 
   for (var i = 0; i < perms.length; i++) {
@@ -294,6 +343,4 @@ function _spikeAdminSdkFolderAccess(folderId, email) {
       result.level = level;
     }
   }
-
-  return result;
 }
