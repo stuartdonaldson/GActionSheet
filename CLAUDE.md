@@ -168,6 +168,14 @@ references are mapped in `docs/atdd/ID-map.md` — start there):
 
 For long running tests, always route test output to a fail rather than pipe to tail so we have the file for later analysis and to use to monitor progress of the test.
 
+**Never poll a `pnpm run deploy:test` or `pytest` run with `ScheduleWakeup`.** Both are
+harness-tracked background work: background the command, then stop — you are re-invoked when it
+exits. A wakeup scheduled against one of these usually fires *before* the notification and
+produces a turn that re-reads the whole conversation to say "still waiting". Measured in the
+gts-gwyg session: 45 such turns, ~11M cache-read tokens, ~11% of total session spend, zero work
+produced. See ~/.claude/CLAUDE.md (global) §Waiting on Long-Running Commands, and
+`docs/lessons-learned/2026-09-01-idle-polling-and-duplicate-hook-injection-inflate-context.md`.
+
 **Full-suite sweeps: never use `pytest --sw` (stepwise, stop-on-first-failure).** Run one non-stopping pass (`pytest -x` is for merge-gate's fail-fast semantics on a scoped/known-green run, not for triaging a fresh full sweep — for that, drop `-x` too and let it run to completion) and triage failures in bulk from the persisted log afterward. `--sw` against a 28-file live-backend suite means every transient Google `/exec` routing blip (`gts-pm72`) forces a manual re-invoke and restarts the wait, multiplying human/agent time spent babysitting the run instead of reviewing one consolidated failure list. See `docs/regression-suite-health-review-2026-08-05.md` recommendation #1.
 
 Every Playwright/UI test failure must, as a matter of course, capture a screenshot + diagnostics (screenshot path, frame URLs, and for locator waits the per-frame match-count / is_visible / bbox). This is automated (gts-3tkf): bounded driver waits call `UiDriver.capture_failure(...)` before raising, and a `pytest_runtest_makereport` hook in `tests/conftest.py` screenshots the active page on any UI-test failure. Add a new bounded wait? Route its failure through `capture_failure` — never copy-paste a capture block. For interactions Playwright cannot drive with a direct mouse gesture (e.g. the `onLinkPreview` link-preview card), try the `Ctrl+F` -> type -> `Enter` -> `Escape` cursor-placement technique (gts-39jk/cug8, `UiDriver.open_link_preview`, `tests/test_link_preview.py`) before falling back to a non-UI route-fallback method — see epic gts-pw5x.
