@@ -33,6 +33,40 @@ var _TF_RESULT = null;
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Common naming convention for every Drive file (Doc, or clone) created as a
+ * test fixture: '<configured prefix><purpose>-<yyyyMMdd>-<hex4>'. Every call
+ * site listed below MUST route through this helper (or _testDocSuffix, for
+ * the clone_doc_with_test_id case which preserves the source doc's name) so
+ * that a single prefix check is sufficient to find and clean up every
+ * test-created Doc in Drive — see 'list_test_drive_docs'.
+ *
+ * gts-97ol: the prefix itself now comes from ArchiveManager's
+ * getConfiguredTestDocPrefix (Config sheet 'Test Doc Prefix', default
+ * 'GActionSheet-Test-' — same literal this function hardcoded before) rather
+ * than being hardcoded here a second time, so the CREATE side (this
+ * function) and the DELETE side (the Cleanup Test Docs menu item) can never
+ * drift apart. _openActionSheetSpreadsheet() (TrackerTable.js) resolves the
+ * tracker spreadsheet regardless of whether this runs from an active-menu
+ * context or headlessly (webapp/journey-session creation) — same helper
+ * SyncManager.js's own Config readers use.
+ *
+ * @param {string} purpose Short hyphenated tag, e.g. 'journey', 'session',
+ *   'discovery-recent'.
+ * @return {string}
+ */
+function _testDocName(purpose) {
+  var prefix = ArchiveManager.getConfiguredTestDocPrefix(_openActionSheetSpreadsheet());
+  return prefix + purpose + '-' + _testDocSuffix();
+}
+
+/** @return {string} '<yyyyMMdd>-<hex4>' — the shared uniqueness suffix. */
+function _testDocSuffix() {
+  var now = new Date();
+  var dateStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyyMMdd');
+  var hexSuffix = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4);
+  return dateStr + '-' + hexSuffix;
+}
 
 /**
  * Clears all data rows (keeps header in row 1) from a named sheet tab.
@@ -441,6 +475,165 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
 }
 
 /**
+ * gts-ogev/gts-mt39: appends ONE plain (non-bulleted) body-level paragraph of
+ * the form `[beforeText '\v'] tokenPrefix ' ' <PERSON chip> [' ' afterText]`,
+ * via the Docs REST API only (no DocumentApp), so the chip and the soft
+ * return are both created with the exact same mechanism the fast-path chip
+ * fixtures above use for the chip itself.
+ *
+ * '\v' (U+000B), not '\n', is the separator between beforeText and the token
+ * line: this is what makes it a genuine same-paragraph soft return rather
+ * than a new paragraph — see _toSoftReturnText's doc comment in
+ * SyncManager.js for why U+000B specifically (InsertTextRequest strips
+ * U+000B<0x1F control chars except this one, and treats literal '\n' as a
+ * hard paragraph break).
+ *
+ * Omitting beforeText ('') produces a single-line paragraph with the token at
+ * position 0 — the single-token fast path's shape
+ * (_parseParagraphAsFloatingAction) — so the SAME helper can seed both sides
+ * of a same-chip fast-path-vs-soft-return-path comparison.
+ *
+ * @param {string} token       OAuth2 access token from ScriptApp.getOAuthToken()
+ * @param {string} docId       Document ID
+ * @param {string} beforeText  Text on the line(s) before the token; '' for none
+ * @param {string} tokenPrefix e.g. 'AI-9:' or 'ACT-3:' (colon included)
+ * @param {string} email       Assignee email for the PERSON chip
+ * @param {string} afterText   Text after the chip on the token's own line; '' for none
+ */
+function _tfAppendChipHeaderParagraph(token, docId, beforeText, tokenPrefix, email, afterText) {
+  var baseUrl    = 'https://docs.googleapis.com/v1/documents/';
+  var authHeader = { 'Authorization': 'Bearer ' + token };
+
+  var getResp = UrlFetchApp.fetch(
+    baseUrl + docId + '?fields=body.content',
+    { headers: authHeader, muteHttpExceptions: true }
+  );
+  if (getResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendChipHeaderParagraph GET failed: HTTP ' + getResp.getResponseCode());
+  }
+  var content = (JSON.parse(getResp.getContentText()).body || {}).content || [];
+
+  var lastParaEndIndex = null;
+  for (var ci = content.length - 1; ci >= 0; ci--) {
+    if (content[ci].paragraph) {
+      lastParaEndIndex = content[ci].endIndex;
+      break;
+    }
+  }
+  if (lastParaEndIndex === null) {
+    throw new Error('_tfAppendChipHeaderParagraph: no paragraph found in doc body');
+  }
+
+  var insertAt = lastParaEndIndex - 1;
+  var header    = (beforeText ? beforeText + '\v' : '') + tokenPrefix + ' ';
+  var headerLen = header.length;
+
+  var requests = [
+    { insertText: { location: { index: insertAt }, text: '\n' } },
+    { insertText: { location: { index: lastParaEndIndex }, text: header } },
+    { insertPerson: {
+        personProperties: { email: email },
+        location: { index: lastParaEndIndex + headerLen }
+      }
+    }
+  ];
+  if (afterText) {
+    requests.push({ insertText: {
+      location: { index: lastParaEndIndex + headerLen + 1 },
+      text: ' ' + afterText
+    }});
+  }
+
+  var batchResp = UrlFetchApp.fetch(
+    baseUrl + docId + ':batchUpdate',
+    {
+      method: 'post',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeader),
+      payload: JSON.stringify({ requests: requests }),
+      muteHttpExceptions: true
+    }
+  );
+  if (batchResp.getResponseCode() !== 200) {
+    throw new Error('_tfAppendChipHeaderParagraph batchUpdate failed: HTTP ' +
+                    batchResp.getResponseCode() + ': ' +
+                    batchResp.getContentText().substring(0, 200));
+  }
+}
+
+/**
+ * Test-harness signer for gts-79dw.4.18's assertion verifier
+ * (_verifySignedAssertion, src/AccessControl.js). Mirrors NUUC-Dispatch's
+ * own Assertion_issue (../NUUC-Dispatch/src/Assertion.js) exactly on the
+ * happy path, but exposes every claim as an override so negative tests can
+ * construct a deliberately-wrong assertion (bad aud, unknown kid, expired
+ * exp, wrong alg, tampered signature) -- all signed with the REAL Script
+ * Property secret so a positive-path test proves the verifier actually
+ * accepts a correctly-signed token, not just rejects everything.
+ *
+ * Reads the secret from Script Properties (never accepts one from the
+ * caller, never returns it) -- if the named `kid` property doesn't exist
+ * yet, returns {ok:false, error:'missing_secret'} so the caller can report
+ * that as a blocking provisioning gap rather than silently signing with a
+ * fabricated key.
+ *
+ * @param {Object} opts
+ * @param {string}  [opts.sub]
+ * @param {string}  [opts.email]
+ * @param {boolean} [opts.emailVerified]
+ * @param {string}  [opts.aud]              default 'gactionsheet'
+ * @param {string}  [opts.iss]              default 'nuuc-dispatch'
+ * @param {string}  [opts.kid]              default 'ASSERTION_KEY_GACTIONSHEET_1'
+ * @param {string}  [opts.alg]              default 'HS256'
+ * @param {number}  [opts.exp]              default now+3600 (Unix seconds)
+ * @param {boolean} [opts.tamperSignature]  flips one signature char if true
+ * @returns {{ok: true, assertion: string} | {ok: false, error: string, kid: string}}
+ */
+function _tfMintAssertion(opts) {
+  opts = opts || {};
+  var kid = opts.kid || 'ASSERTION_KEY_GACTIONSHEET_1';
+  var secret = PropertiesService.getScriptProperties().getProperty(kid);
+  if (!secret) {
+    return { ok: false, error: 'missing_secret', kid: kid };
+  }
+
+  var now = Math.floor(Date.now() / 1000);
+  var header = {
+    alg: opts.alg || 'HS256',
+    typ: 'JWT',
+    kid: kid
+  };
+  var payload = {
+    iss:            opts.iss !== undefined ? opts.iss : 'nuuc-dispatch',
+    sub:            opts.sub || 'test-sub-001',
+    email:          opts.email || 'test-assertion@example.com',
+    email_verified: opts.emailVerified !== false,
+    aud:            opts.aud !== undefined ? opts.aud : 'gactionsheet',
+    iat:            now,
+    exp:            opts.exp !== undefined ? opts.exp : (now + 3600)
+  };
+
+  function b64urlFromString(str) {
+    return Utilities.base64EncodeWebSafe(str).replace(/=+$/, '');
+  }
+
+  var headerSeg  = b64urlFromString(JSON.stringify(header));
+  var payloadSeg = b64urlFromString(JSON.stringify(payload));
+  var signingInput = headerSeg + '.' + payloadSeg;
+  var sigBytes = Utilities.computeHmacSha256Signature(signingInput, secret);
+  var sigSeg = Utilities.base64EncodeWebSafe(sigBytes).replace(/=+$/, '');
+
+  if (opts.tamperSignature) {
+    // Flip the first character so the signature provably no longer matches
+    // -- exercises the bad-signature negative path without ever needing to
+    // know (or guess) the real secret client-side.
+    var flipped = sigSeg.charAt(0) === 'A' ? 'B' : 'A';
+    sigSeg = flipped + sigSeg.substring(1);
+  }
+
+  return { ok: true, assertion: signingInput + '.' + sigSeg };
+}
+
+/**
  * Builds a sheet row array in SHEET_HEADERS order.
  *
  * SHEET_HEADERS = [globalId, ID, Assignee Email, Assignee Name, Action,
@@ -460,7 +653,7 @@ function _tfAppendPersonChipListItem(token, docId, email, actionText) {
  * @returns {Array}  Row array aligned to SHEET_HEADERS.
  */
 function _tfSheetRow(opts) {
-  var fileId = opts.fileId || (opts.globalId ? opts.globalId.split('/AI-')[0] : '');
+  var fileId = opts.fileId || (opts.globalId ? parseGlobalId(opts.globalId).docId : '');
   return [
     opts.globalId || '',
     fileId,
@@ -495,6 +688,138 @@ function _tfAppendSheetRow(ss, rowData) {
 }
 
 // ---------------------------------------------------------------------------
+// configFormat test support (gts-d99c / gts-1pk)
+// ---------------------------------------------------------------------------
+
+// Fixed reference style applied by the 'seed_styled_action' fixture case —
+// deliberately distinct per-range (token vs action text) so a sampling bug
+// that reads the wrong offset, or a fixed default that never changes, is
+// visible as a mismatch rather than a coincidental pass. Mirrored (not
+// re-derived from _sampleActionItemStyle/_configFormatForDoc) in
+// tests/test_journey.py's Act 6 assertions — per the no-shared-context rule,
+// the Python side hardcodes these same literal values rather than reading
+// this file, so a fixture/test drift here would break the assertion instead
+// of silently trivializing it.
+var _TF_STYLED_AI_TOKEN = Object.freeze({
+  fontFamily: 'Georgia', fontSize: 16, color: '#1B5E20',
+  bold: true, italic: false, underline: true
+});
+var _TF_STYLED_ACTION_TEXT = Object.freeze({
+  fontFamily: 'Courier New', fontSize: 13, color: '#B71C1C',
+  bold: false, italic: true, underline: false
+});
+
+/**
+ * Converts a Docs REST rgbColor ({red,green,blue} 0..1 floats) back to a
+ * '#rrggbb' hex string, for comparing a debug_action_text_style read-back
+ * against _TF_STYLED_AI_TOKEN/_TF_STYLED_ACTION_TEXT's literal hex values.
+ *
+ * @param {{red:number,green:number,blue:number}} rgb
+ * @returns {string}
+ */
+function _tfRgbToHex(rgb) {
+  function ch(v) {
+    var n = Math.round((v || 0) * 255);
+    var s = n.toString(16);
+    return s.length === 1 ? '0' + s : s;
+  }
+  return '#' + ch(rgb.red) + ch(rgb.green) + ch(rgb.blue);
+}
+
+/**
+ * Simplifies one Docs REST textStyle object down to the same
+ * {fontFamily,fontSize,color,bold,italic,underline} shape
+ * _sampleActionItemStyle/_readActionFormatConfig use, for direct comparison
+ * in a run_fixture response.
+ *
+ * @param {Object} textStyle
+ * @returns {{fontFamily:?string, fontSize:?number, color:?string, bold:boolean, italic:boolean, underline:boolean}}
+ */
+function _tfSimplifyTextStyle(textStyle) {
+  var ts = textStyle || {};
+  var fg = ts.foregroundColor && ts.foregroundColor.color && ts.foregroundColor.color.rgbColor;
+  return {
+    fontFamily: (ts.weightedFontFamily || {}).fontFamily || null,
+    fontSize:   ts.fontSize ? ts.fontSize.magnitude : null,
+    color:      fg ? _tfRgbToHex(fg) : null,
+    bold:       !!ts.bold,
+    italic:     !!ts.italic,
+    underline:  !!ts.underline
+  };
+}
+
+/**
+ * Finds the 'AI-N:' token paragraph within a Docs REST body.content tree
+ * (top-level paragraphs only — the configFormat/flush-styled action items
+ * this fixture verifies are never inside a table) and returns the applied
+ * textStyle for the token's own text run and for the text run immediately
+ * following it (the action-text + status range) — mirrors
+ * _collectFlushOccurrences's token-location logic (SyncManager.js) but reads
+ * textStyle instead of computing document-index offsets, since this is a
+ * read-only verification fixture, not a flush.
+ *
+ * @param {Array} content  body.content
+ * @param {number} N
+ * @returns {{ok:boolean, aiToken:?Object, actionText:?Object, error:?string}}
+ */
+function _tfExtractActionTextStyle(content, N) {
+  var candidates = _ACTION_TOKEN_READ_PREFIXES.map(function (p) { return p + '-' + N + ':'; });
+  function prefixAt(text, idx) {
+    for (var ci = 0; ci < candidates.length; ci++) {
+      if (text.substr(idx, candidates[ci].length) === candidates[ci]) return candidates[ci];
+    }
+    return null;
+  }
+  for (var ii = 0; ii < content.length; ii++) {
+    var item = content[ii];
+    if (!item.paragraph) continue;
+    var elements = item.paragraph.elements || [];
+    var fullText = '';
+    var runs = []; // {startTextIdx, len, textStyle}
+    for (var jj = 0; jj < elements.length; jj++) {
+      var el = elements[jj];
+      if (!el.textRun || el.textRun.content === undefined) continue;
+      var tc = el.textRun.content || '';
+      runs.push({ startTextIdx: fullText.length, len: tc.length, textStyle: el.textRun.textStyle || {} });
+      fullText += tc;
+    }
+    var tokenTextIdx = -1;
+    var matchedPrefix = prefixAt(fullText, 0);
+    if (matchedPrefix) {
+      tokenTextIdx = 0;
+    } else {
+      for (var si = 0; si < fullText.length; si++) {
+        var ch = fullText[si];
+        matchedPrefix = (ch === '\n' || ch === '\r' || ch === '\v') ? prefixAt(fullText, si + 1) : null;
+        if (matchedPrefix) { tokenTextIdx = si + 1; break; }
+      }
+    }
+    if (tokenTextIdx < 0) continue;
+
+    var prefixEndTextIdx = tokenTextIdx + matchedPrefix.length;
+    var tokenRun  = null;
+    var actionRun = null;
+    for (var ri = 0; ri < runs.length; ri++) {
+      var run    = runs[ri];
+      var runEnd = run.startTextIdx + run.len;
+      if (!tokenRun && tokenTextIdx >= run.startTextIdx && tokenTextIdx < runEnd) {
+        tokenRun = run;
+      }
+      if (!actionRun && run.startTextIdx >= prefixEndTextIdx) {
+        actionRun = run;
+      }
+    }
+    if (!tokenRun) continue;
+    return {
+      ok: true,
+      aiToken:    _tfSimplifyTextStyle(tokenRun.textStyle),
+      actionText: actionRun ? _tfSimplifyTextStyle(actionRun.textStyle) : null
+    };
+  }
+  return { ok: false, error: candidates[0] + ' token paragraph not found' };
+}
+
+// ---------------------------------------------------------------------------
 // Public entry-point
 // ---------------------------------------------------------------------------
 
@@ -503,6 +828,9 @@ function _tfAppendSheetRow(ss, rowData) {
  * When called from the function picker, scenario defaults to 'default'.
  *
  * @param {string} [scenario] - Name of the fixture scenario to set up.
+ * @param {{docId: string}} [data] - Fixture data; docId is required — the doc
+ *   to operate on is always a real parameter, never read from a shared
+ *   script property (see ADR-0006 §4).
  */
 function setupTestFixtures(scenario, data) {
   var resolvedScenario = scenario || 'default';
@@ -510,14 +838,14 @@ function setupTestFixtures(scenario, data) {
   _TF_RESULT = null; // reset for this invocation
   var _SF = CONTRACT_SCHEMA.sheetAction.columnsByField;
   try {
-    // -- Read test IDs from script properties --------------------------------
+    // -- docId is a real parameter; TEST_SHEET_ID is still deploy-time config --
     var props = PropertiesService.getScriptProperties();
-    var testDocId   = props.getProperty('TEST_DOC_ID');
+    var testDocId   = data.docId;
     var testSheetId = props.getProperty('TEST_SHEET_ID');
 
     if (!testDocId || !testSheetId) {
       GasLogger.log('fixture.error', {
-        msg: 'TEST_DOC_ID and/or TEST_SHEET_ID script properties not set'
+        msg: 'docId parameter and/or TEST_SHEET_ID script property not set'
       });
       return;
     }
@@ -899,8 +1227,11 @@ function setupTestFixtures(scenario, data) {
         break;
 
       case 'force_homepage_error':
-        // GTaskSheet-rvwu AC-5: trip buildHomepageCard's catch branch on the
+        // gts-rvwu AC-5: trip buildHomepageCard's catch branch on the
         // next homepage render. Caller must clear via 'clear_homepage_error_force'.
+        // This is a transient toggle (not a memoized cache) — it lives under the
+        // '_TEST_' prefix so 'reset_test_state' sweeps it up if a test crashes
+        // before reaching its own cleanup. See 'reset_test_state' below.
         PropertiesService.getScriptProperties().setProperty('_TEST_FORCE_HOMEPAGE_ERROR', 'true');
         break;
 
@@ -908,18 +1239,53 @@ function setupTestFixtures(scenario, data) {
         PropertiesService.getScriptProperties().deleteProperty('_TEST_FORCE_HOMEPAGE_ERROR');
         break;
 
+      case 'reset_test_state':
+        // Safety net for interrupted test runs (gts-rvwu follow-up): deletes every
+        // script property under the '_TEST_' prefix — transient per-test toggles
+        // like '_TEST_FORCE_HOMEPAGE_ERROR' that a crashed test can leave set,
+        // silently corrupting every later test that shares this GAS deployment.
+        // Invoked as a pytest session-start autouse fixture (tests/conftest.py) and
+        // available standalone via `call_webapp.py run_fixture reset_test_state`.
+        //
+        // Deliberately does NOT touch:
+        //   - Durable deployment config (no '_' prefix): TEST_SHEET_ID,
+        //     TEST_TOKEN, WEBAPP_URL, ADMIN_SECRET, AXIOM_TOKEN, DOC_FOLDER_ID,
+        //     ... (no doc-ID property exists to list here — ADR-0006 §4)
+        //   - Memoized fixture caches (DISCOVERY_*, TEAMSCOPE_FOLDER_*): these
+        //     create-once Drive folders/docs are meant to persist across sessions —
+        //     DISCOVERY_STALE_DOC_ID in particular only becomes useful once its doc
+        //     is 8+ days old, so clearing it on every run would defeat the fixture.
+        // Add new transient (crash-unsafe) toggles under '_TEST_' so this sweep
+        // covers them automatically; add new cross-session caches under their own
+        // distinct prefix so they're excluded by construction.
+        var _rtsProps = PropertiesService.getScriptProperties();
+        var _rtsAll = _rtsProps.getProperties();
+        var _rtsCleared = [];
+        for (var _rtsKey in _rtsAll) {
+          if (_rtsKey.indexOf('_TEST_') === 0) {
+            _rtsProps.deleteProperty(_rtsKey);
+            _rtsCleared.push(_rtsKey);
+          }
+        }
+        GasLogger.log('fixture.reset_test_state', { cleared: _rtsCleared });
+        break;
+
       case 'discovery':
+        // Memoized cross-session cache, not a transient toggle — deliberately
+        // outside the '_TEST_' prefix so 'reset_test_state' never clears it.
+        // DISCOVERY_STALE_DOC_ID only becomes useful once its doc is 8+ days
+        // old, so wiping it every pytest session would defeat the fixture.
         var discProps = PropertiesService.getScriptProperties();
         var recentId = discProps.getProperty('DISCOVERY_RECENT_DOC_ID');
         var staleId  = discProps.getProperty('DISCOVERY_STALE_DOC_ID');
         if (!recentId) {
-          var recentDoc = DocumentApp.create('GActionSheet Test - Discovery Recent');
+          var recentDoc = DocumentApp.create(_testDocName('discovery-recent'));
           recentId = recentDoc.getId();
           recentDoc.saveAndClose();
           discProps.setProperty('DISCOVERY_RECENT_DOC_ID', recentId);
         }
         if (!staleId) {
-          var staleDoc = DocumentApp.create('GActionSheet Test - Discovery Stale');
+          var staleDoc = DocumentApp.create(_testDocName('discovery-stale'));
           staleId = staleDoc.getId();
           staleDoc.saveAndClose();
           discProps.setProperty('DISCOVERY_STALE_DOC_ID', staleId);
@@ -946,13 +1312,13 @@ function setupTestFixtures(scenario, data) {
         }
         if (!subfolderId) {
           var parentFolder = DriveApp.getFolderById(parentFolderId);
-          var subFolder = parentFolder.createFolder('GActionSheet Test - Discovery Subfolder');
+          var subFolder = parentFolder.createFolder(_testDocName('discovery-subfolder'));
           subfolderId = subFolder.getId();
           sfProps.setProperty('DISCOVERY_SUBFOLDER_ID', subfolderId);
         }
         if (!subfolderDocId) {
           var sfFolder = DriveApp.getFolderById(subfolderId);
-          var sfDoc = DocumentApp.create('GActionSheet Test - Discovery Subfolder Doc');
+          var sfDoc = DocumentApp.create(_testDocName('discovery-subfolder-doc'));
           DriveApp.getFileById(sfDoc.getId()).moveTo(sfFolder);
           subfolderDocId = sfDoc.getId();
           sfDoc.saveAndClose();
@@ -1212,13 +1578,13 @@ function setupTestFixtures(scenario, data) {
       }
 
       // -----------------------------------------------------------------------
-      // UC-C scenarios: insert / refresh the in-doc tracker table (GTaskSheet-mol-bgq)
+      // UC-C scenarios: insert / refresh the in-doc tracker table (gts-mol-bgq)
       //
       // All three scenarios accumulate on the shared clone doc without resetting.
       // Scenario prefixes: UCC-FIRST: / UCC-REFRESH: / UCC-VIEWONLY:
       //
       // RED PHASE: insertTrackerTable() is defined by the UC-C implementation
-      // (GTaskSheet-mol-vzk). Until that lands these scenarios will log an error
+      // (gts-mol-vzk). Until that lands these scenarios will log an error
       // tag and the Python tests will fail as expected.
       // -----------------------------------------------------------------------
 
@@ -1351,7 +1717,7 @@ function setupTestFixtures(scenario, data) {
       case 'uc_c_idempotent_refresh': {
         // Insert two chip-led FAs, sync+insert tracker, then call insertTrackerTable
         // again with NO intervening changes. The second call must be a no-op
-        // (tracker.skip — GTaskSheet-yo9q): same {id, action, status} rows as
+        // (tracker.skip — gts-yo9q): same {id, action, status} rows as
         // the first call.
         var ucCIRToken = ScriptApp.getOAuthToken();
         var ucCIREmail = props.getProperty('TEST_ASSIGNEE_EMAIL')
@@ -1376,7 +1742,7 @@ function setupTestFixtures(scenario, data) {
       }
 
       // -----------------------------------------------------------------------
-      // Sync Status column scenarios (GTaskSheet-ly5 AC1–AC7)
+      // Sync Status column scenarios (gts-ly5 AC1–AC7)
       //
       // Each scenario accumulates on the shared clone doc without resetting.
       // Scenario prefixes: SS-DEL: / SS-NF: / SS-REC: / SS-EDIT: / SS-ARCH:
@@ -1638,21 +2004,75 @@ function setupTestFixtures(scenario, data) {
 
       case 'sync_document': {
         // Sync the clone doc. Called between fixture steps in the HTTP test runner.
-        // testDocId was stored in TEST_DOC_ID by _handleRunFixture before calling us.
-        syncDocument(testDocId);
-        _TF_RESULT = { tag: 'fixture.sync_document', data: { synced: true, docId: testDocId } };
+        // testDocId arrives as a real parameter (data.docId) from _handleRunFixture.
+        //
+        // scn.session.ScenarioSession.sync()'s own docstring promises "durable
+        // convergence" for a preceding async act (e.g. the sidebar's Sync Now
+        // button, whose click fires a separate syncDocument() execution).
+        // syncDocument() intentionally no-ops (sync.locked.skip) rather than
+        // proceed against a stale pre-lock read when it loses that race for
+        // the per-doc lock -- honor the convergence promise here by retrying
+        // (bounded) instead of reporting synced:true on what was actually a
+        // no-op (gts-kkm7 sidebar_bootstrap_sync race, reproduced 2026-08-14:
+        // sidebar_sync's async trigger held the lock, this call skipped, and
+        // the immediately-following find_sheet_actions() read count=0).
+        // Bound: 12 attempts * 3s = <=36s of extra wait -- comfortably above
+        // the ~14s single-doc syncDocument() hold observed live (gts-kkm7
+        // reproduction above), same order of magnitude as sidebar_sync's own
+        // 60s cold-sync budget (scn/ui.py).
+        var sdMaxAttempts = 12;
+        var sdAttempts = 0;
+        var sdResult;
+        do {
+          sdResult = syncDocument(testDocId);
+          sdAttempts++;
+          if (sdResult === 'locked-skip' && sdAttempts < sdMaxAttempts) {
+            Utilities.sleep(3000);
+          }
+        } while (sdResult === 'locked-skip' && sdAttempts < sdMaxAttempts);
+        if (sdResult === 'locked-skip') {
+          GasLogger.log('fixture.sync_document.still_locked', { docId: testDocId, attempts: sdAttempts });
+        }
+        _TF_RESULT = { tag: 'fixture.sync_document', data: { synced: sdResult !== 'locked-skip', docId: testDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'sync_lock_race': {
+        // gts-li3g: deterministically proves syncDocument()'s per-docId lock
+        // serializes two overlapping executions for the SAME docId, per the
+        // AC's "or proves the lock serializes two overlapping syncDocument
+        // calls for the same docId" alternative — genuine cross-execution
+        // OS-level concurrency cannot be reliably timed from a Python test
+        // harness (network jitter dwarfs GAS's own scheduling).
+        //
+        // Simulates a first, still in-flight execution (e.g. the 30-min
+        // trigger) holding the per-doc lock, then drives the REAL
+        // syncDocument() entry point a second time (e.g. sidebar Sync Now,
+        // or another trigger firing mid-sync) while that lock is held. The
+        // second call must skip outright — not read/reconcile/flush
+        // anything — so a sheet row already marked Dirty by a concurrent
+        // write is left completely untouched rather than being read against
+        // a stale pre-lock snapshot and reverted.
+        var raceLockAcquired = _acquireDocSyncLock(testDocId);
+        try {
+          syncDocument(testDocId); // the "second" overlapping execution
+        } finally {
+          if (raceLockAcquired) _releaseDocSyncLock(testDocId);
+        }
+        _TF_RESULT = {
+          tag: 'fixture.sync_lock_race',
+          data: { lockHeldByFirst: raceLockAcquired, docId: testDocId }
+        };
         docAlreadyClosed = true;
         break;
       }
 
       case 'begin_journey_session': {
         // Empty-create a fresh journey doc (§16.11 #1 — never a template clone).
-        // Does NOT update TEST_DOC_ID or TEST_DOC_TEMPLATE_ID — safe to run
+        // Does NOT touch TestControl!B1 — safe to run
         // alongside an active begin_test_session clone in the same pytest session.
-        var bjsNow    = new Date();
-        var bjsDate   = Utilities.formatDate(bjsNow, Session.getScriptTimeZone(), 'yyyyMMdd');
-        var bjsHex    = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4);
-        var bjsName   = 'GActionSheet-Test-journey-' + bjsDate + '-' + bjsHex;
+        var bjsName   = _testDocName('journey');
         var bjsSheetId = PropertiesService.getScriptProperties().getProperty('TEST_SHEET_ID');
         var bjsFolderIter = DriveApp.getFileById(bjsSheetId).getParents();
         var bjsParent = bjsFolderIter.hasNext() ? bjsFolderIter.next() : DriveApp.getRootFolder();
@@ -1708,7 +2128,7 @@ function setupTestFixtures(scenario, data) {
         // one paragraph (or list item) per cell. The only doc-seeding fixture
         // able to place AI: tokens inside table cells; append_doc_paragraph
         // (WebApp.js) only supports body-level plain paragraphs
-        // (GTaskSheet-dq6t AC-3/AC-4/AC-5).
+        // (gts-dq6t AC-3/AC-4/AC-5).
         var adtRows    = data.rows || [];
         var adtNumRows = adtRows.length;
         var adtNumCols = adtNumRows > 0 ? adtRows[0].length : 0;
@@ -1742,7 +2162,7 @@ function setupTestFixtures(scenario, data) {
 
       case 'append_doc_list_item': {
         // Body-level bulleted list item containing an AI: token
-        // (GTaskSheet-dq6t AC-1/AC-2) — append_doc_paragraph only appends a
+        // (gts-dq6t AC-1/AC-2) — append_doc_paragraph only appends a
         // plain (non-list) paragraph.
         body.appendListItem(data.text || '');
         _TF_RESULT = { tag: 'fixture.append_doc_list_item', data: { ok: true } };
@@ -1752,7 +2172,7 @@ function setupTestFixtures(scenario, data) {
       case 'append_doc_soft_paragraph': {
         // Appends a body-level paragraph whose text contains embedded line
         // breaks (soft returns / Shift+Enter in DocumentApp).  Used to seed
-        // the soft-return multi-AI-token patterns (GTaskSheet-d7z8/mrd8).
+        // the soft-return multi-AI-token patterns (gts-d7z8/mrd8).
         // Note: DocumentApp represents soft returns as \r (not \n) in getText();
         // the scanner normalizes line endings before processing.
         body.appendParagraph(data.text || '');
@@ -1760,11 +2180,35 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'append_doc_paragraph_with_chip':
+      case 'append_doc_soft_paragraph_with_chip': {
+        // gts-ogev/gts-mt39: seeds a PERSON-chip action header via the Docs
+        // REST API (_tfAppendChipHeaderParagraph). 'append_doc_paragraph_with_chip'
+        // (data.before omitted/'') puts the token at paragraph position 0 —
+        // the single-token fast path's shape. 'append_doc_soft_paragraph_with_chip'
+        // (data.before non-empty) puts context text before the token, joined
+        // by a genuine soft return — the soft-return path's shape. The same
+        // helper builds both so a test can seed one chip email through each
+        // path and compare the resolved assignee.
+        doc.saveAndClose();
+        var chipParaToken = ScriptApp.getOAuthToken();
+        _tfAppendChipHeaderParagraph(
+          chipParaToken, testDocId,
+          data.before || '',
+          data.token || 'AI:',
+          data.email,
+          data.after || ''
+        );
+        docAlreadyClosed = true;
+        _TF_RESULT = { tag: 'fixture.' + resolvedScenario, data: { ok: true } };
+        break;
+      }
+
       case 'append_tracker_cell_text': {
         // Appends an AI: token into the LAST data row's first cell of the
         // existing Action Item Tracker table (must already exist via
         // 'insert_tracker_table') to verify the scanner's tracker-table
-        // exclusion (GTaskSheet-dq6t AC-6). Locates the table the same way
+        // exclusion (gts-dq6t AC-6). Locates the table the same way
         // _scanFloatingActions does: the first TABLE body-child after the
         // 'Action Item Summary' heading paragraph.
         var atctN           = body.getNumChildren();
@@ -1827,7 +2271,7 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'assert_team_access': {
-        // Calls the assertTeamAccess(teamId, ss) security gate (GTaskSheet-me6w.5)
+        // Calls the assertTeamAccess(teamId, ss) security gate (gts-me6w.5)
         // and reports the outcome instead of letting the thrown error propagate,
         // so the test harness can assert on TeamNotFound / TeamAccessDenied.
         var atfTeamId = data.teamId || '';
@@ -1844,8 +2288,11 @@ function setupTestFixtures(scenario, data) {
       case 'sidebar_set_status': {
         // Mutation: change an action from "Open" to "Done" using sidebarSetStatus.
         // Resolves globalId by scanning floating actions for the target text.
-        var sssTargetText = 'AC1: Review the project budget';
-        var sssNewStatus  = 'Done';
+        // data.targetText / data.newStatus override the journey defaults so a
+        // scenario can drive the sidebar flush path against its own seeded
+        // action (gts-dr8j) rather than the canonical journey's.
+        var sssTargetText = data.targetText || 'AC1: Review the project budget';
+        var sssNewStatus  = data.newStatus  || 'Done';
         var sssFloating   = _scanFloatingActions(doc);
         var sssNrId       = '';
         for (var ssi = 0; ssi < sssFloating.length; ssi++) {
@@ -1927,10 +2374,10 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'begin_test_session': {
-        // masterDocId was stored in TEST_DOC_ID by _handleRunFixture from the HTTP payload.
-        // beginTestSession creates a named clone and updates TEST_DOC_ID to the clone.
-        beginTestSession(testDocId);
-        var btsCloneId = props.getProperty('TEST_DOC_ID');
+        // masterDocId arrives as a real parameter (data.docId, from the HTTP
+        // payload's testDocId). beginTestSession creates a named clone and
+        // returns its ID directly — no script-property round-trip.
+        var btsCloneId = beginTestSession(testDocId);
         _TF_RESULT = {
           tag:  'fixture.begin_test_session',
           data: { cloneId: btsCloneId }
@@ -1940,8 +2387,11 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'end_test_session': {
-        // Trash the clone and restore TEST_DOC_ID to the master template.
-        endTestSession(testDocId);
+        // Trash the clone. Both the clone ID (testDocId, i.e. data.docId) and
+        // the master ID to restore (data.masterDocId) are real parameters —
+        // the caller already knows the master ID (Python: settings['testDocId'])
+        // so there's no need to round-trip it through a script property.
+        endTestSession(testDocId, data.masterDocId);
         _TF_RESULT = { tag: 'fixture.end_test_session', data: {} };
         docAlreadyClosed = true;
         break;
@@ -1957,7 +2407,7 @@ function setupTestFixtures(scenario, data) {
       }
 
       case 'get_team_scope': {
-        // Returns the document's Drive appProperty 'teamScope' (GTaskSheet-me6w.6).
+        // Returns the document's Drive appProperty 'teamScope' (gts-me6w.6).
         var gtsDocId = data.docId || testDocId;
         var gtsToken = ScriptApp.getOAuthToken();
         _TF_RESULT = {
@@ -1968,8 +2418,44 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'edit_cell_via_trigger': {
+        // Writes a cell on the Actions tab and then invokes onActionSheetEdit
+        // with a real Range, driving the SAME entry point a user's spreadsheet
+        // edit fires. Distinct from the edit_action_row route, which only
+        // stamps Dirty and never runs the trigger (doPost writes cannot fire an
+        // installable trigger), so it cannot exercise _syncSheetRowToDoc.
+        // data: { globalId, field: 'action_text'|'status'|'assignee_email'|'assignee_name', value }
+        var ecGid    = data.globalId || '';
+        var ecField  = data.field    || 'action_text';
+        var ecValue  = data.value    || '';
+        var ecSheet  = ss.getSheetByName('Actions');
+        var ecCol    = CONTRACT_SCHEMA.sheetAction.columnsByField[ecField];
+        var ecRow    = -1;
+        if (ecSheet && ecCol) {
+          var ecLast = ecSheet.getLastRow();
+          if (ecLast >= 2) {
+            var ecIds = ecSheet.getRange(2, CONTRACT_SCHEMA.sheetAction.columnsByField.global_id, ecLast - 1, 1).getValues();
+            for (var eci = 0; eci < ecIds.length; eci++) {
+              if (String(ecIds[eci][0] || '') === ecGid) { ecRow = eci + 2; break; }
+            }
+          }
+        }
+        if (ecRow > 0) {
+          var ecRange = ecSheet.getRange(ecRow, ecCol);
+          ecRange.setValue(ecValue);
+          SpreadsheetApp.flush();
+          onActionSheetEdit({ range: ecRange });
+        }
+        _TF_RESULT = {
+          tag:  'fixture.edit_cell_via_trigger',
+          data: { globalId: ecGid, field: ecField, row: ecRow, applied: ecRow > 0 }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'get_docdata_row': {
-        // Returns the DocData row for fileId (default testDocId), or null (GTaskSheet-me6w.6).
+        // Returns the DocData row for fileId (default testDocId), or null (gts-me6w.6).
         var gddFileId = data.fileId || testDocId;
         _TF_RESULT = {
           tag: 'fixture.get_docdata_row',
@@ -1979,8 +2465,170 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'get_all_docdata_rows': {
+        // gts-axll (docdata-oracle): dumps every DocData row with BOTH the
+        // display value (getValues()) and the raw formula (getFormulas())
+        // for Doc Name, so a caller can tell a live HYPERLINK apart from its
+        // flattened display text -- the discrimination _readDocDataRow can't
+        // make (it only ever calls getValues()). Ignores testDocId; this is
+        // a whole-sheet audit, not a per-doc lookup.
+        var gadrSheet = ss.getSheetByName('DocData');
+        var gadrRows  = [];
+        var gadrLastRow = gadrSheet ? gadrSheet.getLastRow() : 0;
+        if (gadrSheet && gadrLastRow >= 2) {
+          var gadrCols   = CONTRACT_SCHEMA.sheetDocData.columnsByField;
+          var gadrNumCols = CONTRACT_SCHEMA.sheetDocData.headers.length;
+          var gadrRange  = gadrSheet.getRange(2, 1, gadrLastRow - 1, gadrNumCols);
+          var gadrValues   = gadrRange.getValues();
+          var gadrFormulas = gadrRange.getFormulas();
+          for (var gadrI = 0; gadrI < gadrValues.length; gadrI++) {
+            var gadrRow = gadrValues[gadrI];
+            var gadrFml = gadrFormulas[gadrI];
+            if (!gadrRow[gadrCols.file_id - 1]) continue;
+            gadrRows.push({
+              fileId:          gadrRow[gadrCols.file_id - 1],
+              docName:         gadrRow[gadrCols.doc_name - 1],
+              docNameFormula:  gadrFml[gadrCols.doc_name - 1],
+              syncStatus:      gadrRow[gadrCols.sync_status - 1],
+              actionCount:     gadrRow[gadrCols.action_count - 1],
+              resolvedCount:   gadrRow[gadrCols.resolved_count - 1]
+            });
+          }
+        }
+        _TF_RESULT = {
+          tag: 'fixture.get_all_docdata_rows',
+          data: { rows: gadrRows }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'dump_all_action_rows': {
+        // gts-dgw8 (litter-purge): whole-sheet Actions audit, same shape as
+        // get_all_docdata_rows above -- ignores testDocId. Reads BOTH
+        // getValues() and getFormulas() for the Document column so a caller
+        // can tell a blank cell apart from a HYPERLINK formula that's merely
+        // been flattened to display text (same discrimination gts-axll added
+        // for DocData's Doc Name).
+        var daarSheet = ss.getSheetByName('Actions');
+        var daarRows  = [];
+        var daarLastRow = daarSheet ? daarSheet.getLastRow() : 0;
+        if (daarSheet && daarLastRow >= 2) {
+          var daarCols    = CONTRACT_SCHEMA.sheetAction.columnsByField;
+          var daarNumCols = CONTRACT_SCHEMA.sheetAction.headers.length;
+          var daarRange   = daarSheet.getRange(2, 1, daarLastRow - 1, daarNumCols);
+          var daarValues   = daarRange.getValues();
+          var daarFormulas = daarRange.getFormulas();
+          for (var daarI = 0; daarI < daarValues.length; daarI++) {
+            var daarRow = daarValues[daarI];
+            var daarFml = daarFormulas[daarI];
+            if (!daarRow[daarCols.global_id - 1]) continue;
+            var daarModified = daarRow[daarCols.modified_date - 1];
+            daarRows.push({
+              globalId:        daarRow[daarCols.global_id - 1],
+              fileId:          daarRow[daarCols.file_id - 1],
+              actionId:        daarRow[daarCols.action_id - 1],
+              status:          daarRow[daarCols.status - 1],
+              documentText:    daarRow[daarCols.document_formula - 1],
+              documentFormula: daarFml[daarCols.document_formula - 1],
+              syncStatus:      daarRow[daarCols.sync_status - 1],
+              dateModified:    daarModified instanceof Date ? daarModified.toISOString() : String(daarModified)
+            });
+          }
+        }
+        _TF_RESULT = {
+          tag: 'fixture.dump_all_action_rows',
+          data: { rows: daarRows }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'list_test_drive_docs': {
+        // gts-dgw8 (litter-purge): enumerates Drive files sitting alongside
+        // the TEST spreadsheet whose name matches the shared test-doc naming
+        // convention ('GActionSheet-Test-<purpose>-<yyyyMMdd>-<hex>', see
+        // _testDocName/_testDocSuffix above) -- the audit no prior fixture
+        // could do (no lister existed). A single prefix check now covers
+        // every fixture creation site (journey, session, discovery-*,
+        // clone_doc_with_test_id), not just the original two. Scoped to
+        // the TEST sheet's own parent folder, not a Drive-wide search, since
+        // every harness doc is created as a sibling of TEST_SHEET_ID (see
+        // each creation site). Read-only: never trashes or modifies a file.
+        var ltddParent = DriveApp.getFileById(testSheetId).getParents();
+        var ltddFolder = ltddParent.hasNext() ? ltddParent.next() : DriveApp.getRootFolder();
+        var ltddFiles  = ltddFolder.getFiles();
+        var ltddRows   = [];
+        while (ltddFiles.hasNext()) {
+          var ltddFile = ltddFiles.next();
+          var ltddName = ltddFile.getName();
+          if (ltddName.indexOf('GActionSheet-Test-') !== 0) continue;
+          ltddRows.push({
+            id:          ltddFile.getId(),
+            name:        ltddName,
+            createdDate: ltddFile.getDateCreated().toISOString(),
+            isTrashed:   ltddFile.isTrashed()
+          });
+        }
+        _TF_RESULT = {
+          tag: 'fixture.list_test_drive_docs',
+          data: { files: ltddRows }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'restamp_docdata_names': {
+        // gts-dgw8 (litter-purge): one-shot repair of DocData rows flattened
+        // by _evictStaleDocData before gts-t9f9 fixed it -- syncAll's own
+        // integrity pass (SyncManager.js:792) only rewrites Doc Name when
+        // computedName !== existingRow.docName, which is FALSE here (the
+        // flattened text still equals the intended title), so these rows
+        // never self-heal on a normal sync. Rewrites just the Doc Name cell
+        // to a fresh HYPERLINK, using the row's own existing display text
+        // and fileId -- the exact same construction as
+        // SyncManager.js's _getOrUpsertDocDataRow, just targeted at rows
+        // already in the sheet instead of a fresh upsert. Skips any row
+        // whose Doc Name is already a formula (nothing to repair) or blank
+        // (no title to preserve -- that's the sticky-blank case, repaired by
+        // a forced resync instead, not this fixture).
+        var rdnSheet = ss.getSheetByName('DocData');
+        var rdnRepaired = 0;
+        if (rdnSheet) {
+          var rdnLastRow = rdnSheet.getLastRow();
+          if (rdnLastRow >= 2) {
+            var rdnCols     = CONTRACT_SCHEMA.sheetDocData.columnsByField;
+            var rdnNameCol  = rdnCols.doc_name;
+            var rdnIdCol    = rdnCols.file_id;
+            var rdnNumRows  = rdnLastRow - 1;
+            var rdnNameRange = rdnSheet.getRange(2, rdnNameCol, rdnNumRows, 1);
+            var rdnIdRange   = rdnSheet.getRange(2, rdnIdCol, rdnNumRows, 1);
+            var rdnNameValues   = rdnNameRange.getValues();
+            var rdnNameFormulas = rdnNameRange.getFormulas();
+            var rdnIdValues     = rdnIdRange.getValues();
+            for (var rdnI = 0; rdnI < rdnNameValues.length; rdnI++) {
+              var rdnDisplay = rdnNameValues[rdnI][0];
+              var rdnFormula = rdnNameFormulas[rdnI][0];
+              var rdnFileId  = rdnIdValues[rdnI][0];
+              if (!rdnFileId || rdnFormula || !rdnDisplay) continue; // repair target only
+              var rdnNewFormula = '=HYPERLINK("https://docs.google.com/document/d/' + rdnFileId +
+                '/edit","' + _escapeQuotes(rdnDisplay) + '")';
+              rdnSheet.getRange(rdnI + 2, rdnNameCol).setValue(rdnNewFormula);
+              rdnRepaired++;
+            }
+          }
+        }
+        GasLogger.log('fixture.restamp_docdata_names', { repaired: rdnRepaired });
+        _TF_RESULT = {
+          tag: 'fixture.restamp_docdata_names',
+          data: { repaired: rdnRepaired }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'get_team_data_rows': {
-        // Returns all TeamData rows ({teamId, folderId, contact}) (GTaskSheet-zc21).
+        // Returns all TeamData rows ({teamId, folderId, contact}) (gts-zc21).
         // Used to verify TeamData fixture setup never mutates pre-existing rows.
         _TF_RESULT = {
           tag: 'fixture.get_team_data_rows',
@@ -1990,9 +2638,546 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'seed_garbage_teamdata_row': {
+        // gts-moy1.2 regression coverage: appends one TeamData row with a
+        // deliberately implausible Folder Id (default '-NA-', the actual
+        // live-sheet placeholder that triggered the bug) under a
+        // distinctive, easily-cleaned-up teamId. Used to prove
+        // _fetchDriveDocMetadata's scoped-listing query survives one
+        // malformed folder id instead of Drive rejecting the whole combined
+        // 'in parents' OR clause with a 404 that took down BOTH the scoped
+        // listing and its own fallback safety net account-wide.
+        var sgtrTeamSheet = _getOrCreateSheet(ss, 'TeamData');
+        if (sgtrTeamSheet.getLastRow() < 1) {
+          sgtrTeamSheet.getRange(1, 1, 1, 4).setValues(
+            [CONTRACT_SCHEMA.sheetTeamData.headers]).setFontWeight('bold');
+        }
+        var sgtrTeamId   = data.teamId   || '_TEST_GTMOY12_GARBAGE';
+        var sgtrFolderId = (data.folderId !== undefined) ? data.folderId : '-NA-';
+        var sgtrLastRow  = sgtrTeamSheet.getLastRow();
+        sgtrTeamSheet.getRange(sgtrLastRow + 1, 1, 1, 4)
+          .setValues([[sgtrTeamId, sgtrFolderId, '', '']]);
+        _TF_RESULT = {
+          tag: 'fixture.seed_garbage_teamdata_row',
+          data: { teamId: sgtrTeamId, folderId: sgtrFolderId, row: sgtrLastRow + 1 }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'remove_teamdata_row_by_team_id': {
+        // Cleanup counterpart to seed_garbage_teamdata_row -- removes every
+        // TeamData row whose Team Id exactly matches data.teamId. Safe no-op
+        // if no such row exists.
+        var rtrTeamId   = data.teamId || '_TEST_GTMOY12_GARBAGE';
+        var rtrSheet    = ss.getSheetByName('TeamData');
+        var rtrRemoved  = 0;
+        if (rtrSheet && rtrSheet.getLastRow() >= 2) {
+          var rtrCols = CONTRACT_SCHEMA.sheetTeamData.columnsByField;
+          for (var rtrR = rtrSheet.getLastRow(); rtrR >= 2; rtrR--) {
+            var rtrVal = rtrSheet.getRange(rtrR, rtrCols.team_id).getValue();
+            if (rtrVal === rtrTeamId) {
+              rtrSheet.deleteRow(rtrR);
+              rtrRemoved++;
+            }
+          }
+        }
+        _TF_RESULT = {
+          tag: 'fixture.remove_teamdata_row_by_team_id',
+          data: { teamId: rtrTeamId, removed: rtrRemoved }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'resolve_team_tier_for_email': {
+        // gts-pulj regression coverage: calls
+        // _resolveTeamTierForVerifiedIdentity (src/AccessControl.js) directly
+        // for a synthetic already-verified email, bypassing the signed-
+        // assertion verification step (out of scope here -- covered by
+        // tests/test_signed_assertion.py) so this test can exercise the
+        // folder-tier resolution loop, including the gts-pulj implausible-
+        // folderId guard, without a live GIS sign-in. Mirrors
+        // seed_garbage_teamdata_row / get_team_data_rows's existing pattern
+        // of exposing an internal resolver as a direct test-support fixture.
+        var rtteTeamId = data.teamId || '';
+        var rtteEmail  = data.email  || 'nobody@example.invalid';
+        var rtteRows   = _readTeamDataRows(ss);
+        var rtteResolved = _resolveTeamTierForVerifiedIdentity(rtteEmail, rtteTeamId, rtteRows, {});
+        _TF_RESULT = {
+          tag: 'fixture.resolve_team_tier_for_email',
+          data: {
+            teamId: rtteTeamId,
+            email: rtteEmail,
+            tier: rtteResolved.tier,
+            method: rtteResolved.method,
+            folderTiers: rtteResolved.folderTiers
+          }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'seed_styled_action': {
+        // gts-1pk step 1: seeds this invocation's doc (testDocId — the
+        // caller's own isolated reference doc, set via the run_fixture
+        // testDocId override) with a first floating action, AI-1:, whose
+        // token and action-text ranges carry two deliberately DIFFERENT
+        // fixed styles (_TF_STYLED_AI_TOKEN / _TF_STYLED_ACTION_TEXT above),
+        // so configFormat/_configFormatForDoc sampling the wrong offset (or
+        // not sampling at all) is visible as a mismatch, not a coincidence.
+        var ssaText   = 'AI-1: Sample styled reference action';
+        var ssaPara   = body.appendParagraph(ssaText);
+        var ssaText2  = ssaPara.editAsText();
+        var ssaTokEnd = 4; // "AI-1:" occupies offsets 0-4 inclusive
+        var ssaActEnd = ssaText.length - 1;
+        var ssaActStart = 6; // offset 5 is the single space after "AI-1:"
+        ssaText2.setFontFamily(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.fontFamily);
+        ssaText2.setFontSize(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.fontSize);
+        ssaText2.setForegroundColor(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.color);
+        ssaText2.setBold(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.bold);
+        ssaText2.setItalic(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.italic);
+        ssaText2.setUnderline(0, ssaTokEnd, _TF_STYLED_AI_TOKEN.underline);
+        ssaText2.setFontFamily(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.fontFamily);
+        ssaText2.setFontSize(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.fontSize);
+        ssaText2.setForegroundColor(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.color);
+        ssaText2.setBold(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.bold);
+        ssaText2.setItalic(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.italic);
+        ssaText2.setUnderline(ssaActStart, ssaActEnd, _TF_STYLED_ACTION_TEXT.underline);
+        _TF_RESULT = { tag: 'fixture.seed_styled_action', data: { ok: true } };
+        break;
+      }
+
+      case 'seed_formatted_action': {
+        // gts-zocq: seeds this invocation's doc (testDocId, or data.docId
+        // when provided) with a floating action whose actionText carries a
+        // bold span over one word and a separate italic span over another —
+        // deliberately non-adjacent and non-overlapping so a scan bug that
+        // reads the wrong offset range, merges the two runs, or drops one
+        // entirely is visible as a mismatch rather than a coincidental pass.
+        // No status token (so the sync's "materialize missing explicit
+        // status" flush path exercises the new per-run bold/italic requests
+        // in _buildFlushRequests on the very first sync).
+        var sfaN        = (data && data.n) || 1;
+        var sfaText     = 'AI-' + sfaN + ': Please bold this and italic that today';
+        var sfaPara     = body.appendParagraph(sfaText);
+        var sfaTextEl   = sfaPara.editAsText();
+        var sfaBoldWord   = 'bold this';
+        var sfaItalicWord = 'italic that';
+        var sfaBoldStart   = sfaText.indexOf(sfaBoldWord);
+        var sfaBoldEnd     = sfaBoldStart + sfaBoldWord.length - 1;
+        var sfaItalicStart = sfaText.indexOf(sfaItalicWord);
+        var sfaItalicEnd   = sfaItalicStart + sfaItalicWord.length - 1;
+        sfaTextEl.setBold(sfaBoldStart, sfaBoldEnd, true);
+        sfaTextEl.setItalic(sfaItalicStart, sfaItalicEnd, true);
+        _TF_RESULT = { tag: 'fixture.seed_formatted_action', data: {
+          ok: true, n: sfaN, text: sfaText,
+          boldWord: sfaBoldWord, italicWord: sfaItalicWord
+        } };
+        break;
+      }
+
+      case 'seed_formatted_action_with_assignee': {
+        // gts-1ibp: same shape as seed_formatted_action, but with a leading
+        // plain-text email assignee (the form _buildFlushRequests' validEmail
+        // branch always rewrites into a real PERSON chip via insertPerson on
+        // the very next flush -- the exact branch gts-1ibp's cumulative
+        // left-shift lived in, and the one seed_formatted_action's assignee-
+        // less text never exercises). No status token, so the first sync's
+        // flush exercises the per-run bold/italic requests immediately.
+        var sfawaN        = (data && data.n) || 1;
+        var sfawaEmail    = (data && data.email) || 'jane@example.com';
+        var sfawaText     = 'AI-' + sfawaN + ': ' + sfawaEmail + ' Please bold this and italic that today';
+        var sfawaPara     = body.appendParagraph(sfawaText);
+        var sfawaTextEl   = sfawaPara.editAsText();
+        var sfawaBoldWord   = 'bold this';
+        var sfawaItalicWord = 'italic that';
+        var sfawaBoldStart   = sfawaText.indexOf(sfawaBoldWord);
+        var sfawaBoldEnd     = sfawaBoldStart + sfawaBoldWord.length - 1;
+        var sfawaItalicStart = sfawaText.indexOf(sfawaItalicWord);
+        var sfawaItalicEnd   = sfawaItalicStart + sfawaItalicWord.length - 1;
+        sfawaTextEl.setBold(sfawaBoldStart, sfawaBoldEnd, true);
+        sfawaTextEl.setItalic(sfawaItalicStart, sfawaItalicEnd, true);
+        _TF_RESULT = { tag: 'fixture.seed_formatted_action_with_assignee', data: {
+          ok: true, n: sfawaN, text: sfawaText, email: sfawaEmail,
+          boldWord: sfawaBoldWord, italicWord: sfawaItalicWord
+        } };
+        break;
+      }
+
+      case 'seed_link_action': {
+        // gts-tz5x: seeds this invocation's doc (testDocId, or data.docId
+        // when provided) with a floating action whose actionText carries a
+        // hyperlink over one phrase, deliberately isolated from any
+        // bold/italic span (ADR-0027 rule 12's hasFormatting gate must fire
+        // on link alone -- a link-only action must not be misread as
+        // unformatted and dropped). No status token, so the first sync's
+        // "materialize missing explicit status" flush path exercises the
+        // link's updateTextStyle request immediately, same as
+        // seed_formatted_action does for bold/italic.
+        //
+        // Accepts {n, url}; url defaults to one with encodable characters
+        // (query string) so the same fixture covers gts-tz5x case 3 without
+        // a second seed helper -- pass a plain https://host/path url to
+        // isolate the encodable-URL behavior from the base round-trip case.
+        var slaN       = (data && data.n) || 1;
+        var slaUrl     = (data && data.url) || 'https://example.com/docs?x=1&y=2';
+        // gts-mtw0: the paragraph carries the full 'AI-N: ...' token text (the
+        // scanner needs the token to recognize the action), but the scanner
+        // strips the token prefix before returning actionText (see
+        // SyncManager.js's header-parse path, ~line 1145: "the text form is
+        // stripped off actionText either way") -- so debug_action_runs'
+        // scanActionText is ALWAYS prefix-free. This fixture's returned 'text'
+        // must return the same prefix-free shape so a test can compare the two
+        // directly, instead of the raw seeded paragraph text.
+        var slaActionText = 'Please see the Q3 deck for context today';
+        var slaText    = 'AI-' + slaN + ': ' + slaActionText;
+        var slaPara    = body.appendParagraph(slaText);
+        var slaTextEl  = slaPara.editAsText();
+        var slaLinkWord  = 'Q3 deck';
+        var slaLinkStart = slaText.indexOf(slaLinkWord);
+        var slaLinkEnd   = slaLinkStart + slaLinkWord.length - 1;
+        slaTextEl.setLinkUrl(slaLinkStart, slaLinkEnd, slaUrl);
+        _TF_RESULT = { tag: 'fixture.seed_link_action', data: {
+          ok: true, n: slaN, text: slaActionText, url: slaUrl,
+          linkWord: slaLinkWord
+        } };
+        break;
+      }
+
+      case 'replace_action_plain_text': {
+        // gts-a8yh.2 state probe: rewrites an existing floating action's
+        // paragraph (previously seeded by e.g. seed_formatted_action) with
+        // NEW plain text carrying no bold/italic anywhere, so a re-sync
+        // exercises WebApp.js's doc-authoritative "update existing row"
+        // branch (actionText differs -> write executes) with
+        // runs === [] -- the exact code path _buildRichTextValueForActionText
+        // returns null for. Accepts {n, text}; `text` defaults to a plain
+        // sentence distinct from seed_formatted_action's text so the content
+        // comparison in that branch is guaranteed to trigger a write.
+        var raptN    = (data && data.n) || 1;
+        var raptText = (data && data.text) || ('AI-' + raptN + ': now nothing but plain text');
+        var raptParas = body.getParagraphs();
+        var raptFound = false;
+        for (var rapti = 0; rapti < raptParas.length; rapti++) {
+          if (raptParas[rapti].getText().indexOf('AI-' + raptN + ':') === 0) {
+            var raptTextEl = raptParas[rapti].editAsText();
+            var raptOldLen = raptTextEl.getText().length;
+            raptTextEl.setText(raptText);
+            // setText() does not reliably reset per-character style runs on
+            // its own (this fixture must not itself mask the very bug it is
+            // probing) -- explicitly clear bold/italic over the full new
+            // range.
+            raptTextEl.setBold(0, raptText.length - 1, false);
+            raptTextEl.setItalic(0, raptText.length - 1, false);
+            raptFound = true;
+            break;
+          }
+        }
+        _TF_RESULT = { tag: 'fixture.replace_action_plain_text', data: {
+          ok: raptFound, n: raptN, text: raptText
+        } };
+        break;
+      }
+
+      case 'create_canonical_reference_doc': {
+        // gts-colw AC#3: creates a NEW, permanent Doc (not the throwaway
+        // testDocId this dispatcher always opens/closes) and decodes
+        // data.apt into it — the one-time step that produces the canonical
+        // reference doc's fixed Drive location. Requires testDocId only to
+        // satisfy this function's own entry guard; that doc is untouched.
+        var ccrdApt = data && data.apt;
+        if (!ccrdApt) {
+          _TF_RESULT = { tag: 'fixture.create_canonical_reference_doc', data: { ok: false, error: 'data.apt is required' } };
+          break;
+        }
+        var ccrdName = (data && data.name) || 'GActionSheet — ADR-0027 Canonical Reference (gts-colw)';
+        var ccrdDoc = DocumentApp.create(ccrdName);
+        var ccrdDocId = ccrdDoc.getId();
+        decodeAptIntoDoc(ccrdDoc, ccrdApt); // saves and closes ccrdDoc internally
+        _TF_RESULT = { tag: 'fixture.create_canonical_reference_doc', data: {
+          ok: true, docId: ccrdDocId, docUrl: 'https://docs.google.com/document/d/' + ccrdDocId + '/edit'
+        } };
+        break;
+      }
+
+      case 'encode_reference_document': {
+        // gts-colw: encodes this invocation's doc (testDocId, or data.docId
+        // when provided) to Action Portable Text (docs/interfaces/action-
+        // portable-text.md). Used both for the round-trip check
+        // (encode(decode(x)) == x) and to regenerate the checked-in APT
+        // file from the human-maintained canonical reference doc.
+        var erdDocId = (data && data.docId) || testDocId;
+        var erdDoc = erdDocId === testDocId ? doc : DocumentApp.openById(erdDocId);
+        var erdApt = encodeDocToApt(erdDoc);
+        if (erdDoc === doc) { doc.saveAndClose(); docAlreadyClosed = true; }
+        _TF_RESULT = { tag: 'fixture.encode_reference_document', data: { ok: true, apt: erdApt } };
+        break;
+      }
+
+      case 'decode_reference_document': {
+        // gts-colw: decodes Action Portable Text (data.apt, required) into
+        // this invocation's doc (testDocId, or data.docId when provided).
+        // decodeAptIntoDoc is append-only (targets an EMPTY body), so this
+        // case clears the target doc's body first — makes the call a true
+        // "regenerate whole" regardless of whatever the doc held before
+        // (a fresh scn.new_doc() test seed, or the canonical Doc after a
+        // human hand-edited or a live sync flushed it). Without this,
+        // re-pushing a correction to an already-populated doc APPENDS a
+        // second copy instead of replacing the first (caught live 2026-08-27
+        // pushing a correction back to the canonical Doc).
+        var drdApt = data && data.apt;
+        if (!drdApt) {
+          _TF_RESULT = { tag: 'fixture.decode_reference_document', data: { ok: false, error: 'data.apt is required' } };
+          break;
+        }
+        var drdDocId = (data && data.docId) || testDocId;
+        var drdDoc = drdDocId === testDocId ? doc : DocumentApp.openById(drdDocId);
+        drdDoc.getBody().clear();
+        decodeAptIntoDoc(drdDoc, drdApt); // saves and closes drdDoc internally
+        if (drdDoc === doc) docAlreadyClosed = true;
+        _TF_RESULT = { tag: 'fixture.decode_reference_document', data: { ok: true, docId: drdDocId } };
+        break;
+      }
+
+      case 'debug_action_runs': {
+        // gts-zocq round-trip verification fixture. Accepts {docId, n}
+        // (docId defaults to testDocId). Returns three independently-sourced
+        // views of the SAME action's inline formatting so a test can compare
+        // them without trusting any one source:
+        //   scanRuns  — _scanFloatingActions' own runs[] for AI-n, read via a
+        //               FRESH DocumentApp.openById (not the dispatcher's own
+        //               already-open `doc`, so this also proves the doc on
+        //               disk — not an in-memory handle — carries the format).
+        //   sheetRuns — the Actions sheet's action_text cell RichTextValue
+        //               for that globalId, read via the same
+        //               _richTextRunsForCell helper the product uses.
+        var darDocId = (data && data.docId) || testDocId;
+        var darN     = (data && data.n) || 1;
+        if (darDocId === testDocId) { doc.saveAndClose(); docAlreadyClosed = true; }
+        else { docAlreadyClosed = true; }
+
+        var darDoc = DocumentApp.openById(darDocId);
+        var darActions = _scanFloatingActions(darDoc);
+        darDoc.saveAndClose();
+        var darScan = null;
+        for (var dai = 0; dai < darActions.length; dai++) {
+          if (darActions[dai].N === darN) { darScan = darActions[dai]; break; }
+        }
+
+        var darGlobalId = darScan ? darScan.globalId : darDocId + '/' + _actionTokenId(darN);
+        var darSheet = ss.getSheetByName('Actions');
+        var darSheetRuns = [];
+        var darSheetText = null;
+        if (darSheet) {
+          var darLastRow = darSheet.getLastRow();
+          if (darLastRow >= 2) {
+            var darGidCol = darSheet.getRange(2, _ACOL.global_id, darLastRow - 1, 1).getValues();
+            for (var dri = 0; dri < darGidCol.length; dri++) {
+              if (darGidCol[dri][0] === darGlobalId) {
+                var darRow = dri + 2;
+                darSheetText = darSheet.getRange(darRow, _ACOL.action_text).getValue();
+                darSheetRuns = _richTextRunsForCell(darSheet.getRange(darRow, _ACOL.action_text));
+                break;
+              }
+            }
+          }
+        }
+
+        _TF_RESULT = { tag: 'fixture.debug_action_runs', data: {
+          ok: true,
+          globalId: darGlobalId,
+          scanActionText: darScan ? darScan.actionText : null,
+          scanRuns:       darScan ? darScan.runs : null,
+          // gts-po8t: additive — ADR-0027 rule 5a custom fields as scanned
+          // FRESH off the doc, {FieldName:{text,runs}}, so a test can assert
+          // the write-side render (_renderCustomFieldLines) reparses as the
+          // same field(s)/value(s)/formatting on the next scan, independent
+          // of sheet custom_fields persistence (not yet shipped, gts-t6xs).
+          scanCustomFields: darScan ? darScan.customFields : null,
+          sheetActionText: darSheetText,
+          sheetRuns:       darSheetRuns
+        } };
+        break;
+      }
+
+      case 'config_format': {
+        // gts-d99c/gts-1pk: headless entry point for _configFormatForDoc(docId)
+        // (SyncManager.js), extracted from the interactive configFormat()
+        // menu shell. Accepts {docId}; falls back to this invocation's own
+        // testDocId (the run_fixture testDocId override) when omitted, same
+        // convention as the other fileId/docId-parameterized fixtures above.
+        var cfgDocId = data.docId || testDocId;
+        var cfgResult = _configFormatForDoc(cfgDocId);
+        _TF_RESULT = { tag: 'fixture.config_format', data: cfgResult };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'get_config_rows': {
+        // gts-1pk step 3/6: reads the Config sheet's raw rows back (durable-
+        // state assertion target — exactly one 'ai_token' + one 'action_text'
+        // row after sampling; zero rows after 'clear_config_rows').
+        var gcrSheet = ss.getSheetByName('Config');
+        var gcrRows  = [];
+        if (gcrSheet) {
+          var gcrLastRow = gcrSheet.getLastRow();
+          if (gcrLastRow >= 2) {
+            var gcrCols   = CONTRACT_SCHEMA.sheetConfig.columnsByField;
+            var gcrValues = gcrSheet.getRange(2, 1, gcrLastRow - 1, CONTRACT_SCHEMA.sheetConfig.headers.length).getValues();
+            for (var gcrI = 0; gcrI < gcrValues.length; gcrI++) {
+              var gcrKey = gcrValues[gcrI][gcrCols.key - 1];
+              if (!gcrKey) continue;
+              var gcrRawCell = gcrValues[gcrI][gcrCols.value - 1];
+              var gcrParsed = null;
+              try { gcrParsed = JSON.parse(gcrRawCell || '{}'); } catch (gcrErr) { gcrParsed = null; }
+              // gts debug (2026-09-02, SR Indent \t report): JSON.parse above
+              // silently nulls any plain-text row (SR Indent/Field SR Indent/
+              // Field SR SR Indent are never JSON), hiding what's actually in
+              // the cell. `raw`/`rawCharCodes` expose the literal string so a
+              // caller can tell "\t" (2 chars, backslash+t) apart from an
+              // actual tab character (1 char, code 9) or a blank cell (0
+              // chars) without guessing from `value` alone.
+              var gcrRawStr = String(gcrRawCell === undefined || gcrRawCell === null ? '' : gcrRawCell);
+              var gcrCharCodes = [];
+              for (var gcrJ = 0; gcrJ < gcrRawStr.length; gcrJ++) gcrCharCodes.push(gcrRawStr.charCodeAt(gcrJ));
+              gcrRows.push({ key: gcrKey, value: gcrParsed, raw: gcrRawStr, rawCharCodes: gcrCharCodes });
+            }
+          }
+        }
+        _TF_RESULT = { tag: 'fixture.get_config_rows', data: { rows: gcrRows } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'clear_config_rows': {
+        // gts-1pk step 5: clears the Config sheet's data rows (keeps the
+        // header) — an explicit reset, not an undo/revert-to-prior-style
+        // (_configFormatForDoc has no stack semantics). The next
+        // _getActionFormatConfig() read (any execution, including the same
+        // one via the cache-invalidate below) falls back to
+        // _DEFAULT_AI_TOKEN_STYLE / actionText:null.
+        var ccrSheet = ss.getSheetByName('Config');
+        if (ccrSheet) {
+          var ccrLastRow = ccrSheet.getLastRow();
+          if (ccrLastRow > 1) {
+            WriteGuard.wrap(function () {
+              ccrSheet.getRange(2, 1, ccrLastRow - 1, CONTRACT_SCHEMA.sheetConfig.headers.length).clearContent();
+            });
+          }
+        }
+        _actionFormatConfigCache = null;
+        _continuationIndentConfigCache = null;
+        _statusIconSizeConfigCache = undefined;
+        _TF_RESULT = { tag: 'fixture.clear_config_rows', data: { cleared: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'set_config_row': {
+        // gts-9a4j: generic Config-sheet Key/Value upsert for tests, distinct
+        // from configFormat's JSON-encoded 'ai_token'/'action_text' rows —
+        // this writes the raw value as given (used for 'SR Indent'/'Field SR
+        // Indent', plain integers a human types directly into the sheet).
+        // Accepts {key, value}. Creates the Config sheet/header if absent
+        // (mirrors SheetSetup.js's header list) rather than requiring
+        // Setup > Initialize to have run first.
+        var scrKey    = data.key;
+        var scrValue  = data.value;
+        var scrAppend = !!data.append;
+        if (!scrKey) {
+          _TF_RESULT = { tag: 'fixture.set_config_row', data: { ok: false, error: 'key required' } };
+          docAlreadyClosed = true;
+          break;
+        }
+        var scrSheet = ss.getSheetByName('Config');
+        var scrFinalValue = scrValue;
+        WriteGuard.wrap(function () {
+          if (!scrSheet) {
+            scrSheet = ss.insertSheet('Config');
+            scrSheet.getRange(1, 1, 1, CONTRACT_SCHEMA.sheetConfig.headers.length)
+              .setValues([CONTRACT_SCHEMA.sheetConfig.headers]);
+          }
+          var scrCols     = CONTRACT_SCHEMA.sheetConfig.columnsByField;
+          var scrLastRow  = scrSheet.getLastRow();
+          var scrRowIndex = -1;
+          if (scrLastRow >= 2) {
+            var scrKeys = scrSheet.getRange(2, scrCols.key, scrLastRow - 1, 1).getValues();
+            for (var scrI = 0; scrI < scrKeys.length; scrI++) {
+              if (scrKeys[scrI][0] === scrKey) { scrRowIndex = 2 + scrI; break; }
+            }
+          }
+          if (scrRowIndex === -1) {
+            scrRowIndex = Math.max(scrLastRow + 1, 2);
+          } else if (scrAppend) {
+            // gts-gwyg: comma-append onto an existing value (e.g. a real
+            // AdminUsers row a human seeded manually) instead of clobbering
+            // it -- distinct from the default overwrite semantics every
+            // other set_config_row caller (SR Indent/Field SR Indent) relies
+            // on, so opt-in only via data.append.
+            var scrExisting = String(scrSheet.getRange(scrRowIndex, scrCols.value).getValue() || '').trim();
+            scrFinalValue = scrExisting ? (scrExisting + ',' + scrValue) : scrValue;
+          }
+          scrSheet.getRange(scrRowIndex, scrCols.key).setValue(scrKey);
+          scrSheet.getRange(scrRowIndex, scrCols.value).setValue(scrFinalValue);
+        });
+        _actionFormatConfigCache = null;
+        _continuationIndentConfigCache = null;
+        _statusIconSizeConfigCache = undefined;
+        _TF_RESULT = { tag: 'fixture.set_config_row', data: { ok: true, key: scrKey, value: scrFinalValue } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'debug_action_text_style': {
+        // gts-1pk steps 4/6: verifies an already-flushed AI-N chip's applied
+        // style via the SAME Docs REST GET mechanism the real flush uses
+        // (docs.googleapis.com/v1/documents/{docId}, textStyle fields) —
+        // not a DocumentApp visual read, per the AC's "not just visually"
+        // requirement. Accepts {docId, n}; docId defaults to testDocId.
+        var datsDocId = data.docId || testDocId;
+        var datsN     = data.n || data.N || 1;
+        if (datsDocId === testDocId) {
+          doc.saveAndClose(); // release this dispatcher's own handle first
+          docAlreadyClosed = true;
+        } else {
+          docAlreadyClosed = true;
+        }
+        var datsToken  = ScriptApp.getOAuthToken();
+        var datsFields = 'body.content(paragraph/elements(textRun(content,textStyle(weightedFontFamily,fontSize,foregroundColor,bold,italic,underline))))';
+        var datsResp = UrlFetchApp.fetch(
+          'https://docs.googleapis.com/v1/documents/' + datsDocId + '?fields=' + encodeURIComponent(datsFields),
+          { headers: { Authorization: 'Bearer ' + datsToken }, muteHttpExceptions: true }
+        );
+        var datsResult;
+        if (datsResp.getResponseCode() === 200) {
+          var datsBody    = JSON.parse(datsResp.getContentText());
+          var datsContent = (datsBody.body || {}).content || [];
+          datsResult = _tfExtractActionTextStyle(datsContent, datsN);
+        } else {
+          datsResult = { ok: false, error: 'GET failed: HTTP ' + datsResp.getResponseCode() };
+        }
+        _TF_RESULT = { tag: 'fixture.debug_action_text_style', data: datsResult };
+        break;
+      }
+
+      case 'debug_bulk_drive_metadata': {
+        // Diagnostic (gts-sl64 investigation): returns what syncAll's own
+        // bulk _fetchDriveDocMetadata() call currently reports for fileId,
+        // to compare against the live per-doc debug_drive_ancestors walk.
+        var dbdmFileId = data.fileId || testDocId;
+        var dbdmMap = _fetchDriveDocMetadata();
+        _TF_RESULT = {
+          tag: 'fixture.debug_bulk_drive_metadata',
+          data: { fileId: dbdmFileId, entry: dbdmMap[dbdmFileId] || null }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'debug_drive_ancestors': {
         // Diagnostic: returns the chain of ancestor folders ({id, name}) from
-        // fileId's immediate parent up to My Drive root (GTaskSheet-u2np).
+        // fileId's immediate parent up to My Drive root (gts-u2np).
         // Useful for explaining unexpected teamScope folder-walk matches.
         var ddaFileId = data.fileId || testSheetId;
         var ddaChain  = [];
@@ -2012,8 +3197,8 @@ function setupTestFixtures(scenario, data) {
 
       case 'set_docdata_row': {
         // Upserts a DocData row, overriding only the fields supplied
-        // (GTaskSheet-me6w.6: teamId/syncStatus, for the UpdateDoc-override
-        // scenarios S3/S7; GTaskSheet-cduk: actionCount/resolvedCount/docName,
+        // (gts-me6w.6: teamId/syncStatus, for the UpdateDoc-override
+        // scenarios S3/S7; gts-cduk: actionCount/resolvedCount/docName,
         // to corrupt a row so the syncAll() integrity pass has something to
         // reconcile). Acts on a row already created by a prior sync.
         var sdrFileId = data.fileId || testDocId;
@@ -2037,8 +3222,94 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'clone_doc_with_test_id': {
+        // Copies an arbitrary source Doc (data.docId) into ITS OWN parent
+        // folder, appending a caller-supplied test id to the copy's name for
+        // traceability/uniqueness across runs. Built for
+        // tests/test_floating_action_copy_fidelity.py, which clones a real,
+        // non-fixture-seeded reference Doc and must never mutate the
+        // original -- DriveApp.makeCopy() only reads the source. Distinct
+        // from move_doc_to_folder above (moves, doesn't copy, and requires a
+        // caller-supplied folderId) and beginTestSession's clone (clones the
+        // master template into the TEST_SHEET's own folder, not the source
+        // doc's parent). DriveApp-only, like move_doc_to_folder/trash_doc --
+        // never touches the source via DocumentApp, so docAlreadyClosed is
+        // set without ever calling doc.saveAndClose() on it.
+        var cdwtiSourceId = data.docId;
+        if (!cdwtiSourceId) throw new Error('clone_doc_with_test_id: docId required');
+        var cdwtiTestId = data.testId || Utilities.getUuid();
+        var cdwtiSourceFile = DriveApp.getFileById(cdwtiSourceId);
+        var cdwtiFolderIter = cdwtiSourceFile.getParents();
+        var cdwtiFolder = cdwtiFolderIter.hasNext() ? cdwtiFolderIter.next() : DriveApp.getRootFolder();
+        var cdwtiCloneName = 'GActionSheet-Test-clone-' + _testDocSuffix() +
+          ' [src:' + cdwtiSourceFile.getName() + '][test:' + cdwtiTestId + ']';
+        var cdwtiCloneFile = cdwtiSourceFile.makeCopy(cdwtiCloneName, cdwtiFolder);
+        _TF_RESULT = {
+          tag: 'fixture.clone_doc_with_test_id',
+          data: { docId: cdwtiCloneFile.getId(), name: cdwtiCloneName, sourceDocId: cdwtiSourceId }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'admin_scan_pass': {
+        // gts-lgpx twin-TST support. Invokes the time-driven trigger handler
+        // (resumeAdminDocScan, src/AdminDocScan.js) directly, so the suite
+        // can exercise that entry point as a CALL-SITE rather than only the
+        // helper it delegates to — the entry-point coverage invariant
+        // (CLAUDE.md) counts the trigger handler as state-modifying.
+        // Deliberately drives the real handler, not _advanceScanPass, so a
+        // regression in the handler itself is visible to the tests.
+        resumeAdminDocScan();
+        _TF_RESULT = { tag: 'fixture.admin_scan_pass', data: { state: _readScanState() } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'admin_scan_set_state': {
+        // gts-lgpx twin-TST support. Reads or patches the persisted scan
+        // state so a test can (a) assert durable progress directly rather
+        // than inferring it from a response body, and (b) manufacture the
+        // stale-running case (status:'running' with an old updatedAt) that
+        // otherwise needs a genuinely crashed 6-minute execution to produce.
+        // `patch` is shallow-merged; `clear:true` wipes the feature's
+        // properties entirely (fresh-scan precondition).
+        if (data.clear) {
+          _clearScanState();
+          _TF_RESULT = { tag: 'fixture.admin_scan_set_state', data: { state: null } };
+          docAlreadyClosed = true;
+          break;
+        }
+        var assState = _readScanState();
+        if (data.patch && assState) {
+          for (var assK in data.patch) {
+            if (Object.prototype.hasOwnProperty.call(data.patch, assK)) {
+              assState[assK] = data.patch[assK];
+            }
+          }
+          // Write the blob verbatim when the patch sets updatedAt itself —
+          // _writeScanState would stamp a fresh heartbeat and destroy the
+          // very staleness the test is constructing.
+          if (data.patch.updatedAt) {
+            PropertiesService.getScriptProperties()
+              .setProperty(ADMIN_DOC_SCAN_STATE_PROP, JSON.stringify(assState));
+          } else {
+            _writeScanState(assState);
+          }
+        }
+        _TF_RESULT = {
+          tag: 'fixture.admin_scan_set_state',
+          data: { state: _readScanState(),
+                  triggers: ScriptApp.getProjectTriggers().filter(function (tg) {
+                    return tg.getHandlerFunction() === ADMIN_DOC_SCAN_TRIGGER_HANDLER;
+                  }).length }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'move_doc_to_folder': {
-        // Moves a doc into the given folder (GTaskSheet-me6w.6) — used by the
+        // Moves a doc into the given folder (gts-me6w.6) — used by the
         // sticky-after-move scenario (S8) and the folder-hierarchy fixture.
         var mdtfDocId    = data.docId || testDocId;
         var mdtfFolderId = data.folderId;
@@ -2055,47 +3326,65 @@ function setupTestFixtures(scenario, data) {
       case 'setup_team_scope_fixture': {
         // Idempotent (check-exists-or-create, no cleanup) folder hierarchy +
         // TeamData rows for the S1a/S1b/S1c/S8 folder-walk scenarios
-        // (GTaskSheet-me6w.6). Folder IDs are persisted in script properties so
+        // (gts-me6w.6). Folder IDs are persisted in script properties so
         // repeat runs reuse the same Drive folders.
         //
-        //   testTeamA (parent, registered TestTeamA)
-        //   |- testTeamAChild (child, registered TestTeamAChild)
+        //   testTeamA (parent, registered TestTeamScopeA)
+        //   |- testTeamAChild (child, registered TestTeamScopeAChild)
         //   `- testTeamAMid (unregistered)
         //      `- testTeamADeep (unregistered, no TeamData row)
         //
         //   testTeamNoTeam (sibling of testTeamA, unregistered, no TeamData
         //   row) — used by S2/S6 for the folder-walk no-match path
-        //   (GTaskSheet-u2np).
+        //   (gts-u2np).
+        //
+        // NOTE (gts-vc3m): this fixture's own teamId literals are
+        // 'TestTeamScopeA'/'TestTeamScopeAChild' -- distinct from the
+        // separately-provisioned live multi-folder ACL fixture (gts-79dw.4.16,
+        // docs/verified-team-portal-plan.md §6a), which independently uses
+        // teamId 'TestTeamA' for its own two folder rows. The script-property
+        // keys below (TEAMSCOPE_FOLDER_SCOPE_*) are deliberately distinct from
+        // the legacy TEAMSCOPE_FOLDER_* keys this fixture used to write, which
+        // had come to point at the exact same Drive folder the .4.16 ACL
+        // fixture reuses (folder 1) -- reusing that folder here would leave
+        // two TeamData rows with different teamIds pointing at the same
+        // Folder Id, making _walkFolderForTeam's folder-walk match
+        // order-dependent. Using fresh property keys forces this fixture onto
+        // its own, non-shared Drive folders.
+        //
+        // Also memoized cross-session, like DISCOVERY_* above: TEAMSCOPE_FOLDER_*
+        // sits outside the '_TEST_' prefix so 'reset_test_state' leaves these
+        // Drive folder IDs alone rather than forcing re-creation every run.
         var stsfProps = PropertiesService.getScriptProperties();
 
         var stsfRootIter = DriveApp.getFileById(testSheetId).getParents();
         var stsfRoot = stsfRootIter.hasNext() ? stsfRootIter.next() : DriveApp.getRootFolder();
 
-        var stsfParentId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A');
+        var stsfParentId = stsfProps.getProperty('TEAMSCOPE_FOLDER_SCOPE_A');
         var stsfParent = stsfParentId ? DriveApp.getFolderById(stsfParentId)
                                        : stsfRoot.createFolder('GActionSheet Test - TeamScope A');
         stsfParentId = stsfParent.getId();
-        stsfProps.setProperty('TEAMSCOPE_FOLDER_A', stsfParentId);
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_SCOPE_A', stsfParentId);
 
-        var stsfChildId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A_CHILD');
+        var stsfChildId = stsfProps.getProperty('TEAMSCOPE_FOLDER_SCOPE_A_CHILD');
         var stsfChild = stsfChildId ? DriveApp.getFolderById(stsfChildId)
                                      : stsfParent.createFolder('GActionSheet Test - TeamScope A Child');
         stsfChildId = stsfChild.getId();
-        stsfProps.setProperty('TEAMSCOPE_FOLDER_A_CHILD', stsfChildId);
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_SCOPE_A_CHILD', stsfChildId);
 
-        var stsfMidId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A_MID');
+        var stsfMidId = stsfProps.getProperty('TEAMSCOPE_FOLDER_SCOPE_A_MID');
         var stsfMid = stsfMidId ? DriveApp.getFolderById(stsfMidId)
                                  : stsfParent.createFolder('GActionSheet Test - TeamScope A Mid');
         stsfMidId = stsfMid.getId();
-        stsfProps.setProperty('TEAMSCOPE_FOLDER_A_MID', stsfMidId);
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_SCOPE_A_MID', stsfMidId);
 
-        var stsfDeepId = stsfProps.getProperty('TEAMSCOPE_FOLDER_A_DEEP');
+        var stsfDeepId = stsfProps.getProperty('TEAMSCOPE_FOLDER_SCOPE_A_DEEP');
         var stsfDeep = stsfDeepId ? DriveApp.getFolderById(stsfDeepId)
                                    : stsfMid.createFolder('GActionSheet Test - TeamScope A Deep');
         stsfDeepId = stsfDeep.getId();
-        stsfProps.setProperty('TEAMSCOPE_FOLDER_A_DEEP', stsfDeepId);
+        stsfProps.setProperty('TEAMSCOPE_FOLDER_SCOPE_A_DEEP', stsfDeepId);
 
-        // No-team folder (GTaskSheet-u2np): the live TeamData row
+        // No-team folder (gts-u2np): the live TeamData row
         // 'TestGActionSheet' registers stsfRoot itself (testSheetId's parent
         // "GActionSheet" folder) — so any descendant of stsfRoot walks up to
         // a match. Create the no-team folder at My Drive root instead, which
@@ -2106,7 +3395,7 @@ function setupTestFixtures(scenario, data) {
         stsfNoTeamId = stsfNoTeam.getId();
         stsfProps.setProperty('TEAMSCOPE_FOLDER_NOTEAM_ROOT', stsfNoTeamId);
 
-        // Idempotent TeamData rows: TestTeamA -> A, TestTeamAChild -> Child
+        // Idempotent TeamData rows: TestTeamScopeA -> A, TestTeamScopeAChild -> Child
         var stsfTeamSheet = _getOrCreateSheet(ss, 'TeamData');
         if (stsfTeamSheet.getLastRow() < 1) {
           stsfTeamSheet.getRange(1, 1, 1, 3).setValues([['Team Id', 'Folder Id', 'Contact']]).setFontWeight('bold');
@@ -2114,12 +3403,12 @@ function setupTestFixtures(scenario, data) {
         var stsfRows = _readTeamDataRows(ss);
         var stsfHasA = false, stsfHasChild = false;
         for (var stsfI = 0; stsfI < stsfRows.length; stsfI++) {
-          if (stsfRows[stsfI].teamId === 'TestTeamA') stsfHasA = true;
-          if (stsfRows[stsfI].teamId === 'TestTeamAChild') stsfHasChild = true;
+          if (stsfRows[stsfI].teamId === 'TestTeamScopeA') stsfHasA = true;
+          if (stsfRows[stsfI].teamId === 'TestTeamScopeAChild') stsfHasChild = true;
         }
         var stsfNewRows = [];
-        if (!stsfHasA) stsfNewRows.push(['TestTeamA', stsfParentId, '']);
-        if (!stsfHasChild) stsfNewRows.push(['TestTeamAChild', stsfChildId, '']);
+        if (!stsfHasA) stsfNewRows.push(['TestTeamScopeA', stsfParentId, '']);
+        if (!stsfHasChild) stsfNewRows.push(['TestTeamScopeAChild', stsfChildId, '']);
         if (stsfNewRows.length > 0) {
           var stsfLastRow = stsfTeamSheet.getLastRow();
           stsfTeamSheet.getRange(stsfLastRow + 1, 1, stsfNewRows.length, 3).setValues(stsfNewRows);
@@ -2144,6 +3433,250 @@ function setupTestFixtures(scenario, data) {
         SpreadsheetApp.flush();
         _TF_RESULT = { tag: 'fixture.sync_all', data: { ok: true } };
         docAlreadyClosed = true;
+        break;
+      }
+
+      case 'sync_all_force_listing_miss': {
+        // gts-m33k: simulates the Shared-Drive-listing-omission symptom
+        // (gts-rskf) for a specific, otherwise perfectly live and reachable
+        // doc, without requiring a real Shared Drive to be provisioned in
+        // this test environment — no test Shared Drive folder id exists in
+        // local.settings.json (see plan-context.md). Monkey-patches the
+        // global _fetchDriveDocMetadata for the duration of exactly one
+        // syncAll() call so the target doc is absent from the bulk listing
+        // map exactly as a Shared-Drive-hosted doc would have been pre-fix,
+        // while still being fully reachable via the per-doc
+        // _fetchSingleDocMetadata fallback syncAll now calls before marking
+        // anything Doc Not Found. Restored in a finally block so the patch
+        // never leaks past this single request.
+        var flmDocId   = data.docId || testDocId;
+        var flmRealFetch = _fetchDriveDocMetadata;
+        _fetchDriveDocMetadata = function () {
+          var map = flmRealFetch();
+          delete map[flmDocId];
+          return map;
+        };
+        try {
+          syncAll();
+          SpreadsheetApp.flush();
+        } finally {
+          _fetchDriveDocMetadata = flmRealFetch;
+        }
+        _TF_RESULT = { tag: 'fixture.sync_all_force_listing_miss', data: { docId: flmDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'sync_all_force_listing_miss_multi': {
+        // gts-uuse point 3: same Shared-Drive-listing-omission simulation as
+        // 'sync_all_force_listing_miss' above, but removes MULTIPLE target
+        // docs from the bulk map in the same syncAll() call so the sweep's
+        // per-doc fallback has more than one doc to resolve at once. That is
+        // exactly the condition _fetchDriveDocMetadataBatch (gts-uuse) exists
+        // for: syncAll only calls it when missingDocIds.length > 1, so a
+        // single-doc miss (the existing fixture) never exercises the actual
+        // batch/drive/v3 HTTP path. Restored in a finally block so the patch
+        // never leaks past this single request.
+        var flmmDocIds     = data.docIds || [];
+        var flmmRealFetch  = _fetchDriveDocMetadata;
+        _fetchDriveDocMetadata = function () {
+          var map = flmmRealFetch();
+          for (var flmmI = 0; flmmI < flmmDocIds.length; flmmI++) {
+            delete map[flmmDocIds[flmmI]];
+          }
+          return map;
+        };
+        try {
+          syncAll();
+          SpreadsheetApp.flush();
+        } finally {
+          _fetchDriveDocMetadata = flmmRealFetch;
+        }
+        _TF_RESULT = { tag: 'fixture.sync_all_force_listing_miss_multi', data: { docIds: flmmDocIds } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'sync_all_force_team_walk_error': {
+        // gts-sl64 AC4: simulates a transient Drive folder-parent lookup
+        // failure for one specific doc during syncAll's team-reconciliation
+        // pass, without depending on a real, timing-sensitive Drive outage.
+        // Monkey-patches the global _walkFolderForTeam so it returns the
+        // walk's own "could not complete" sentinel (false) for the target
+        // doc only, for the duration of exactly one syncAll() call, proving
+        // the pass leaves that doc's existing DocData.teamId untouched
+        // rather than clobbering it with a blank. Restored in a finally
+        // block so the patch never leaks past this single request.
+        var fweDocId    = data.docId || testDocId;
+        var fweRealWalk = _walkFolderForTeam;
+        _walkFolderForTeam = function (docId, teamDataRows, folderTeamCache) {
+          if (docId === fweDocId) return false;
+          return fweRealWalk(docId, teamDataRows, folderTeamCache);
+        };
+        try {
+          syncAll();
+          SpreadsheetApp.flush();
+        } finally {
+          _walkFolderForTeam = fweRealWalk;
+        }
+        _TF_RESULT = { tag: 'fixture.sync_all_force_team_walk_error', data: { docId: fweDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'sync_all_force_drive_5xx': {
+        // gts-pm72 Backstop proof: simulates N consecutive transient Drive
+        // files.list 5xx responses (the sync.driveMetadata.error symptom)
+        // without depending on a real Google-side outage lining up with a
+        // test run. Sets _TEST_FORCE_DRIVE_5XX_COUNT, which
+        // SyncManager.js's _fetchDriveWithRetry consults on every Drive REST
+        // attempt via _driveFetchTestOverrideCode -- each consulted attempt
+        // decrements the counter and reports a synthetic HTTP 500 (real
+        // Drive is still called underneath; only the code the retry loop
+        // sees is overridden, so this never touches production Drive
+        // behaviour). The counter is a '_TEST_' property, so a crashed test
+        // is swept by 'reset_test_state' rather than leaking into later runs.
+        //
+        // data.fails (default 1) is the number of attempts to force-fail:
+        //   - fails < 3 (the bounded retry's max attempts): a later attempt
+        //     within the same _fetchDriveWithRetry call recovers, so
+        //     sync.driveMetadata.error is never logged and syncAll finishes
+        //     clean -- proves the retry recovers.
+        //   - fails >= 3: every attempt in the bounded window is forced,
+        //     the loop exhausts and _fetchDriveDocMetadata still throws (its
+        //     existing per-doc fallback then keeps the sweep correct) --
+        //     proves the retry is bounded, not infinite/skipped.
+        var d5xxFails = (data && data.fails != null) ? data.fails : 1;
+        PropertiesService.getScriptProperties().setProperty('_TEST_FORCE_DRIVE_5XX_COUNT', String(d5xxFails));
+        try {
+          syncAll();
+          SpreadsheetApp.flush();
+        } finally {
+          PropertiesService.getScriptProperties().deleteProperty('_TEST_FORCE_DRIVE_5XX_COUNT');
+        }
+        _TF_RESULT = { tag: 'fixture.sync_all_force_drive_5xx', data: { requestedFails: d5xxFails } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'sync_all_force_webapp_non200': {
+        // gts-232z Backstop proof: simulates N consecutive non-200 responses
+        // from _syncActionRows' own self-call back into this same deployed
+        // WebApp (the documented /exec -> script.googleusercontent.com
+        // routing glitch, observed live as HTTP 302) without depending on a
+        // real routing hiccup lining up with a test run. Sets
+        // _TEST_FORCE_WEBAPP_NON200_COUNT, which SyncManager.js's
+        // _syncActionRows consults on every self-call attempt via
+        // _webAppFetchTestOverrideCode -- each consulted attempt decrements
+        // the counter and reports a synthetic HTTP 302 (the real self-call
+        // still happens underneath -- a real nested GAS execution answers
+        // it -- only the code the retry loop sees is overridden, mirroring
+        // sync_all_force_drive_5xx's fault-injection shape one level up).
+        // The counter is a '_TEST_' property, so a crashed test is swept by
+        // 'reset_test_state' rather than leaking into later runs.
+        //
+        // data.fails (default 1) is the number of attempts to force-fail:
+        //   - fails < 3 (the bounded retry's max attempts): a later attempt
+        //     within the same _syncActionRows call recovers, so sync.error
+        //     is never logged and syncAll finishes with the row synced --
+        //     proves the retry recovers.
+        //   - fails >= 3: every attempt in the bounded window is forced, the
+        //     loop exhausts and _syncActionRows still logs sync.error and
+        //     returns a zeroed result (its existing pre-fix behaviour) --
+        //     proves the retry is bounded, not infinite/skipped.
+        var wa302Fails = (data && data.fails != null) ? data.fails : 1;
+        PropertiesService.getScriptProperties().setProperty('_TEST_FORCE_WEBAPP_NON200_COUNT', String(wa302Fails));
+        try {
+          syncAll();
+          SpreadsheetApp.flush();
+        } finally {
+          PropertiesService.getScriptProperties().deleteProperty('_TEST_FORCE_WEBAPP_NON200_COUNT');
+        }
+        _TF_RESULT = { tag: 'fixture.sync_all_force_webapp_non200', data: { requestedFails: wa302Fails } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'insert_tracker_force_gas_retry': {
+        // gts-bops Backstop proof: forces N consecutive synthetic
+        // 'Service Documents failed while accessing document with id ...'
+        // exceptions out of TrackerTable.js's DocumentApp.openById call --
+        // the exact failure that triggered gts-bops (F10, S5 merge-gate run
+        // 2026-08-07) -- via withGasRetry's own test-only fault-injection
+        // hook (RetryUtil.js::_gasRetryTestShouldForceFailure), keyed on
+        // that call site's label. Real DocumentApp is never touched; only
+        // the code path withGasRetry sees is overridden, mirroring
+        // sync_all_force_drive_5xx's fault-injection shape one level up
+        // (exception-based instead of response-code-based).
+        //
+        // data.fails (default 1) is the number of attempts to force-fail:
+        //   - fails < 3 (the bounded retry's max attempts): insertTrackerTable
+        //     still succeeds, having consumed >1 attempt -- proves the retry
+        //     recovers (gasRetry.attempt + gasRetry.recovered logged, no
+        //     gasRetry.exhausted, no tracker.error).
+        //   - fails >= 3: every attempt in the bounded window is forced, the
+        //     loop exhausts and insertTrackerTable throws (caught and logged
+        //     as tracker.error by its own existing catch, same as before this
+        //     bead) -- proves the retry is bounded, not infinite/skipped.
+        var itfLabel = 'TrackerTable.insertTrackerTable:DocumentApp.openById';
+        var itfFails = (data && data.fails != null) ? data.fails : 1;
+        _tfInsertFloatingAction(body, 'AI-1: gts-bops forced-retry tracker action');
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        syncDocument(testDocId);
+        SpreadsheetApp.flush();
+        PropertiesService.getScriptProperties().setProperty(
+          '_TEST_FORCE_GAS_RETRY_FAIL_COUNT:' + itfLabel, String(itfFails));
+        var itfOk = true;
+        var itfErr = null;
+        try {
+          insertTrackerTable(testDocId);
+        } catch (e) {
+          itfOk = false;
+          itfErr = e.message;
+        } finally {
+          PropertiesService.getScriptProperties().deleteProperty(
+            '_TEST_FORCE_GAS_RETRY_FAIL_COUNT:' + itfLabel);
+        }
+        _TF_RESULT = {
+          tag: 'fixture.insert_tracker_force_gas_retry',
+          data: { requestedFails: itfFails, ok: itfOk, err: itfErr }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'gas_retry_classifier_selftest': {
+        // gts-bops AC5 proof: RetryUtil.js::_isRetryableGasError classifies
+        // real (non-transient) error messages as NOT retryable, so a genuine
+        // not-found/permission-denied error still surfaces on attempt 1
+        // rather than burning 2 extra attempts + ~2s of backoff on an answer
+        // that will never change. Pure-function check -- no live Doc/Drive
+        // call, no doc mutation, near-instant.
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        var gcsCases = [
+          { msg: 'Service Documents failed while accessing document with id abc123.', expect: true },
+          { msg: 'Service invoked too many times in a short time: getFileById.', expect: true },
+          { msg: 'Internal error executing the API request.', expect: true },
+          { msg: "We're sorry, a server error occurred. Please wait a bit and try again.", expect: true },
+          { msg: 'Invalid argument: id', expect: false },
+          { msg: 'Document is missing (perhaps it was deleted?)', expect: false },
+          { msg: 'You do not have permission to access the requested document.', expect: false },
+          { msg: 'File not found.', expect: false }
+        ];
+        var gcsResults = [];
+        var gcsAllMatch = true;
+        for (var gc = 0; gc < gcsCases.length; gc++) {
+          var gcsGot = _isRetryableGasError({ message: gcsCases[gc].msg });
+          var gcsMatch = gcsGot === gcsCases[gc].expect;
+          if (!gcsMatch) gcsAllMatch = false;
+          gcsResults.push({ msg: gcsCases[gc].msg, expect: gcsCases[gc].expect, got: gcsGot, match: gcsMatch });
+        }
+        _TF_RESULT = {
+          tag: 'fixture.gas_retry_classifier_selftest',
+          data: { allMatch: gcsAllMatch, results: gcsResults }
+        };
         break;
       }
 
@@ -2179,26 +3712,77 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'menu_cleanup_test_docs': {
+        // gts-97ol/gts-ve6z: menuCleanupTestDocs() -> ArchiveManager.purgeByPrefix
+        // (getActiveSpreadsheet()). No interactive Sheets UI exists in this
+        // headless run_fixture context, so SpreadsheetApp.getUi() throws inside
+        // menuCleanupTestDocs() and it deliberately takes the documented
+        // no-confirm path (see that function's own doc comment) — this is the
+        // one call site that exercises it, by design.
+        var mctdResult = menuCleanupTestDocs();
+        SpreadsheetApp.flush();
+        _TF_RESULT = { tag: 'fixture.menu_cleanup_test_docs', data: mctdResult };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'menu_sync_active_doc': {
         // menuSyncActiveDoc() -> syncDocument(docId) — Docs-menu wrapper
-        // call-site (GTaskSheet-ez2e), distinct from the already-covered
+        // call-site (gts-ez2e), distinct from the already-covered
         // syncDocument() core. doc.saveAndClose() first so syncDocument's own
         // open of testDocId doesn't lock against this dispatcher's handle.
+        //
+        // menuSyncActiveDoc() is a real zero-argument menu callback (production
+        // API shape) so it cannot take docId as a parameter here either — it
+        // resolves via DocumentApp.getActiveDocument(), which is null outside a
+        // real Docs UI session. _TEST_ACTIVE_DOC_ID is the narrow, case-scoped
+        // bridge for that one gap: set immediately before the call, cleared
+        // immediately after in a finally, so its lifetime never spans more than
+        // this single case (unlike the old dispatcher-wide TEST_DOC_ID shim).
         doc.saveAndClose();
         docAlreadyClosed = true;
-        menuSyncActiveDoc();
+        props.setProperty('_TEST_ACTIVE_DOC_ID', testDocId);
+        try {
+          menuSyncActiveDoc();
+        } finally {
+          props.deleteProperty('_TEST_ACTIVE_DOC_ID');
+        }
         SpreadsheetApp.flush();
         _TF_RESULT = { tag: 'fixture.menu_sync_active_doc', data: { docId: testDocId } };
         break;
       }
 
-      case 'menu_insert_tracker_active_doc': {
-        // menuInsertTrackerActiveDoc() -> insertTrackerTable(docId) — Docs-menu
-        // wrapper call-site (GTaskSheet-ez2e), distinct from the already-covered
-        // insertTrackerTable() core (see the 'insert_tracker_table' case above).
+      case 'menu_force_refresh_active_doc': {
+        // menuForceRefreshActiveDoc() -> syncDocument(docId, {force:true}) —
+        // Docs-menu "Force Refresh Style" wrapper call-site (gts-t78c),
+        // distinct from the plain menuSyncActiveDoc() case above. See
+        // 'menu_sync_active_doc' above for why _TEST_ACTIVE_DOC_ID exists.
         doc.saveAndClose();
         docAlreadyClosed = true;
-        menuInsertTrackerActiveDoc();
+        props.setProperty('_TEST_ACTIVE_DOC_ID', testDocId);
+        try {
+          menuForceRefreshActiveDoc();
+        } finally {
+          props.deleteProperty('_TEST_ACTIVE_DOC_ID');
+        }
+        SpreadsheetApp.flush();
+        _TF_RESULT = { tag: 'fixture.menu_force_refresh_active_doc', data: { docId: testDocId } };
+        break;
+      }
+
+      case 'menu_insert_tracker_active_doc': {
+        // menuInsertTrackerActiveDoc() -> insertTrackerTable(docId) — Docs-menu
+        // wrapper call-site (gts-ez2e), distinct from the already-covered
+        // insertTrackerTable() core (see the 'insert_tracker_table' case above).
+        // See 'menu_sync_active_doc' above for why _TEST_ACTIVE_DOC_ID exists.
+        doc.saveAndClose();
+        docAlreadyClosed = true;
+        props.setProperty('_TEST_ACTIVE_DOC_ID', testDocId);
+        try {
+          menuInsertTrackerActiveDoc();
+        } finally {
+          props.deleteProperty('_TEST_ACTIVE_DOC_ID');
+        }
         _TF_RESULT = { tag: 'fixture.menu_insert_tracker_active_doc', data: { docId: testDocId } };
         break;
       }
@@ -2211,9 +3795,65 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      case 'untrash_doc': {
+        // gts-m33k: 24h aging-window guard — makes a previously-trashed doc
+        // reachable again so a subsequent sync_all fixture call can prove it
+        // gets revived (sync.docNotFound.revived) rather than archived.
+        var untrashDocId = data.docId || testDocId;
+        DriveApp.getFileById(untrashDocId).setTrashed(false);
+        _TF_RESULT = { tag: 'fixture.untrash_doc', data: { untrashed: untrashDocId } };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'archive_journey': {
         ArchiveManager.archive(ss);
         _TF_RESULT = { tag: 'fixture.archive_journey', data: { archiveTriggered: true } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'purge_stale_test_docs': {
+        // gts-4m7l durable fix: TEST corpus growth races sync_all's client
+        // timeout. ArchiveManager's 24h 'Doc Not Found' grace window exists
+        // for production safety (a transient Drive blip shouldn't evict a
+        // doc's rows immediately) -- but on the shared TEST deployment it
+        // means every trashed test doc from THIS session's pytest runs
+        // lingers in Actions/DocData for a full day, so docCount (and
+        // syncAll()'s real execution time) climbs steadily across a day of
+        // repeated runs (observed 106 -> 171 in one session, see gts-4m7l).
+        //
+        // Rather than shortening the production threshold, this backdates
+        // every currently-'Doc Not Found' Actions row's Date Modified past
+        // the 24h window (same technique as 'backdate_action_row' above for
+        // the 30-day Closed case), then runs the SAME unmodified production
+        // ArchiveManager.archive() sweep. Invoked once per pytest session
+        // (tests/conftest.py _purge_stale_test_docs, alongside
+        // reset_test_state) so the shared corpus stays bounded per-suite
+        // instead of growing unboundedly across a day of sessions.
+        var pscActionsSheet = ss.getSheetByName('Actions');
+        var pscBackdated = 0;
+        if (pscActionsSheet) {
+          var pscLastRow = pscActionsSheet.getLastRow();
+          if (pscLastRow > 1) {
+            var pscNumRows   = pscLastRow - 1;
+            var pscStatusCol = pscActionsSheet.getRange(2, _ACOL.sync_status, pscNumRows, 1).getValues();
+            var pscModCol    = pscActionsSheet.getRange(2, _ACOL.modified_date, pscNumRows, 1).getValues();
+            var pscOldDate   = new Date(Date.now() - 25 * 60 * 60 * 1000); // > 24h threshold
+            for (var pscI = 0; pscI < pscStatusCol.length; pscI++) {
+              if (pscStatusCol[pscI][0] === 'Doc Not Found') {
+                pscModCol[pscI][0] = pscOldDate;
+                pscBackdated++;
+              }
+            }
+            if (pscBackdated > 0) {
+              pscActionsSheet.getRange(2, _ACOL.modified_date, pscNumRows, 1).setValues(pscModCol);
+            }
+          }
+        }
+        var pscArchivedCount = ArchiveManager.archive(ss);
+        GasLogger.log('fixture.purge_stale_test_docs', { backdated: pscBackdated, archived: pscArchivedCount });
+        _TF_RESULT = { tag: 'fixture.purge_stale_test_docs', data: { backdated: pscBackdated, archived: pscArchivedCount } };
         docAlreadyClosed = true;
         break;
       }
@@ -2229,13 +3869,49 @@ function setupTestFixtures(scenario, data) {
         if (!backdateEntry) throw new Error('backdate_action_row: row not found for globalId=' + backdateGlobalId);
         var backdateDate = new Date();
         backdateDate.setDate(backdateDate.getDate() - daysAgo);
+        // gts-5kyu AC9: this writes the Actions sheet directly (not through
+        // WriteGuard.wrap, which is the choke point that otherwise
+        // invalidates ActionSnapshot.js's memo) -- invalidate explicitly so a
+        // same-execution read after this fixture never sees a pre-backdate
+        // snapshot.
         actionsSheet.getRange(backdateEntry.rowIndex, _ACOL.modified_date).setValue(backdateDate);
+        // Optional gts-a8yh.2 state-probe extension: also stamp Status so the
+        // row becomes ArchiveManager-eligible (_isExpired requires
+        // status === 'Closed') without a second round-trip fixture call.
+        if (data.status) {
+          actionsSheet.getRange(backdateEntry.rowIndex, _ACOL.status).setValue(data.status);
+        }
+        _invalidateActionsSnapshot();
         _TF_RESULT = { tag: 'fixture.backdate_action_row', data: { globalId: backdateGlobalId, daysAgo: daysAgo } };
         docAlreadyClosed = true;
         break;
       }
 
+      case 'archive_sweep': {
+        // gts-a8yh.2 state probe: runs ArchiveManager.archive(ss) directly,
+        // same call menuRunArchive() makes, without the doc-scoped ceremony
+        // most other fixtures carry (archive operates sheet-wide).
+        var archivedCount = ArchiveManager.archive(ss);
+        docAlreadyClosed = true;
+        _TF_RESULT = { tag: 'fixture.archive_sweep', data: { ok: true, archived: archivedCount } };
+        break;
+      }
+
       case 'seed_row': {
+        // gts-zj60: the production scanner never writes an Actions row with an
+        // empty Document column -- every real row's document_formula points at
+        // the doc it was scanned from. Defaulting to blank here let 27 rows
+        // manufactured by this fixture poison the DocData integrity pass
+        // (docdata-litter-apt-speed.md's Evidence table), which derives Doc
+        // Name from this same formula with no fallback. Default to testDocId's
+        // own HYPERLINK (the `docFormula` this dispatcher already computed
+        // above for the non-fixture-scoped scenarios) so a caller gets the
+        // production shape unless it explicitly opts into a blank/other value
+        // as a named case (data.documentFormula === '' or any other string).
+        var seedDocFormula = data.documentFormula;
+        if (seedDocFormula === undefined) {
+          seedDocFormula = docFormula;
+        }
         _tfAppendSheetRow(ss, _tfSheetRow({
           globalId:      data.globalId        || '',
           id:            data.actionId        || 1,
@@ -2243,7 +3919,7 @@ function setupTestFixtures(scenario, data) {
           assigneeName:  data.assigneeName    || '',
           action:        data.actionText      || 'Seeded action',
           status:        data.status          || 'Open',
-          docFormula:    data.documentFormula || '',
+          docFormula:    seedDocFormula,
           dateCreated:   new Date(),
           dateModified:  data.dateModified ? new Date(data.dateModified) : new Date()
         }));
@@ -2267,8 +3943,85 @@ function setupTestFixtures(scenario, data) {
         break;
       }
 
+      // gts-5kyu (measurement-only, AC0 baseline + AC5 comparison):
+      // exercises the exact EditorAddonCard.js:591-597 shape -- N calls to
+      // insertTrackerTable(docId) inside ONE execution -- without going
+      // through the queue/trigger plumbing, so the Actions-sheet read count
+      // for that loop can be measured directly and compared before/after
+      // the snapshot routing (AC0 recorded reads=2N; AC5 compares against
+      // it). _actionsReadTotal() is the same counter actioncache.build/
+      // reuse's `reads` field reports.
+      case 'baseline_tracker_batch': {
+        var btbDocIds = data.docIds || [];
+        for (var btbI = 0; btbI < btbDocIds.length; btbI++) {
+          insertTrackerTable(btbDocIds[btbI]);
+        }
+        _TF_RESULT = { tag: 'fixture.baseline_tracker_batch', data: { docs: btbDocIds.length, reads: _actionsReadTotal() } };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      // gts-5kyu AC9 self-check (temporary, self-verification only -- not
+      // part of the frozen actioncache contract or the twin [TST] bead's
+      // assertions): build the snapshot, write via the production
+      // _patchActionStatusCore (WriteGuard-wrapped -> invalidates), then read
+      // again in the SAME execution and confirm the second read sees the new
+      // value, not the memoized pre-write one. Restores the original status
+      // afterward so the probe is non-destructive.
+      case 'ac9_smoke': {
+        var ac9GlobalId = data.globalId || '';
+        if (!ac9GlobalId) throw new Error('ac9_smoke: globalId required');
+        var ac9Sheet = ss.getSheetByName('Actions');
+        var ac9Before = _loadExistingRowsByGlobalId(ac9Sheet)[ac9GlobalId];
+        if (!ac9Before) throw new Error('ac9_smoke: row not found for globalId=' + ac9GlobalId);
+        var ac9Original = ac9Before.status;
+        var ac9NewStatus = ac9Original === 'Closed' ? 'Open' : 'Closed';
+        _patchActionStatusCore(ac9GlobalId, ac9NewStatus);
+        var ac9After = _loadExistingRowsByGlobalId(ac9Sheet)[ac9GlobalId];
+        // restore
+        _patchActionStatusCore(ac9GlobalId, ac9Original);
+        _TF_RESULT = {
+          tag: 'fixture.ac9_smoke',
+          data: {
+            before: ac9Original,
+            wrote: ac9NewStatus,
+            readAfterWrite: ac9After.status,
+            freshRead: ac9After.status === ac9NewStatus
+          }
+        };
+        docAlreadyClosed = true;
+        break;
+      }
+
+      case 'mint_test_assertion': {
+        // gts-79dw.4.18 test harness: mints an HS256 signed identity
+        // assertion using the SAME Script Property secret
+        // _verifySignedAssertion (src/AccessControl.js) reads at verify time,
+        // so tests/test_*.py can construct real positive AND deliberately
+        // broken negative assertions without a live NUUC-Dispatch round
+        // trip. Gated the same way as every other fixture (run_fixture's
+        // TEST_TOKEN check, _handleRunFixture in TestWebApp.js) -- no new
+        // gating mechanism. Never returns the secret itself, only the
+        // finished signed token; a missing Script Property is reported back
+        // as {ok:false, error:'missing_secret'} rather than fabricated.
+        var mtaResult = _tfMintAssertion({
+          sub:             data.sub,
+          email:           data.email,
+          emailVerified:   data.emailVerified,
+          aud:             data.aud,
+          iss:             data.iss,
+          kid:             data.kid,
+          alg:             data.alg,
+          exp:             data.exp,
+          tamperSignature: data.tamperSignature
+        });
+        _TF_RESULT = { tag: 'fixture.mint_test_assertion', data: mtaResult };
+        docAlreadyClosed = true;
+        break;
+      }
+
       case 'team_data_slice': {
-        // Slice-BUILD for EPIC-A (GTaskSheet-5r4l.2, ADR-0013).
+        // Slice-BUILD for EPIC-A (gts-5r4l.2, ADR-0013).
         // Creates a sample DocData tab and performs the two durable-invariant
         // smoke checks in-process, returning results for Python assertion:
         //   (a) round-trip: rows written then read back are identical (non-date cols)
@@ -2371,22 +4124,18 @@ function setupTestFixtures(scenario, data) {
 
 /**
  * Combined fixture setup and sync in one invocation.
- * Reads the scenario from TestControl!A1 and the doc ID from script properties.
  *
  * @param {string} [scenario] - Name of the fixture scenario to set up.
+ * @param {string} docId - Doc to operate on; always a real parameter.
  */
-function setupAndSync(scenario) {
+function setupAndSync(scenario, docId) {
   try {
-    setupTestFixtures(scenario);
-    var props = PropertiesService.getScriptProperties();
-    var testDocId = props.getProperty('TEST_DOC_ID');
-    if (!testDocId) {
-      GasLogger.log('sync.error', {
-        msg: 'TEST_DOC_ID script property not set'
-      });
+    if (!docId) {
+      GasLogger.log('sync.error', { msg: 'docId parameter not set' });
       return;
     }
-    syncDocument(testDocId);
+    setupTestFixtures(scenario, { docId: docId });
+    syncDocument(docId);
     GasLogger.log('sync.complete', { scenario: scenario });
   } finally {
     GasLogger.flush();
@@ -2418,31 +4167,32 @@ function setupAndSync(scenario) {
  * Logs verify.consistency.complete with the result object so Playwright tests
  * can poll gasLogDir and assert result.ok === true.
  *
- * @param {string} [docId]  Defaults to TEST_DOC_ID script property.
+ * @param {string} docId  Doc to verify; always a real parameter (no
+ *   script-property fallback).
  * @param {?{teamId: string}} [expected]  Optional Team Scope expectation
- *   (GTaskSheet-me6w.6). When expected.teamId is set, additionally asserts:
+ *   (gts-me6w.6). When expected.teamId is set, additionally asserts:
  *     - the document's Drive appProperty 'teamScope' === expected.teamId
  *     - DocData[fileId].team_id === expected.teamId
  *     - DocData[fileId] exists with doc_name, last_sync_time, action_count,
  *       resolved_count populated and consistent with the current scan
  */
 function verifyConsistencyForTest(docId, expected) {
-  var props = PropertiesService.getScriptProperties();
-  var resolvedDocId = docId || props.getProperty('TEST_DOC_ID');
+  var props        = PropertiesService.getScriptProperties();
+  var resolvedDocId = docId;
   var testSheetId   = props.getProperty('TEST_SHEET_ID');
 
   if (!resolvedDocId || !testSheetId) {
     GasLogger.log('verify.consistency.complete', {
       ok: false,
-      issues: ['TEST_DOC_ID or TEST_SHEET_ID script properties not set'],
-      counts: { floating: 0, sheet: 0, tracker: 0, matched: 0 },
+      issues: ['docId parameter and/or TEST_SHEET_ID script property not set'],
+      counts: { floating: 0, sheet: 0, tracker: 0, matched: 0, unparseable: 0 },
       docTitle: ''
     });
     GasLogger.flush();
     return {
       ok: false,
-      issues: ['TEST_DOC_ID or TEST_SHEET_ID script properties not set'],
-      counts: { floating: 0, sheet: 0, tracker: 0, matched: 0 },
+      issues: ['docId parameter and/or TEST_SHEET_ID script property not set'],
+      counts: { floating: 0, sheet: 0, tracker: 0, matched: 0, unparseable: 0 },
       docTitle: ''
     };
   }
@@ -2450,7 +4200,7 @@ function verifyConsistencyForTest(docId, expected) {
   var result = {
     ok: true,
     issues: [],
-    counts: { floating: 0, sheet: 0, tracker: 0, matched: 0 },
+    counts: { floating: 0, sheet: 0, tracker: 0, matched: 0, unparseable: 0 },
     docTitle: ''
   };
 
@@ -2459,8 +4209,20 @@ function verifyConsistencyForTest(docId, expected) {
     result.docTitle = doc.getName();
 
     // Collect floating actions with globalIds (reuses VerifySync.js helpers).
-    var floatingActions = _collectFloatingActionState(doc);
+    var unparseableParagraphs = [];
+    var floatingActions = _collectFloatingActionState(doc, unparseableParagraphs);
     result.counts.floating = floatingActions.length;
+
+    // ADR-0027 rule 6 / gts-xvlu: a paragraph that starts a token but never
+    // completes the grammar (e.g. the gts-tis pipe-delimited spelling) is
+    // reported, not silently dropped from the scan.
+    result.counts.unparseable = unparseableParagraphs.length;
+    for (var vcfUpI = 0; vcfUpI < unparseableParagraphs.length; vcfUpI++) {
+      var vcfUp = unparseableParagraphs[vcfUpI];
+      result.issues.push(
+        'Paragraph looks like an action but does not parse (body index ' + vcfUp.bodyChildIndex + '): ' + vcfUp.leadingText
+      );
+    }
 
     var tracker = _readTrackerTableState(doc);
     result.counts.tracker = tracker.rows.length;
@@ -2516,7 +4278,7 @@ function verifyConsistencyForTest(docId, expected) {
 
     _runConsistencyChecks(result, floatingActions, tracker, sheetRows, result.docTitle, archivedIds);
 
-    // DocData consistency (GTaskSheet-zc21) — runs whenever a DocData row exists
+    // DocData consistency (gts-zc21) — runs whenever a DocData row exists
     // for this doc, independent of `expected`. Verifies DocData.team_id matches
     // the document's actual teamScope appProperty, and that DocData.action_count
     // / resolved_count match BOTH the document's floating actions AND the
@@ -2560,7 +4322,7 @@ function verifyConsistencyForTest(docId, expected) {
       }
     }
 
-    // Team Scope consistency (GTaskSheet-me6w.6) — only when requested.
+    // Team Scope consistency (gts-me6w.6) — only when requested.
     if (expected && expected.teamId !== undefined && expected.teamId !== null) {
       if (vcfTeamScope !== expected.teamId) {
         result.issues.push(
@@ -2674,7 +4436,7 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
       // which is correct — skip the mismatch for this case.
       var docNameEmpty   = floating.assigneeName === '';
       var sheetDerived   = _isEmailDerivedName(floating.assigneeEmail, sheet.assigneeName);
-      // GTaskSheet-mpe1: a directory-resolved chip name (e.g. "Northlake
+      // gts-mpe1: a directory-resolved chip name (e.g. "Northlake
       // Minister") is propagated to the sheet on the next syncAll sweep, not
       // immediately (see SyncManager.js sync.sheet-to-doc.done note) — skip
       // this case too.
@@ -2741,7 +4503,7 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
     var floatingByAIN = {};
     for (var fgid in floatingByNrId) {
       if (!Object.prototype.hasOwnProperty.call(floatingByNrId, fgid)) continue;
-      var ainMatch = fgid.match(/\/?(AI-\d+)$/);
+      var ainMatch = fgid.match(new RegExp('\\/?((?:' + _ACTION_TOKEN_READ_PREFIXES.join('|') + ')-\\d+)$'));
       if (ainMatch) floatingByAIN[ainMatch[1]] = true;
     }
     for (var tid in trackerById) {
@@ -2756,10 +4518,11 @@ function _runConsistencyChecks(result, floatingActions, tracker, sheetRows, docT
 /**
  * Diagnostic: logs the body element types of the test doc to GasLogger.
  * Run via "Test: Debug Doc Body" menu item to verify fixture state.
+ *
+ * @param {string} testDocId  Doc to inspect; always a real parameter.
  */
-function debugDocBody() {
+function debugDocBody(testDocId) {
   var props   = PropertiesService.getScriptProperties();
-  var testDocId = props.getProperty('TEST_DOC_ID');
   GasLogger.log('debug.props', {
     webAppUrl:    getWebAppUrl(),
     hasSecret:    !!props.getProperty('WEBAPP_SECRET'),
@@ -2799,23 +4562,25 @@ function debugDocBody() {
  *
  * Properties set:
  *   TEST_SHEET_ID        — the bound spreadsheet used for testing
- *   TEST_DOC_ID          — the Google Doc used for testing
  *   GAS_LOGGER_FOLDER_ID — the Drive folder GasLogger writes .log files to
  *   TEST_ASSIGNEE_EMAIL  — email used for the chip-led list item in UC-A fixtures
  *   TEST_ASSIGNEE_NAME   — display name for the chip (optional; email used as fallback)
+ *
+ * Deliberately does NOT set a master-template-doc property: GAS holds no
+ * script property for any doc ID (ADR-0006 §4). The master template ID lives
+ * in local.settings.json (settings.testDocId) and is always passed to GAS as
+ * a real parameter — including the very first beginTestSession call.
  */
 function bootstrap() {
   var props = PropertiesService.getScriptProperties();
   props.setProperties({
     'TEST_SHEET_ID':        '10UCsEHPL2RjA1IduUSFDSaA2lpkoCuZY79sIjratH_s',
-    'TEST_DOC_ID':          '11jA0FMowlJbyxyJoK6bePVvcO63niVrKcXA0eMJW1F4',
     'GAS_LOGGER_FOLDER_ID': '1lg2CWtOmDGglMVasSjEk3jTaW9SXcO6s',
     'TEST_ASSIGNEE_EMAIL':  'stuart.donaldson@gmail.com',
     'TEST_ASSIGNEE_NAME':   'Stuart Donaldson'
   });
   GasLogger.log('bootstrap.complete', {
     testSheetId:     '10UCsEHPL2RjA1IduUSFDSaA2lpkoCuZY79sIjratH_s',
-    testDocId:       '11jA0FMowlJbyxyJoK6bePVvcO63niVrKcXA0eMJW1F4',
     logFolderId:     '1lg2CWtOmDGglMVasSjEk3jTaW9SXcO6s',
     assigneeEmail:   'stuart.donaldson@gmail.com'
   });
@@ -2828,14 +4593,19 @@ function bootstrap() {
 
 /**
  * Creates a named clone of the master template doc in the same Drive folder as
- * the test sheet, sets TEST_DOC_ID to the clone, and stores the master ID in
- * TEST_DOC_TEMPLATE_ID so endTestSession can restore it.
- *
- * Called by menuBeginTestSession; masterDocId is read from TestControl!A1.
+ * the test sheet, and returns the clone's ID directly to the caller. GAS holds
+ * no script property for any doc ID (ADR-0006 §4) — masterDocId arrives as a
+ * real parameter (the webapp path: Python's settings.testDocId; the menu path:
+ * whatever the human typed into TestControl!A1) and cloneId is returned
+ * directly rather than staged anywhere for the caller to read back. Also
+ * mirrors the clone ID to TestControl!B1 purely as a human-visible pointer for
+ * manual continuation — not read back by any test path.
  *
  * @param {string} masterDocId  ID of the master template doc (read-only).
+ * @return {string} The new clone's Drive file ID.
  */
 function beginTestSession(masterDocId) {
+  var cloneId = '';
   try {
     var props       = PropertiesService.getScriptProperties();
     var testSheetId = props.getProperty('TEST_SHEET_ID');
@@ -2848,19 +4618,13 @@ function beginTestSession(masterDocId) {
       folder = DriveApp.getRootFolder();
     }
 
-    var now      = new Date();
-    var dateStr  = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyyMMdd');
-    var hexSuffix = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4);
-    var cloneName = 'GActionSheet-Test-session-' + dateStr + '-' + hexSuffix;
+    var cloneName = _testDocName('session');
 
     var cloneFile = DriveApp.getFileById(masterDocId).makeCopy(cloneName, folder);
     if (cloneFile.setTrashed) {
       cloneFile.setTrashed(false);
     }
-    var cloneId   = cloneFile.getId();
-
-    props.setProperty('TEST_DOC_TEMPLATE_ID', masterDocId);
-    props.setProperty('TEST_DOC_ID', cloneId);
+    cloneId = cloneFile.getId();
 
     var ss   = SpreadsheetApp.openById(testSheetId);
     var ctrl = ss.getSheetByName('TestControl');
@@ -2879,27 +4643,37 @@ function beginTestSession(masterDocId) {
     GasLogger.log('session.begin.error', { msg: err.message, masterDocId: masterDocId });
   }
   GasLogger.flush();
+  return cloneId;
 }
 
 /**
- * Trashes the clone created by beginTestSession and restores TEST_DOC_ID to
- * the master template ID stored in TEST_DOC_TEMPLATE_ID.
+ * Trashes the clone identified by cloneId and, when masterDocId is supplied,
+ * restores TestControl!B1 to it (a human-visible convenience only — no test
+ * path reads B1 back).
  *
- * @param {string} [cloneIdOverride]  Explicit clone ID to end. Falls back to TEST_DOC_ID.
+ * @param {string} cloneId  Clone ID to end; always a real parameter.
+ * @param {string} [masterDocId]  Master template ID to restore. The webapp
+ *   path always passes this explicitly (Python already knows it from
+ *   settings — no round trip needed). GAS holds no script property for it
+ *   (ADR-0006 §4); the bare menuEndTestSession() call simply omits the
+ *   B1 restore rather than reach for one.
  */
-function endTestSession(cloneIdOverride) {
+function endTestSession(cloneId, masterDocId) {
   try {
     var props      = PropertiesService.getScriptProperties();
-    var cloneId    = cloneIdOverride || props.getProperty('TEST_DOC_ID');
-    var masterId   = props.getProperty('TEST_DOC_TEMPLATE_ID');
+    var masterId   = masterDocId || '';
 
     if (cloneId && cloneId !== masterId) {
       DriveApp.getFileById(cloneId).setTrashed(true);
     }
     if (masterId) {
-      props.setProperty('TEST_DOC_ID', masterId);
+      var testSheetId = props.getProperty('TEST_SHEET_ID');
+      var ss   = testSheetId ? SpreadsheetApp.openById(testSheetId) : null;
+      var ctrl = ss ? ss.getSheetByName('TestControl') : null;
+      if (ctrl) {
+        ctrl.getRange('B1').setValue(masterId);
+      }
     }
-    props.deleteProperty('TEST_DOC_TEMPLATE_ID');
 
     GasLogger.log('session.end', { cloneId: cloneId, masterDocId: masterId });
   } catch (err) {

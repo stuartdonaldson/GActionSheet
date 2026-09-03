@@ -25,7 +25,7 @@
     "headers": [
       "FileId",
       "Doc Name",
-      "Doc Modified",
+      "Last Sync Time",
       "Doc Updated",
       "SyncStatus",
       "Team Id",
@@ -35,12 +35,40 @@
     "columnsByField": {
       "file_id": 1,
       "doc_name": 2,
-      "doc_modified": 3,
+      "last_sync_time": 3,
       "doc_updated": 4,
       "sync_status": 5,
       "team_id": 6,
       "action_count": 7,
       "resolved_count": 8
+    }
+  },
+  "sheetConfig": {
+    "headers": [
+      "Key",
+      "Value"
+    ],
+    "columnsByField": {
+      "key": 1,
+      "value": 2
+    }
+  },
+  "sheetExportIndex": {
+    "headers": [
+      "Doc Id",
+      "Doc Title",
+      "Folder Id",
+      "Created At",
+      "Last Exported At",
+      "Meta Json"
+    ],
+    "columnsByField": {
+      "doc_id": 1,
+      "doc_title": 2,
+      "folder_id": 3,
+      "created_at": 4,
+      "last_exported_at": 5,
+      "meta_json": 6
     }
   },
   "sheetAction": {
@@ -57,7 +85,8 @@
       "doc_name",
       "created_date",
       "modified_date",
-      "sync_status"
+      "sync_status",
+      "custom_fields"
     ],
     "headers": [
       "globalId",
@@ -70,7 +99,8 @@
       "Document",
       "Date Created",
       "Date Modified",
-      "Sync Status"
+      "Sync Status",
+      "Custom Fields"
     ],
     "columnsByField": {
       "global_id": 1,
@@ -83,14 +113,19 @@
       "document_formula": 8,
       "created_date": 9,
       "modified_date": 10,
-      "sync_status": 11
+      "sync_status": 11,
+      "custom_fields": 12
     }
   },
   "webApp": {
     "routeNames": [
       "set_test_token",
+      "set_axiom_config",
+      "set_export_config",
       "upsert_action_rows",
       "sync_action_rows",
+      "sync_document",
+      "insert_tracker_table",
       "verify_action_rows",
       "mark_doc_not_found",
       "delete_action_row",
@@ -102,6 +137,9 @@
     "testRouteNames": [
       "edit_action_row",
       "find_sheet_actions",
+      "dump_doc_paragraphs",
+      "dump_raw_docs_api",
+      "read_team_actions",
       "verify_chip_integrity",
       "import_selected_for_test",
       "forward_action_rows_test"
@@ -120,6 +158,34 @@
           "queueDrained"
         ],
         "completionSignal": "synchronous response after ACTION_SHEET_QUEUE drains (§16.11 #4)"
+      },
+      "sync_document": {
+        "request": [
+          "action",
+          "secret",
+          "docId",
+          "force"
+        ],
+        "response": [
+          "ok",
+          "docId",
+          "forced",
+          "result"
+        ],
+        "completionSignal": "synchronous response; GasLogger 'sync.complete' with forced=<force>"
+      },
+      "insert_tracker_table": {
+        "request": [
+          "action",
+          "secret",
+          "docId"
+        ],
+        "response": [
+          "ok",
+          "docId",
+          "result"
+        ],
+        "completionSignal": "synchronous response; GasLogger 'tracker.insert.complete' or 'tracker.skip'"
       },
       "edit_action_row": {
         "request": [
@@ -216,6 +282,25 @@
           "baseN"
         ],
         "completionSignal": "synchronous response; same as _submitImport's IMPORT_SELECTED.done"
+      },
+      "read_team_actions": {
+        "request": [
+          "action",
+          "testToken",
+          "teamId",
+          "docId",
+          "statusFilter",
+          "windowDays",
+          "excludeDocId",
+          "assigneeEmail"
+        ],
+        "response": [
+          "ok",
+          "teamId",
+          "rows",
+          "statusOptions"
+        ],
+        "completionSignal": "synchronous response; rows scoped to teamId under the requested filters"
       },
       "forward_action_rows_test": {
         "request": [

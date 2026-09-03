@@ -58,7 +58,7 @@ without explicit instruction.
 Do not use MEMORY.md for project rationale. Do not use `bd remember` for user preferences. When in doubt: if the insight is about a specific codebase or project decision, use `bd remember`; if it applies regardless of repo, use MEMORY.md.
 
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:970c3bf2 -->
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -66,7 +66,7 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full 
 ### Quick Reference
 
 ```bash
-bdls --ready          # Find available work (preferred — one call, richer output)
+bd ready              # Find available work
 bd show <id>          # View issue details
 bd update <id> --claim  # Claim work
 bd close <id>         # Complete work
@@ -80,30 +80,38 @@ bd close <id>         # Complete work
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 
+## Agent Context Profiles
+
+The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
+
+- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
+- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
+- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
+
 ## Session Completion
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
 
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
+1. **File issues for remaining work** - Create beads for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+4. **Handle git/sync by active profile**:
    ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+   # Conservative/minimal/default: report status and proposed commands; wait for approval.
+   git status
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+   # Team-maintainer opt-in only, unless current instructions forbid it:
+   git pull --rebase
+   bd dolt push
+   git push
+   git status
+   ```
+5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
+
+**Critical rules:**
+- Explicit user or orchestrator instructions override this Beads block.
+- Do not commit or push without clear authority from the active profile or the current user request.
+- If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
 
 ## python
@@ -160,7 +168,17 @@ references are mapped in `docs/atdd/ID-map.md` — start there):
 
 For long running tests, always route test output to a fail rather than pipe to tail so we have the file for later analysis and to use to monitor progress of the test.
 
-Every Playwright/UI test failure must, as a matter of course, capture a screenshot + diagnostics (screenshot path, frame URLs, and for locator waits the per-frame match-count / is_visible / bbox). This is automated (GTaskSheet-3tkf): bounded driver waits call `UiDriver.capture_failure(...)` before raising, and a `pytest_runtest_makereport` hook in `tests/conftest.py` screenshots the active page on any UI-test failure. Add a new bounded wait? Route its failure through `capture_failure` — never copy-paste a capture block. For interactions Playwright cannot drive with a direct mouse gesture (e.g. the `onLinkPreview` link-preview card), try the `Ctrl+F` -> type -> `Enter` -> `Escape` cursor-placement technique (GTaskSheet-39jk/cug8, `UiDriver.open_link_preview`, `tests/test_link_preview.py`) before falling back to a non-UI route-fallback method — see epic GTaskSheet-pw5x.
+**Never poll a `pnpm run deploy:test` or `pytest` run with `ScheduleWakeup`.** Both are
+harness-tracked background work: background the command, then stop — you are re-invoked when it
+exits. A wakeup scheduled against one of these usually fires *before* the notification and
+produces a turn that re-reads the whole conversation to say "still waiting". Measured in the
+gts-gwyg session: 45 such turns, ~11M cache-read tokens, ~11% of total session spend, zero work
+produced. See ~/.claude/CLAUDE.md (global) §Waiting on Long-Running Commands, and
+`docs/lessons-learned/2026-09-01-idle-polling-and-duplicate-hook-injection-inflate-context.md`.
+
+**Full-suite sweeps: never use `pytest --sw` (stepwise, stop-on-first-failure).** Run one non-stopping pass (`pytest -x` is for merge-gate's fail-fast semantics on a scoped/known-green run, not for triaging a fresh full sweep — for that, drop `-x` too and let it run to completion) and triage failures in bulk from the persisted log afterward. `--sw` against a 28-file live-backend suite means every transient Google `/exec` routing blip (`gts-pm72`) forces a manual re-invoke and restarts the wait, multiplying human/agent time spent babysitting the run instead of reviewing one consolidated failure list. See `docs/regression-suite-health-review-2026-08-05.md` recommendation #1.
+
+Every Playwright/UI test failure must, as a matter of course, capture a screenshot + diagnostics (screenshot path, frame URLs, and for locator waits the per-frame match-count / is_visible / bbox). This is automated (gts-3tkf): bounded driver waits call `UiDriver.capture_failure(...)` before raising, and a `pytest_runtest_makereport` hook in `tests/conftest.py` screenshots the active page on any UI-test failure. Add a new bounded wait? Route its failure through `capture_failure` — never copy-paste a capture block. For interactions Playwright cannot drive with a direct mouse gesture (e.g. the `onLinkPreview` link-preview card), try the `Ctrl+F` -> type -> `Enter` -> `Escape` cursor-placement technique (gts-39jk/cug8, `UiDriver.open_link_preview`, `tests/test_link_preview.py`) before falling back to a non-UI route-fallback method — see epic gts-pw5x.
 
 Methodology declaration — Testing: `atdd-bdd` — DevStandard `knowledge-base/methodology/testing/bdd/README.md`. Key rules for every session:
 
@@ -194,7 +212,7 @@ Rules when choosing Slice:
 - **No-shared-context preserved at hardening.** The slice implementation is throwaway, or the hardening `[TST]` is authored by a fresh-context agent against the frozen contract only — never reading slice code.
 - **Blocking hardening bead required.** The gate produces a *created, blocking* hardening bead. Slice is not done until its hardening `[TST]` is green; the entry-point coverage invariant still holds.
 
-**Ordering is oracle-driven; coverage-before-merge is the invariant _(lever under test — GTaskSheet-m65t; candidate for DevStandard T23 promotion, see `docs/methodology/oracle-ordering-lever.md`)_.**
+**Ordering is oracle-driven; coverage-before-merge is the invariant _(lever under test — gts-m65t; candidate for DevStandard T23 promotion, see `docs/methodology/oracle-ordering-lever.md`)_.**
 "Test-first" bundles two claims; only one is load-bearing. **Coverage-before-merge** — durable invariants and every state-modifying entry point (T17) are tested before merge — is non-negotiable. **Ordering** — whether the test is written before the implementation — is chosen by the *oracle*:
 - **Specifiable oracle** (correct answer is a precise value/state you can write down before coding — parsed value, row status, contract shape): **test-first** (red → green). Debugging the test *is* debugging the contract.
 - **Perceptual oracle** (you recognize "correct" on sight but cannot cheaply pre-specify it — most UI/UX, rendered output, layout/feel): **Slice** (implement-first → human review → freeze AC → author hardening `[TST]` against the frozen contract). A pre-written assertion here is both expensive *and* blind to the emergent anomaly the human eye catches. State why an assertion cannot cheaply pre-specify "correct."
@@ -215,9 +233,29 @@ point at least once with observable state verification. The entry point itself m
 call-site — testing only the mechanism it delegates to is not sufficient. Standalone or sequential
 test structure is not required; the entry point may be exercised as part of any scenario.
 
-**Backstop rules (LL resolve, GTaskSheet-mpi9):**
-- `pytest -x` (full suite, not just the touched files) is required before any `[IMP]` issue is
-  closed or merged.
+**Backstop rules (LL resolve, gts-mpi9; scope narrowed 2026-07-24 — see below):**
+- `pytest -x` (full suite, not just the touched files) is required at **merge-gate**, and always
+  before a hardening `[TST]` (gts-79dw.4.8-style) is itself closed. This is the enforcement point
+  both source incidents actually pointed at (`2026-06-02-scanner-change-did-not-audit-fixture-
+  producers.md`, `2026-06-02-test-failures-observed-but-not-elevated-to-blocker.md` — both
+  resolutions say the fix belongs in `merge-gate`, not at `[IMP]`-close).
+- An `[IMP]` bead may **close** on a fast, targeted-subset gate (touched-file/related tests —
+  practically, whatever runs in well under a couple minutes) instead of the full suite. This is
+  the normal path for a Slice-phase bead (Review-fidelity phasing, ADR-0013 above): implement,
+  get the fast gate green, close, and get to a reviewable working experience without paying full
+  regression cost before the AC is even frozen. Track the gap explicitly rather than silently: on
+  close, set `bd set-state <id> regression=pending --reason "<what actually ran>"`; flip it to
+  `regression=verified` once `pytest -x` is run clean against that bead's changes. `bd-run-beads.py`
+  does this automatically (`--partial-gate` marks `regression=pending`; a full unrestricted
+  `test_cmd` marks `regression=verified`; `-t ''` always implies `pending`).
+  **Default to this path: never run the full `pytest -x` sweep on your own initiative — it is
+  expensive against the live GAS backend. Close on the targeted gate with `regression=pending`,
+  and only run the full sweep (to flip it to `regression=verified`) when the user explicitly asks
+  for it.**
+- Merge-gate (or manual merge to master) still requires every bead in scope to be
+  `regression=verified` — i.e. full `pytest -x` clean — before it passes. A bead closed with
+  `regression=pending` is not itself blocking further implementation work in the same tree; it
+  blocks that tree's merge.
 - Known test failures are not a basis for proceeding autonomously: present the debt state (which
   tests fail, why) and wait for an explicit human decision rather than working around or ignoring
   the failure.
@@ -228,6 +266,24 @@ test structure is not required; the entry point may be exercised as part of any 
   fails when the condition it checks is violated, not only that it passes on the current suite.
   A new assertion that only shows green is unverified.
 
+**Proven-to-fail vs. no-shared-context collision (gts-tz3j, decided 2026-09-02):** on this
+live-backend, no-local-mock project, an `[IMP]` bead's close-time deploy to the single shared TEST
+target can make the pre-change/unguarded state unreachable before the twin `[TST]` bead gets to it
+— constructing a genuinely broken build to prove PROVEN-TO-FAIL would then require either reading
+the implementation (violating no-shared-context) or a destructive revert/redeploy of shared TEST
+(racing other in-flight beads' uncommitted work). Decided resolution: **a structural/static code
+review, with a written rationale, discharges PROVEN-TO-FAIL when a live red run is genuinely
+unavailable for this reason.** The review must trace the actual guard code the assertion protects,
+reason through the counterfactual of removing the specific guard clause, and state a verdict per
+AC (HOLDS / HOLDS WITH CAVEAT / DOES NOT HOLD) — a review that only confirms "looks fine" without
+that counterfactual trace does not count. Any unenforced invariant the review surfaces (e.g. an
+ordering dependency, a scope hazard) gets an inline code comment at its exact site, not just a note
+on the bead. See gts-hztp's closing comment for a worked example. This does not relax the
+Backstop rule generally — a live red run is still required whenever the pre-change build is
+actually reachable (e.g. via `manage-deployments.js --deploy-dev` against an isolated DEV target,
+still untried for this purpose); it only names what discharges the obligation in the specific
+collision above.
+
 ## GAS Deployment
 
 Use the pnpm scripts in `package.json` — never invoke `clasp` directly.
@@ -237,9 +293,33 @@ Use the pnpm scripts in `package.json` — never invoke `clasp` directly.
 | Deploy for test cycle | `pnpm run deploy:test` |
 | Deploy to production | `pnpm run deploy:prod` |
 | Push only (no redeploy) | `pnpm run push` |
+| What is deployed right now? | `node manage-deployments.js --summary --env test\|prod` (read-only) |
 
 `clasp logs | tail -50` to look at the last 50 lines of the logs in the cloud google apps server environment
-`pnpm run deploy:test` runs `update-revision.js` + `manage-deployments.js --deploy-prod`
-in one step. Running `clasp push` (or `pnpm run push`) alone leaves the versioned
-WebApp deployment stale — the test suite will call the old revision and produce
-`sync.warn: Non-JSON response` failures.
+
+`pnpm run deploy:test` stamps `src/Version.js`, pushes `src/`, repoints the TEST-WEB-APP
+deployment, runs the post-deploy hooks (test token, Axiom config, export config, config
+verification, static portal), **verifies over the wire that TEST is actually serving the build
+just stamped**, and prints the standard summary. Running `clasp push` (or `pnpm run push`) alone
+leaves the versioned WebApp deployment stale — the test suite will call the old revision and
+produce `sync.warn: Non-JSON response` failures.
+
+**The pipeline is GAS-Core's `gas-deploy` package** (pinned in `package.json`;
+`GAS-Core/packages/gas-deploy/README.md` documents the config surface).
+`manage-deployments.js` is this project's configuration of it — targets, stamper, resolver, and
+the ordered hook list — plus `--verify*` and `--deploy-dev`, which are not deploys.
+`local.settings.json` must carry `claspAuth` (the clasp credential file this project deploys
+with): without it clasp silently falls back to `~/.clasprc.json` and can push to a different
+script project. Every clasp call goes through the package, which always sets it.
+
+**Deploy verification** (`?cmd=version`, `src/WebApp.js`): the deployed webapp reports
+`{ok, version, versionDate, target, deploymentId}` with no secret required, routed ahead of every
+auth gate in both `doGet` and `doPost`. The deploy polls it until version *and* target match what
+was stamped, and fails the deploy otherwise — `clasp deploy` exiting 0 only proves a version was
+created, not that the /exec URL serves it, and the `target` check is what catches a deploy landing
+in the wrong environment. Query it directly:
+`curl -sL "$(python3 -c "import json;print(json.load(open('local.settings.json'))['webappTestUrl'])")?cmd=version"`
+
+**Versions:** `package.json` is the sole source of truth. TEST bumps the integer `build` and stamps
+`v<version>.<build>`; PROD bumps the semver patch, resets `build`, and stamps `v<version>`.
+`src/Version.js` is generated output — never hand-edit it, and never read a version back out of it.

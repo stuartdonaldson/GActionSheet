@@ -1,0 +1,256 @@
+EXECUTION PLAN 2026-07-26 (rev. c) — verified team action portal, gts-79dw.4
+================================================================================
+This file is the EXECUTION plan: what to do in what order, grouped by shared
+context. It deliberately does NOT restate requirements, decisions, or
+architecture — those live in docs/verified-team-portal-plan.md, which is the
+durable spec. The two are not duplicates and neither replaces the other:
+
+    docs/verified-team-portal-plan.md   WHAT and WHY   durable, committed, cited
+                                                       by bead descriptions
+    plan-0726a.txt (this file)          HOW and WHEN   session scratch; the bead
+                                                       graph is the real record
+
+If this file and the bead descriptions ever disagree, the beads win. Delete this
+file once Milestone 1 closes.
+
+--------------------------------------------------------------------------------
+THE ONE THING THAT DRIVES THIS ORDER
+--------------------------------------------------------------------------------
+Everything downstream is waiting on ONE gate: the human review of View A that
+freezes the AC (ADR-0013). Until it happens, .4.3's projection, .4.14's contract,
+and both hardening beads are all guessing. So the plan is organised to reach that
+review in the first sitting, not the fifth.
+
+The old bead graph made that impossible — .4.7 depended on .4.3 and .4.5, i.e.
+"the UI needs the endpoint." That is false for a perceptual oracle. Both edges
+are now removed and .4.7 is READY.
+
+Why it's false: the review asks "does the list read well, do the filters feel
+right, does tier-gating of the sync and edit controls read correctly." None of
+that needs a GIS round trip — it needs REAL DATA, delivered statically. A live
+verified capture is not cheap right now (NUUC-Dispatch's GIS spike routes are
+decommissioned, ND-z0l), but the data is reachable under the existing
+WEBAPP_SECRET gate with no identity plumbing at all.
+
+DO NOT fabricate the fixture. An earlier draft of this plan proposed capturing
+`list_importable_actions` (open-only, excludes the current doc) and hand-adding a
+few resolved rows for the Closed/All states. That is unsafe here, because
+isResolved() (SyncManager.js:2272) matches FREE-TEXT SYNONYMS, not an enum:
+
+    delegated: delegated routed forwarded escalated handed-off transferred
+    closed:    done complete finished closed resolved finalized
+    (also in-progress: active working running…; waiting: blocked on-hold stalled…)
+
+Real status values are arbitrary user-typed strings collapsing into semantic
+buckets. A fabricated fixture would hold 'Open' and 'Closed' and nothing else,
+and the review would freeze an AC blind to how the status column reads with a
+dozen literal values meaning three things — exactly the perceptual property the
+review exists to judge. Fabrication would hide the finding.
+
+Instead: take gts-79dw.4.11 SLICE 1 first (see G1a). Extract the parameterized
+reader, expose it through one TEST_TOKEN-gated capture route, and capture real
+rows for every filter state. One deploy cycle, one time; page iteration stays
+pure-static afterwards. The work is not throwaway — it is .4.11's core, pulled
+forward to where its regression test (the existing Import tab suite) is cheapest.
+
+Remaining honest caveat: tier is a mode switch in the mockup (render as VIEW / as
+EDIT / as the assignee) rather than a real resolution. That one is fine — which
+is why the expensive multi-folder ACL fixture (.4.16) is NOT on the critical path
+to this review.
+
+--------------------------------------------------------------------------------
+GROUPING RATIONALE — cost profile, not topic
+--------------------------------------------------------------------------------
+The beads split into four sharply different loops. Mixing loops inside one
+sitting is what makes sessions slow; the groups below each hold ONE loop.
+
+  static page        browser reload            seconds      .4.7, .4.13 (UI half)
+  GAS backend        pnpm run deploy:test      minutes      .4.11 .4.12 .4.3 .4.14
+                     + pytest subset                        .4.13 (route), .4.9
+  Drive/Admin ACL    manual, one-time          slow         .4.16
+  Python hardening   full pytest -x            long         .4.8, .4.15
+
+--------------------------------------------------------------------------------
+GROUPS, IN ORDER
+--------------------------------------------------------------------------------
+
+G1a ── FIXTURE CAPTURE ──  gts-79dw.4.11 slice 1     [one GAS deploy, one time]
+    STATUS: DONE 2026-07-27. _readTeamActions(teamId, opts) extracted;
+    _listImportableActionsData is now a gate-plus-delegate wrapper and stayed
+    byte-identical (Import tab tests pass unmodified). One testToken-gated
+    read_team_actions route; capture via scripts/capture_team_actions_fixture.py.
+    Fixture re-captured against REAL teams (Communications 7 open / Board 2 open
+    + 1 closed + the 7-day window boundary, 4 real assignees) after the Shared
+    Drive archive defect that had emptied them was fixed — the first capture had
+    only test-suite residue. Status display is resolved ONCE, server-side: the
+    five inline synonym word-lists in SyncManager.js were folded into one
+    _STATUS_SYNONYMS table, getStatusDisplay(status) resolves a free-text status
+    to {bucket, resolved, icon} through it, and _readTeamActions stamps that on
+    every row (status_bucket / status_resolved / status_icon). The page renders
+    those fields and re-derives nothing.
+    First attempt served the synonym TABLE to the page instead (getStatusVocabulary)
+    and had the page re-implement the matching; withdrawn on operator challenge —
+    it centralised the words but duplicated the logic, which is the part that
+    drifts, and added five hops of machinery to do it. Ship conclusions, not
+    rules, to a surface that cannot call the function.
+    Fixing the matching in one place also fixed it for real: _matchesState now
+    normalizes separators, so canonical 'In Progress' lands in the InProgress
+    bucket (it previously matched nothing, since the synonym list spells it
+    'in-progress'). Same fix now applies to the sheet and the sidebar too.
+    Real vocabulary caveat for the review: the captured statuses are Open /
+    In Progress / Done only — no delegated-bucket value (forwarded, escalated)
+    exists in the live data, so that rendering is judged from the fixture's
+    vocabulary block, not from a row.
+    Extract _readTeamActions(teamId, opts) from _listImportableActionsData;
+    re-point _listImportableActionsData at it with opts reproducing today's
+    behaviour exactly (list_importable_actions stays byte-identical — enforced by
+    tests/test_import.py and scn/contract.py, so the regression proof is free);
+    expose the parameterized reader via ONE TEST_TOKEN-gated capture route. Do
+    not add filter params to the production list_importable_actions contract just
+    to serve a fixture.
+    Then capture real rows for every filter state: open, closed, all, mine, and
+    the window boundary. Page scaffolding for .4.7 can start in parallel — only
+    the capture waits on this.
+
+G1b ── AC FREEZE ──  gts-79dw.4.7      [static only]   MOCKUP BUILT — REVIEW DUE
+    STATUS 2026-07-27: docs/team-portal-mockup.html built on the real fixture.
+    Everything in the scope list below is rendered. Serve and review with:
+        python -m http.server -d docs 8231
+        http://localhost:8231/team-portal-mockup.html
+    Review controls in the page: team (Communications/Board), signed-in identity,
+    access tier (VIEW/EDIT) as a mode switch, status Open/Closed/All, scope
+    Everyone/Mine, resolved-within window (only captured windows are offered).
+    Decisions taken in the build, to confirm or overturn at the review:
+      • status column shows the literal the user typed, plus '(counts as
+        open/closed)' ONLY when the literal is off the canonical list — a reader
+        of 'Escalated' cannot otherwise tell which side of the filter it lands on
+      • filter buckets via isResolved(), matching the server, not literal strings
+      • assignee status control offers the canonical picker AND free text
+      • icons/bucketing come from getStatusVocabulary() over the wire, not a copy
+      • rows grouped by document, with the sync control on the document header
+        (still document-scoped, per plan §10 — but one control per document
+        rather than one per row, since a row's sync target is its document)
+      • Person… filter rendered as a disabled extension point (R13a seam)
+      • the window control is labelled "Include resolved from the last N days",
+        not "Resolved within" / "Updated within" — it ages out RESOLVED rows
+        only, so under All it was describing a filter it does not apply to the
+        open rows in the same list (operator observation, 2026-07-27)
+    Question raised at the same time, for the review to settle: should a stale
+    OPEN action ever age out of the list? Today it never does, at any window.
+    Still owed at the gate: the three ADR-0013 outputs (verdict; funnel deltas;
+    open-seams register into .4.8/.4.15 design fields).
+    Build the COMPLETE View A mockup on the captured fixture, review, freeze.
+    Review agenda additions surfaced by the status vocabulary: how the status
+    column renders a dozen literal values meaning three things; whether the
+    filter buckets via isResolved() or matches literals; whether the assignee
+    status control is a canonical picker, free text, or both; and inheriting
+    getStatusIconUrl (SyncManager.js:2284) as the display authority rather than
+    inventing one.
+    Everything in the mockup: status filter Open/Closed/All, scope filter
+    mine/all, per-row sync control, per-row edit affordance at EDIT tier,
+    assignee status control. Read paths wired to the fixture; write affordances
+    inert.
+    → Output of the gate (ADR-0013 requires all three): verdict; funnel deltas
+      into ROADMAP §Funnel; open-seams register written into .4.8/.4.15's design
+      fields. The known seam is filter-by-named-person (R13a).
+    Do NOT fold hosting (.4.10) in here — deploy/origin plumbing would slow the
+    iteration loop this group depends on.
+
+G2  ── BACKEND MODEL CORRECTION ──  .4.11 slice 2 + .4.12   [one GAS context]
+    Runs in PARALLEL with G1b — disjoint files, and neither touches the response
+    projection the review might change.
+      .4.11  slice 2: fold BoardListing and _handleTeamView onto the reader
+             extracted in G1a; fix R13b (dead-document exclusion) and
+             assertTeamAccess's first-row bug; land the Board→Team rename in the
+             same pass.
+      .4.12  multi-folder tier (R3a) + _authorizeDocWrite (R3b).
+    Grouped because they share the TeamData/DocData/ACL model, the same files,
+    one deploy cycle and one subset gate. Both are specifiable oracles →
+    test-first for .4.12; .4.11 is a refactor against an already-frozen contract
+    (list_importable_actions must be byte-identical after — Import tab tests pass
+    unmodified, and that IS the regression test).
+    .4.11 is ready now. .4.12 needs .4.16 first.
+
+G0  ── PREREQUISITE, START EARLY ──  gts-79dw.4.16      [manual, slow]  READY NOW
+    The multi-folder team ACL fixture. Listed after G1/G2 because it is not on
+    the review's critical path, but START IT FIRST in wall-clock terms: it is
+    manual Drive/Admin work, it blocks .4.12, .4.8 and .4.15, and discovering
+    that late turns a 30-minute test into a blocked session. Reuse the Spike S2
+    world rather than provisioning a parallel one.
+
+G3  ── FINISH THE READ PATHS TO THE FROZEN AC ──  .4.3 + .4.5 adoption
+    After G1's freeze and G2. Remaining .4.3 work is the Closed filter, the
+    mine/all scope filter and teamId keying — all as options on the consolidated
+    reader, no new code in the old file. .4.5 (closed) adopts the rename and the
+    R3b per-document write check. Then point .4.7 at the live endpoint and
+    confirm the reviewed experience survives real data.
+    .4.3 still owes its full pytest -x (regression=pending since 2026-07-24) —
+    cleared in G6, not here.
+
+G4  ── SECOND SURFACE + WRITE PATHS ──  .4.13 + .4.14   [one GAS context]
+    Grouped because both are thin GIS-gated wrappers over cores that already
+    exist (find_sheet_actions; edit_action_row; patch_action_status), sharing the
+    same gate boilerplate and one deploy cycle — and .4.13's UI half reuses
+    .4.7's visual idiom while it is still fresh.
+      .4.13  View B, the web document view. Mirror the sidebar's affordance set
+             (WorkspaceAddonCard.js, docs/side-bar-mockup.html) and reconcile
+             explicitly: what's present, what's deliberately absent, why.
+      .4.14  edit (EDIT tier on the document's folder) and status change (allowed
+             to the ASSIGNEE even with view-only access — the case that makes the
+             portal useful to an external assignee).
+
+G5  ── REACHABILITY ──  .4.10 + .4.9                    [one context]
+    Grouped: both are about URLs, origins and deploy. .4.9 is nearly free once
+    .4.10 produces a stable URL — resolve teamId from DocData (not a folder
+    walk), land the chip on View B, offer navigation up to View A.
+
+G6  ── HARDENING ──  .4.8 + .4.15        [fresh context, one full pytest -x]
+    Grouped despite being two beads: same Python harness, same .4.16 fixture, and
+    ONE full-suite run closes both AND clears .4.3's and .4.5's regression=pending
+    debt (Backstop rules). The no-shared-context rule is satisfied by a fresh
+    context reading only the frozen contracts — it does not require the two TSTs
+    to be separated from each other.
+    Non-negotiables carried from CLAUDE.md: every negative asserts DURABLE state
+    unchanged, not just the response; the R3b cross-folder negative must be proven
+    to FAIL against a build without the per-document check; any scenario calling
+    verify_consistency() also calls verify_all_expectations().
+
+G7  ── gts-79dw.5, supersede ADR-0017 ──                [cheap, rides with G5/G6]
+    Write it AFTER the freeze so the ADR records a reviewed decision, not an
+    intended one. Supersede, do not edit (ADRs are immutable once accepted).
+    Keep the anonymous cmd=preview notice as the unauthenticated fallback.
+
+--------------------------------------------------------------------------------
+WHAT NOT TO GROUP (and why the temptation is wrong)
+--------------------------------------------------------------------------------
+- .4.11's rename with .4.7's UI. Different loop entirely, zero shared context.
+- .4.10 hosting with .4.7. Both feel like "the page", but hosting is deploy/origin
+  plumbing that slows the fast loop the review depends on.
+- Either hardening bead with any implementation bead. Rule, not preference.
+- .4.16 with .4.12 in one sitting if the Drive setup turns out to need admin
+  console work — split rather than block a code session on a console tab.
+
+--------------------------------------------------------------------------------
+STATE  (updated 2026-07-27)
+--------------------------------------------------------------------------------
+G1a  DONE       — reader consolidated (slice 1), real multi-team fixture captured.
+G1b  AWAITING   — mockup built; blocked only on the human review that freezes the
+                  AC. Nothing downstream should be guessed at before it happens.
+G2   NOT STARTED — .4.11 slice 2 is ready now; .4.12 still needs G0/.4.16.
+G0   NOT STARTED — .4.16, manual Drive/Admin work, still the long pole.
+G3-G7 unchanged, all downstream of the G1b freeze.
+
+Detour taken between the two G1a sittings (2026-07-26/27): a user-reported data
+loss — Drive files.list without the all-drives flags made Shared Drive documents
+invisible, syncAll read that as deletion and archived their rows. Fixed, rows
+restored; this is why the first fixture capture found the real teams empty.
+
+Ready now: .4.7 (G1), .4.11 (G2), .4.16 (G0).
+Closed as superseded this session: gts-1hyh (→ .4.12), gts-6dlp (operator
+decision: reaching the portal is sufficient; no in-place edit on the preview
+card). gts-hc6v remains open as a one-question confirmation, not implementation.
+
+Suggested first sitting: start .4.16 (manual and slow, get it moving), then do
+.4.11 slice 1 and capture the fixture (G1a) — it is one deploy cycle and it is
+what makes the review trustworthy. Second sitting: .4.7 on real data, through to
+the review (G1b). .4.11 slice 2 + .4.12 are the natural parallel track.

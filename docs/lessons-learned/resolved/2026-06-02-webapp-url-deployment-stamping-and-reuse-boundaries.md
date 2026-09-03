@@ -84,4 +84,4 @@ b: add a deployment checklist to `OPERATIONS.md` — after `npm run deploy:test`
 Documentation lever applied: guidance integrated into DevStandard `knowledge-base/gas-addon-guide.md`
 §"WebApp URL must be deployment-stamped at build time, not self-registered (LL 2026-06-02)". The
 code-fix verification (WEBAPP_URL stamped at deploy time vs. self-registered on first visit) is
-tracked separately in GTaskSheet-g7ep. Moved to resolved/.
+tracked separately in gts-g7ep. Moved to resolved/.

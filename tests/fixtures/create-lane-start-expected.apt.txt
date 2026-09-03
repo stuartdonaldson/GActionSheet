@@ -1,0 +1,16 @@
+<!-- kind: golden -->
+<!-- name: create-lane-start-expected -->
+<!-- serves: gts-pi1s -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Case (gts-pi1s, @create at document start): a bare AI: trigger placed BEFORE existing content -- the establishing sync's flush must locate and rewrite this occurrence via \_buildFlushRequests' general occurrence scanner, not append-relative arithmetic.
+
+[**ACT-999: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-999)create lane start token (Open)
+
+Filler context action, unrelated to the create boundary under test.
+
+ACT-201: filler@example.com create-start filler one (Open)
+
+Filler context action, unrelated to the create boundary under test.
+
+ACT-202: filler@example.com create-start filler two (Open)

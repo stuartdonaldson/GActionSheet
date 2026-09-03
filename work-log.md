@@ -234,14 +234,14 @@ Validated single-script dual-architecture POC end-to-end; adopted GAS-Practices 
 Completed three prereq issues: removed legacy AI-prefix modules (ii7), restructured to single clasp project with menu+stubs (urx), and added NamedRangeId as first sheet column (v4v). Added Playwright submenu support and a session fixture so ensureSheetStructure runs automatically before header tests — no more manual GAS editor steps for CI/CD.
 
 ### Issues Closed
-- **GTaskSheet-ii7** — Deleted FloatingActionParser, DocumentDiscovery, DocumentNormalizer, SheetReconciler, SyncOrchestrator, MenuHandler, onEditTrigger from src/. Deleted test_floating_action_parser.py. Removed AI- prefix references from UC scenario expectations and doc_inspect helpers. Stubbed floating_actions() for future checkbox+person-chip parser.
-- **GTaskSheet-urx** — Added MenuHandler.js (onOpen, Setup submenu, test menu items) and SyncManager.js (syncDocument/syncAll/onActionSheetEdit stubs). Custom menu registers on sheet open.
-- **GTaskSheet-v4v** — Added NamedRangeId as first column of SHEET_HEADERS. Updated ArchiveManager column indices (STATUS 5→6, DATE_MODIFIED 8→9). Updated TestFixtures._tfSheetRow and test_infrastructure.py headers.
+- **gts-ii7** — Deleted FloatingActionParser, DocumentDiscovery, DocumentNormalizer, SheetReconciler, SyncOrchestrator, MenuHandler, onEditTrigger from src/. Deleted test_floating_action_parser.py. Removed AI- prefix references from UC scenario expectations and doc_inspect helpers. Stubbed floating_actions() for future checkbox+person-chip parser.
+- **gts-urx** — Added MenuHandler.js (onOpen, Setup submenu, test menu items) and SyncManager.js (syncDocument/syncAll/onActionSheetEdit stubs). Custom menu registers on sheet open.
+- **gts-v4v** — Added NamedRangeId as first column of SHEET_HEADERS. Updated ArchiveManager column indices (STATUS 5→6, DATE_MODIFIED 8→9). Updated TestFixtures._tfSheetRow and test_infrastructure.py headers.
 
 ### Key Learnings
 - Google Sheets renders submenu trigger items with a ► arrow in the accessible name — `getByRole('menuitem', { name: 'Setup', exact: true })` fails; use `.locator('[role="menuitem"]').filter({ hasText: parentMenu }).first()` instead.
 - Drive log sync latency can exceed 60s; session fixtures that depend on log-wait should catch TimeoutError and let the test assertion carry the error rather than failing setup.
-- Playwright scripts with `headless: false` hardcoded will open a browser window even from pytest — tracked as GTaskSheet-4qd (P3).
+- Playwright scripts with `headless: false` hardcoded will open a browser window even from pytest — tracked as gts-4qd (P3).
 - Utility GAS functions (ensureSheetStructure, initializeTriggers) should be in the custom menu from the start so CI/CD can invoke them without the Apps Script editor.
 
 
@@ -251,9 +251,9 @@ Completed three prereq issues: removed legacy AI-prefix modules (ii7), restructu
 UC-A full TDD cycle (red → green) plus ADR for Workspace Add-on architecture.
 
 ### Completed
-- **mol-75k (red phase):** `tests/test_uc_a.py` — 4 E2E tests covering AC1 (action appears in ActionSheet), AC2 (no duplicate on second sync), AC3 (idempotent). New Playwright helper `addon_helpers.js` for driving the Doc sidebar; Python wrapper `addon_invoke.py`. `uc_a_clear` fixture in `TestFixtures.js` clears ActionSheet + named ranges while preserving chip-led checklist items. Old AI-prefix UC-A scenarios removed from `test_uc_scenarios.py`.
+- **mol75k (red phase):** `tests/test_uc_a.py` — 4 E2E tests covering AC1 (action appears in ActionSheet), AC2 (no duplicate on second sync), AC3 (idempotent). New Playwright helper `addon_helpers.js` for driving the Doc sidebar; Python wrapper `addon_invoke.py`. `uc_a_clear` fixture in `TestFixtures.js` clears ActionSheet + named ranges while preserving chip-led checklist items. Old AI-prefix UC-A scenarios removed from `test_uc_scenarios.py`.
 - **nmo (ADR):** `knowledge-base/adr/0005-workspace-addon-with-automation-sidecar.md` — captures two-project architecture, identity via namedRangeId, proxy-write pattern, and why alternatives were rejected. ADR-0001 status updated to Superseded.
-- **mol-uv8 (green phase):** `SyncManager.js` — `_scanChipLedActions` (PERSON chip as first child), `_buildAnchoredIndexMap`, `_anchorNewActions` (DocumentApp.addNamedRange), `_upsertActionRows` (doPost proxy). `Addon.js` — "Sync now" button and `onSyncNow` handler. `WebApp.js` — `_handleUpsertActionRows` with idempotent namedRangeId key and WriteGuard-wrapped appendRow. `appsscript.json` — add-on name changed to "Action Sync". `doc_inspect.py` — `floating_actions()` parser (mailto hyperlink → email, regex fallback).
+- **moluv8 (green phase):** `SyncManager.js` — `_scanChipLedActions` (PERSON chip as first child), `_buildAnchoredIndexMap`, `_anchorNewActions` (DocumentApp.addNamedRange), `_upsertActionRows` (doPost proxy). `Addon.js` — "Sync now" button and `onSyncNow` handler. `WebApp.js` — `_handleUpsertActionRows` with idempotent namedRangeId key and WriteGuard-wrapped appendRow. `appsscript.json` — add-on name changed to "Action Sync". `doc_inspect.py` — `floating_actions()` parser (mailto hyperlink → email, regex fallback).
 
 ### Key Learnings
 - `DocumentApp.Document.addNamedRange()` creates the same named range as the REST API `createNamedRange`; `getId()` returns the stable `namedRangeId` — REST API batchUpdate not needed for MVP anchoring.
@@ -287,11 +287,11 @@ UC-A green phase complete — all 4 acceptance tests passing end-to-end. Indepen
 
 ### Test Changes
 - `test_uc_a.py`: replaced `sync_via_sidebar` with GAS menu path throughout; combined fixture + first sync into single browser session (`setup_and_sync`); dropped supplemental docx test (not an acceptance criterion); reduced from ~10 to ~6 browser sessions across 3 tests
-- Independent review (mol-oib) complete: 5 blocking, 10 non-blocking findings; `_escapeQuotes` fix applied this session
+- Independent review (moloib) complete: 5 blocking, 10 non-blocking findings; `_escapeQuotes` fix applied this session
 
 ### Issues Closed
-- `GTaskSheet-mol-88d` — Verify UC-A passes full test suite
-- `GTaskSheet-mol-oib` — Independent agent review: UC-A
+- `gts-mol88d` — Verify UC-A passes full test suite
+- `gts-moloib` — Independent agent review: UC-A
 
 ## 2026-05-24 02:05:06
 
@@ -314,14 +314,14 @@ Current AC1 covers 2 permutations (chip+default-status, email+explicit-status). 
 
 Strategy: all items in a single doc, single Sync. Expect 3 rows (chip, email, email-underscore) and zero row for plain text. One browser session, maximum coverage per execution run.
 
-Tracked as **GTaskSheet-ly7** (blocks mol-p30 sign-off gate).
+Tracked as **gts-ly7** (blocks molp30 sign-off gate).
 
-**UC-B test design** (GTaskSheet-5vk, notes updated): same multi-example paradigm — construct doc with multiple forms, make sheet edits, one Sync, assert all propagated. Include regression checks for append-instead-of-replace and duplicate tracker table insertion.
+**UC-B test design** (gts-5vk, notes updated): same multi-example paradigm — construct doc with multiple forms, make sheet edits, one Sync, assert all propagated. Include regression checks for append-instead-of-replace and duplicate tracker table insertion.
 
 ### Issues
-- **GTaskSheet-ly7** (new, open): Expand UC-A fixture + tests to full permutation coverage
-- **GTaskSheet-mol-p30**: Blocked on ly7; sign-off criteria documented in notes
-- **GTaskSheet-5vk**: Notes updated with ATDD paradigm for UC-B
+- **gts-ly7** (new, open): Expand UC-A fixture + tests to full permutation coverage
+- **gts-molp30**: Blocked on ly7; sign-off criteria documented in notes
+- **gts-5vk**: Notes updated with ATDD paradigm for UC-B
 
 ## 2026-05-24 07:23:23
 
@@ -329,13 +329,13 @@ Tracked as **GTaskSheet-ly7** (blocks mol-p30 sign-off gate).
 Session-start check; reviewed UC-B readiness and test strategy; designed canonical test doc architecture for all UC tests; created hardening issue for parentheses corner case.
 
 ### Details
-- Confirmed UC-B mol workflow state: use-cases, AC, and gate all closed; `mol-745` (Develop tests) is next
+- Confirmed UC-B mol workflow state: use-cases, AC, and gate all closed; `mol745` (Develop tests) is next
 - Resolved staged LL incident review: Branch A already applied (OPERATIONS.md + bd memory); Branch B still open
 - Reviewed UC-A test structure as the model for UC-B: batching multiple format variants into one Sync execution
 - Established that UC-B test variants are defined by **floating action format** (email-only, chip+status, chip+no-status, non-default status, etc.), not by edit direction
 - Designed canonical test doc: 7 floating action variants shared across all UCs; GAS fixture resets to or builds from this state per UC
-- Updated `GTaskSheet-mol-745` with full test architecture: 3 scenarios (doc-wins, sheet-wins, conflict-resolution), batching principle documented
-- Created `GTaskSheet-28q` (P3, hardening): parentheses-in-action-text corner case for status token parser
+- Updated `gts-mol745` with full test architecture: 3 scenarios (doc-wins, sheet-wins, conflict-resolution), batching principle documented
+- Created `gts-28q` (P3, hardening): parentheses-in-action-text corner case for status token parser
 - Persisted canonical test doc principle as bd memory (`canonical-test-doc-shared-fixture-across-all-ucs`)
 
 ### Key Learnings
@@ -345,11 +345,11 @@ Session-start check; reviewed UC-B readiness and test strategy; designed canonic
 ## 2026-05-24 07:41:07
 
 ### Summary
-Implemented UC-B test suite (GTaskSheet-mol-745): GAS fixture scenarios for all three UC-B cases plus the Python xfail test file.
+Implemented UC-B test suite (gts-mol745): GAS fixture scenarios for all three UC-B cases plus the Python xfail test file.
 
 ### Changes
 - `src/TestFixtures.js`: Added `_tfAppendPersonChipListItem` REST API helper (appends a chip-led bullet to end of doc without clearing). Added `uc_b_doc_wins`, `uc_b_sheet_wins`, and `uc_b_conflict` fixture scenarios — each builds the canonical 7-item state (3 chip + 3 email + 1 plain-text negative), runs an intermediate `syncDocument()` call to anchor named ranges, then applies scenario-specific mutations. Extended `_tfResetDocBody` exclusion list to cover all three UC-B scenarios.
-- `tests/test_uc_b.py`: New file with three `@pytest.mark.xfail(strict=True)` tests covering AC1 (doc wins), AC2 (sheet wins), and AC3+conflict resolution. All tests collect cleanly; all will remain xfail until `GTaskSheet-mol-dyu` (UC-B implementation) is complete.
+- `tests/test_uc_b.py`: New file with three `@pytest.mark.xfail(strict=True)` tests covering AC1 (doc wins), AC2 (sheet wins), and AC3+conflict resolution. All tests collect cleanly; all will remain xfail until `gts-moldyu` (UC-B implementation) is complete.
 
 ### Key Learnings
 - UC-B fixture flow uses two GAS invocations per test: `setup_fixture('uc_b_XXX')` triggers the full canonical setup + intermediate sync + mutations; `sync_document(test_doc_id)` triggers the final convergence sync. Separating these avoids ambiguous `sync.complete` log entries from the intermediate sync.
@@ -365,23 +365,23 @@ Captured and analyzed deployment process deviation (direct `clasp push` vs `npm 
 1. **Lessons Learned capture** — documented incident where Claude bypassed npm deploy toolchain; staged file with 5-why analysis (two root causes: undocumented npm script path + missing LL trigger for process deviations)
 2. **Option A1** — Added GAS Deployment section to CLAUDE.md with table: `npm run deploy:test` (test), `npm run deploy:prod` (prod), `npm run push` (push-only, deprecated). Explained stale deployment symptom.
 3. **Option A2** — Updated OPERATIONS.md §Pushing → §Deploying; led with npm deploy scripts; updated First-time Setup and POC Checklist to use `npm run deploy:test`.
-4. **Test suite verification** — Ran full UC-B + UC-A test suite: 6/6 pass (292s wall time). Closed GTaskSheet-mol-b7d.
+4. **Test suite verification** — Ran full UC-B + UC-A test suite: 6/6 pass (292s wall time). Closed gts-molb7d.
 
 ### Key Learnings
 - Structural gaps (undocumented mandatory paths) accumulate into repeated process deviations. Documenting the npm deploy toolchain as the authoritative path in CLAUDE.md prevents the next agent from using direct `clasp` commands.
 - Lessons-learned auto-trigger list should include "task required rework because wrong toolchain entry point was used" to catch process deviations earlier in the session.
 
 ### Status
-- GTaskSheet-mol-dyu: closed (UC-B bidirectional sync implementation)
-- GTaskSheet-mol-b7d: closed (verification gate)
+- gts-moldyu: closed (UC-B bidirectional sync implementation)
+- gts-molb7d: closed (verification gate)
 - LL incident: staged (resolution deferred per user)
-- Ready: GTaskSheet-mol-4vr (independent review) and 14 other open issues
+- Ready: gts-mol4vr (independent review) and 14 other open issues
 
 
 ## 2026-05-24 22:14:53
 
 ### Summary
-Completed GTaskSheet-5vk (UC-B: Sheet→Doc sync). All 3 UC-B acceptance tests now pass; UC-A regressions clean.
+Completed gts-5vk (UC-B: Sheet→Doc sync). All 3 UC-B acceptance tests now pass; UC-A regressions clean.
 
 ### Changes
 - `src/SyncManager.js`: added `_syncSheetRowToDoc` (real-time `onActionSheetEdit` path) + call from `onActionSheetEdit`; fixed bug where Document column read via `getValues()` returned HYPERLINK display text instead of URL — changed to `sheet.getRange(row, 7).getFormula()`
@@ -414,8 +414,8 @@ Fixed named range anchor shift bug in UC-B sync; all 3 UC-B tests now pass. Fixe
 - Google Docs PERSON chip exports to docx as `<w:hyperlink>` with email in the URL; the display text (person's name) is inside the hyperlink element and is included in `para.text` — must be excluded when extracting action text.
 
 ### Issues
-- GTaskSheet-1ar: closed (NR shift fix delivered)
-- GTaskSheet-x2s: filed — UC-A permutations test downloads 0 rows from xlsx despite sync logging `upserted:3`; likely Google Sheets export caching lag
+- gts-1ar: closed (NR shift fix delivered)
+- gts-x2s: filed — UC-A permutations test downloads 0 rows from xlsx despite sync logging `upserted:3`; likely Google Sheets export caching lag
 
 
 ## 2026-05-25 15:32:16
@@ -425,14 +425,14 @@ Closed two P1 process gates (j5u, qea): operationalized AC postconditions as ver
 
 ### Details
 
-**GTaskSheet-j5u — AC postconditions as verifiable invariants**
+**gts-j5u — AC postconditions as verifiable invariants**
 - UC-A postconditions: replaced mutation-scoped language with full-state invariant (every FA ↔ ActionSheet row pair agrees on all fields; Document column display text equals current doc title; no extra rows)
 - UC-A AC2: added Document column title check to the invariant
 - UC-B postconditions: added Document column display text requirement to existing full-state invariant
 - UC-C postconditions: replaced "tracker table reflects current set" with 3-way consistency invariant (FA ↔ tracker row ↔ ActionSheet row for Action, Status, Assignee, NamedRangeId, Document title)
 - UC-D: added Postconditions section (no rows with Status=Closed + Last Modified >30 days remain; no doc content altered)
 
-**GTaskSheet-qea — verifyConsistency test gate helper**
+**gts-qea — verifyConsistency test gate helper**
 - `src/TestFixtures.js`: added `verifyConsistencyForTest(docId)` — reads doc+sheet directly (all 9 ActionSheet columns including dates and Document formula), runs full field comparison (assigneeEmail, assigneeName, action, status, dateCreated, dateModified, Document title), and logs `verify.consistency.complete` for Playwright to poll
 - `src/TestFixtures.js`: added `_runConsistencyChecks()` — compares floating↔sheet pairs, tracker rows (when present), reports sheet rows with no floating action, tracker rows with no sheet row
 - `src/MenuHandler.js`: added "Test: Verify Consistency" menu item and `menuVerifyConsistency()` handler
@@ -440,8 +440,8 @@ Closed two P1 process gates (j5u, qea): operationalized AC postconditions as ver
 
 **Design discussions (new bd issues filed)**
 - Retrieved prior session discussion (from 62ebf8c3 JSONL) on deleted action items and deleted documents
-- **GTaskSheet-beh (P2)**: Sync Status column — blank (OK), "Removed" (FA named range gone), "Doc Not Found" (openById throws). No auto-archive on Removed. UC-C refresh includes Removed rows with visual indicator.
-- **GTaskSheet-6fu (P3)**: Human-readable named range names using AI-{id} prefix (e.g., AI-1, AI-5). ID pre-assigned by GAS before NR creation (read max from sheet). UUID remains primary identity key in NamedRangeId column.
+- **gts-beh (P2)**: Sync Status column — blank (OK), "Removed" (FA named range gone), "Doc Not Found" (openById throws). No auto-archive on Removed. UC-C refresh includes Removed rows with visual indicator.
+- **gts-6fu (P3)**: Human-readable named range names using AI-{id} prefix (e.g., AI-1, AI-5). ID pre-assigned by GAS before NR creation (read max from sheet). UUID remains primary identity key in NamedRangeId column.
 
 ### Commit
 `16470d0` feat(test-gates): operationalize AC postconditions and add verifyConsistency helper (not yet pushed)
@@ -461,16 +461,16 @@ Pre-existing live-GAS test failure (`uc2_new_table_row` — tracker table row ID
 ## 2026-05-25 21:17:37
 
 ### Summary
-Completed GTaskSheet-cby (named-clone fixture isolation) and diagnosed a regression in the Date Modified fix (GTaskSheet-6rn) that breaks UC-B conflict resolution.
+Completed gts-cby (named-clone fixture isolation) and diagnosed a regression in the Date Modified fix (gts-6rn) that breaks UC-B conflict resolution.
 
-### GTaskSheet-cby — Named-clone fixture isolation (closed)
+### gts-cby — Named-clone fixture isolation (closed)
 - Replaced shared static TEST_DOC_ID with session-scoped clone: `beginTestSession` / `endTestSession` added to TestFixtures.js and MenuHandler.js; conftest.py `test_doc_id` fixture now clones and trashes per pytest run
 - Adopted accumulate-without-reset design: scenarios append unique-prefixed items to the clone doc without clearing; cleared clearing logic (`_tfResetDocBody`, named-range sweeps) removed from uc_a_clear, uc_a_permutations, and uc_b_* cases
 - Scenario prefixes: `AC1:` (uc_a_clear), `Perm:` (uc_a_permutations), `UCB-DW:` / `UCB-SW:` / `UCB-CF:` (uc_b scenarios)
 - Tests updated to filter rows and FAs by prefix before count/content assertions; AC2 no longer re-runs uc_a_clear setup (relies on session state from AC1)
 - All 6 tests green on first full run
 
-### GTaskSheet-6rn — Date Modified idempotency (regression in progress)
+### gts-6rn — Date Modified idempotency (regression in progress)
 - Root cause identified: in `_handleSyncActionRows` doc-wins branch (WebApp.js), `Date Modified` stamp and HYPERLINK refresh were unconditional — fired even when action/status unchanged. Design decision: Date Modified should only stamp on user-visible content changes (action, status, assignee), not on HYPERLINK formula refresh.
 - Fix applied: moved `setValue(now)` inside the content-changed guard; HYPERLINK refresh kept unconditional
 - AC2 full equality assertion restored (was weakened as workaround)
@@ -483,9 +483,9 @@ Completed GTaskSheet-cby (named-clone fixture isolation) and diagnosed a regress
 ## 2026-05-25 22:32:44
 
 ### Summary
-Resolved GTaskSheet-6rn (Date Modified idempotency fix) — all 6 UC-A and UC-B tests green.
+Resolved gts-6rn (Date Modified idempotency fix) — all 6 UC-A and UC-B tests green.
 
-### GTaskSheet-6rn — Root cause and fix
+### gts-6rn — Root cause and fix
 - **WebApp.js fix (from previous session):** moved `setValue(now)` inside the content-changed guard in `_handleSyncActionRows` doc-wins branch; HYPERLINK refresh kept unconditional. UC-A AC2 full-equality assertion restored.
 - **Regression root cause:** The shared Actions sheet accumulates rows from all prior test sessions (accumulate-without-reset design). When `uc_b_conflict` Phase 3 searched for Var 4 by action text alone, it stamped an **old row from a previous session** (different namedRangeId) instead of the current session's row. The current row kept its Date Modified from `appendRow` (T_webapp < LAST_SYNC_TIME), so the conflict check `dateModified > lastSyncTime` evaluated FALSE → doc-wins branch fired → doc showed 'Done' instead of 'Closed'.
 - **TestFixtures.js fix:** Added `testDocId` filter (Document column formula check) to all Phase 3 row searches in both `uc_b_sheet_wins` and `uc_b_conflict` mutations. Also stamped Var 4 Date Modified with `new Date('2030-01-01')` in the conflict fixture for belt-and-suspenders (dateModified always >> lastSyncTime).
@@ -501,7 +501,7 @@ Resolved GTaskSheet-6rn (Date Modified idempotency fix) — all 6 UC-A and UC-B 
 ## 2026-05-26 10:25:00
 
 ### Summary
-Wrote full test suite for UC-C (tracker table insert/refresh) and GTaskSheet-ly5 (Sync Status column). Identified Playwright session cost; built batch runner to reduce 18 browser launches to 4.
+Wrote full test suite for UC-C (tracker table insert/refresh) and gts-ly5 (Sync Status column). Identified Playwright session cost; built batch runner to reduce 18 browser launches to 4.
 
 ### Detail
 
@@ -644,7 +644,7 @@ POC: Editor add-on action chip (6ov) — continued Marketplace publish and link 
 ## 2026-05-28 12:40:00
 
 ### Summary
-Implemented AI-N token floating action identity (GTaskSheet-s4m). Replaced UUID named-range identity with doc-scoped `AI-N:` text token; global ID is `{docFileId}/AI-{N}` stored in sheet col 1. Six files changed across GAS project.
+Implemented AI-N token floating action identity (gts-s4m). Replaced UUID named-range identity with doc-scoped `AI-N:` text token; global ID is `{docFileId}/AI-{N}` stored in sheet col 1. Six files changed across GAS project.
 
 ### Changes
 - **SyncManager.js**: rewrote `_scanFloatingActions` to detect by `AI-N:` prefix; deleted `_buildAnchoredIndexMap`, `_anchorNewActions`, `_applySheetWinToDoc`, `_normalizeMissingFloatingActionStatuses`, `_updateParaTextFromSheet`; updated `syncDocument` sheetWins path to use `_poc_flushActionParagraph`; rewrote `_syncSheetRowToDoc` to extract N from globalId and call REST flush directly
@@ -660,13 +660,13 @@ Implemented AI-N token floating action identity (GTaskSheet-s4m). Replaced UUID 
 - The batchUpdate reverse-insertion pattern (insert at same index, each pushes prior right) requires the trailing text to be inserted first and the image last to achieve `[img][token][chip][text]` order.
 
 ### Pending
-- GTaskSheet-sjj: `[TST]` regression + integration test coverage for AI-N token format — open, not yet started
+- gts-sjj: `[TST]` regression + integration test coverage for AI-N token format — open, not yet started
 - Manual verification cycle: reinstall test deployment, run Verification steps 1–8 from plan
 
 ## 2026-05-28 13:15:00
 
 ### Summary
-Extended AI-N token format with three UX changes (GTaskSheet-ar4): AI: placeholder auto-assignment on sync, AI-N identifier in ActionSheet ID column, and AI-N display in sidebar/creation/preview cards. Also fixed SVG rejection by Docs REST API insertInlineImage.
+Extended AI-N token format with three UX changes (gts-ar4): AI: placeholder auto-assignment on sync, AI-N identifier in ActionSheet ID column, and AI-N display in sidebar/creation/preview cards. Also fixed SVG rejection by Docs REST API insertInlineImage.
 
 ### Changes
 - **SVG fix**: Docs REST API rejects SVG for `insertInlineImage` — changed `_POC_STATUS_IMAGES` to empty map and `imgUrl` in `_poc_flushActionParagraph` to always use PNG fallback (`action-logo-t-32.png`)
@@ -681,7 +681,7 @@ Extended AI-N token format with three UX changes (GTaskSheet-ar4): AI: placehold
 - The N in `AI-N` is both the doc identity token and the human-readable ID — single source of truth with no separate counter needed.
 
 ### Pending
-- GTaskSheet-sjj: `[TST]` regression + integration test coverage — still open
+- gts-sjj: `[TST]` regression + integration test coverage — still open
 - Manual verification cycle still needed: reinstall test deployment, run plan Verification steps 1–8
 - PNG status icons needed to replace the fallback logo for status-specific images
 
@@ -717,10 +717,10 @@ POC editor add-on UI polish and edit-action flow: preview card shows AI-N id as 
 - `_insertTrackerIdLinks(docId, globalIds)`: REST `updateTextStyle` applies hyperlink to each ID cell pointing to chip URL
 
 ### Issues
-- Created and closed `GTaskSheet-7js` [IMP] UI display changes
-- Created and closed `GTaskSheet-j8y` [IMP] edit action + async sheet update
-- Created (open) `GTaskSheet-rwz` [TST] verify UI display changes
-- Created (open) `GTaskSheet-0n3` [TST] verify edit action propagation
+- Created and closed `gts-7js` [IMP] UI display changes
+- Created and closed `gts-j8y` [IMP] edit action + async sheet update
+- Created (open) `gts-rwz` [TST] verify UI display changes
+- Created (open) `gts-0n3` [TST] verify edit action propagation
 
 ### Key Learnings
 - `DecoratedText.setTopLabel` is the right place to pack AI-N + assignee + status for compact sidebar rows — avoids two lines of metadata below each action
@@ -935,15 +935,15 @@ Four references missed in the main commit: prose on line 300 (stale alias note),
 
 ### bd Issues
 Created 9 issues, closed 5 FIX issues:
-- GTaskSheet-2ia [FIX] C1 rename — closed
-- GTaskSheet-s5f [FIX] M1 assignee email — closed
-- GTaskSheet-feo [FIX] M2 idempotence — closed
-- GTaskSheet-xju [FIX] M3 flush (Open) token — closed
-- GTaskSheet-5mk [FIX] M4 docId matching — closed
-- GTaskSheet-45k [TST] M1 — open (Python tests needed)
-- GTaskSheet-ckj [TST] M2 — open (Python tests needed)
-- GTaskSheet-dm7 [TST] M3 — open (Python tests needed)
-- GTaskSheet-wpe1 [TST] M4 — open (Python tests needed)
+- gts-2ia [FIX] C1 rename — closed
+- gts-s5f [FIX] M1 assignee email — closed
+- gts-feo [FIX] M2 idempotence — closed
+- gts-xju [FIX] M3 flush (Open) token — closed
+- gts-5mk [FIX] M4 docId matching — closed
+- gts-45k [TST] M1 — open (Python tests needed)
+- gts-ckj [TST] M2 — open (Python tests needed)
+- gts-dm7 [TST] M3 — open (Python tests needed)
+- gts-wpe1 [TST] M4 — open (Python tests needed)
 
 ### Decisions
 - TestFixtures.js `_TF_RESULT` fields renamed to `globalId` even though it breaks Python test assertions — correct per the twin-ticket rule; TST issues capture the Python-side obligation.
@@ -994,11 +994,11 @@ Resolved the two Opus-deferred merge-blockers from design-review-05-29.md in one
 ### Verification
 - `node --check` clean on `EditorAddon.js`, `WorkspaceAddon.js`, `SyncManager.js`, `TrackerTable.js`.
 - Full call graph verified: every renamed/extracted helper has exactly one def and all call sites resolve; zero `_poc_`/`_POC_`/`_buildSidebarAction`/`POC_QUEUE` remain in `src/`.
-- **Runtime not yet exercised** — renamed `setFunctionName`/trigger-handler strings validate only at runtime. Merge gate: `npm run deploy:test` + editor-addon `[TST]` suite green (GTaskSheet-rwz preview/tracker, GTaskSheet-0n3 edit propagation).
+- **Runtime not yet exercised** — renamed `setFunctionName`/trigger-handler strings validate only at runtime. Merge gate: `npm run deploy:test` + editor-addon `[TST]` suite green (gts-rwz preview/tracker, gts-0n3 edit propagation).
 
 ### Issues
-- GTaskSheet-y8rb [IMP] M6 — closed
-- GTaskSheet-jyyf [IMP] M7 — closed
+- gts-y8rb [IMP] M6 — closed
+- gts-jyyf [IMP] M7 — closed
 
 ### M6/M7 follow-on — naming convention + chip-URL consolidation (2026-05-29)
 Triggered by the toolset-direction discussion (HtmlService LLM side-chat expected as future work).
@@ -1024,7 +1024,7 @@ Promoted the session's structural decisions into two ADRs and finished the NUTS 
 - An accepted ADR's *peripheral consequence* (ADR-0008's chip-URL string) can be updated by a new "Refines:" ADR without superseding the host ADR's core decision — avoids wrongly retiring the token-identity decision.
 
 ### Migration / deploy note
-Chips on the old `GActionSheet/action` path won't fire `onLinkPreview` until re-flushed by a sync; manifest change takes effect only after `npm run deploy:test`. Pre-production, so no live impact (GTaskSheet-erc not yet done).
+Chips on the old `GActionSheet/action` path won't fire `onLinkPreview` until re-flushed by a sync; manifest change takes effect only after `npm run deploy:test`. Pre-production, so no live impact (gts-erc not yet done).
 
 ## 2026-05-29 20:58:13
 
@@ -1053,7 +1053,7 @@ Diagnosed and fixed bidirectional sync failure (Dirty flag not clearing, items n
 ## 2026-05-30 12:26:23
 
 ### Summary:
-Completed bead GTaskSheet-5vwu.2 ([IMP] GAS pre-code contract for the §16.10 ATDD scenario journey). Authored additive contract entries only — no GAS feature logic. Resolved the act→route gap left open by .1 (§7 #2 / §15 still-open #3) with a three-tier ownership model:
+Completed bead gts-5vwu.2 ([IMP] GAS pre-code contract for the §16.10 ATDD scenario journey). Authored additive contract entries only — no GAS feature logic. Resolved the act→route gap left open by .1 (§7 #2 / §15 still-open #3) with a three-tier ownership model:
 - Production routes (ContractSchema.js webApp.routeNames): sync_action_rows, patch_action_status (set_status), delete_action_row.
 - Test-support routes (new ContractSchema.js webApp.testRouteNames): edit_action_row (edit_sheet act; API path replicates onActionSheetEdit Dirty+Date-Modified per §16.11 #2), find_sheet_actions (docId-scoped read).
 - ATDD-only contracts (new src/AtddContracts.js): begin_/end_journey_session — empty-create (§16.11 #1), name GActionSheet-Test-journey-{YYYYMMDD}-{hex}, same Drive folder; never consumed by the production app.
@@ -1067,7 +1067,7 @@ Added webApp.messages (per-route request/response + completion signals) and docs
 ## 2026-05-30 12:27:48
 
 ### Summary:
-Completed bead GTaskSheet-5vwu.1 ([TST] Design Python scenario-harness architecture + checkpoint-engine algorithm) — the model:opus design-only deliverable unblocking the epic's build beads. Authored docs/atdd/scenario-harness-design.md (new, ~26 KB): (1) scn/ package module layout mapping the §16.9 catalog 1:1 to build beads (.4 ai/contacts, .5 engine, .6 surfaces, .7 session, .10 ui, .3 contract, .13 journey); (2) concrete typed signatures for every §16.9 catalog entry, §16 names verbatim; (3) the expectation/checkpoint engine algorithm — Expectation record with per-surface `remaining` state, snapshot-at-enqueue rule, STEP vs INTEGRITY observability (incl. synthetic CONSISTENCY surface + deterministic bare-STEP default), 5-step drain decision procedure, drain invariant, worked per-surface partial-drain trace; (4) the §16.10 journey traced act-by-act through the engine. Pure design — ContractSchema.js untouched (two implied-shape findings deferred to .3/build beads). Epic Coordination Log updated; bead closed; committed 2789736 and pushed.
+Completed bead gts-5vwu.1 ([TST] Design Python scenario-harness architecture + checkpoint-engine algorithm) — the model:opus design-only deliverable unblocking the epic's build beads. Authored docs/atdd/scenario-harness-design.md (new, ~26 KB): (1) scn/ package module layout mapping the §16.9 catalog 1:1 to build beads (.4 ai/contacts, .5 engine, .6 surfaces, .7 session, .10 ui, .3 contract, .13 journey); (2) concrete typed signatures for every §16.9 catalog entry, §16 names verbatim; (3) the expectation/checkpoint engine algorithm — Expectation record with per-surface `remaining` state, snapshot-at-enqueue rule, STEP vs INTEGRITY observability (incl. synthetic CONSISTENCY surface + deterministic bare-STEP default), 5-step drain decision procedure, drain invariant, worked per-surface partial-drain trace; (4) the §16.10 journey traced act-by-act through the engine. Pure design — ContractSchema.js untouched (two implied-shape findings deferred to .3/build beads). Epic Coordination Log updated; bead closed; committed 2789736 and pushed.
 
 ### Key Learnings:
 - "per-surface partial drain (§16.11 #9)" is a mis-citation — §16.11 has only 8 items; the mechanism is the §16.1 observability rule applied to a multi-surface verify_all_expectations. Recorded so siblings don't chase a nonexistent item.
@@ -1077,7 +1077,7 @@ Completed bead GTaskSheet-5vwu.1 ([TST] Design Python scenario-harness architect
 
 ## 2026-05-30 16:15:00
 
-### Closed: GTaskSheet-5vwu.3 [INF] ContractSchema.js → JSON export + Python loader
+### Closed: gts-5vwu.3 [INF] ContractSchema.js → JSON export + Python loader
 
 **Deliverables:**
 - `scripts/export-contract.js` — Node.js tool exporting CONTRACT_SCHEMA to JSON via VM eval
@@ -1101,7 +1101,7 @@ Completed bead GTaskSheet-5vwu.1 ([TST] Design Python scenario-harness architect
 ## 2026-05-30 12:58:28
 
 ### Summary
-Implemented GTaskSheet-5vwu.4 — `scn/ai.py` (the `ai` dataclass) and `scn/contacts.py` (TEST_CONTACTS + name resolution). 25 unit tests written and passing. Bead closed, committed, pushed.
+Implemented gts-5vwu.4 — `scn/ai.py` (the `ai` dataclass) and `scn/contacts.py` (TEST_CONTACTS + name resolution). 25 unit tests written and passing. Bead closed, committed, pushed.
 
 ### Detail
 - **scn/ai.py** — `ai` dataclass per §16.2: fields `action`, `assignee`, `action_id`, `status`, `assignee_source`; `as_text()` implementing the 4-row rendering table with status-token-only-if-set rule
@@ -1115,7 +1115,7 @@ Implemented GTaskSheet-5vwu.4 — `scn/ai.py` (the `ai` dataclass) and `scn/cont
 ## 2026-05-30 14:02:54
 
 ### Summary
-Implemented GTaskSheet-5vwu.5 — expectation + checkpoint engine: `scn/engine.py`, `scn/assertions.py`, 38 unit tests. All four AC verified; 67 total tests green. Bead closed and pushed.
+Implemented gts-5vwu.5 — expectation + checkpoint engine: `scn/engine.py`, `scn/assertions.py`, 38 unit tests. All four AC verified; 67 total tests green. Bead closed and pushed.
 
 ### Details
 - **Plan phase:** read bead .5 and epic .5vwu; read `docs/atdd/scenario-harness-design.md` §4 (algorithm spec); confirmed no contract gaps
@@ -1132,7 +1132,7 @@ Implemented GTaskSheet-5vwu.5 — expectation + checkpoint engine: `scn/engine.p
 ## 2026-05-30 14:15:36
 
 ### Summary
-GTaskSheet-5vwu.6 ([TST] Surface readers) complete. Implemented `scn/surfaces.py` with `DocReader`, `SheetReader`, `TrackerReader` per §16.5 and `docs/atdd/scenario-harness-design.md §3.7`. 26 unit tests written and passing; 89 total scn unit tests green. Committed and pushed.
+gts-5vwu.6 ([TST] Surface readers) complete. Implemented `scn/surfaces.py` with `DocReader`, `SheetReader`, `TrackerReader` per §16.5 and `docs/atdd/scenario-harness-design.md §3.7`. 26 unit tests written and passing; 89 total scn unit tests green. Committed and pushed.
 
 ### Details
 - `scn/surfaces.py` — three reader classes returning plain `ai` records (no assertion logic):
@@ -1153,7 +1153,7 @@ Cost of session reported 1.64, observed on https://claude.ai/settings/usage 2.18
 ## 2026-05-30 14:48:42
 
 ### Summary
-Delivered bead GTaskSheet-5vwu.7: `scn/session.py` — the ScenarioSession thin driver wiring the completed §16 harness modules (.3 contract, .4 ai/contacts, .5 engine/assertions, .6 surfaces) into the full author-facing scenario API. 25 unit tests written and green; no sibling regressions (89 passing). Committed and pushed: a877452.
+Delivered bead gts-5vwu.7: `scn/session.py` — the ScenarioSession thin driver wiring the completed §16 harness modules (.3 contract, .4 ai/contacts, .5 engine/assertions, .6 surfaces) into the full author-facing scenario API. 25 unit tests written and green; no sibling regressions (89 passing). Committed and pushed: a877452.
 
 ### Work Done
 - **Planning (plan mode):** Explored codebase; verified engine.py drain() signature, surfaces.py reader signatures, existing fixture_invoke.py HTTP pattern, and ContractSchema.json + AtddContracts.js route inventory before writing any code.
@@ -1170,7 +1170,7 @@ Cost of session reported 2.44, observed on https://claude.ai/settings/usage 2.43
 ## 2026-05-30 18:58:31
 
 ### Summary:
-Implemented bead GTaskSheet-5vwu.9 — two new testToken-gated GAS doPost routes (`edit_action_row` + `find_sheet_actions`) per ContractSchema.js `testRouteNames`. Deployed and smoke-tested. Bead closed and pushed.
+Implemented bead gts-5vwu.9 — two new testToken-gated GAS doPost routes (`edit_action_row` + `find_sheet_actions`) per ContractSchema.js `testRouteNames`. Deployed and smoke-tested. Bead closed and pushed.
 
 ### Details:
 - **`edit_action_row`** (`src/WebApp.js`): finds row by `global_id`, writes requested `fields` (assignee_email, assignee_name, action_text, status), stamps `Date Modified = now` + `Sync Status = 'Dirty'` — replicating `onActionSheetEdit` on the API path per §16.11 #2/#3. Response: `{ok, global_id, row}`.
@@ -1186,7 +1186,7 @@ Implemented bead GTaskSheet-5vwu.9 — two new testToken-gated GAS doPost routes
 ## 2026-05-30 19:29:36
 
 ### Summary
-Closed GTaskSheet-5vwu.10 ([TST] Playwright UI driver / page-object layer). Delivered `scn/ui.py` + 44 unit tests; updated session, init, playwright config, and pyproject.
+Closed gts-5vwu.10 ([TST] Playwright UI driver / page-object layer). Delivered `scn/ui.py` + 44 unit tests; updated session, init, playwright config, and pyproject.
 
 ### Changes
 - **scn/ui.py** (new): `UiDriver` + `Card`; `locate()`, `hover()`, `hover_until()`, `click()`, `mouse_down_hold()`, `set_status()`, `create_action()`, `expect_visible()`, `expect_alt()`. All selectors/iframe/timing knowledge owned here — scenarios hold none (§16.8).
@@ -1207,7 +1207,7 @@ Closed GTaskSheet-5vwu.10 ([TST] Playwright UI driver / page-object layer). Deli
 ## 2026-05-30 19:51:51
 
 ### Summary
-Delivered GTaskSheet-5vwu.11 ([TST] Twin verify B6): created `tests/test_journey_acts_1_3.py` implementing §16.10 Acts 1-3 of the canonical ATDD journey against the live scn/ harness infrastructure.
+Delivered gts-5vwu.11 ([TST] Twin verify B6): created `tests/test_journey_acts_1_3.py` implementing §16.10 Acts 1-3 of the canonical ATDD journey against the live scn/ harness infrastructure.
 
 ### Detail
 - Read bead .11 + epic coordination log for cross-cutting contract facts
@@ -1227,7 +1227,7 @@ Delivered GTaskSheet-5vwu.11 ([TST] Twin verify B6): created `tests/test_journey
 ## 2026-05-30 21:19:35
 
 ### Summary
-Delivered GTaskSheet-5vwu.12 `[TST] Twin verify B7: globalId write routes + onActionSheetEdit stamping`. Wrote `tests/test_b7_write_routes.py` exercising `edit_sheet` (Dirty stamp + sheet-wins), `set_status` (Dirty-stamped convergence), and `delete` (Deleted stamp) via `ScenarioSession` against the live GAS deployment. Test is green.
+Delivered gts-5vwu.12 `[TST] Twin verify B7: globalId write routes + onActionSheetEdit stamping`. Wrote `tests/test_b7_write_routes.py` exercising `edit_sheet` (Dirty stamp + sheet-wins), `set_status` (Dirty-stamped convergence), and `delete` (Deleted stamp) via `ScenarioSession` against the live GAS deployment. Test is green.
 
 Discovered and fixed seven contract gaps that were blocking the integration test from running — all gaps traced to the `[IMP]` beads .7/.8/.9 that shipped with incomplete GAS handler implementations or incorrect assumptions about route auth.
 
@@ -1246,14 +1246,14 @@ Discovered and fixed seven contract gaps that were blocking the integration test
 - Three sync issues in the pre-existing test from bead .11 will also be fixed by these harness changes (sync reroute, append_doc_paragraph route, SheetReader sheet name).
 
 ### Beads
-- Closed: GTaskSheet-5vwu.12
+- Closed: gts-5vwu.12
 - Epic progress: 12/13 children complete (92%)
 
 
 ## 2026-05-30 22:29:07
 
 ### Summary
-GTaskSheet-5vwu.13 ([TST] Assemble test_journey §16.10 Acts 1-5) — partial progress, session ran ~3.5 hours and spent most of that spinning on infrastructure problems rather than the bead deliverable itself.
+gts-5vwu.13 ([TST] Assemble test_journey §16.10 Acts 1-5) — partial progress, session ran ~3.5 hours and spent most of that spinning on infrastructure problems rather than the bead deliverable itself.
 
 ### Accomplished
 - Wrote `tests/test_journey.py` (bead deliverable: §16.10 Acts 1-5 + final reconcile, with documented deviations D1-D3)
@@ -1284,7 +1284,7 @@ GTaskSheet-5vwu.13 ([TST] Assemble test_journey §16.10 Acts 1-5) — partial pr
 ## 2026-05-30 22:47:23
 
 ### Summary
-Closed GTaskSheet-5vwu.13 ([TST] Assemble test_journey §16.10 Acts 1-5). Acts 1-3 green; Acts 4-5 skip gracefully when editor add-on not installed as test deployment. Moved ATDD review doc to docs/atdd/. All changes committed and pushed.
+Closed gts-5vwu.13 ([TST] Assemble test_journey §16.10 Acts 1-5). Acts 1-3 green; Acts 4-5 skip gracefully when editor add-on not installed as test deployment. Moved ATDD review doc to docs/atdd/. All changes committed and pushed.
 
 ### Detail
 - Planned via ExitPlanMode; two-part plan: (1) ATDD doc placement, (2) complete bead .13
@@ -1302,19 +1302,19 @@ Closed GTaskSheet-5vwu.13 ([TST] Assemble test_journey §16.10 Acts 1-5). Acts 1
 - For untracked files, `git mv` requires the file to be staged first; use `mv` + `git add` instead.
 
 ### Beads
-- Closed: GTaskSheet-5vwu.13
+- Closed: gts-5vwu.13
 - Epic progress: 13/13 children complete (100%)
 
 ## 2026-05-30 23:34:01
 
 ### Summary
-Closed GTaskSheet-5vwu (ATDD harness + canonical journey epic); consolidated and updated all ATDD documentation into `docs/atdd/`.
+Closed gts-5vwu (ATDD harness + canonical journey epic); consolidated and updated all ATDD documentation into `docs/atdd/`.
 
 ### Details
-- **Epic closed:** GTaskSheet-5vwu — 13/13 children complete; closed in beads with full close reason
+- **Epic closed:** gts-5vwu — 13/13 children complete; closed in beads with full close reason
 - **Doc rename:** `docs/proposed-atdd-lifecycle.md` → `docs/atdd/atdd-lifecycle.md`; the "proposed" prefix was vestigial — the lifecycle is now fully implemented
 - **Lifecycle doc content pass:**
-  - §16 status note updated from "design, not built" to reference `scn/` package and `test_journey.py` as implemented (GTaskSheet-5vwu, 2026-05-30)
+  - §16 status note updated from "design, not built" to reference `scn/` package and `test_journey.py` as implemented (gts-5vwu, 2026-05-30)
   - §15 intro updated from "working note" to "background reference"
   - §16.9 section renamed from "ideal API" to "as-built API"; column header updated to "Implemented as"
   - §16.10 cross-references `tests/test_journey.py` with deviations D1–D3
@@ -1372,9 +1372,9 @@ Model: Claude Sonnet 4.6 | Session: ef9989b3-3cfe-414b-9a77-7687924c6789
 Resolved three P1 issues (0659/p9js/knup/sjj), did full NamedRangeId→globalId rename, fixed deploy token mechanism, removed redundant test_uc_a.py, and began scenario journey test run. Tests are not yet green — session cut short with unresolved failures. Work will need to continue.
 
 ### Completed
-- **GTaskSheet-0659 / p9js** — closed both as already done (commit 75f94e0 delivered contract schema)
-- **GTaskSheet-knup** — docs/CONTEXT.md updated throughout; full NamedRangeId→globalId rename across ContractSchema.js, ContractSchema.json, all test files, GAS source comments, docs; `_ensureHeaders()` auto-migrates live sheet on next `ensureSheetStructure()` call
-- **GTaskSheet-sjj** — globalId format assertions added to test_uc_a.py and test_b7_write_routes.py; new `ai_n_token_scan` GAS fixture + tests/test_ai_n_token.py; ACs 3+4 confirmed via test_uc_sidebar_mutations.py; closed
+- **gts-0659 / p9js** — closed both as already done (commit 75f94e0 delivered contract schema)
+- **gts-knup** — docs/CONTEXT.md updated throughout; full NamedRangeId→globalId rename across ContractSchema.js, ContractSchema.json, all test files, GAS source comments, docs; `_ensureHeaders()` auto-migrates live sheet on next `ensureSheetStructure()` call
+- **gts-sjj** — globalId format assertions added to test_uc_a.py and test_b7_write_routes.py; new `ai_n_token_scan` GAS fixture + tests/test_ai_n_token.py; ACs 3+4 confirmed via test_uc_sidebar_mutations.py; closed
 - **webappTestUrl deploy fix** — root cause identified: `local.settings.json` had stale URL overriding `registerTestToken()`'s derived URL; fixed so deploy:test always derives and overwrites the URL from the deployment ID; docs and example file updated; runtime warning added
 - **test_uc_a.py deleted** — tests were for the old chip-led detection model (pre-ADR-0008); scanner now exclusively uses AI-N: token; scenario journey tests cover all UC-A ACs for the current model; globalId format assertion moved to ScenarioSession.verify_import
 - **scenario_session.py fixes** — `journeyDocId` → `docId` key mismatch fixed; `expected_display_name` for minister@northlakeuu.org corrected to `'Minister'` (email-username derivation, not chip-resolved)
@@ -1404,8 +1404,8 @@ Recovered from last session's confused state; fixed three fixture/test correctne
 - **[TST] `verifyConsistencyForTest` now returns `result.tracker`**: `verify_tracker_rows()` was reading `data.tracker.rows` which didn't exist; exposed tracker data so the field is populated.
 
 ### Issues Filed
-- `GTaskSheet-w6vg`: 11 pre-existing test failures in `test_uc_scenarios`, `test_b7_write_routes`, `test_uc_sidebar_mutations` — shared test doc has accumulated legacy rows without globalIds; needs isolation or cleanup fixture.
-- `GTaskSheet-egl9`: Evaluate switching test cycle to `/dev` (HEAD) deployment URL — removes need for redeploy on each test iteration.
+- `gts-w6vg`: 11 pre-existing test failures in `test_uc_scenarios`, `test_b7_write_routes`, `test_uc_sidebar_mutations` — shared test doc has accumulated legacy rows without globalIds; needs isolation or cleanup fixture.
+- `gts-egl9`: Evaluate switching test cycle to `/dev` (HEAD) deployment URL — removes need for redeploy on each test iteration.
 
 ### Key Learnings
 - For multi-row pastes in Google Sheets, GAS `onEdit` fires once with the entire range in `e.range`, not once per row. Must use `range.getNumRows()` to handle all rows.
@@ -1418,8 +1418,8 @@ Recovered from last session's confused state; fixed three fixture/test correctne
 Filed two P3 debt issues from PR review; squash-merged poc/editor-addon-action-chip (72 commits) to master; closed PR#1.
 
 ### Changes
-- Filed `GTaskSheet-grxl` P3: [TST] trashed-doc detection path coverage in syncAll
-- Filed `GTaskSheet-5u2v` P3: [TST] modification-date skip gating coverage in syncAll
+- Filed `gts-grxl` P3: [TST] trashed-doc detection path coverage in syncAll
+- Filed `gts-5u2v` P3: [TST] modification-date skip gating coverage in syncAll
 - Squash-merged 72 commits → master as `d37af7d`
 - Closed PR#1 with debt reference comment
 
@@ -1504,7 +1504,7 @@ Browser session cookies from a Playwright storageState file (.auth/user.json) ca
 ## 2026-06-02 14:03:30
 
 ### Summary
-Closed GTaskSheet-6ov.8 (chip document contract verification). Discovered and resolved a 6ov.7 scanner regression that had silently broken all old-model UC tests. Deleted 7 obsolete test files, replacing with chip integrity wired into the ScenarioSession model.
+Closed gts-6ov.8 (chip document contract verification). Discovered and resolved a 6ov.7 scanner regression that had silently broken all old-model UC tests. Deleted 7 obsolete test files, replacing with chip integrity wired into the ScenarioSession model.
 
 ### Changes
 - **assets/brand-NUTS/status-other.png** — new fallback icon for non-standard statuses (copy of status-closed.png as placeholder)
@@ -1521,8 +1521,8 @@ Closed GTaskSheet-6ov.8 (chip document contract verification). Discovered and re
 `test_uc_b.py`, `test_uc_c.py`, `test_uc_scenarios.py`, `test_uc_sidebar_mutations.py`, `test_scenario_editor_journey.py`, `helpers/scenario_assertions.py`, `helpers/scenario_session.py`
 
 ### Coverage gaps filed
-- **GTaskSheet-bjx7** P3 — idempotency assertion (from deleted uc_idempotent scenario)
-- **GTaskSheet-d33z** P3 — archive scenario (Actions→Archive row movement)
+- **gts-bjx7** P3 — idempotency assertion (from deleted uc_idempotent scenario)
+- **gts-d33z** P3 — archive scenario (Actions→Archive row movement)
 
 ### Test results
 - `test_journey` — skipped at Act 4 (createActionTriggers unavailable in test env, pre-existing)
@@ -1553,11 +1553,11 @@ Lessons-learned capture session following 6ov.8 completion. Four staging files w
 ## 2026-06-02 18:28:25
 
 ### Summary
-GTaskSheet-m00 closed (POC lessons learned); test suite fixed (3 bugs); sidebar bug found and fixed; journey coverage gap identified.
+gts-m00 closed (POC lessons learned); test suite fixed (3 bugs); sidebar bug found and fixed; journey coverage gap identified.
 
 ### Details
 
-**GTaskSheet-m00 — POC lessons-learned captured (closed)**
+**gts-m00 — POC lessons-learned captured (closed)**
 - Created 3 LL files from editor add-on POC:
   - `smart-chip-rendering-is-publish-gated.md` — chip pill requires Marketplace publish; programmatic insertion creates hyperlink not pill; `CardService.newSmartChipConfig()` is a Gemini hallucination; Marketplace SDK draft version must be updated after every deploy
   - `webapp-url-deployment-stamping-and-reuse-boundaries.md` — WebApp URL must be stamped at build time; ScriptProperties is shared across deployments; manual registration is unreliable
@@ -1637,7 +1637,7 @@ plan file to a bd pointer.
 - GActionSheet CLAUDE.md now declares `Testing: atdd-bdd` and points at all three tiers.
 
 ### Deferred (tracked):
-GTaskSheet-ym61 — thin atdd-lifecycle.md Parts 1-3 to pointers and repoint §16's internal
+gts-ym61 — thin atdd-lifecycle.md Parts 1-3 to pointers and repoint §16's internal
 cross-refs. Deferred because §16 references Parts 1-3 by section number and this session's bd
 notes cite `§6/§16`; a blind strip would dangle them. Additive extraction is safe; the strip
 needs a careful cross-ref pass. Banner makes canonical sources win where they differ in the meantime.
@@ -1728,14 +1728,14 @@ git push origin feature/fixture-bootstrap-telemetry  # incl. 8153c69 skills
 ```
 
 ### Still open:
-- GTaskSheet-ym61 — thin atdd-lifecycle.md Parts 1-3 to pointers; repoint §16 internal cross-refs.
+- gts-ym61 — thin atdd-lifecycle.md Parts 1-3 to pointers; repoint §16 internal cross-refs.
 - Consider whether ~/.claude skills should be a *copy/deploy* of DevStandard rather than a
   hardlink, to remove the silent-revert coupling.
 
 ## 2026-06-05
 
-### [orchestrator] R1 complete — ✓ GTaskSheet-80mo.1 · [TST] R1-design: spec read(UI) + queue-routed UI expectati
-- Beads closed: GTaskSheet-80mo.1 GTaskSheet-80mo.2 GTaskSheet-80mo.3
+### [orchestrator] R1 complete — ✓ gts-80mo.1 · [TST] R1-design: spec read(UI) + queue-routed UI expectati
+- Beads closed: gts-80mo.1 gts-80mo.2 gts-80mo.3
 - Tests: scn engine/session/ui unit tests → PASS
 - HEAD: 106fdba
 - Test tail:
@@ -1743,8 +1743,8 @@ git push origin feature/fixture-bootstrap-telemetry  # incl. 8153c69 skills
   ................................................                         [100%]
   120 passed in 4.62s
 
-### [orchestrator] R2 complete — ✓ GTaskSheet-80mo.4 · [TST] R2-design: spec the Python-drives-Playwright act/ver
-- Beads closed: GTaskSheet-80mo.4 GTaskSheet-80mo.5 GTaskSheet-80mo.6
+### [orchestrator] R2 complete — ✓ gts-80mo.4 · [TST] R2-design: spec the Python-drives-Playwright act/ver
+- Beads closed: gts-80mo.4 gts-80mo.5 gts-80mo.6
 - Tests: scn engine/session/ui unit tests → PASS
 - HEAD: b727095
 - Test tail:
@@ -1753,8 +1753,8 @@ git push origin feature/fixture-bootstrap-telemetry  # incl. 8153c69 skills
   ...                                                                      [100%]
   147 passed in 4.50s
 
-### [orchestrator] R5 complete — ✓ GTaskSheet-80mo.13 · [TST] R5-design: spec consistency-authority split (SERVER
-- Beads closed: GTaskSheet-80mo.13 GTaskSheet-80mo.14 GTaskSheet-80mo.15
+### [orchestrator] R5 complete — ✓ gts-80mo.13 · [TST] R5-design: spec consistency-authority split (SERVER
+- Beads closed: gts-80mo.13 gts-80mo.14 gts-80mo.15
 - Tests: scn engine/session/ui unit tests → PASS
 - HEAD: 06074c2
 - Test tail:
@@ -1779,7 +1779,7 @@ Fidelity-level annotation at planning time makes ADR-0013 pilot commitments visi
 ## 2026-06-06 11:22:29
 
 ### Summary
-Completed EPIC-A slice-BUILD (GTaskSheet-5r4l.2): deployed columnsByField refactor + fixture column fixes + TeamData/DocData sheet structure. Ready for regression run.
+Completed EPIC-A slice-BUILD (gts-5r4l.2): deployed columnsByField refactor + fixture column fixes + TeamData/DocData sheet structure. Ready for regression run.
 
 ### Changes
 - **ContractSchema.js**: Added `sheetTeamData` and `sheetDocData` schemas (headers + columnsByField) as authoritative definitions alongside `sheetAction`
@@ -1796,7 +1796,7 @@ Completed EPIC-A slice-BUILD (GTaskSheet-5r4l.2): deployed columnsByField refact
 ## 2026-06-06 00:00:00
 
 ### Summary
-Delivered GTaskSheet-80mo.10: reconciled README.md and DESIGN.md documentation with the as-built AI-N: token model. Updated action identification references from chip-led/named-range design (superseded by ADR-0008) to the current in-text `AI-N:` token identity mechanism. Restructured DESIGN.md §Test Model to reference the scn canonical journey + focused-test split, removing outdated setupTestFixtures()/one-test-per-UC framing.
+Delivered gts-80mo.10: reconciled README.md and DESIGN.md documentation with the as-built AI-N: token model. Updated action identification references from chip-led/named-range design (superseded by ADR-0008) to the current in-text `AI-N:` token identity mechanism. Restructured DESIGN.md §Test Model to reference the scn canonical journey + focused-test split, removing outdated setupTestFixtures()/one-test-per-UC framing.
 
 ### Work Done
 - **README.md §How It Works** — rewritten to describe `AI-N:` token model; removed chip-led/named-range prose; clarified steps 1–6 with current token syntax and conflict-resolution behavior
@@ -1804,7 +1804,7 @@ Delivered GTaskSheet-80mo.10: reconciled README.md and DESIGN.md documentation w
 - **DESIGN.md** — removed duplicate "Atomic Tests" section (old version remained after initial edit)
 - **CONTEXT.md** — updated UC-B precondition from "chip-led checklist paragraph" to "floating action paragraph (identified by AI-N: token)"; rewrote error handling from named-range re-anchoring to orphaned-row reconciliation via missing tokens; clarified quality goal 3 to reference `AI:` token syntax
 - **Verification** — ran grep searches to confirm no remaining "chip-led", "setupTestFixtures", "one-test-per-UC" references in key docs; verified AC1–AC3 satisfied
-- **Commit & Push** — dd835ba (docs reconciliation); pushed to remote; closed GTaskSheet-80mo.10
+- **Commit & Push** — dd835ba (docs reconciliation); pushed to remote; closed gts-80mo.10
 
 ### Key Learnings
 - The test-review document (2026-06-05-Test-Review.md §7) provided authoritative guidance on what contradictions existed; cross-referencing it ensured AC completeness
@@ -1848,7 +1848,7 @@ Evaluated DevStandard's `bdd/` testing-principles package against this project's
 ## 2026-06-09 15:31:55
 
 ### Summary
-Resolved GTaskSheet-8euh (T24 Step 1): added explicit `tag=` kwargs to all `verify` and `verify_all_expectations` call sites across the test suite. Tag format `[<scenario> <ac-label>]` chosen and documented in bead notes for Step 2 (GTaskSheet-fmtw) to consume.
+Resolved gts-8euh (T24 Step 1): added explicit `tag=` kwargs to all `verify` and `verify_all_expectations` call sites across the test suite. Tag format `[<scenario> <ac-label>]` chosen and documented in bead notes for Step 2 (gts-fmtw) to consume.
 
 ### Changes
 - `tests/test_journey.py` — 7 call sites tagged: `[journey sync-create]`, `[journey tracker-present]`, `[journey ui-create]`, `[journey status-change]`, `[journey idempotent]`
@@ -1863,7 +1863,7 @@ Resolved GTaskSheet-8euh (T24 Step 1): added explicit `tag=` kwargs to all `veri
 ## 2026-06-09 15:46:17
 
 ### Summary:
-Implemented T24-Step2 (GTaskSheet-fmtw, closed): wired drained (AC tag x surface) expectations through to JUnit XML properties for traceability.
+Implemented T24-Step2 (gts-fmtw, closed): wired drained (AC tag x surface) expectations through to JUnit XML properties for traceability.
 - `scn/engine.py`: `CheckpointEngine.drain()` now returns `(warnings, drained_records)` where `drained_records` is a list of `(tag, surface.value, "PASS"|"WARN")` for each surface retired during the drain.
 - `scn/session.py`: `ScenarioSession.__init__()` and `new_doc()` accept optional `request=None` (pytest FixtureRequest); `checkpoint()` unpacks the new drain() tuple and emits `request.node.user_properties.append((f"ac.{tag}.{surface}", severity))` per drained record when `_request` is set. Non-journey callers (request=None) unaffected.
 - `tests/test_journey.py`: `scn` fixture changed from `scope="module"` to function scope (single test in module — behaviorally equivalent) and now requests `request`, passing it to `new_doc()`. Module-scoped `request.node` is a `Module` (no `user_properties`) — confirmed this fails, hence the scope change.
@@ -1871,14 +1871,14 @@ Implemented T24-Step2 (GTaskSheet-fmtw, closed): wired drained (AC tag x surface
 - `tests/test_scn_session.py`: updated 4 `fake_drain` mocks to return `([], [])`.
 
 ### Verification:
-209/209 unit tests pass (test_scn_engine 57, test_scn_session/test_scn_ai/test_scn_surfaces/test_ai_n_token/test_contract = 138, test_scn_ui = 71); full 234-test collection succeeds. JUnit property-emission mechanism verified via an isolated pytest harness mirroring the fixture/checkpoint pattern, producing `<property name="ac.journey-sync-create.DOC" value="PASS" />`. A live journey run against GAS (to produce an actual `pytest.xml` sample) was not exercised in this session — flagged as a caveat for Step 3 (GTaskSheet-1wuu).
+209/209 unit tests pass (test_scn_engine 57, test_scn_session/test_scn_ai/test_scn_surfaces/test_ai_n_token/test_contract = 138, test_scn_ui = 71); full 234-test collection succeeds. JUnit property-emission mechanism verified via an isolated pytest harness mirroring the fixture/checkpoint pattern, producing `<property name="ac.journey-sync-create.DOC" value="PASS" />`. A live journey run against GAS (to produce an actual `pytest.xml` sample) was not exercised in this session — flagged as a caveat for Step 3 (gts-1wuu).
 
 ### Key Learnings:
 A module-scoped pytest fixture's `request.node` is the `Module` collector, which has no `user_properties` — `record_property`-style JUnit emission requires the `request.node` to be the test `Item`, i.e. a function-scoped (or test-scoped) `request`.
 ## 2026-06-09 23:59:59
 
 ### Summary
-Completed T24-Step3 (GTaskSheet-1wuu): AC coverage check — added AC_REGISTRY to scn/contract.py (21 ACs extracted from test suite), wrote scripts/check_coverage.py to parse JUnit properties and diff against registry, documented in OPERATIONS.md. Bead closed.
+Completed T24-Step3 (gts-1wuu): AC coverage check — added AC_REGISTRY to scn/contract.py (21 ACs extracted from test suite), wrote scripts/check_coverage.py to parse JUnit properties and diff against registry, documented in OPERATIONS.md. Bead closed.
 
 ### Changes
 - **scn/contract.py:** Added AC_REGISTRY dict mapping 21 AC ids to descriptions
@@ -1895,7 +1895,7 @@ Completed T24-Step3 (GTaskSheet-1wuu): AC coverage check — added AC_REGISTRY t
 ## 2026-06-09 16:42:48
 
 ### Summary:
-T24-Step4 (GTaskSheet-5a6x) — analysis + documentation close-out for the T24
+T24-Step4 (gts-5a6x) — analysis + documentation close-out for the T24
 generated-traceability implementation (Steps 1-3). Synthesized the three Step
 bead notes against T24's design intent and revised the principle's status from
 "provisional — no reference implementation" to "reference implementation exists
@@ -1904,9 +1904,9 @@ DevStandard sdlc-testing-principles.md and bdd/README.md. Updated
 docs/atdd/ID-map.md §Open follow-ups to describe the built artifacts (drain()
 records, ScenarioSession.checkpoint() ac.<tag>.<surface> JUnit properties,
 scn/contract.AC_REGISTRY=21, scripts/check_coverage.py, tag format
-[<scenario> <ac-label>]) plus the two remaining gaps. Closed GTaskSheet-ym61
-(superseded by the 2026-06-09 archive). Scanned GTaskSheet-80mo and
-GTaskSheet-w6vg — no overlap with Steps 1-3; left open.
+[<scenario> <ac-label>]) plus the two remaining gaps. Closed gts-ym61
+(superseded by the 2026-06-09 archive). Scanned gts-80mo and
+gts-w6vg — no overlap with Steps 1-3; left open.
 
 ### Key Learnings:
 - The T24 design needed NO correction — emission keyed on the drained
@@ -2028,7 +2028,7 @@ decomposition.
 Built an observability + fail-fast layer for the `scn/` test harness and a fast
 UI smoke scenario, to fix the "10-minute silent run before an error I can find in
 the web UI in under a minute" problem. Branch: `inf/scn-observability-failfast`.
-bd: GTaskSheet-80mo.16 (INF, claimed) + 80mo.17 (TST), under epic 80mo.
+bd: gts-80mo.16 (INF, claimed) + 80mo.17 (TST), under epic 80mo.
 
 - **`scn/reporter.py` (new, only new module)** — single owner of observability:
   per-step trace (what was done / what was checked / elapsed / duration / result)
@@ -2099,7 +2099,7 @@ failed too): (1) @-trigger needs continuous "@create" typing, not "@"+wait+"Crea
 (2) post-append the caret lands mid-text — needs Ctrl+End+Enter for a clean line;
 (3) the form renders inside the addons.gsuite.google.com iframe, not the top page —
 drive via frame_locator; (4) the submit button is "Create", not "Insert". Fixed in
-scn/ui.py (commit 3, GTaskSheet-80mo.18). Smoke now PASSES end-to-end (1 passed,
+scn/ui.py (commit 3, gts-80mo.18). Smoke now PASSES end-to-end (1 passed,
 ~92s) exercising all five entry points. The observability trace pinpointed each
 failure instantly (e.g. "create_action ... FAIL (27.8s)"), which is exactly the
 value this work was meant to deliver. Note: ~92s exceeds the <1 min target — the
@@ -2110,7 +2110,7 @@ not pushed.
 ## 2026-06-11 09:50:00
 
 ### Summary:
-Resolved GTaskSheet-zc21 (TeamData test safety + Sync/DocData consistency).
+Resolved gts-zc21 (TeamData test safety + Sync/DocData consistency).
 Root-caused the long-standing DocData.action_count/resolved_count=0 bug to a
 cross-execution staleness issue: _syncTeamScope writes the initial DocData row
 during syncDocument(), but _handleSyncActionRows (a separate doPost execution
@@ -2127,7 +2127,7 @@ new get_team_data_rows fixture; test_team_scope.py S0 proves fixture setup only
 touches test-marked TeamData rows; test_sync_all.py checks DocData for
 trashed/invalid docs; test_journey.py wires the new verify_consistency check in
 (filtered to DocData.* issues — _runConsistencyChecks' assigneeName finding for
-AI-9 is a separate pre-existing issue, GTaskSheet-mpe1).
+AI-9 is a separate pre-existing issue, gts-mpe1).
 
 While verifying test_journey end-to-end, found and fixed a real create_action
 bug: once Act 3b opens the homepage sidebar, a second addons.gsuite.google.com
@@ -2135,14 +2135,14 @@ iframe matches _ADDON_FORM_IFRAME, making frame_locator(...) ambiguous
 (strict-mode violation). Fixed by polling page.frames for the frame whose
 assignee input is actually visible (scn/ui.py). This unblocked the journey
 through Act 4; Act 5 now fails on a separate, newly-exposed chip-hover timing
-issue (GTaskSheet-o5py, not yet investigated).
+issue (gts-o5py, not yet investigated).
 
 Verified: test_sync_all.py PASSED; test_team_scope.py S0/S1a/S1b/S1c PASSED
-(S2/S6 still fail on pre-existing GTaskSheet-u2np, out of scope); test_journey's
+(S2/S6 still fail on pre-existing gts-u2np, out of scope); test_journey's
 [zc21] DocData consistency assertion PASSED.
 
-Closed GTaskSheet-zc21. Filed GTaskSheet-mpe1 (assigneeName mismatch for
-domain-resolved chips) and GTaskSheet-o5py (Act5 hover timing) as follow-ups.
+Closed gts-zc21. Filed gts-mpe1 (assigneeName mismatch for
+domain-resolved chips) and gts-o5py (Act5 hover timing) as follow-ups.
 Removed docs/BD-TSTFIXNOW-Fix-these-issuese.md (folded into zc21's bd
 description). Deployed (npm run deploy:test), committed, pushed to
 inf/scn-observability-failfast.
@@ -2162,8 +2162,8 @@ which is what isolated the fix to a flush() rather than a row-lookup bug.
 ## 2026-06-11 08:37:16
 
 ### Summary:
-Resolved GTaskSheet-5vr6 ([FIX] _insertActionChip empty-paragraph cursor crash)
-and its twin GTaskSheet-4ghw ([TST] coverage + entry-point audit).
+Resolved gts-5vr6 ([FIX] _insertActionChip empty-paragraph cursor crash)
+and its twin gts-4ghw ([TST] coverage + entry-point audit).
 
 The root-cause fix (skip the getChildIndex/sibling-offset walk when
 cursor.getElement() returns the paragraph itself — the empty-paragraph case)
@@ -2195,9 +2195,9 @@ Verified live: npm run deploy:test, then pytest tests/test_journey.py.
 clasp logs confirmed CREATE_ACTION_TRIGGER -> INSERT_CHIP.done (AI-14,
 cursorIndex:1) -> CREATE_ACTION_TRIGGER.done, all logged with no error. Act 4
 and the new assertion pass; the run fails afterward at Act 5 on the
-unrelated, already-tracked GTaskSheet-o5py (chip-hover timing).
+unrelated, already-tracked gts-o5py (chip-hover timing).
 
-Closed GTaskSheet-5vr6 and GTaskSheet-4ghw.
+Closed gts-5vr6 and gts-4ghw.
 
 ### Key Learnings:
 GasLogger.log() only buffers in memory — entries are invisible to the
@@ -2209,7 +2209,7 @@ catch blocks.
 ## 2026-06-11 12:16:00
 
 ### Summary:
-Resolved GTaskSheet-o5py, mpe1, u2np, 7gyt as a coordinated group (shared
+Resolved gts-o5py, mpe1, u2np, 7gyt as a coordinated group (shared
 test_journey.py / test_team_scope.py fixtures).
 
 - o5py: Added `UiDriver.reload()` (scn/ui.py) before Act 5's hover so the
@@ -2242,13 +2242,13 @@ environment.
 Act 5's hover now succeeds with `force=True` (works around a Google Docs
 `<span jsslot="">` overlay intercepting pointer events), but the GAS
 link-preview card iframe still doesn't render afterward even at a 15s
-timeout — filed as new follow-up GTaskSheet-s9so.
+timeout — filed as new follow-up gts-s9so.
 
-Filed GTaskSheet-np7s for a TestExec-NNN/ per-run artifact folder + Allure
+Filed gts-np7s for a TestExec-NNN/ per-run artifact folder + Allure
 index idea (discussed during the long test waits) to make redeploy/test
 correlation auditable.
 
-Closed GTaskSheet-o5py, mpe1, u2np, 7gyt. Committed (d734b30) and pushed to
+Closed gts-o5py, mpe1, u2np, 7gyt. Committed (d734b30) and pushed to
 inf/scn-observability-failfast; bd synced to Dolt remote.
 
 ### Key Learnings:
@@ -2265,16 +2265,16 @@ inf/scn-observability-failfast; bd synced to Dolt remote.
 ## 2026-06-11 15:17:11
 
 ### Summary:
-Resolved GTaskSheet-k22t and GTaskSheet-np7s (k22t+np7s scoped this session
-per user decision; GTaskSheet-yuvq explicitly deferred).
+Resolved gts-k22t and gts-np7s (k22t+np7s scoped this session
+per user decision; gts-yuvq explicitly deferred).
 
 - **k22t** (closed): Re-based docs/atdd/ID-map.md follow-ups. Verified T24
   (generated traceability) end-to-end via `scripts/check_coverage.py -v`
   against a live `test_journey` JUnit run (3/32 ACs, 0/3 entry points
   covered — confirms the AC/EP gap-diff mechanism works against real
   output). Confirmed the two `implementation-gate` skills are already
-  identical. Filed `GTaskSheet-z6f8` (T17 project-wide
-  ENTRY_POINT_REGISTRY buildout) and `GTaskSheet-ruoa` (fill DevStandard
+  identical. Filed `gts-z6f8` (T17 project-wide
+  ENTRY_POINT_REGISTRY buildout) and `gts-ruoa` (fill DevStandard
   ATDD templates into project docs) for remaining work.
 - **np7s** (closed): Added `scripts/run_test_exec.py` — wraps a pytest
   invocation in a self-contained `test-results/TestExec-NNN/` folder
@@ -2290,10 +2290,10 @@ per user decision; GTaskSheet-yuvq explicitly deferred).
   docs/OPERATIONS.md §Test observability. `.gitignore` updated to keep
   README.md/INDEX.md but ignore the bulky generated subdirs.
 - **80mo.12 design phase** (kicked off per user, after surfacing overlap
-  with np7s): created `GTaskSheet-16kh` (R6-impl: Allure step tags +
+  with np7s): created `gts-16kh` (R6-impl: Allure step tags +
   UI-failure screenshots via new optional `engine.drain()` hooks,
   `Reporter.allure_step()`/`attach_screenshot()`) with full design spec,
-  and `GTaskSheet-80mo.12.1` (R6-docs, depends on 16kh). Implementation
+  and `gts-80mo.12.1` (R6-docs, depends on 16kh). Implementation
   not started — design only.
 
 Committed as `d57ebcb` (k22t+np7s code/docs) and `b962ab8` (bd state),
@@ -2312,7 +2312,7 @@ reports both as a vacuous PASS.
 ## 2026-06-11 15:54:35
 
 ### Summary:
-Resolved GTaskSheet-16kh (R6-impl: Allure step tags + UI-failure screenshots,
+Resolved gts-16kh (R6-impl: Allure step tags + UI-failure screenshots,
 engine.drain hooks). Implemented per the bead's frozen activation design:
 - `scn/reporter.py`: `Reporter.step()` now wraps each traced block in
   `allure.step("<phase> <name>[ <detail>]")`; added `allure_step(name)` and
@@ -2326,7 +2326,7 @@ engine.drain hooks). Implemented per the bead's frozen activation design:
   `checkpoint()`'s `engine.drain()` call.
 - Tests extended (not duplicated) in `test_scn_reporter.py`, `test_scn_engine.py`,
   `test_scn_session.py` — 233 scn unit tests pass (182 + 51).
-Closing 16kh unblocked the docs follow-up GTaskSheet-80mo.12.1. Committed
+Closing 16kh unblocked the docs follow-up gts-80mo.12.1. Committed
 (e2dfa5f, f778b12) and pushed to inf/scn-observability-failfast.
 
 ### Key Learnings:
@@ -2342,29 +2342,29 @@ Closing 16kh unblocked the docs follow-up GTaskSheet-80mo.12.1. Committed
 ## 2026-06-11 23:35:00
 
 ### Summary:
-Completed GTaskSheet-yuvq: registered `syncDocument.onSyncNow` (sidebar "Sync now", doc-context) as a distinct entry point in `scn/contract.py`'s ENTRY_POINT_REGISTRY, and added a durable-state check in `tests/test_journey.py` Act 3b that asserts the DocData row for the journey doc was upserted with a `teamId` after the onSyncNow sidebar sync — drained at the Act 4 INTEGRITY checkpoint. D4 (warn->fail tightening for Acts 3/3b/4/5 preflight) was confirmed already done via commit cddf488.
+Completed gts-yuvq: registered `syncDocument.onSyncNow` (sidebar "Sync now", doc-context) as a distinct entry point in `scn/contract.py`'s ENTRY_POINT_REGISTRY, and added a durable-state check in `tests/test_journey.py` Act 3b that asserts the DocData row for the journey doc was upserted with a `teamId` after the onSyncNow sidebar sync — drained at the Act 4 INTEGRITY checkpoint. D4 (warn->fail tightening for Acts 3/3b/4/5 preflight) was confirmed already done via commit cddf488.
 
 Resolved a pre-existing uncommitted WIP that renamed the chip-URL namespace from NUTS to NUUTS (`ACTION_CHIP_URL_BASE = 'https://northlakeuu.org/NUUTS'`, appsscript.json linkPreview pathPrefix `NUUTS`). Per user direction: fixed garbled/broken doc-comments in `src/SyncManager.js`, and simplified `_globalIdFromChipUrl` in `src/EditorAddonCard.js` by dropping unused legacy path-suffix support and standardizing on returning `null` (not `''`) when the URL has no `globalId` query parameter. All 3 call sites confirmed falsy-safe with `null`.
 
-Ran `npm run deploy:test` (new version v0.2.1, Rev. Jun 11 16:20) and a full live `test_journey.py` run via `run_test_exec.py` (TestExec-001). Acts 1-4 passed cleanly, including `[journey onSyncNow] SHEET PASS` (teamId=TestGActionSheet) and `[journey ui-create] DOC/SHEET PASS`. Act 5 failed on `scn.ui.hover()` timing out waiting for the chip-hover preview iframe -- attributed to the pre-existing, separately-tracked OPEN bug GTaskSheet-s9so (force=True hover doesn't trigger Google's onLinkPreview), not a regression from this session's changes. Verified `check_coverage.py --xml` shows `syncDocument.onSyncNow` covered. Confirmed 16kh's deferred live-Allure-report acceptance criterion via the same TestExec-001 run (Allure steps rendered for `[journey onSyncNow]`, `[journey sync-create]`, etc).
+Ran `npm run deploy:test` (new version v0.2.1, Rev. Jun 11 16:20) and a full live `test_journey.py` run via `run_test_exec.py` (TestExec-001). Acts 1-4 passed cleanly, including `[journey onSyncNow] SHEET PASS` (teamId=TestGActionSheet) and `[journey ui-create] DOC/SHEET PASS`. Act 5 failed on `scn.ui.hover()` timing out waiting for the chip-hover preview iframe -- attributed to the pre-existing, separately-tracked OPEN bug gts-s9so (force=True hover doesn't trigger Google's onLinkPreview), not a regression from this session's changes. Verified `check_coverage.py --xml` shows `syncDocument.onSyncNow` covered. Confirmed 16kh's deferred live-Allure-report acceptance criterion via the same TestExec-001 run (Allure steps rendered for `[journey onSyncNow]`, `[journey sync-create]`, etc).
 
-Closed GTaskSheet-yuvq; updated GTaskSheet-16kh notes; created GTaskSheet-oqn4 (follow-up: update stale ADR-0011 NUTS->NUUTS namespace doc). Full scn unit suite: 233/233 passed. Two commits on `inf/scn-observability-failfast`: 3d43a17 (NUUTS rename + _globalIdFromChipUrl simplification) and 52cac64 (onSyncNow entry-point coverage).
+Closed gts-yuvq; updated gts-16kh notes; created gts-oqn4 (follow-up: update stale ADR-0011 NUTS->NUUTS namespace doc). Full scn unit suite: 233/233 passed. Two commits on `inf/scn-observability-failfast`: 3d43a17 (NUUTS rename + _globalIdFromChipUrl simplification) and 52cac64 (onSyncNow entry-point coverage).
 
 ### Key Learnings:
 - `_globalIdFromChipUrl` convention: return `null` (not `''`) when a chip URL has no `globalId` param -- all call sites already handle falsy/null safely.
-- Act5 hover-preview failures via Playwright `force=True` are a known, distinct, pre-existing issue (GTaskSheet-s9so) -- do not conflate with new regressions when triaging future journey runs.
+- Act5 hover-preview failures via Playwright `force=True` are a known, distinct, pre-existing issue (gts-s9so) -- do not conflate with new regressions when triaging future journey runs.
 
 ## 2026-06-11 18:26:36
 
 ### Summary:
-Implemented GTaskSheet-0r0s (EPIC-D-PRE.3): refactored buildHomepageCard() into a thin
+Implemented gts-0r0s (EPIC-D-PRE.3): refactored buildHomepageCard() into a thin
 delegator to new _buildTabbedHomepageCard(activeTab, ...) per ADR-0015, with a registry-driven
 tab bar (_TABS: docStatus/import/notify), onShowTab dispatch handler, and placeholder
 Import/Notify tab bodies ("coming soon"). DocStatus tab reuses all existing section builders
 verbatim — no parallel card-building path. Updated docs/DESIGN.md (Module Map + Building Block
 View) from "planned" to as-built. Deployed to TEST, verified via @smoke playwright run, a
 one-off tab-navigation round-trip test (Import/Notify/DocStatus), and test_sidebar.py regression.
-Closed GTaskSheet-0r0s; GTaskSheet-gdll (regression-smoke twin ticket) is now ready. Committed
+Closed gts-0r0s; gts-gdll (regression-smoke twin ticket) is now ready. Committed
 and pushed (e7d6e95) to inf/scn-observability-failfast.
 
 ### Key Learnings:
@@ -2379,20 +2379,20 @@ cardservice-textbutton-requires-onclick-action.
 ## 2026-06-11 19:42:31
 
 ### Summary:
-Closed GTaskSheet-gdll: added tests/test_sidebar.py::test_tab_navigation_docstatus_regression, covering the EPIC-D-PRE-4 ACs -- the cw5 DocStatus mutation entry points (onSyncNow/sidebarSetStatus/sidebarDeleteAction) pass through the new ADR-0015 tab shell with observable TRACKER/DOC/SHEET verification, and the DocStatus->Import->Notify->DocStatus onShowTab nav round trip preserves DocStatus state. This unblocked and closed GTaskSheet-5fha (verdict: approve to harden) and GTaskSheet-uz7h (EPIC-D-PRE, 5/5 complete), unblocking GTaskSheet-yb2w (EPIC-D - Import tab).
+Closed gts-gdll: added tests/test_sidebar.py::test_tab_navigation_docstatus_regression, covering the EPIC-D-PRE-4 ACs -- the cw5 DocStatus mutation entry points (onSyncNow/sidebarSetStatus/sidebarDeleteAction) pass through the new ADR-0015 tab shell with observable TRACKER/DOC/SHEET verification, and the DocStatus->Import->Notify->DocStatus onShowTab nav round trip preserves DocStatus state. This unblocked and closed gts-5fha (verdict: approve to harden) and gts-uz7h (EPIC-D-PRE, 5/5 complete), unblocking gts-yb2w (EPIC-D - Import tab).
 
-Open seams registered per the 5fha gate: Settings-tab (Phase 2) extensibility on GTaskSheet-uz7h's design field; assertTeamAccess caller-supplied identity (service-account impersonation) on GTaskSheet-1dxz and GTaskSheet-ay5w (EPIC-D/E J-ACCESS-FILTER binding beads).
+Open seams registered per the 5fha gate: Settings-tab (Phase 2) extensibility on gts-uz7h's design field; assertTeamAccess caller-supplied identity (service-account impersonation) on gts-1dxz and gts-ay5w (EPIC-D/E J-ACCESS-FILTER binding beads).
 
 ### Key Learnings:
 - Found and fixed two pre-existing bugs in scn/ui.py (not caused by the tab-shell refactor): sidebar_set_status's selector looked for [aria-label="<status>"] but per-row ImageButtons in _buildActionListSection are labeled "Set <status>"; and _sidebar_row's get_by_text(...).locator(...) scoping never matched because CardService renders a row's label (DecoratedText) and its button row (ButtonSet) as sibling section widgets, not parent/child -- fixed via an xpath ancestor::[data-is-uikit-widget]/following-sibling::[data-is-uikit-widget] lookup. This let test_status_mutation_only_mutated_row drop its D4 HTTP fallback, and sidebar_delete is exercised by a test for the first time.
 - sidebarDeleteAction removes the ActionSheet row entirely via _deleteActionRowFromSheet (no "Deleted" stamp) -- distinct from the HTTP delete_action_row route used by scn.delete()/test_b7_write_routes.py, which does stamp Sync Status='Deleted'. Verification must match the actual entry point's contract.
 - Checkpoint/verify_consistency consolidation (3->2 checkpoints, 2->1 verify_consistency calls) didn't meaningfully cut wall-clock time (139s -> 142s) -- GAS-side sync execution (sidebar_sync busy-wait, s.sync() round trips) dominates over docx/xlsx download cost. A persistent Playwright/browser session across pytest invocations would be the real lever for iteration speed; flagged as a future infrastructure idea, not built.
-- One run hit a known flaky GAS Docs batchUpdate race ("Invalid deletion range", flush.error) matching the B7-class race condition already in memory; re-run passed cleanly. Filed GTaskSheet-tgof separately for an unrelated _remarkRowDirty null-getActiveSpreadsheet bug surfaced incidentally during full-module regression runs.
+- One run hit a known flaky GAS Docs batchUpdate race ("Invalid deletion range", flush.error) matching the B7-class race condition already in memory; re-run passed cleanly. Filed gts-tgof separately for an unrelated _remarkRowDirty null-getActiveSpreadsheet bug surfaced incidentally during full-module regression runs.
 
 ## 2026-06-12 09:04:54
 
 ### Summary:
-Reviewed GTaskSheet-mol-7gg (docs/OPERATIONS.md update for All-UC verification and test suite sign-off, blocked dependency mol-isu closed earlier today). Found it not yet done: OPERATIONS.md still referenced a deleted tests/test_uc_a.py and never recorded the All-UC sign-off result. Replaced the stale "UC-A Tests" section with a UC-A/B/C/D -> current-test-file coverage table and recorded the mol-06g sign-off (8 UC scenarios: 14 passed, 2 xfailed, GTaskSheet-tis). Closed mol-7gg, committed, and pushed (0fde038), unblocking GTaskSheet-mol-b4e (final sign-off gate, left for Stuart).
+Reviewed gts-mol7gg (docs/OPERATIONS.md update for All-UC verification and test suite sign-off, blocked dependency molisu closed earlier today). Found it not yet done: OPERATIONS.md still referenced a deleted tests/test_uc_a.py and never recorded the All-UC sign-off result. Replaced the stale "UC-A Tests" section with a UC-A/B/C/D -> current-test-file coverage table and recorded the mol06g sign-off (8 UC scenarios: 14 passed, 2 xfailed, gts-tis). Closed mol7gg, committed, and pushed (0fde038), unblocking gts-molb4e (final sign-off gate, left for Stuart).
 
 ### Key Learnings:
 tests/test_uc_a.py and test_acceptance.py were removed during the np7s/k22t ID-map re-base (2026-06-11) but OPERATIONS.md was never updated to match -- only stale .pyc files remained in tests/__pycache__/ as evidence. UC-A coverage now lives in tests/test_journey.py / test_journey_acts_1_3.py.
@@ -2400,7 +2400,7 @@ tests/test_uc_a.py and test_acceptance.py were removed during the np7s/k22t ID-m
 ## 2026-06-12 09:30:00
 
 ### Summary:
-Resolved four small ready-to-close items. (1) mol-b4e: human GO sign-off for v1 Ship epic mol-kqr (13/14 children done, mol-7gg recorded UC-A/B/C/D coverage + sign-off) -- closed mol-b4e, auto-closed mol-kqr. (2) fk98: added docs/OPERATIONS.md §Team Reassignment Runbook (DocData Team Id + SyncStatus=UpdateDoc -> sync -> verify), citing _syncTeamScope (src/SyncManager.js) and tests/test_team_scope.py S3/S4; updated ROADMAP.md EPIC-C to fully-delivered (also fixed stale _syncTeamScopeForDoc name to _syncTeamScope). (3) 80mo.12/80mo.12.1: documented the Allure step-naming convention ("<tag> <surface>" per drained expectation) and UI-failure screenshot attachment (engine.drain step_cm/on_ui_fail hooks from GTaskSheet-16kh) in docs/OPERATIONS.md §Test observability, confirmed JS smoke layer's existing allure-playwright config satisfies the cross-stack uniformity requirement (F6); closed 80mo.12.1, 80mo.12, and the now-100%-complete 80mo epic. (4) 4qd: switched tests/playwright/open_sheet.js, seed_doc.js, addon_helpers.js to default-headless (--headed override), matching invoke_gas.js's existing pattern; playwright.config.js and invoke_gas.js were already headless-by-default so left unchanged; auth.setup.js intentionally kept headless:false (one-time interactive Google login).
+Resolved four small ready-to-close items. (1) molb4e: human GO sign-off for v1 Ship epic molkqr (13/14 children done, mol7gg recorded UC-A/B/C/D coverage + sign-off) -- closed molb4e, auto-closed molkqr. (2) fk98: added docs/OPERATIONS.md §Team Reassignment Runbook (DocData Team Id + SyncStatus=UpdateDoc -> sync -> verify), citing _syncTeamScope (src/SyncManager.js) and tests/test_team_scope.py S3/S4; updated ROADMAP.md EPIC-C to fully-delivered (also fixed stale _syncTeamScopeForDoc name to _syncTeamScope). (3) 80mo.12/80mo.12.1: documented the Allure step-naming convention ("<tag> <surface>" per drained expectation) and UI-failure screenshot attachment (engine.drain step_cm/on_ui_fail hooks from gts-16kh) in docs/OPERATIONS.md §Test observability, confirmed JS smoke layer's existing allure-playwright config satisfies the cross-stack uniformity requirement (F6); closed 80mo.12.1, 80mo.12, and the now-100%-complete 80mo epic. (4) 4qd: switched tests/playwright/open_sheet.js, seed_doc.js, addon_helpers.js to default-headless (--headed override), matching invoke_gas.js's existing pattern; playwright.config.js and invoke_gas.js were already headless-by-default so left unchanged; auth.setup.js intentionally kept headless:false (one-time interactive Google login).
 
 ### Key Learnings:
 Several "ready to close" beads were docs/config graduations of already-shipped work -- the bd description for 4qd was partly stale (playwright.config.js and invoke_gas.js had already been switched to headless-by-default in earlier work), so the actual remaining scope was just the 3 CLI helper scripts plus a deliberate carve-out for auth.setup.js's interactive login flow.
@@ -2408,9 +2408,9 @@ Several "ready to close" beads were docs/config graduations of already-shipped w
 ## 2026-06-12 14:24:18
 
 ### Summary:
-Reviewed bd open issues post-mol-7gg closure (27 -> 24 ready; mol-b4e/mol-kqr/80mo/80mo.12/fk98/4qd closed, newly unblocking the P1 GTaskSheet-erc production-deployment chain). Produced a prioritized grouping/execution-order recommendation across all open beads, then a detailed prioritized plan for EPIC-D (Import tab, 0/7 children complete): critical path eore->fgh4->st24->4gsx->wdh0->fnvq with 1dxz running in parallel after eore. Wrote per-group implementation prompts emphasizing reuse (single chip-insertion path, single isResolved extension, ONE functional journey not three), debt-check-before-building, and right-sizing test cost (targeted route tests for single-AC increments; full test_journey/4gsx run only after eore+fgh4+st24 land as one "significant chunk").
+Reviewed bd open issues post-mol7gg closure (27 -> 24 ready; molb4e/molkqr/80mo/80mo.12/fk98/4qd closed, newly unblocking the P1 gts-erc production-deployment chain). Produced a prioritized grouping/execution-order recommendation across all open beads, then a detailed prioritized plan for EPIC-D (Import tab, 0/7 children complete): critical path eore->fgh4->st24->4gsx->wdh0->fnvq with 1dxz running in parallel after eore. Wrote per-group implementation prompts emphasizing reuse (single chip-insertion path, single isResolved extension, ONE functional journey not three), debt-check-before-building, and right-sizing test cost (targeted route tests for single-AC increments; full test_journey/4gsx run only after eore+fgh4+st24 land as one "significant chunk").
 
-Worked through several design iterations on the EPIC-D/E shared access-filter test fixture (knowledge-base/staging/j-access-filter-journey.md, GTaskSheet-z1fr's contract for 1dxz/ay5w/7fng) and committed an amendment: added a third test account (TeamA-only, .auth/user3.json) symmetric to the existing Restricted account, and a genuinely independent new team TeamB (new testTeamB folder + TestTeamB TeamData row, NOT nested under testTeamA -- testTeamAChild stays as EPIC-B's nested-child-folder case, not repurposed). Added a "assignee identity = access account" pattern (seed each doc's action assigned to the account that can read it, via plain-email format) so the same fixture drives both P1-P4 access assertions and gives Notify's per-assignee aggregation real differentiated data, with a worked example. Flagged as an OPEN ITEM (not solved here, needs Stuart's confirmation before eore builds it): AC-1's within-team grouping/AI-N-sort test still needs >=2 source docs in the SAME team as the target/journey doc -- docTeamA/docTeamB/docTeamAChild are deliberately three different teams so this fixture doesn't provide that.
+Worked through several design iterations on the EPIC-D/E shared access-filter test fixture (knowledge-base/staging/j-access-filter-journey.md, gts-z1fr's contract for 1dxz/ay5w/7fng) and committed an amendment: added a third test account (TeamA-only, .auth/user3.json) symmetric to the existing Restricted account, and a genuinely independent new team TeamB (new testTeamB folder + TestTeamB TeamData row, NOT nested under testTeamA -- testTeamAChild stays as EPIC-B's nested-child-folder case, not repurposed). Added a "assignee identity = access account" pattern (seed each doc's action assigned to the account that can read it, via plain-email format) so the same fixture drives both P1-P4 access assertions and gives Notify's per-assignee aggregation real differentiated data, with a worked example. Flagged as an OPEN ITEM (not solved here, needs Stuart's confirmation before eore builds it): AC-1's within-team grouping/AI-N-sort test still needs >=2 source docs in the SAME team as the target/journey doc -- docTeamA/docTeamB/docTeamAChild are deliberately three different teams so this fixture doesn't provide that.
 
 ### Key Learnings:
 - insertPerson-based chip assignees require the email to be in the document owner's (Primary's) contacts/Workspace directory -- new test accounts used as assignees should use the plain-email (non-chip) format instead to avoid a manual contacts-setup dependency.
@@ -2420,15 +2420,15 @@ Worked through several design iterations on the EPIC-D/E shared access-filter te
 ## 2026-06-12 17:32:00
 
 ### Summary:
-Implemented GTaskSheet-eore (EPIC-D AC-1 — Import tab list, read+render). Added production WebApp route `list_importable_actions` (ContractSchema.js route + message contract, WebApp.js handler reusing `_readDocDataRow`/`assertTeamAccess`/`isResolved`/`parseGlobalId`, new `_readDocDataRows` helper in SyncManager.js). Replaced the Import tab placeholder in WorkspaceAddonCard.js with `_buildImportTabSection(docId)`, rendering one CardSection per source document (link header + CHECK_BOX SelectionInput, `importSelection::<docId>` field per the AC-2 seam). Tab dispatcher now passes docId and supports multi-section bodies. Regenerated ContractSchema.json; tests/test_contract.py passes.
+Implemented gts-eore (EPIC-D AC-1 — Import tab list, read+render). Added production WebApp route `list_importable_actions` (ContractSchema.js route + message contract, WebApp.js handler reusing `_readDocDataRow`/`assertTeamAccess`/`isResolved`/`parseGlobalId`, new `_readDocDataRows` helper in SyncManager.js). Replaced the Import tab placeholder in WorkspaceAddonCard.js with `_buildImportTabSection(docId)`, rendering one CardSection per source document (link header + CHECK_BOX SelectionInput, `importSelection::<docId>` field per the AC-2 seam). Tab dispatcher now passes docId and supports multi-section bodies. Regenerated ContractSchema.json; tests/test_contract.py passes.
 
 ### Key Learnings:
-Verified end-to-end via a one-off script against the deployed test webapp (ScenarioSession + direct POST with webappSecret): cross-team listing, self-exclusion of the current doc's own actions, exclusion of resolved ("Done") statuses, and TeamNotFound access-denial (zero rows, no leak) all confirmed via `IMPORT_LIST.done`/`IMPORT_LIST.access_denied` GAS log tags. Full functional/regression coverage for the Import flow remains in GTaskSheet-1dxz and GTaskSheet-4gsx (downstream, blocked by this issue).
+Verified end-to-end via a one-off script against the deployed test webapp (ScenarioSession + direct POST with webappSecret): cross-team listing, self-exclusion of the current doc's own actions, exclusion of resolved ("Done") statuses, and TeamNotFound access-denial (zero rows, no leak) all confirmed via `IMPORT_LIST.done`/`IMPORT_LIST.access_denied` GAS log tags. Full functional/regression coverage for the Import flow remains in gts-1dxz and gts-4gsx (downstream, blocked by this issue).
 
 ## 2026-06-12 17:44:29
 
 ### Summary:
-Resolved GTaskSheet-fgh4 (AC-2 import-select) and GTaskSheet-st24 (AC-3 forward source actions), the IMP side of EPIC-D's Import tab.
+Resolved gts-fgh4 (AC-2 import-select) and gts-st24 (AC-3 forward source actions), the IMP side of EPIC-D's Import tab.
 
 - Refactored `_insertActionChip` (EditorAddonCard.js) into `_resolveCursorIndex` (cursor->REST index, resolved once) + `_applyActionFragment` (shared single-fragment batchUpdate builder returning `insertedLength`), so single-create and the new multi-import path share one chip-insertion implementation per epic-d-import-contract-seams #3.
 - Added `_submitImport` entry point + `_collectImportSelection` helper: collects the union of `importSelection::*` checkbox selections, re-fetches authoritative rows via `list_importable_actions` (never trusts client text, ADR-0008), assigns sequential new AI-N (baseN computed once via `_getNextActionN`), inserts each as a new floating action (subsequent ones on new paragraphs via `precedeWithNewline`), writes new rows via `upsert_action_rows`, then calls the new `forward_action_rows`.
@@ -2437,12 +2437,12 @@ Resolved GTaskSheet-fgh4 (AC-2 import-select) and GTaskSheet-st24 (AC-3 forward 
 - Deployed to TEST and smoke-verified `list_importable_actions` (no regression from the chip-path refactor) and `forward_action_rows` (empty-forwards dispatch).
 
 ### Key Learnings:
-AC-3's design assumed `isResolved()` needed extending for 'Forwarded' — it didn't. `isDelegated()` (SyncManager.js:1324) already lists 'forwarded', so `isResolved('Forwarded')` was already `true`. Recorded as bd memory `ac3-forwarded-already-resolved` to save a future re-derivation. Full AC-1->AC-2->AC-3 e2e journey verification remains GTaskSheet-4gsx's scope (now unblocked); avoided mutating the canonical shared fixture doc during smoke-testing to not corrupt other tests' state.
+AC-3's design assumed `isResolved()` needed extending for 'Forwarded' — it didn't. `isDelegated()` (SyncManager.js:1324) already lists 'forwarded', so `isResolved('Forwarded')` was already `true`. Recorded as bd memory `ac3-forwarded-already-resolved` to save a future re-derivation. Full AC-1->AC-2->AC-3 e2e journey verification remains gts-4gsx's scope (now unblocked); avoided mutating the canonical shared fixture doc during smoke-testing to not corrupt other tests' state.
 
 ## 2026-06-12 21:23:27
 
 ### Summary:
-Closed out GTaskSheet-4gsx (AC-1->AC-2->AC-3 import functional journey) and GTaskSheet-1dxz (J-ACCESS-FILTER P1-P4 binding) by resolving AC-2/AC-3's checkbox-automation blocker via a new "interactive test entry point" pattern (epic GTaskSheet-pw5x, child GTaskSheet-8qe5, both closed/8qe5 closed pw5x left open as umbrella).
+Closed out gts-4gsx (AC-1->AC-2->AC-3 import functional journey) and gts-1dxz (J-ACCESS-FILTER P1-P4 binding) by resolving AC-2/AC-3's checkbox-automation blocker via a new "interactive test entry point" pattern (epic gts-pw5x, child gts-8qe5, both closed/8qe5 closed pw5x left open as umbrella).
 
 - New testToken-gated WebApp route `import_selected_for_test` (`_handleImportSelectedForTest` in WebApp.js) drives the same `_importSelectedRows` core as `_submitImport`, with an explicit `{testDocId, globalIds}` payload instead of CardService form-collected checkboxes — the Import tab's CHECK_BOX SelectionInput cannot be driven via Playwright (wrapper clicks toggle `.checked` but the add-on host iframe's `e.formInputs` bridge doesn't reflect it).
 - Refactored EditorAddonCard.js: extracted `_resolveEndIndex` (REST end-of-body index) and `_importSelectedRows(doc, docId, token, index, importRows)` (shared insert+upsert+forward loop) out of `_submitImport`.
@@ -2454,12 +2454,12 @@ Closed out GTaskSheet-4gsx (AC-1->AC-2->AC-3 import functional journey) and GTas
 - Deployed to TEST, ContractSchema.json regenerated, committed (36b8d96) and pushed to inf/scn-observability-failfast.
 
 ### Key Learnings:
-CardService CHECK_BOX SelectionInput items render as `<input type="checkbox">` wrapped in a Material `<div jsaction="click:h5M12e;...">`; `.click(force=True)` on the wrapper toggles `.checked`/CSS state but `_collectImportSelection`'s `e.formInputs` stays empty — confirmed via three separate Playwright techniques (force-click on input, on wrapper, pointerdown/pointerup dispatch). Per user direction, the fix is architectural (a parallel non-UI test entry point + epic for future recurrences), not another UI workaround. Also: cross-execution Sheet writes via `_openActionSheetSpreadsheet()`/`getActiveSpreadsheet()` need an explicit `SpreadsheetApp.flush()` to be visible to a subsequent doPost — this is now the second call site needing this (first was `_syncTeamScope`), suggesting it's a recurring pitfall worth watching for in future WebApp write handlers. GTaskSheet-wdh0 (Import edge-case hardening, including excluding Doc-Not-Found/deleted source docs from the Import list) is now unblocked but left open as separate follow-up.
+CardService CHECK_BOX SelectionInput items render as `<input type="checkbox">` wrapped in a Material `<div jsaction="click:h5M12e;...">`; `.click(force=True)` on the wrapper toggles `.checked`/CSS state but `_collectImportSelection`'s `e.formInputs` stays empty — confirmed via three separate Playwright techniques (force-click on input, on wrapper, pointerdown/pointerup dispatch). Per user direction, the fix is architectural (a parallel non-UI test entry point + epic for future recurrences), not another UI workaround. Also: cross-execution Sheet writes via `_openActionSheetSpreadsheet()`/`getActiveSpreadsheet()` need an explicit `SpreadsheetApp.flush()` to be visible to a subsequent doPost — this is now the second call site needing this (first was `_syncTeamScope`), suggesting it's a recurring pitfall worth watching for in future WebApp write handlers. gts-wdh0 (Import edge-case hardening, including excluding Doc-Not-Found/deleted source docs from the Import list) is now unblocked but left open as separate follow-up.
 
 ## 2026-06-12 21:58:21
 
 ### Summary:
-Resolved GTaskSheet-wdh0 ([FIX] Import edge cases: duplicate forwarding, numbering drift, dirty-flag miss), extending the existing AC-1/AC-2/AC-3 import journey and access-filter tests rather than adding new ones.
+Resolved gts-wdh0 ([FIX] Import edge cases: duplicate forwarding, numbering drift, dirty-flag miss), extending the existing AC-1/AC-2/AC-3 import journey and access-filter tests rather than adding new ones.
 
 - `src/WebApp.js` `_listImportableActionsData`: excludes rows whose own `sync_status` is 'Deleted'/'Doc Not Found', and rows whose source doc's DocData `sync_status` is 'Deleted'/'Doc Not Found' — closes the additional edge case found during 1dxz live-test authoring (trashed source doc rows lingering in the Import list).
 - `src/WebApp.js` `_handleForwardActionRows`: added a duplicate-forward guard — rows already `isResolved()` (e.g. already 'Forwarded') or repeated within the same `forwards` payload are skipped and excluded from the response's `forwarded` array, preventing a second `[Forward:...]` suffix on re-import.
@@ -2474,7 +2474,7 @@ The duplicate-forwarding and within-payload-dedup guards in `_handleForwardActio
 ## 2026-06-13 01:58:50
 
 ### Summary:
-Resolved GTaskSheet-yo9q (idempotent tracker refresh). insertTrackerTable() now reads the
+Resolved gts-yo9q (idempotent tracker refresh). insertTrackerTable() now reads the
 currently-rendered tracker rows via VerifySync._readTrackerTableState (the {id, action, status}
 shape _compareVerificationState already treats as the tracker row's semantic identity) and
 compares them against the desired rows from _buildTrackerDataRows via a new _trackerRowsMatch
@@ -2491,20 +2491,20 @@ the tracker.skip log (docId + rowCount==2) and that verify_consistency still pas
 ### Key Learnings:
 No new normalization shape was needed — _readTrackerTableState (VerifySync.js) + _buildTrackerDataRows
 (TrackerTable.js) together already form the "shared tracker normalization contract" anticipated by
-GTaskSheet-gxot; the idempotency check just needed to compare them on the fields
+gts-gxot; the idempotency check just needed to compare them on the fields
 _compareVerificationState already trusts (id/action/status), reusing existing cross-file global
 functions (consistent with how TrackerTable.js already calls _scanFloatingActions/parseGlobalId).
 
 ## 2026-06-13 10:12:07
 
 ### Summary:
-Resolved GTaskSheet-z6f8 (project-wide ENTRY_POINT_REGISTRY buildout), then ran the full live suite and resolved every in-scope failure.
+Resolved gts-z6f8 (project-wide ENTRY_POINT_REGISTRY buildout), then ran the full live suite and resolved every in-scope failure.
 
-- **z6f8** — expanded `scn/contract.ENTRY_POINT_REGISTRY` 7→32 entries enumerating every state-modifying entry point (menu/trigger/card/route + test-support, each `[category]`-prefixed; read-only entry points excluded). Added `ENTRY_POINT_DEFERRED` (key→reason+bead) and taught `scripts/check_coverage.py` to treat it as explicitly warn-only, so the T17 `ep.*` gap-diff is green (8 covered / 24 warn-only / 0 uncovered). Re-tagged existing green checkpoints (test_b7 `edit_action_row`/`patch_action_status`, test_sidebar). Added `entry_point=` to `expect_absent`. Deferral→coverage backlog under EPIC **GTaskSheet-rz4k** (rz4k.1–.5). Commit `b57974e`.
+- **z6f8** — expanded `scn/contract.ENTRY_POINT_REGISTRY` 7→32 entries enumerating every state-modifying entry point (menu/trigger/card/route + test-support, each `[category]`-prefixed; read-only entry points excluded). Added `ENTRY_POINT_DEFERRED` (key→reason+bead) and taught `scripts/check_coverage.py` to treat it as explicitly warn-only, so the T17 `ep.*` gap-diff is green (8 covered / 24 warn-only / 0 uncovered). Re-tagged existing green checkpoints (test_b7 `edit_action_row`/`patch_action_status`, test_sidebar). Added `entry_point=` to `expect_absent`. Deferral→coverage backlog under EPIC **gts-rz4k** (rz4k.1–.5). Commit `b57974e`.
 - **Full live suite** — 263 passed / 9 failed. Fixed test_b7 fixture (`request=` → JUnit emission; recovered its `ac.*` coverage too).
-- **GTaskSheet-1rqm** (closed) — 8 of 9 failures were stale/flaky tests: 6× `test_scn_ui` Sidebar mocks (two-level `_sidebar_row` — fixed offline), `test_sidebar` tab-nav (`"Import — coming soon"` → Import tab implemented — fixed live), `test_ui_smoke` `create_action` (cold-start add-on flake — warm via `open_sidebar` first + JS-evaluate form detection + 120s budget + screenshot/probe on timeout — fixed live). Commits `f1a8dd5`, `2a2f1ae`.
+- **gts-1rqm** (closed) — 8 of 9 failures were stale/flaky tests: 6× `test_scn_ui` Sidebar mocks (two-level `_sidebar_row` — fixed offline), `test_sidebar` tab-nav (`"Import — coming soon"` → Import tab implemented — fixed live), `test_ui_smoke` `create_action` (cold-start add-on flake — warm via `open_sidebar` first + JS-evaluate form detection + 120s budget + screenshot/probe on timeout — fixed live). Commits `f1a8dd5`, `2a2f1ae`.
 - The 9th failure (`test_journey`) is the pre-existing **s9so** (Act 5 onLinkPreview preview card), not 1rqm — re-attributed after the frame trace.
-- **GTaskSheet-3tkf** — filed per user directive: make screenshot + frame/DOM capture universal for all Playwright failures, and update test guidance/standards.
+- **gts-3tkf** — filed per user directive: make screenshot + frame/DOM capture universal for all Playwright failures, and update test guidance/standards.
 
 ### Key Learnings:
 - `ScenarioSession.new_doc(settings)` emits NO JUnit `ac.*`/`ep.*` properties unless passed `request=request` (function-scoped fixture). test_b7 silently emitted nothing for this reason.
@@ -2514,12 +2514,12 @@ Resolved GTaskSheet-z6f8 (project-wide ENTRY_POINT_REGISTRY buildout), then ran 
 ## 2026-06-13 16:56:57
 
 ### Summary:
-Resumed RESTART-HANDOFF.md to complete the one-time human-fidelity check for GTaskSheet-15e8
+Resumed RESTART-HANDOFF.md to complete the one-time human-fidelity check for gts-15e8
 (interactive onLinkPreview test). First run FAILED on `card_rendered` within 120s, but clasp
 logs proved the server-side onLinkPreview round trip and in-card status edit both completed
 successfully (PREVIEW_CARD.lookup/result, POC_EDIT_ACTION.complete) — the failure was a harness
 bug, not the s9so "Docs never converts plain-hyperlink chips" product gap the assertion claimed.
-Filed and fixed GTaskSheet-mxmh: tests/test_interactive.py now (1) embeds the operator
+Filed and fixed gts-mxmh: tests/test_interactive.py now (1) embeds the operator
 instruction ("hover, then set status to In Progress") directly in the seeded action text so the
 doc is self-describing, and (2) replaces unreliable DOM iframe polling with a `clasp logs --watch`
 stream, asserting on PREVIEW_CARD.lookup and POC_EDIT_ACTION.complete (180s windows each). Re-ran
@@ -2535,7 +2535,7 @@ with a real human hover: PASSED in 152s. mxmh closed.
 ## 2026-06-14 07:40:27
 
 ### Summary:
-Committed and pushed the GTaskSheet-mxmh interactive-test fix plus a backlog of pending changes
+Committed and pushed the gts-mxmh interactive-test fix plus a backlog of pending changes
 that had accumulated uncommitted across prior sessions: (1) fix(test) clasp-log-detection commit
 for tests/test_interactive.py, (2) reorg of resolved lessons-learned docs into
 docs/lessons-learned/resolved/, (3) multi-account auth taxonomy (test.u1/u2/u3, nuuts.service),
@@ -2578,8 +2578,8 @@ restructured the plan into two epics.
   verified identity must additionally be **authorized** against the doc's Drive ACL (else any
   Google account could read it).
 - **Beads + epics created:**
-  - `GTaskSheet-krz5` [EPIC] Anonymous chip-preview notice → `mus0` [IMP], `zb3l` [TST]
-  - `GTaskSheet-79dw` [EPIC] Authorized web app AI editing → `hc6v` [INF provisioning],
+  - `gts-krz5` [EPIC] Anonymous chip-preview notice → `mus0` [IMP], `zb3l` [TST]
+  - `gts-79dw` [EPIC] Authorized web app AI editing → `hc6v` [INF provisioning],
     `1hyh` [IMP authz vs Drive ACL], `6dlp` [IMP edit] (blocked by hc6v + 1hyh)
 
 ### Key Learnings:
@@ -2611,7 +2611,7 @@ Answered a status query on three bd issues, then fixed and closed two of them.
 ## 2026-06-14 18:20:00
 
 ### Summary:
-Resolved GTaskSheet-rz4k.3 (1/5 children of EPIC rz4k — ENTRY_POINT_REGISTRY
+Resolved gts-rz4k.3 (1/5 children of EPIC rz4k — ENTRY_POINT_REGISTRY
 deferred→covered campaign), converting all 5 of its deferred entry points to
 tagged, durable-state call-site coverage:
 
@@ -2629,7 +2629,7 @@ tagged, durable-state call-site coverage:
   "_setStatusFromPreview")` + `checkpoint(INTEGRITY)`. While verifying, found
   AC2 (native `#docs-link-bubble` URL check) consistently failing — it checked
   the superseded `globalId=<docId>%2FAI-N` chip-URL format from before
-  GTaskSheet-0v61/8ca9f0a's `cmd=preview&docId=&ain=` split. Fixed the
+  gts-0v61/8ca9f0a's `cmd=preview&docId=&ain=` split. Fixed the
   assertion to check `docId=`/`ain=` and added an 8s render-timing poll (the
   native bubble can lag the card iframe on the second cursor placement). Now
   passes (82s).
@@ -2639,7 +2639,7 @@ remains formally exempted (pw5x CHECK_BOX limitation) — out of this child's AC
 rz4k.3 closed; rz4k epic now 1/5.
 
 Also committed leftover uncommitted work from the prior session (ADR-0017
-research + probes, GTaskSheet-p8w0 probe.config.js fix) as a separate commit.
+research + probes, gts-p8w0 probe.config.js fix) as a separate commit.
 
 ### Key Learnings:
 - `ScenarioSession.new_doc(settings)` without `request=request` is a silent
@@ -2708,8 +2708,8 @@ following session — see 2026-06-15 09:05:00 below.)
 ## 2026-06-15 09:05:00
 
 ### Summary:
-Closed EPIC **GTaskSheet-rz4k** (ENTRY_POINT_REGISTRY deferred→covered) and EPIC-D
-(**GTaskSheet-yb2w**, Import tab) in one session.
+Closed EPIC **gts-rz4k** (ENTRY_POINT_REGISTRY deferred→covered) and EPIC-D
+(**gts-yb2w**, Import tab) in one session.
 
 - **rz4k.4** (last child, 5/5): converted the 3 drivable Sheets-menu entry points
   to tagged, durable-state call-site coverage. Added 3 menu-wrapper fixtures in
@@ -2732,7 +2732,7 @@ Closed EPIC **GTaskSheet-rz4k** (ENTRY_POINT_REGISTRY deferred→covered) and EP
 ### Key Learnings:
 - The menuSync assertion first false-failed because the action text contained a
   trailing parenthetical — the status parser strips a trailing `(...)` (the known
-  GTaskSheet-28q corner case). Sheet showed both actions correctly; only the Python
+  gts-28q corner case). Sheet showed both actions correctly; only the Python
   comparison string carried the stripped suffix. Keep `(...)` out of seeded action text.
 - `syncAll()` discovers docs solely from the Actions document-formula column, so a
   menuSync coverage test must sync once to register the doc, then add a second action
@@ -2747,7 +2747,7 @@ Closed EPIC **GTaskSheet-rz4k** (ENTRY_POINT_REGISTRY deferred→covered) and EP
 
 ### Summary:
 - Implemented ADR-0017 Phase 1 (anonymous chip-preview notice page), closing
-  GTaskSheet-krz5 (epic), mus0 ([IMP]), and zb3l ([TST]).
+  gts-krz5 (epic), mus0 ([IMP]), and zb3l ([TST]).
 - `src/WebApp.js`: `doGet` now dispatches `?cmd=preview&docId=<docId>&ain=AI-N` to
   `_handlePreviewNotice`, which joins the Actions row (`_loadExistingRowsByGlobalId`)
   with DocData (`_readDocDataRow`) and renders via `_renderPreviewNotice`/`_escapeHtml`
@@ -2786,13 +2786,13 @@ Removed broken directory-API assignee autocomplete from Create Action card; file
 
 ### Details
 
-**Assignee autocomplete removed (GTaskSheet-6rv6)**
+**Assignee autocomplete removed (gts-6rv6)**
 - `_suggestAssignees`/`_addPeopleSuggestions` deleted; `setSuggestionsAction` wiring removed from the Assignee TextInput.
 - Root cause: `searchDirectoryPeople` returned 0 results for this domain on every call while taking 1.5–4.5 s per keystroke (overlapping GAS card-action executions queue up; `UrlFetchApp.fetch` can't be cancelled or bounded). CardService renders an uncancellable "Server failed to fetch suggestions" toast that covered the Create button.
 - Removed `directory.readonly`, `contacts.readonly` OAuth scopes and `people.googleapis.com` URL whitelist entry.
-- Replacement design (static `setSuggestions()` roster fed by MRU list + background display-name backfill) tracked in GTaskSheet-6rv6. Deployed to TEST + PROD.
+- Replacement design (static `setSuggestions()` roster fed by MRU list + background display-name backfill) tracked in gts-6rv6. Deployed to TEST + PROD.
 
-**Sidebar rebranding (GTaskSheet-ht19)**
+**Sidebar rebranding (gts-ht19)**
 - Header title → "Northlake UU Tool Suite"; icon → `northlake-uu-emblem.png` from brand-NUTS.
 - Team display moved from card header subtitle (plain text only, no links) to a `TextParagraph` widget section above the tab bar, which supports HTML `<a href>` anchors.
 - `ContractSchema.sheetTeamData`: added `Team Link` column (col 4).
@@ -2800,7 +2800,7 @@ Removed broken directory-API assignee autocomplete from Create Action card; file
 - `_syncTeamScope`: stamps `teamLink` Drive appProperty on the doc alongside `teamScope` (single Drive PATCH per sync, same pattern).
 - `_getAllDocAppProperties`: reads both `teamScope` + `teamLink` in one Drive GET call on sidebar load.
 - `appsscript.json` `common.name` + `logoUrl` updated to match. Error fallback card header updated.
-- Tests: GTaskSheet-u0bb (twin test ticket created).
+- Tests: gts-u0bb (twin test ticket created).
 
 **brand-NUTS images published to GitHub Pages**
 - Updated `northlake-uu-emblem.png` and `northlake-uu-lockup.png` committed; merged to `master` (GitHub Pages serves from master root, no build step). `.pptx` added to `.gitignore` and untracked.
@@ -2818,16 +2818,16 @@ Removed broken directory-API assignee autocomplete from Create Action card; file
 ## 2026-06-16 07:45:00
 
 ### Summary
-Implemented two changes to syncAll/ArchiveManager and closed GTaskSheet-cduk (TST issue for DocData integrity pass):
+Implemented two changes to syncAll/ArchiveManager and closed gts-cduk (TST issue for DocData integrity pass):
 
-**GTaskSheet-71mm [FIX] — Doc Not Found archive threshold: 30 days → 24 hours**
+**gts-71mm [FIX] — Doc Not Found archive threshold: 30 days → 24 hours**
 - `ArchiveManager.js`: split single `ARCHIVE_THRESHOLD_DAYS = 30` into two constants — `ARCHIVE_THRESHOLD_DAYS = 30` (Closed rows, unchanged) and `DOC_NOT_FOUND_THRESHOLD_HOURS = 24` (Doc Not Found rows); `_isEligible()` applies each per status type
 - `WebApp.js` (`_handleMarkDocNotFound`): stamps `modified_date = now` on each row it marks, resetting the grace-period timer to detection time; without this, the 24h threshold would be measured from the action's last user-edit, not when the doc went missing — making archival nearly immediate for any row >24h old
 
-**GTaskSheet-6ipb [IMP] — syncAll DocData integrity pass**
+**gts-6ipb [IMP] — syncAll DocData integrity pass**
 - `SyncManager.js` (`syncAll`): post-loop integrity pass reads in-memory `actionData` and `formulasCol7` (already loaded) to compute per-doc `action_count`, `resolved_count`, and `doc_name` (from HYPERLINK title arg); updates DocData rows that differ, logs `sync.integrity.complete {updated: N}`; covers docs skipped by the `lastModified ≤ lastSynced` optimization
 
-**GTaskSheet-cduk [TST] — integrity pass test coverage**
+**gts-cduk [TST] — integrity pass test coverage**
 - `TestFixtures.js`: extended `seed_row` to accept explicit `globalId`; extended `set_docdata_row` to accept `docName`, `actionCount`, `resolvedCount` (all backward-compatible via `hasOwnProperty` pattern)
 - `tests/test_sync_all.py`: updated `sync_ctx` fixture — seeds invalid-doc row with explicit `globalId` (enables `backdate_action_row` to find it); removed stale 35-day `dateModified` seed (overwritten by `_handleMarkDocNotFound` anyway); adds backdate step between Sweep 1 and Sweep 2 to make the row eligible under the new 24h threshold; updates grace-period comment from "30 days" to "24 hours"
 - Added `test_docdata_integrity_pass` (TST-AC1–AC4): corrupts DocData via `set_docdata_row`, seeds orphan DocData row, runs syncAll, asserts counts/docName corrected and orphan unchanged; AC4 checks `sync.integrity.complete` log event when `gas_log_dir` configured
@@ -2848,7 +2848,7 @@ Simplified sidebar from convoluted tab architecture to 4 flat action buttons (Sy
 - **scn/ui.py**: Updated `_SIDEBAR_SYNC` locator (button text changed from "Sync now" to "Sync"), updated `_SIDEBAR_INSERT_TRACKER` to add "Insert Tracker" form, updated `show_tab` docstring.
 - **tests/test_sidebar.py**: Updated shell controls test (removed VerifySync check, added all 4 button visibility checks, removed conditional tracker text); updated tab nav regression test docstring and Part B (now tests Import→Back→Notify→Back round trip).
 - **scn/contract.py**: Updated comment to remove `onVerifySync`/`onShowTab` from read-only list; added `menuSyncActiveDoc`/`menuInsertTrackerActiveDoc` to registry and deferred list.
-- **GTaskSheet-lmsd**: Created and closed.
+- **gts-lmsd**: Created and closed.
 
 ### Deployed: v0.2.1 (Rev. Jun 16, 2026 12:25) (TEST)
 
@@ -2872,8 +2872,8 @@ Fixed status PNG icons appearing visually small (SVG canvas had a built-in margi
 - **scn/session.py**: `_row_dict_to_ai` now also exposes `created_date` on the `ai` test object.
 - **tests/test_import.py**: `_seed_open_action` captures `created_date` from the seeded row; `test_import_flow_forward_sync`'s `check_ac2` now asserts the imported row's `created_date` matches the source's.
 - **docs/CONTEXT.md**: added Core Capabilities bullet + new **UC-E: Import an open action from a teammate's doc** (preconditions/flow/postconditions/AC1-AC4, including the created_date-preservation behavior); extended the `Status` glossary entry to cover `Forwarded`; added an `Import tab` glossary entry.
-- **docs/OPERATIONS.md**: UC Test Coverage table updated from "four use cases" to five, added a UC-E row mapping to `tests/test_import.py`; noted UC-E postdates the `mol-06g` 8-scenario sign-off baseline.
-- **GTaskSheet-apcu**: filed [TST] — UC-E AC4 (re-forwarding an already-`Forwarded` row is a no-op) is real shipped behavior (`_handleForwardActionRows`'s `seen[]`/`isResolved` guard) but currently unreachable from any test entry point, since `import_selected_for_test` re-derives its row set from the same filter that excludes resolved rows before `forward_action_rows` is ever called. Annotated in CONTEXT.md rather than silently claimed as tested.
+- **docs/OPERATIONS.md**: UC Test Coverage table updated from "four use cases" to five, added a UC-E row mapping to `tests/test_import.py`; noted UC-E postdates the `mol06g` 8-scenario sign-off baseline.
+- **gts-apcu**: filed [TST] — UC-E AC4 (re-forwarding an already-`Forwarded` row is a no-op) is real shipped behavior (`_handleForwardActionRows`'s `seen[]`/`isResolved` guard) but currently unreachable from any test entry point, since `import_selected_for_test` re-derives its row set from the same filter that excludes resolved rows before `forward_action_rows` is ever called. Annotated in CONTEXT.md rather than silently claimed as tested.
 - Deployed to TEST (v0.2.1 Rev. Jun 16 2026 16:09) and verified the WebApp responds 200 OK.
 
 ### Key Learnings:
@@ -2884,15 +2884,15 @@ Fixed status PNG icons appearing visually small (SVG canvas had a built-in margi
 ## 2026-06-16 17:14:08
 
 ### Summary:
-Implemented the Team view feature (GTaskSheet-cu55/2p21): added `doGet ?cmd=teamview&team=<teamId>`, a branded WebApp page listing TeamData contact info and every team document with open actions (doc name links to the doc, with open/resolved counts; unknown teamId renders a non-leaking not-found page). Extracted a shared `_renderBrandedPage` shell (Constants.js's `_NORTHLAKE_UU_EMBLEM_URL` + new `_NORTHLAKE_UU_SUITE_NAME`) so the chip-preview notice and team view share one branding source instead of duplicating it. The sidebar's Team link now falls back to this page (`_buildTeamViewUrl`, SyncManager.js) whenever TeamData has no Team Link of its own; both links open in a new tab. Added `test_team_view_page` to tests/test_import.py (twin TST), reusing the existing testTeamA/testTeamAChild fixtures — passed against the live TEST deployment. Also carried forward and committed prior uncommitted session work that was sitting dirty (status-icon crop fix, Import created_date preservation, UC-E docs backfill). Committed as fd0bd7d and pushed.
+Implemented the Team view feature (gts-cu55/2p21): added `doGet ?cmd=teamview&team=<teamId>`, a branded WebApp page listing TeamData contact info and every team document with open actions (doc name links to the doc, with open/resolved counts; unknown teamId renders a non-leaking not-found page). Extracted a shared `_renderBrandedPage` shell (Constants.js's `_NORTHLAKE_UU_EMBLEM_URL` + new `_NORTHLAKE_UU_SUITE_NAME`) so the chip-preview notice and team view share one branding source instead of duplicating it. The sidebar's Team link now falls back to this page (`_buildTeamViewUrl`, SyncManager.js) whenever TeamData has no Team Link of its own; both links open in a new tab. Added `test_team_view_page` to tests/test_import.py (twin TST), reusing the existing testTeamA/testTeamAChild fixtures — passed against the live TEST deployment. Also carried forward and committed prior uncommitted session work that was sitting dirty (status-icon crop fix, Import created_date preservation, UC-E docs backfill). Committed as fd0bd7d and pushed.
 
 ### Key Learnings:
-Running regression checks (test_chip_preview.py, test_sidebar.py) surfaced a pre-existing, unrelated bug: the immediately-prior commit renamed the sidebar's Sync button from "Sync Now" to "Sync" but didn't update scn/ui.py's `open_sidebar()` locator (still regex-matches "sync now"), so any UI test calling it times out even though the sidebar renders correctly — confirmed via failure screenshot. Filed separately as GTaskSheet-f26q rather than fixed in-session, since it was out of scope for the team-view change. Long-running GAS-backed pytest runs (5+ doc creates/syncs) can take 5-10 minutes with near-zero CPU usage while genuinely making progress (network I/O wait) — checking `ps` state + active TCP connections + clasp logs timestamps is a better hang/progress signal than elapsed wall-clock time alone.
+Running regression checks (test_chip_preview.py, test_sidebar.py) surfaced a pre-existing, unrelated bug: the immediately-prior commit renamed the sidebar's Sync button from "Sync Now" to "Sync" but didn't update scn/ui.py's `open_sidebar()` locator (still regex-matches "sync now"), so any UI test calling it times out even though the sidebar renders correctly — confirmed via failure screenshot. Filed separately as gts-f26q rather than fixed in-session, since it was out of scope for the team-view change. Long-running GAS-backed pytest runs (5+ doc creates/syncs) can take 5-10 minutes with near-zero CPU usage while genuinely making progress (network I/O wait) — checking `ps` state + active TCP connections + clasp logs timestamps is a better hang/progress signal than elapsed wall-clock time alone.
 
 ## 2026-06-16 17:53:22
 
 ### Summary:
-Drafted and published docs/USER_GUIDE.md, an end-user guide for GActionSheet. Iterated through several rounds of feedback to correct feature descriptions: two ways to create an action (AI: shorthand as primary, @create action card as alternative — both work without the sidebar open), sidebar uses a flat action-button row (not tabs) with results displayed below, status changes via sidebar or doc-chip click/hover with a 10-20s sync-settle note, Docs menu location corrected to Extensions > Action Sync, and renamed "Import" feature to "Prior Team Actions" with a note on team scoping. Added a "Getting Started" section at the top using the verbatim existing help text plus the AI: shorthand example. Added YAML front matter so GitHub Pages (Jekyll, already live for this repo) renders the doc as HTML at https://stuartdonaldson.github.io/GActionSheet/docs/USER_GUIDE.html. Filed GTaskSheet-csbv.3 under the UX Improvements epic to evaluate splitting the Import button's view/import semantics. Committed (de6f143) and pushed to master.
+Drafted and published docs/USER_GUIDE.md, an end-user guide for GActionSheet. Iterated through several rounds of feedback to correct feature descriptions: two ways to create an action (AI: shorthand as primary, @create action card as alternative — both work without the sidebar open), sidebar uses a flat action-button row (not tabs) with results displayed below, status changes via sidebar or doc-chip click/hover with a 10-20s sync-settle note, Docs menu location corrected to Extensions > Action Sync, and renamed "Import" feature to "Prior Team Actions" with a note on team scoping. Added a "Getting Started" section at the top using the verbatim existing help text plus the AI: shorthand example. Added YAML front matter so GitHub Pages (Jekyll, already live for this repo) renders the doc as HTML at https://stuartdonaldson.github.io/GActionSheet/docs/USER_GUIDE.html. Filed gts-csbv.3 under the UX Improvements epic to evaluate splitting the Import button's view/import semantics. Committed (de6f143) and pushed to master.
 
 ### Key Learnings:
 This repo's GitHub Pages is already live (legacy/Jekyll build, source = master root) and was already serving assets/ images via raw URLs referenced in Constants.js — but markdown files without YAML front matter are served as raw text/markdown, not rendered HTML. Minimal front matter (`---\ntitle: ...\n---`) is sufficient to opt a .md file into Jekyll's HTML rendering on GitHub Pages; no separate HTML conversion step or _config.yml needed. Relative asset paths (e.g. ../assets/product-details/...) continue to resolve correctly post-render since Jekyll preserves source directory structure.
@@ -2900,22 +2900,22 @@ This repo's GitHub Pages is already live (legacy/Jekyll build, source = master r
 ## 2026-06-18 09:35:49
 
 ### Summary:
-Executed Batches 2 and 3 of TEST-DEV-PLAN-2026-06-17.md (test/debug backlog while the TEST deployment is out for stakeholder review). Batch 2 (no-deploy): closed GTaskSheet-u0bb (sidebar Team section coverage — team-set/anchor-link vs team-absent/"(none)" states, added `test_sidebar_team_header` to tests/test_sidebar.py, unblocked GTaskSheet-ht19) and GTaskSheet-28q (parentheses-in-action-text status-token hardening, new tests/test_status_token_parens.py locking down the existing trailing-`(Status)` regex behavior for mid-text-parens-with/without-status and the ambiguous trailing-only-parens case). Reclassified GTaskSheet-dq6t out of Batch 2 into Batch 3 after finding its ACs need a table/list doc-seeding fixture that didn't exist (only plain-paragraph `append_doc_paragraph` was available) — closing it required new GAS code and therefore a deploy.
+Executed Batches 2 and 3 of TEST-DEV-PLAN-2026-06-17.md (test/debug backlog while the TEST deployment is out for stakeholder review). Batch 2 (no-deploy): closed gts-u0bb (sidebar Team section coverage — team-set/anchor-link vs team-absent/"(none)" states, added `test_sidebar_team_header` to tests/test_sidebar.py, unblocked gts-ht19) and gts-28q (parentheses-in-action-text status-token hardening, new tests/test_status_token_parens.py locking down the existing trailing-`(Status)` regex behavior for mid-text-parens-with/without-status and the ambiguous trailing-only-parens case). Reclassified gts-dq6t out of Batch 2 into Batch 3 after finding its ACs need a table/list doc-seeding fixture that didn't exist (only plain-paragraph `append_doc_paragraph` was available) — closing it required new GAS code and therefore a deploy.
 
-Batch 3 (one controlled `npm run deploy:test` cycle, rev 254): closed GTaskSheet-apcu, -cduk, -ez2e, -dq6t. apcu needed a new testToken-gated `forward_action_rows_test` route (ContractSchema.js + WebApp.js) since the production `forward_action_rows` is `secret`-gated and unreachable from the test harness; covers UC-E AC4's duplicate-forward guard (tests/test_import.py::test_forward_duplicate_guard). cduk's twin IMP (GTaskSheet-6ipb) was marked Closed in bd with **no actual implementation anywhere in the codebase** (no `sync.integrity.complete` log tag, no commit) — implemented the syncAll() DocData integrity pass in SyncManager.js per its frozen AC1-AC5 contract, verified against the pre-existing `test_docdata_integrity_pass` (already written to that contract, just waiting on the code); also extended `set_docdata_row` to support overriding actionCount/resolvedCount/docName, which that test needs. ez2e covered `menuSyncActiveDoc()`/`menuInsertTrackerActiveDoc()` (MenuHandler.js), which depend on `DocumentApp.getActiveDocument()` — unreachable from the stateless `run_fixture` webapp execution — by adding a `TEST_DOC_ID` script-property fallback plus two new TestFixtures.js cases and tests in tests/test_menu_entry_points.py. dq6t scoped to AC-1 through AC-6 (scanner detection in lists/table-cells/tracker-exclusion) via three new doc-seeding fixtures (`append_doc_table`, `append_doc_list_item`, `append_tracker_cell_text`) and new tests/test_floating_action_scanner.py; AC-4's "prefix AI: task" sub-case doesn't match shipped behavior (token must be paragraph-anchored) — documented instead of "fixed"; AC-7/AC-8 (`@create` caret placement inside a table cell) split into follow-up GTaskSheet-4hqn since they need new UiDriver caret-placement capability. Also fixed an unrelated pre-existing bug found while regression-testing: `seed_row` never forwarded `data.globalId` into the row it built. Filed (not fixed, needs a product decision) GTaskSheet-0f0s: `test_sync_all`'s `[nv6g]` assertion assumes a 24h Doc-Not-Found archive eviction threshold, but `ArchiveManager.js` actually uses a flat 30 days for everything. `zai6` (optional stretch) deferred. All work committed locally (7baef4f, 998d9fb) but **not pushed** per explicit no-deploy/no-push instruction during the stakeholder review window — Batch 3 was the one approved exception for the deploy itself, not for pushing to remote.
+Batch 3 (one controlled `npm run deploy:test` cycle, rev 254): closed gts-apcu, -cduk, -ez2e, -dq6t. apcu needed a new testToken-gated `forward_action_rows_test` route (ContractSchema.js + WebApp.js) since the production `forward_action_rows` is `secret`-gated and unreachable from the test harness; covers UC-E AC4's duplicate-forward guard (tests/test_import.py::test_forward_duplicate_guard). cduk's twin IMP (gts-6ipb) was marked Closed in bd with **no actual implementation anywhere in the codebase** (no `sync.integrity.complete` log tag, no commit) — implemented the syncAll() DocData integrity pass in SyncManager.js per its frozen AC1-AC5 contract, verified against the pre-existing `test_docdata_integrity_pass` (already written to that contract, just waiting on the code); also extended `set_docdata_row` to support overriding actionCount/resolvedCount/docName, which that test needs. ez2e covered `menuSyncActiveDoc()`/`menuInsertTrackerActiveDoc()` (MenuHandler.js), which depend on `DocumentApp.getActiveDocument()` — unreachable from the stateless `run_fixture` webapp execution — by adding a `TEST_DOC_ID` script-property fallback plus two new TestFixtures.js cases and tests in tests/test_menu_entry_points.py. dq6t scoped to AC-1 through AC-6 (scanner detection in lists/table-cells/tracker-exclusion) via three new doc-seeding fixtures (`append_doc_table`, `append_doc_list_item`, `append_tracker_cell_text`) and new tests/test_floating_action_scanner.py; AC-4's "prefix AI: task" sub-case doesn't match shipped behavior (token must be paragraph-anchored) — documented instead of "fixed"; AC-7/AC-8 (`@create` caret placement inside a table cell) split into follow-up gts-4hqn since they need new UiDriver caret-placement capability. Also fixed an unrelated pre-existing bug found while regression-testing: `seed_row` never forwarded `data.globalId` into the row it built. Filed (not fixed, needs a product decision) gts-0f0s: `test_sync_all`'s `[nv6g]` assertion assumes a 24h Doc-Not-Found archive eviction threshold, but `ArchiveManager.js` actually uses a flat 30 days for everything. `zai6` (optional stretch) deferred. All work committed locally (7baef4f, 998d9fb) but **not pushed** per explicit no-deploy/no-push instruction during the stakeholder review window — Batch 3 was the one approved exception for the deploy itself, not for pushing to remote.
 
 ### Key Learnings:
-A bd issue marked Closed is a claim about a past state, not a current guarantee — `GTaskSheet-6ipb` was Closed with zero trace of its implementation in the repo (no log tag, no commit), only discoverable by actually grepping for the contract's own stated log tag (`sync.integrity.complete`) before trusting the closure and writing tests against "already-shipped" behavior. When a TST ticket's own filing description proposes a fixture approach ("build via REST API or append_doc_paragraph"), verify the named fixture actually supports that shape before accepting the plan — `append_doc_paragraph` only ever supported a body-level plain paragraph, so dq6t's table/list ACs were silently undoable without new GAS code, despite reading as pure test-code additions. `DocumentApp.getActiveDocument()` only resolves inside a real container-bound UI session (menu click, onOpen) — it returns null when invoked via a stateless webapp/run_fixture HTTP execution, so any production code relying on it needs an explicit test-mode fallback (here, the same `TEST_DOC_ID` script property `_handleRunFixture` already stages) to be testable at all. A test failing deep into a long pre-existing scenario can be a *different*, unrelated pre-existing bug uncovered by getting further than before (seed_row's dropped globalId masked the separate ArchiveManager 24h-vs-30-day threshold mismatch) — worth distinguishing "I broke this" from "this was already broken and my fix let the test run far enough to find the next break," and scoping fixes accordingly (fixed the one-liner, filed the deeper one for a product decision rather than guessing at the right threshold).
+A bd issue marked Closed is a claim about a past state, not a current guarantee — `gts-6ipb` was Closed with zero trace of its implementation in the repo (no log tag, no commit), only discoverable by actually grepping for the contract's own stated log tag (`sync.integrity.complete`) before trusting the closure and writing tests against "already-shipped" behavior. When a TST ticket's own filing description proposes a fixture approach ("build via REST API or append_doc_paragraph"), verify the named fixture actually supports that shape before accepting the plan — `append_doc_paragraph` only ever supported a body-level plain paragraph, so dq6t's table/list ACs were silently undoable without new GAS code, despite reading as pure test-code additions. `DocumentApp.getActiveDocument()` only resolves inside a real container-bound UI session (menu click, onOpen) — it returns null when invoked via a stateless webapp/run_fixture HTTP execution, so any production code relying on it needs an explicit test-mode fallback (here, the same `TEST_DOC_ID` script property `_handleRunFixture` already stages) to be testable at all. A test failing deep into a long pre-existing scenario can be a *different*, unrelated pre-existing bug uncovered by getting further than before (seed_row's dropped globalId masked the separate ArchiveManager 24h-vs-30-day threshold mismatch) — worth distinguishing "I broke this" from "this was already broken and my fix let the test run far enough to find the next break," and scoping fixes accordingly (fixed the one-liner, filed the deeper one for a product decision rather than guessing at the right threshold).
 
 ## 2026-06-19 09:59:48
 
 ### Summary:
-Implemented and tested GTaskSheet-4tnr (Doc Not Found eviction redesign), but
+Implemented and tested gts-4tnr (Doc Not Found eviction redesign), but
 session ended mid-cleanup with nothing yet committed/pushed — three independent
 changesets remain uncommitted in the working tree, plus one full-suite run still
 blocked by an unrelated stale test constant.
 
-- **GTaskSheet-4tnr** (`src/ArchiveManager.js`, `src/WebApp.js`): rewrote the
+- **gts-4tnr** (`src/ArchiveManager.js`, `src/WebApp.js`): rewrote the
   archive sweep from per-row appendRow/deleteRow to a single bulk read →
   partition → at-most-two-range-write per sheet, wrapped in a LockService lock
   scoped to just that read-modify-write. `_handleMarkDocNotFound` now stamps
@@ -2927,19 +2927,19 @@ blocked by an unrelated stale test constant.
   eviction and DocData/Actions consistency — verified passing in isolation.
   Issue still `in_progress`: full pytest -x suite not yet clean end-to-end,
   nothing committed.
-- **GTaskSheet-y8a0 (closed)**: fixed `tests/test_import.py::test_import_access_filter`
+- **gts-y8a0 (closed)**: fixed `tests/test_import.py::test_import_access_filter`
   — second `show_tab("Import")` call needs `show_tab("Back")` first (sidebar
   was already on the Import card, which has no button literally named
   "Import"). The "File is in trash" dialog seen in failure screenshots was a
   side effect of the resulting stuck 15s wait, not an independent cause —
   never recurred after the fix.
-- **GTaskSheet-3sgr (open, P3)**: added `scn.ui.describe_visible_buttons()`,
+- **gts-3sgr (open, P3)**: added `scn.ui.describe_visible_buttons()`,
   wired into both `UiDriver.capture_failure()` and `tests/conftest.py`'s
   `pytest_runtest_makereport` hook — every UI test failure report now lists
   each frame's visible button accessible names (DOM/ARIA-based, not OCR).
   Issue tracks validating this earns its keep on real failures before
   promoting the convention into documented best practices.
-- **GTaskSheet-csbv.3**: added a tooltip (`setAltText`) to the sidebar's
+- **gts-csbv.3**: added a tooltip (`setAltText`) to the sidebar's
   "Import" button reading "View unresolved actions and import them"
   (`src/WorkspaceAddonCard.js`). NOT yet deployed/verified — needs to confirm
   `setAltText` doesn't override the button's accessible name and break the
@@ -2957,20 +2957,20 @@ blocked by an unrelated stale test constant.
   reads/writes all updated) but incomplete end-to-end: `tests/test_infrastructure.py`
   hardcodes `DOCDATA_HEADERS` as a literal Python list (not generated from the
   contract export), still expecting the old header text — this surfaced as a
-  spurious full-suite failure for GTaskSheet-4tnr that has nothing to do with
+  spurious full-suite failure for gts-4tnr that has nothing to do with
   archive/eviction logic. Running combined, uncoordinated changesets through
   one full-suite pass conflates unrelated failures; isolating via `git stash`
   before a close-out verification run is the planned fix, pending user
   confirmation.
 - `bd` issues can be created independently by parallel sessions investigating
-  the same live failure in real time (GTaskSheet-y8a0 was filed by another
+  the same live failure in real time (gts-y8a0 was filed by another
   session while this one was mid-investigation of the identical bug) — worth
   checking `bd` for an existing issue before deep-diving a failure, even
   mid-session.
-- Screenshot-on-UI-failure (GTaskSheet-3tkf) was already automatic and
+- Screenshot-on-UI-failure (gts-3tkf) was already automatic and
   correctly captured every failure in this session, but lacked DOM-derived
   state (visible button names) that would have shortened root-cause time —
-  now added in GTaskSheet-3sgr's `describe_visible_buttons()`.
+  now added in gts-3sgr's `describe_visible_buttons()`.
 
 ### Outstanding for next session:
 - Decide on stashing the rename changeset to get a clean full-suite run, then
@@ -2985,7 +2985,7 @@ Evaluated docs/atdd/journey-logging-design.md and replaced its proposed standalo
 Apps Script webapp + Sheet sink (§4.3) with Axiom as the shared logging sink, after
 confirming with a POC (curl ingest+query round-trip against dataset `nuuts`) that it
 covers the same need with less new infrastructure. Implemented the approved slice
-(GTaskSheet-ishz.1/.2): §4.1 fixture-name-wins event naming and §4.2 synthetic
+(gts-ishz.1/.2): §4.1 fixture-name-wins event naming and §4.2 synthetic
 `begin_journey_session` event in scn/session.py; buffered Axiom POST sink in
 scn/reporter.py (Python) and src/GasLogger.js (GAS), gated by axiomDataset/axiomToken
 in local.settings.json; `set_axiom_config` WEBAPP_SECRET-gated route (WebApp.js +
@@ -3004,7 +3004,7 @@ name, slowest tests by total traced time) and found a genuine root cause for
 test_b7_write_routes's 68s sync_document outlier: a ~13-event `sync.warn` retry loop,
 not GAS execution time. The full regression suite run during this also reproduced
 test_import_access_filter's known intermittent Playwright timeout
-(GTaskSheet-y8a0/-3sgr/-1o7g) live, now with full Axiom trace coverage of the failure.
+(gts-y8a0/-3sgr/-1o7g) live, now with full Axiom trace coverage of the failure.
 
 ### Key Learnings:
 - GAS manifest `urlFetchWhitelist` (src/appsscript.json) silently blocks
@@ -3024,7 +3024,7 @@ test_import_access_filter's known intermittent Playwright timeout
   conventions (dot.case domain.event vs SCREAMING_SNAKE entry-point names) and zero
   call-tree correlation ID anywhere (e.g. syncAll()'s per-doc sub-events are only
   associable with their parent invocation by time-proximity inference). Filed both
-  as separate beads (GTaskSheet-65g1 P1 correlation-ID, GTaskSheet-x94a P2 naming
+  as separate beads (gts-65g1 P1 correlation-ID, gts-x94a P2 naming
   taxonomy) with full findings/evidence/draft AC, explicitly for independent
   re-analysis in a fresh session rather than acting on this session's notes as-is.
 - local.settings.json key was typo'd as `axiomDataSet` (capital S) against the
@@ -3034,9 +3034,9 @@ test_import_access_filter's known intermittent Playwright timeout
 ## 2026-06-19 18:24:30
 
 ### Summary:
-Audited GTaskSheet-x94a (GasLogger tag-naming taxonomy) against current src/*.js — re-derived the rename map independently (28 call sites across EditorAddonCard.js/WebApp.js/PROBE.js, plus a missed snake_case outlier `verify_chip_integrity.done`) rather than trusting the bead's stale snapshot, and confirmed which tests assert on the literal old tag strings. Documented findings in knowledge-base/staging/gaslogger-tag-taxonomy.md. Extended the audit to the data-parameter keys (not just tag names) and found a real `err`/`error` key split, a redundant/shadowing `version` field bug, and two false-positive "duplicates" that are actually distinct entity roles — filed as GTaskSheet-9dss.
+Audited gts-x94a (GasLogger tag-naming taxonomy) against current src/*.js — re-derived the rename map independently (28 call sites across EditorAddonCard.js/WebApp.js/PROBE.js, plus a missed snake_case outlier `verify_chip_integrity.done`) rather than trusting the bead's stale snapshot, and confirmed which tests assert on the literal old tag strings. Documented findings in knowledge-base/staging/gaslogger-tag-taxonomy.md. Extended the audit to the data-parameter keys (not just tag names) and found a real `err`/`error` key split, a redundant/shadowing `version` field bug, and two false-positive "duplicates" that are actually distinct entity roles — filed as gts-9dss.
 
-Queried live Axiom data (200 most recent events) to validate the plan against real traffic, not just static grep. Found `sync.warn` is the single largest event bucket (29%) and is overloaded across two distinct conditions, split further by a `'Doc not found'`/`'Doc Not Found'` msg-casing mismatch — filed as GTaskSheet-aa7j. Also found GAS-side and Python-side logging use two entirely unrelated naming systems (domain.event vs raw action/fixture names) with no documented bridge — filed as GTaskSheet-ecs1.
+Queried live Axiom data (200 most recent events) to validate the plan against real traffic, not just static grep. Found `sync.warn` is the single largest event bucket (29%) and is overloaded across two distinct conditions, split further by a `'Doc not found'`/`'Doc Not Found'` msg-casing mismatch — filed as gts-aa7j. Also found GAS-side and Python-side logging use two entirely unrelated naming systems (domain.event vs raw action/fixture names) with no documented bridge — filed as gts-ecs1.
 
 Built `scripts/query_axiom.py` (limit/since/side/name/where/raw filters, reads axiomDataset/axiomQueryToken from local.settings.json) so future Axiom lookups don't require re-deriving the APL query+auth shape by hand. Documented it in CLAUDE.md and `bd remember`, and added placeholder Axiom keys to local.settings.example.json.
 
@@ -3046,12 +3046,12 @@ Axiom's APL query API takes `apl`/`startTime`/`endTime` as top-level JSON fields
 ## 2026-06-19 19:01:16
 
 ### Summary:
-Resolved GTaskSheet-x94a, GTaskSheet-9dss, and GTaskSheet-ecs1 (GasLogger tag/parameter taxonomy cleanup).
+Resolved gts-x94a, gts-9dss, and gts-ecs1 (GasLogger tag/parameter taxonomy cleanup).
 - Renamed all SCREAMING_SNAKE/snake_case-domain GasLogger tags to the `domain.event` convention across `src/EditorAddonCard.js`, `src/WebApp.js`, `src/PROBE.js`, plus matching doc comments and test assertions (`tests/test_import.py`, `tests/test_journey.py`, `tests/test_poc_features.py`, `src/ContractSchema.js`).
 - Fixed `error:`/`error` key inconsistencies in `src/TestFixtures.js`'s `fixture.*` calls (renamed to `err:` + added `msg:` where missing) and removed two redundant explicit `version:` fields that were silently shadowing GasLogger's auto-stamped field (`EditorAddonCard.js`, `SyncManager.js`).
 - Replaced the transient staging audit (`knowledge-base/staging/gaslogger-tag-taxonomy.md`, deleted) with two durable ADRs: `knowledge-base/adr/0019-gaslogger-naming-standard.md` (tag convention) and `0020-gaslogger-data-key-standard.md` (parameter-key convention), each with an "applying to new call sites" checklist.
 - Re-pulled a live Axiom sample (200 events/24h) to verify the GAS-side vs Python-side event-naming split (182/18) still holds, and added §8 to `docs/atdd/journey-logging-design.md` mapping each Python action/fixture name to its corresponding GAS `domain.event` family.
-- Deliberately left open: GTaskSheet-aa7j (splitting the overloaded `sync.warn` tag) — separate, larger-blast-radius decision.
+- Deliberately left open: gts-aa7j (splitting the overloaded `sync.warn` tag) — separate, larger-blast-radius decision.
 
 ### Key Learnings:
 - `GasLogger.log()`'s `_postToAxiom` spreads `e.data` *after* the auto-stamped base row (`{ version, op, ts, tag }`), so any call site passing those keys inside `data` silently overwrites the auto-stamped value — now a documented reserved-keys rule (ADR-0020).
@@ -3060,9 +3060,9 @@ Resolved GTaskSheet-x94a, GTaskSheet-9dss, and GTaskSheet-ecs1 (GasLogger tag/pa
 ## 2026-06-19 20:09:22
 
 ### Summary:
-Closed out GTaskSheet-ishz.1 (journey-logging/Axiom rollout) and folded in GTaskSheet-aa7j at the same time since both ADR-0019/0020 conventions now applied directly to it: split the overloaded `sync.warn` GasLogger tag into `sync.docNotFound.{invalid,trashed,confirmed}` (`src/SyncManager.js:83,90,371`, `src/WebApp.js:1055`), standardized on lowercase `'Doc not found'` as the disambiguating `msg` now that the tag itself disambiguates, and added `msg: 'unchanged since last sync'` to `sync.skip` (`src/SyncManager.js:378`). Updated `docs/atdd/journey-logging-design.md`'s sync_all event-cascade table to match. Verified via grep that no test asserts on the literal old tag/msg strings (tests only assert the persisted `Sync Status` sheet column, untouched by this change).
+Closed out gts-ishz.1 (journey-logging/Axiom rollout) and folded in gts-aa7j at the same time since both ADR-0019/0020 conventions now applied directly to it: split the overloaded `sync.warn` GasLogger tag into `sync.docNotFound.{invalid,trashed,confirmed}` (`src/SyncManager.js:83,90,371`, `src/WebApp.js:1055`), standardized on lowercase `'Doc not found'` as the disambiguating `msg` now that the tag itself disambiguates, and added `msg: 'unchanged since last sync'` to `sync.skip` (`src/SyncManager.js:378`). Updated `docs/atdd/journey-logging-design.md`'s sync_all event-cascade table to match. Verified via grep that no test asserts on the literal old tag/msg strings (tests only assert the persisted `Sync Status` sheet column, untouched by this change).
 
-Ran the full `pytest -x` regression gate per the backstop rule before closing — found `tests/test_import.py::test_import_access_filter` failing on `scn_target.ui.show_tab("Import")` (30s timeout). Investigated rather than dismissing as flaky: pulled the local pytest trace + cross-referenced Axiom GAS-side events by docId to build a merged timeline, which showed (a) the failure-diagnostics screenshot is misleading — `tests/conftest.py`'s `pytest_runtest_makereport` hook only fires after the test's own `finally:`-block cleanup has already trashed the docs, so "Take out of trash" in the screenshot is a ~17s-late artifact, not the doc's real state at the timeout moment; (b) the failure reproduces identically even after a major leadup-time cut (135.83s → 67.83s), ruling out setup-timing as the cause. Filed as GTaskSheet-3zl5 (P1 bug) with the full evidence chain and a concrete next-step (check `open_sidebar()`/`_current_card` for a stale Playwright frame handle).
+Ran the full `pytest -x` regression gate per the backstop rule before closing — found `tests/test_import.py::test_import_access_filter` failing on `scn_target.ui.show_tab("Import")` (30s timeout). Investigated rather than dismissing as flaky: pulled the local pytest trace + cross-referenced Axiom GAS-side events by docId to build a merged timeline, which showed (a) the failure-diagnostics screenshot is misleading — `tests/conftest.py`'s `pytest_runtest_makereport` hook only fires after the test's own `finally:`-block cleanup has already trashed the docs, so "Take out of trash" in the screenshot is a ~17s-late artifact, not the doc's real state at the timeout moment; (b) the failure reproduces identically even after a major leadup-time cut (135.83s → 67.83s), ruling out setup-timing as the cause. Filed as gts-3zl5 (P1 bug) with the full evidence chain and a concrete next-step (check `open_sidebar()`/`_current_card` for a stale Playwright frame handle).
 
 While investigating the gap, found and fixed a real test-perf issue along the way: `scn_sibling`/`scn_other`/`scn_trashed` in `test_import_access_filter` were paying for full `syncDocument()` round trips (doc open + paragraph scan + team-scope walk + flush-back, ~12-19s each) purely to produce a DocData row + Actions row that `_listImportableActionsData` (the function actually under test) reads but never opens the doc to get. Added `_seed_import_candidate()` (`tests/test_import.py`) using the existing `seed_row`/`set_docdata_row` fixtures instead — documented in its docstring why this is safe and what to re-check if `_listImportableActionsData`'s field reads ever change. Cut this test's leadup time roughly in half.
 
@@ -3074,11 +3074,11 @@ While investigating the gap, found and fixed a real test-perf issue along the wa
 ## 2026-06-19 21:12:55
 
 ### Summary:
-Resolved GTaskSheet-3zl5 (`show_tab("Import")` timeout) by disproving the original stale-frame-handle hypothesis and finding the real root cause. Added temporary env-gated diagnostics to `scn/ui.py` (`GACTIONSHEET_DEBUG_FRAME=1`): tagged the frame `open_sidebar()` caches with a JS marker, then enumerated all `page.frames` at the moment `show_tab()` is called to check whether the cached frame and the frame actually holding the button were the same object. They were — same frame, not detached, same URL — ruling out staleness entirely. A follow-up `frame.evaluate()` poll comparing `innerText` vs `aria-label` on the live button element found the real cause: the Import button's accessible name is `"View unresolved actions and import them"` (set via `.setAltText()` in `src/WorkspaceAddonCard.js:95`, a deliberate a11y improvement from commit `d5a26442`), while `show_tab()` was matching `get_by_role("button", name=label, exact=True)` — accessible name, not visible text. Fixed by switching to `frame.get_by_role("button").filter(has_text=re.compile(...))`, which matches rendered text content instead. Removed all temporary debug instrumentation afterward.
+Resolved gts-3zl5 (`show_tab("Import")` timeout) by disproving the original stale-frame-handle hypothesis and finding the real root cause. Added temporary env-gated diagnostics to `scn/ui.py` (`GACTIONSHEET_DEBUG_FRAME=1`): tagged the frame `open_sidebar()` caches with a JS marker, then enumerated all `page.frames` at the moment `show_tab()` is called to check whether the cached frame and the frame actually holding the button were the same object. They were — same frame, not detached, same URL — ruling out staleness entirely. A follow-up `frame.evaluate()` poll comparing `innerText` vs `aria-label` on the live button element found the real cause: the Import button's accessible name is `"View unresolved actions and import them"` (set via `.setAltText()` in `src/WorkspaceAddonCard.js:95`, a deliberate a11y improvement from commit `d5a26442`), while `show_tab()` was matching `get_by_role("button", name=label, exact=True)` — accessible name, not visible text. Fixed by switching to `frame.get_by_role("button").filter(has_text=re.compile(...))`, which matches rendered text content instead. Removed all temporary debug instrumentation afterward.
 
 Documented the convention in `scn/ui.py`'s module docstring and `bd remember` (`3zl5-aria-label-vs-text-locator`) — explicitly *not* as a blanket "always match text" rule (corrected mid-session per user feedback): icon-only/image buttons have no visible text and accessible-name matching is the only valid signal there. The lesson is knowing which of {visible text, accessible name} a given button actually exposes before choosing a locator strategy.
 
-While re-verifying the fix, uncovered a second, unrelated bug: `test_import_access_filter` failed again post-fix on an `assert_log` timeout waiting for tag `importList.done`. Cross-referenced the Drive-mapped GAS log files directly (not Axiom) and found the live TEST deployment was still emitting the pre-rename tag `IMPORT_LIST.done` — the deployment's build timestamp (17:20) predated the GasLogger naming-taxonomy commit `3d9ab77` (20:10) that renamed it in source. Fixed by running `npm run deploy:test` (no code change needed). Verified end-to-end: `tests/test_import.py` full file (4 tests) passes in 16m03s. Closed GTaskSheet-3zl5, committed (`a12cac4`), and pushed.
+While re-verifying the fix, uncovered a second, unrelated bug: `test_import_access_filter` failed again post-fix on an `assert_log` timeout waiting for tag `importList.done`. Cross-referenced the Drive-mapped GAS log files directly (not Axiom) and found the live TEST deployment was still emitting the pre-rename tag `IMPORT_LIST.done` — the deployment's build timestamp (17:20) predated the GasLogger naming-taxonomy commit `3d9ab77` (20:10) that renamed it in source. Fixed by running `npm run deploy:test` (no code change needed). Verified end-to-end: `tests/test_import.py` full file (4 tests) passes in 16m03s. Closed gts-3zl5, committed (`a12cac4`), and pushed.
 
 ### Key Learnings:
 - `get_by_role(..., name=...)` matches the computed ARIA *accessible name*, not visible text — CardService's `.setText()` and `.setAltText()` are independent properties that can diverge at any time for legitimate a11y reasons. There is no universally-correct choice between matching on text vs. accessible name; it depends on what the specific button actually renders (text-bearing vs. icon-only).
@@ -3092,7 +3092,7 @@ Reviewed the live Axiom data pulled during the ishz.1/aa7j/3zl5 investigations f
 - `journey.end`'s GasLogger data key was `trashed: docId` — a verb-shaped key holding an id value, violating ADR-0020's own entity-id convention (`docId`) that this codebase just adopted. Renamed to `docId: docId` (`src/WebApp.js:1789`); left the unrelated JSON wire-response field (`trashed`) untouched since it's a different contract nothing here needed to touch.
 - `sync.complete`'s `anchored: 0` field was a hardcoded literal at both call sites (`src/SyncManager.js:128,260`) — always 0 regardless of branch, a leftover from a removed named-range-anchoring mechanism (per the nearby comment "No named range anchoring needed — globalId IS the identity"). Removed the dead field from both.
 
-A third finding — `journey.*`/`sync.*` GAS events carry no `caller`/identity context (`caller={eu:None, au:None, version:None}` in every sample) — is a larger, decision-requiring gap rather than a quick fix. Added it as a comment to the existing open correlation/logging bead GTaskSheet-j8cn (not resolved, not a new bead) so a future clean-context session has the concrete evidence without re-deriving it.
+A third finding — `journey.*`/`sync.*` GAS events carry no `caller`/identity context (`caller={eu:None, au:None, version:None}` in every sample) — is a larger, decision-requiring gap rather than a quick fix. Added it as a comment to the existing open correlation/logging bead gts-j8cn (not resolved, not a new bead) so a future clean-context session has the concrete evidence without re-deriving it.
 
 ### Key Learnings:
 - Hardcoded-but-still-passed log fields are the easy-to-miss residue of removed features — `anchored: 0` survived its own architecture (named-range anchoring) being replaced by globalId-based identity, because nothing kept it in sync once the deciding logic was deleted. Worth scanning live log samples (not just diffing source) periodically to catch fields that are *technically* present but provide zero information.
@@ -3100,13 +3100,13 @@ A third finding — `journey.*`/`sync.*` GAS events carry no `caller`/identity c
 ## 2026-06-20 02:37:55
 
 ### Summary:
-Closed out GTaskSheet-j8cn and GTaskSheet-4tnr, plus two opportunistic fixes surfaced while investigating Axiom logs and suite timing.
+Closed out gts-j8cn and gts-4tnr, plus two opportunistic fixes surfaced while investigating Axiom logs and suite timing.
 
 - **j8cn** (addon→WebApp op-id correlation): `GasLogger.startOp(receivedOpId)` now mints its own fresh op but stamps the caller's id as `parentOp` (never adopts it — keeps op-id-per-execution intact); added `GasLogger.getCurrentOp()`; wired into `doPost` and the 5 production addon→WebApp call sites. While reviewing Axiom logs for this, found `_syncTeamScope` was re-reading the Drive `teamScope` appProperty on every sync even though `DocData.teamId` is a provably-identical lockstep mirror — switched to trusting the mirror (perf win), and added a `verify_action_rows` teamScope-drift check (DocData vs Drive) as the compensating self-heal control, proven via a new induced-drift scenario (`test_team_scope.py` S9). Also added gap-instrumentation: all 5 `browser_page` fixtures now time Chromium launch/teardown and emit it to Axiom directly via a new `scn.reporter.emit_standalone_event()` (these fixtures run outside any Reporter's lifecycle, so couldn't log through the normal path) — this closed a ~30% unexplained-time blind spot found while analyzing a prior full-suite run's timing.
 - **4tnr** (Doc Not Found eviction redesign): found most of the original AC already implemented by an earlier pass (per-docId batching via `syncAll`'s `alreadyDocNotFound` skip-list, `ArchiveManager`'s bulk read-modify-write under a scoped lock) — re-derived from reading `ArchiveManager.js`/`SyncManager.js` fresh rather than assuming. The one real gap: `_handleMarkDocNotFound` had no guard against re-stamping `Date Modified` on a row already in `Doc Not Found` state, so `syncDocument()`'s direct entry points (Sync menu item, sidebar Sync button) — which bypass `syncAll`'s skip-list — would reset the 24h aging clock on every re-sync of a still-missing doc. Added the guard; new regression test proven to fail pre-fix (~16s re-stamp observed) and pass post-fix.
 - **Opportunistic fix**: `verify_chip_integrity`'s default-icon label was `'unknown'` but the exemption check tested for `'other'` — a string mismatch that failed chip integrity for any non-standard status (e.g. "Backlog"). Fixed the label, then migrated the underlying asset end-to-end per user request (`status-unknown.svg/png` → `status-other.svg/png` via the brand pipeline), deliberately leaving the old PNG published on GitHub Pages for backward compat with already-rendered chips.
 - **Opportunistic fix**: `fixture.setup` GasLogger tag was a single generic name for every test fixture scenario (info only in the data payload) — inconsistent with the per-scenario tag convention used elsewhere in the same function. Renamed to `fixture.<scenario>.setup`.
-- Full `pytest -x` suite run twice during verification; each run surfaced a different, unrelated `test_journey` failure (chip-integrity mismatch, then a GitHub-Pages asset-propagation race, then an `actionTrigger.done` log-wait timeout) — none connected to j8cn/4tnr, which were independently verified green via targeted runs against the live deployment. Filed the third as GTaskSheet-933t rather than chasing it further this session.
+- Full `pytest -x` suite run twice during verification; each run surfaced a different, unrelated `test_journey` failure (chip-integrity mismatch, then a GitHub-Pages asset-propagation race, then an `actionTrigger.done` log-wait timeout) — none connected to j8cn/4tnr, which were independently verified green via targeted runs against the live deployment. Filed the third as gts-933t rather than chasing it further this session.
 
 5 commits, pushed to master: `7044ee5` (chip-icon label fix), `263eedb` (fixture tag rename), `b856e8e` (j8cn), `3fd1342` (4tnr), `58ef849` (deployment-ledger/version chore).
 
@@ -3118,11 +3118,11 @@ Closed out GTaskSheet-j8cn and GTaskSheet-4tnr, plus two opportunistic fixes sur
 ## 2026-06-20 05:35:24
 
 ### Summary:
-Evaluated GTaskSheet-ht19 against current state before implementing: found AC-3/AC-4 (header subtitle showing team name) contradicted the already-shipped, already-tested `_buildTeamSection` widget design from GTaskSheet-u0bb (closed). Amended ht19 to drop the stale team-subtitle ACs and scope it to title/icon/error-header only; created GTaskSheet-rvwu for the missing twin-ticket test coverage (u0bb's tests never asserted on title/icon/error-fallback header, only team display).
+Evaluated gts-ht19 against current state before implementing: found AC-3/AC-4 (header subtitle showing team name) contradicted the already-shipped, already-tested `_buildTeamSection` widget design from gts-u0bb (closed). Amended ht19 to drop the stale team-subtitle ACs and scope it to title/icon/error-header only; created gts-rvwu for the missing twin-ticket test coverage (u0bb's tests never asserted on title/icon/error-fallback header, only team display).
 
 Implemented `buildHomepageCard()`'s and its error-fallback card's `CardHeader` (title='Northlake UU Tool Suite', icon=northlake-uu-emblem.png — both constants already existed in `Constants.js`, generated by the brand pipeline but unused until now) plus the subtitle = doc name, reusing the already-computed-but-previously-unconsumed `homepageState.docName` field. Added a `force_homepage_error`/`clear_homepage_error_force` TestFixtures.js pair (script-property toggle) to deterministically exercise the catch-block error card, and `test_sidebar_header_branding` in `test_sidebar.py` covering both states. Proved the assertion fails without the fix via stash/redeploy/retest (anti-vacuous-assertion rule) before accepting it as green.
 
-Full `pytest -x` surfaced three pieces of pre-existing debt, none touching the files changed here: `test_scn_ui.py::TestSetStatus` (3 deterministic mock-assertion failures, pure unit tests — filed GTaskSheet-89t6), `test_sidebar.py::test_sidebar_shell_controls` (a 30s timeout waiting for the Import button, though the post-failure diagnostic capture shows it was present — looks like a render-timing flake, filed GTaskSheet-70wo), and `tests/test_journey.py::test_journey`'s `actionTrigger.done` log-wait timeout (GTaskSheet-933t, previously filed as possibly-flaky) — reproduced identically on a second isolated run, so updated that issue's notes to flag it as likely a real deterministic regression in the Editor add-on's `@`-menu create-action flow rather than flakiness. Presented this debt state to the user per the project's backstop rule rather than deciding unilaterally; user confirmed closing ht19/rvwu now and tracking the rest separately.
+Full `pytest -x` surfaced three pieces of pre-existing debt, none touching the files changed here: `test_scn_ui.py::TestSetStatus` (3 deterministic mock-assertion failures, pure unit tests — filed gts-89t6), `test_sidebar.py::test_sidebar_shell_controls` (a 30s timeout waiting for the Import button, though the post-failure diagnostic capture shows it was present — looks like a render-timing flake, filed gts-70wo), and `tests/test_journey.py::test_journey`'s `actionTrigger.done` log-wait timeout (gts-933t, previously filed as possibly-flaky) — reproduced identically on a second isolated run, so updated that issue's notes to flag it as likely a real deterministic regression in the Editor add-on's `@`-menu create-action flow rather than flakiness. Presented this debt state to the user per the project's backstop rule rather than deciding unilaterally; user confirmed closing ht19/rvwu now and tracking the rest separately.
 
 ### Key Learnings:
 - A bd issue's AC text can go stale relative to what actually shipped under a *different*, already-closed issue — always check the dependency chain's closed tickets' actual tests/code, not just the open issue's own AC text, before implementing.
@@ -3133,11 +3133,11 @@ Full `pytest -x` surfaced three pieces of pre-existing debt, none touching the f
 ## 2026-06-22 06:34:05
 
 ### Summary:
-Ran `/catch-up` after a gap; found `work-log.md` was 3 commits behind (the prior session's `GTaskSheet-ishz.3/.5/.7` Axiom flush-routing/calibration-probe work was never logged — noted as doc drift, not backfilled here).
+Ran `/catch-up` after a gap; found `work-log.md` was 3 commits behind (the prior session's `gts-ishz.3/.5/.7` Axiom flush-routing/calibration-probe work was never logged — noted as doc drift, not backfilled here).
 
 Closed out two pending decisions surfaced during catch-up:
-- **GTaskSheet-csbv.3** (Import button semantics split) — closed; current Import-tab/'Import selected' two-step behavior is acceptable as-is, deferred pending actual end-user feedback rather than speculative UX work.
-- **EPIC-E (Notify tab) chain** — closed all 10 beads (`GTaskSheet-gc43` epic, `s3ga` gate, `1xpj`, `7fng`, `ajns`, `ay5w`, `f3v9`, `twwo`, `xiv8`, plus already-closed `tv54`) as indefinite backlog rather than leaving them `deferred` (on hold since 2026-06-15, never resumed). Updated `knowledge-base/ROADMAP.md`'s EPIC-E section with a 2026-06-22 status note (closed, not delivered, design retained only as a non-frozen starting point) and the bead-ID list as a reactivation reference, plus two cross-references elsewhere in the doc (Import/Notify intro, sidebar tab-model table) to stop calling EPIC-E "open"/"proposed".
+- **gts-csbv.3** (Import button semantics split) — closed; current Import-tab/'Import selected' two-step behavior is acceptable as-is, deferred pending actual end-user feedback rather than speculative UX work.
+- **EPIC-E (Notify tab) chain** — closed all 10 beads (`gts-gc43` epic, `s3ga` gate, `1xpj`, `7fng`, `ajns`, `ay5w`, `f3v9`, `twwo`, `xiv8`, plus already-closed `tv54`) as indefinite backlog rather than leaving them `deferred` (on hold since 2026-06-15, never resumed). Updated `knowledge-base/ROADMAP.md`'s EPIC-E section with a 2026-06-22 status note (closed, not delivered, design retained only as a non-frozen starting point) and the bead-ID list as a reactivation reference, plus two cross-references elsewhere in the doc (Import/Notify intro, sidebar tab-model table) to stop calling EPIC-E "open"/"proposed".
 
 User then asked to verify the bd/git remote setup matches their understanding (issues.jsonl gitignored, bd syncing through the same GitHub remote via bd-managed sync) by checking docs/forums, not just assuming. Used the `bd-maintenance` skill plus a live `WebFetch` of beads' `SYNC_CONCEPTS.md` to confirm rather than guess:
 - `issues.jsonl`/`interactions.jsonl` are correctly gitignored via `.beads/.gitignore` (confirmed via `git check-ignore -v`) — matches upstream's own description of the jsonl export as "not the canonical cross-machine sync channel."
@@ -3145,14 +3145,14 @@ User then asked to verify the bd/git remote setup matches their understanding (i
 - Found one real gap: bd's git hooks (`pre-commit`/`post-merge`/`pre-push`/`post-checkout`/`prepare-commit-msg`) existed as templates in `.beads/hooks/` but were never installed into `.git/hooks/` (only `.sample` placeholders were present). Fixed via `bd hooks install`; verified all five are now active.
 
 ### Key Learnings:
-- A bd issue's catch-up status can mask in-flight work happening in a *different* session — `scn/session.py`/`tests/test_scn_session.py` showing dirty in `git status` lined up suspiciously well with `GTaskSheet-ishz.2`'s still-open AC (`begin_journey_session` Reporter event); flagged rather than assumed safe to touch.
+- A bd issue's catch-up status can mask in-flight work happening in a *different* session — `scn/session.py`/`tests/test_scn_session.py` showing dirty in `git status` lined up suspiciously well with `gts-ishz.2`'s still-open AC (`begin_journey_session` Reporter event); flagged rather than assumed safe to touch.
 - Closing an epic/chain as "indefinite backlog" is different from leaving it `deferred` — deferred still reads as pending/resumable-soon; closing with a reactivation-reference note in the roadmap (bead IDs, not re-opened tickets) is the better signal when there's no concrete resume date and the eventual approach may differ from what's currently speculated.
 - When a user says "confirm against docs/forums" rather than "I think bd does X", don't rely on memory or CLAUDE.md's summary alone — fetch the actual upstream doc. In this case it surfaced a real, if minor, gap (hooks never installed) that pure local inspection of config files didn't make obvious until cross-checked against what the doc says *should* exist.
 
 ## 2026-06-22 23:01:51
 
 ### Summary:
-Validated the uncommitted `GTaskSheet-ishz.2` regression-coverage work (file/axiom log-backend
+Validated the uncommitted `gts-ishz.2` regression-coverage work (file/axiom log-backend
 split in `scn/session.py`/`tests/helpers/gas_log.py`, `GasLogger.flush()` call in
 `EditorAddonCard.js`, locator/test fixes) via repeated full-suite `pytest` runs. Two successive
 credential expiries blocked progress before a real signal emerged:
@@ -3176,7 +3176,7 @@ isolation: 5 passed cleanly (confirms GAS-cold-start/quota flakiness from hammer
 WebApp across 4 full-suite runs in ~3 hours, not real regressions). One — `test_sidebar.py::
 test_sidebar_shell_controls` — failed identically twice; diagnostics show the Import button was
 actually present in the frame at failure time, pointing to a locator/render race rather than a
-missing control. Filed as tech debt (`GTaskSheet-t6hx`) rather than chased further, since it has
+missing control. Filed as tech debt (`gts-t6hx`) rather than chased further, since it has
 no connection to this session's code diff and needs reproduction outside heavy-load conditions to
 isolate root cause.
 
@@ -3202,7 +3202,7 @@ isolate root cause.
 ## 2026-06-24 03:47:01
 
 ### Summary:
-Closed out the `GTaskSheet-ishz.2` validation work from the prior entry. Filed `GTaskSheet-t6hx`
+Closed out the `gts-ishz.2` validation work from the prior entry. Filed `gts-t6hx`
 ([TST] `test_sidebar_shell_controls` Import-button locator race) as tech debt rather than chasing
 it further, since the diagnostics dump showed the button present at failure time and it has no
 connection to this session's diff. Split the dirty tree into three commits matching repo
@@ -3227,14 +3227,14 @@ Simplified the soft-return floating action model to one-AI-per-paragraph; update
 
 ### Work completed
 
-**Model simplification (GTaskSheet-cn5v — closed)**
+**Model simplification (gts-cn5v — closed)**
 - Old model: multiple AI: tokens could share one paragraph, separated by soft returns.
 - New model: one AI: token per paragraph; action text runs from the token to end of paragraph including any soft-return continuation lines; contextual prefix lines (before the token) are excluded.
 - Removed three tests (multi-token scenarios): `test_soft_return_multi_ai_token`, `test_soft_return_bare_ai_assigned`, `test_soft_return_full_pattern`.
 - Added/kept four tests covering the simplified model (AC-T1 through AC-T4). All green.
 - Test file updated by a dedicated agent (twin-ticket no-shared-context rule enforced).
 
-**Flush fix (GTaskSheet-til5 — closed)**
+**Flush fix (gts-til5 — closed)**
 - Root cause: `_flushActionParagraph._collectOccurrences` matched only paragraphs whose full REST-API text starts with `AI-N:`. Soft-return paragraphs (`"context\nAI-1: action"`) were never found → `flush.warn: Paragraph not found` → no image, no hyperlink, no status write-back.
 - Fix (SyncManager.js ~line 1566):
   1. `_FLUSH_FIELDS`: added `startIndex,endIndex` to `paragraph/elements(...)` so each textRun element carries its absolute document position.
@@ -3265,21 +3265,21 @@ Diagnosed and fixed sync performance bottlenecks via Axiom trace analysis; batch
 **Performance investigation**
 - Pulled real Axiom traces for `sync.all` runs. Found one 338s sync where ~260s was spent in a serial loop calling `mark_doc_not_found` once per trashed/missing doc (33 calls in one trace), each doing its own full Actions-sheet read + per-row `setValue()` writes. Also found `syncAll` calling `DriveApp.getFileById()` once per tracked doc just for trash/modified-time checks, and `_flushActionParagraph` doing one GET + one `batchUpdate` per action item instead of per doc.
 
-**Batching fixes (epic GTaskSheet-kkm7, issues .1-.3)**
+**Batching fixes (epic gts-kkm7, issues .1-.3)**
 - `mark_doc_not_found`: `syncAll` now collects all not-found docIds and fires one webapp call per sweep; `_handleMarkDocNotFound` (WebApp.js) does one sheet read + one `getRangeList().setValue()` batched write across all matched rows instead of per-doc reads/writes.
 - Drive metadata: new `_fetchDriveDocMetadata()` does one paginated `files.list` REST call (matches existing `urlFetchWhitelist`, unlike the batch endpoint which would need a manifest change) building a docId→{trashed,lastModified,name} map, replacing per-doc `DriveApp.getFileById()`. Falls back to the old per-doc path if the batch fetch itself fails.
 - Chip flush: `_flushActionParagraph` → `_flushActionParagraphs`, one GET + one `batchUpdate` per doc covering every changed action item (`_collectFlushOccurrences`/`_buildFlushRequests` extracted as shared helpers). Single-item call sites (sidebar/preview-card status taps) now route through the same function with a one-element list — no duplicated logic.
 
-**Soft-return corruption fix (GTaskSheet-kkm7.5)**
+**Soft-return corruption fix (gts-kkm7.5)**
 - User-reported bug: a multi-line soft-return action item lost all line breaks after a sidebar status change (became fully concatenated, no separator). Root cause: `_normalizeActionText()` (added in the prior session, f8dc3a6) only strips `\v`/`\n`/`\r` at the four sheet-write sites in WebApp.js; the sidebar status-set path never touches the sheet — it rescans the live doc and passes raw un-normalized text straight into flush, where an unrecognized `\r` is silently dropped by the Docs API. Fix: normalize `actionText` once inside `_buildFlushRequests`, the one chokepoint every flush path now shares — pre-existing bug, not caused by the batching refactor, just newly exposed by it.
 
-**Sidebar ordering (GTaskSheet-kkm7.6)**
+**Sidebar ordering (gts-kkm7.6)**
 - `_buildActionListSection` (WorkspaceAddonCard.js) now renders a locally-sorted copy of the action list by AI-N ascending (mirrors the existing Import-tab sort), with not-yet-anchored actions kept after all numbered ones. Underlying scan order is untouched for other consumers.
 
-**DocData Doc Name as hyperlink (GTaskSheet-46qv)**
+**DocData Doc Name as hyperlink (gts-46qv)**
 - `_getOrUpsertDocDataRow` now writes an `=HYPERLINK(...)` formula for the Doc Name cell instead of plain text, reusing the exact pattern already used for the Actions sheet's `document_formula` column. Read side unaffected (`getValues()` returns the computed title text either way).
 
-**configFormat() feature (GTaskSheet-d99c)**
+**configFormat() feature (gts-d99c)**
 - New Setup-menu item "Configure Action Format" prompts for a Doc ID/URL, finds that doc's first AI-N: action in document order, samples font family/size/color/bold/italic/underline separately for the AI-N: token and the action text (via DocumentApp's per-offset Text style getters), and writes them to a new Config sheet.
 - Applied via `_getActionFormatConfig()` (execution-scoped cache) → `_chipBadgeStyleRequest` (shared by doc-sync flush, Import/create-chip path, and Tracker Table ID links — falls back to the original hardcoded Comic Sans MS/bold/purple style when unconfigured) and new `_actionTextStyleRequest` (returns null/no-op until configured — forward-only, no retroactive reformat of existing chips).
 - Config sheet schema iterated once at user's request: `Key | Value` columns, with Value holding a JSON-encoded style object, instead of one column per style property — new style properties won't need a schema change.
@@ -3289,11 +3289,11 @@ Diagnosed and fixed sync performance bottlenecks via Axiom trace analysis; batch
 - Added `scripts/call_webapp.py`, mirroring `query_axiom.py`'s role — reads `webappTestUrl`/`webappProdUrl`/`webappDevUrl`, `testToken`, `webappSecret` from `local.settings.json`, auto-selects the right auth field per route, reuses `scn.session.ScenarioSession._http_post`'s error handling so manual probes fail with the same diagnosable messages a test run would (including flagging GAS deployment-propagation lag). Declared in CLAUDE.md as the only sanctioned way to call the WebApp manually.
 
 ### bd issues
-- Epic `GTaskSheet-kkm7` with children `.1`-`.6` (batching fixes, soft-return fix, sidebar ordering) — all implementation issues closed out by code, `.4` (regression test twin) still open.
-- `GTaskSheet-46qv` (DocData hyperlink) and `GTaskSheet-d99c` (configFormat) — both implemented, neither has a regression test yet.
+- Epic `gts-kkm7` with children `.1`-`.6` (batching fixes, soft-return fix, sidebar ordering) — all implementation issues closed out by code, `.4` (regression test twin) still open.
+- `gts-46qv` (DocData hyperlink) and `gts-d99c` (configFormat) — both implemented, neither has a regression test yet.
 
 ### Not yet done
-- Regression tests for all of the above (GTaskSheet-kkm7.4 and equivalent coverage for 46qv/d99c) — paused for user inspection before running the full suite again; last full `test_sync_all.py` run hit transient GAS deployment-propagation 404s/non-JSON responses unrelated to the code changes.
+- Regression tests for all of the above (gts-kkm7.4 and equivalent coverage for 46qv/d99c) — paused for user inspection before running the full suite again; last full `test_sync_all.py` run hit transient GAS deployment-propagation 404s/non-JSON responses unrelated to the code changes.
 - Push to remote pending.
 
 ## 2026-07-01 10:36:59
@@ -3310,7 +3310,7 @@ Apps Script HtmlService/ContentService pages render inside a sandboxed googleuse
 Committed and pushed everything that was outstanding as of this session (resolves the earlier "push to remote pending" note): 3 commits to `master`, all pushed clean.
 1. `201dfc2` — the `cmd=register` WebApp feature + `target="_top"`/`target="_blank"` fix.
 2. `906cd08` — `scripts/call_webapp.py` (new) + CLAUDE.md doc for it + removed stale `RESTART-HERE.sh`.
-3. `0c2ace3` — pre-existing uncommitted work from before this session: GTaskSheet-d99c (`configFormat` action-item styling, new Config sheet) and GTaskSheet-kkm7 batching/ordering (Doc-Not-Found batching, Drive metadata batching, flush batching, sidebar AI-N ordering) — bundled into one commit since their diffs interleave in `SyncManager.js`.
+3. `0c2ace3` — pre-existing uncommitted work from before this session: gts-d99c (`configFormat` action-item styling, new Config sheet) and gts-kkm7 batching/ordering (Doc-Not-Found batching, Drive metadata batching, flush batching, sidebar AI-N ordering) — bundled into one commit since their diffs interleave in `SyncManager.js`.
 
 Working tree and `origin/master` are now in sync.
 
@@ -3336,13 +3336,13 @@ project-local **lever under test** (not into DevStandard until proven):
 - implementation-gate SKILL.md → v2.2 — Step 4 "Oracle & phase declaration" + success criterion.
 - docs/methodology/oracle-ordering-lever.md — portable artifact (cross-project paste-in +
   promotion criteria + evidence log).
-- Tracker: GTaskSheet-m65t (prove-then-promote to T23).
+- Tracker: gts-m65t (prove-then-promote to T23).
 
 Also structured the lessons-learned staging cleanup (staging dir was being used as a backlog):
-- GTaskSheet-hp89 — [INF] mechanical cleanup for a clear-context Haiku, driven by a self-contained
+- gts-hp89 — [INF] mechanical cleanup for a clear-context Haiku, driven by a self-contained
   runbook (knowledge-base/staging/ll-cleanup-plan-2026-07-01.md): 7 staged LLs → 0 (6 resolved,
   1 reclassified to references), 2 carrier bd issues, 1 CLAUDE.md [INF]-authoring rule.
-- GTaskSheet-g7ep — [FIX] Sonnet investigation split (verify WEBAPP_URL is deploy-time stamped).
+- gts-g7ep — [FIX] Sonnet investigation split (verify WEBAPP_URL is deploy-time stamped).
 
 ### Key Learnings:
 - Apply the framework's own "lowest fidelity that surfaces error" discipline recursively to
@@ -3361,7 +3361,7 @@ Also structured the lessons-learned staging cleanup (staging dir was being used 
 ## 2026-07-02 17:49:57
 
 ### Summary:
-Reviewed and resolved a Haiku-run subagent session's LL/bd cleanup output. Closed GTaskSheet-a4sg as obsolete (target code deleted before ticket filed). Verified GTaskSheet-mcji's technical-debt v1.1 work was already correctly applied in DevStandard with no overlapping bd/LL items; committed it there (a999f00, unpushed) and closed mcji. Reviewed all 13 resolved lessons-learned files for further groupings and relevance — found 4 accurate clusters, plus one genuinely stale thread: the 2026-05-25 reconciliation LL's carrier issue (mpi9) closed 2026-06-18 without re-tracking its item 4, leaving a real decision silently dangling for a month. Investigated existing cross-surface verification mechanisms (scn/session.py verify_all_expectations, verify_consistency scope=DOC/SHEET) in depth before proposing new process — found the plumbing was ~90% already there, narrowing the fix from "new CLAUDE.md rule" to "extend existing mechanism." Also found and diagnosed a latent performance bug: read_consistency() in scn/engine.py's drain() is not memoized per checkpoint like get_actuals is, so N verify_all_expectations() calls at one INTEGRITY checkpoint would cost Nx GAS round trips — confirmed current test usage avoids this by convention (1-2 calls/test) but the risk was latent. Bundled the fix into a twin-ticket pair: GTaskSheet-k1g9 [INF] (memoize read_consistency, extend ai/check_present_consistent with globalId+dates, add SHEET doc-name-correctness check) + GTaskSheet-dxz3 [TST] (proof-of-effectiveness tests, authored against k1g9's design contract per no-shared-context rule). Superseded/closed the interim GTaskSheet-bupd.
+Reviewed and resolved a Haiku-run subagent session's LL/bd cleanup output. Closed gts-a4sg as obsolete (target code deleted before ticket filed). Verified gts-mcji's technical-debt v1.1 work was already correctly applied in DevStandard with no overlapping bd/LL items; committed it there (a999f00, unpushed) and closed mcji. Reviewed all 13 resolved lessons-learned files for further groupings and relevance — found 4 accurate clusters, plus one genuinely stale thread: the 2026-05-25 reconciliation LL's carrier issue (mpi9) closed 2026-06-18 without re-tracking its item 4, leaving a real decision silently dangling for a month. Investigated existing cross-surface verification mechanisms (scn/session.py verify_all_expectations, verify_consistency scope=DOC/SHEET) in depth before proposing new process — found the plumbing was ~90% already there, narrowing the fix from "new CLAUDE.md rule" to "extend existing mechanism." Also found and diagnosed a latent performance bug: read_consistency() in scn/engine.py's drain() is not memoized per checkpoint like get_actuals is, so N verify_all_expectations() calls at one INTEGRITY checkpoint would cost Nx GAS round trips — confirmed current test usage avoids this by convention (1-2 calls/test) but the risk was latent. Bundled the fix into a twin-ticket pair: gts-k1g9 [INF] (memoize read_consistency, extend ai/check_present_consistent with globalId+dates, add SHEET doc-name-correctness check) + gts-dxz3 [TST] (proof-of-effectiveness tests, authored against k1g9's design contract per no-shared-context rule). Superseded/closed the interim gts-bupd.
 
 ### Key Learnings:
 Closed bd issues can silently drop deferred sub-items if they're not spun out into their own tracked issue before the parent closes — check referenced "open" issues in archived docs for staleness before trusting them. Before proposing a new process/rule to fix a test coverage gap, grep the existing test harness for a mechanism that already does most of the job — verify_all_expectations/check_present_consistent covered ~90% of what looked like a missing capability. Caching/memoization added for one expensive operation (get_actuals) doesn't automatically apply to a sibling operation in the same code path (read_consistency) — worth checking each expensive call site individually rather than assuming symmetry.
@@ -3369,7 +3369,7 @@ Closed bd issues can silently drop deferred sub-items if they're not spun out in
 ## 2026-07-05 17:00:00
 
 ### Summary:
-Implemented GTaskSheet-k1g9 (test harness memoization + consistency checks) using Sonnet agent with clean context. Memoized read_consistency() in engine.py to fire at most once per drain() regardless of expectation count. Extended check_present_consistent() to compare global_id, created_date, modified_date fields when present. Added doc-name-correctness check in verify_consistency(scope=SHEET) to detect stale document titles after rename. All changes zero new GAS route calls (reuses existing artifact downloads + memoized read). Authored proof-of-effectiveness tests for GTaskSheet-dxz3 (8 tests: 2 memoization proofs, 6 field-comparison proofs, all demonstrating failures on deliberately broken fixtures per Backstop rules). Full scn module test suite passes 258 tests including 8 new. Deployed TEST webapp, refreshed test token. Ran full pytest -x suite (326 tests); no regressions from k1g9/dxz3 implementation (one pre-existing soft-return scanner failure unrelated to these changes). Both issues now complete and integrated.
+Implemented gts-k1g9 (test harness memoization + consistency checks) using Sonnet agent with clean context. Memoized read_consistency() in engine.py to fire at most once per drain() regardless of expectation count. Extended check_present_consistent() to compare global_id, created_date, modified_date fields when present. Added doc-name-correctness check in verify_consistency(scope=SHEET) to detect stale document titles after rename. All changes zero new GAS route calls (reuses existing artifact downloads + memoized read). Authored proof-of-effectiveness tests for gts-dxz3 (8 tests: 2 memoization proofs, 6 field-comparison proofs, all demonstrating failures on deliberately broken fixtures per Backstop rules). Full scn module test suite passes 258 tests including 8 new. Deployed TEST webapp, refreshed test token. Ran full pytest -x suite (326 tests); no regressions from k1g9/dxz3 implementation (one pre-existing soft-return scanner failure unrelated to these changes). Both issues now complete and integrated.
 
 ### Key Learnings:
 - Agent context separation: fresh Sonnet agent for complex multi-step implementation task (k1g9) avoids prior-session noise and ensures clean reasoning; proves effective for scoped infrastructure work.
@@ -3412,3 +3412,783 @@ Outcome [internal]: Test run against the already-migrated GActionSheet repo conf
 
 ### Key Learnings:
 pnpm's hardlink-based space savings require the store and consuming project to share a filesystem/device; WSL2's `/mnt/c` (drvfs) and network-sync-backed mounts like `/mnt/g` (Google Drive/OneDrive) don't share a device with the native-Linux `~/proj` tree, and pnpm transparently falls back to copying (not erroring) when it detects a cross-device install — so mixing npm and pnpm repos on the same machine is safe, just with dedup only available within each filesystem silo.
+
+## 2026-07-23 08:15:00
+_session 63c22b7c-9b28-4988-aee9-a546157c3c93 · v3 · 07-22→07-23_
+
+### Objective 1: Execute Spike S2 — external-email group-conferred Drive access
+Rationale: Spike S2 (`gts-79dw.2`) was the load-bearing unknown gating the folder-scoped domain-group ACL model for the verified board-portal design — proving whether the deployer-context backend can resolve read/write access for an external `@gmail` whose only tie to the board folder is membership in a domain-managed Google Group. Architecture placement was clarified early: per ADR-0002 (accepted in NUUC-Dispatch), "authorization will require access to google workspace info and expanded scope. however we need to do authorization for anyone not in the google workspace domain which means it needs to keep a very minimal scope... so we split the two, and gactionsheet remains internal within the domain" — so the access-check route was built in GActionSheet (owner of the real folder/expanded scopes), not NUUC-Dispatch.
+Rejected: Testing against a disposable throwaway folder was offered but declined — the developer chose real production data instead: "can't you use real docs docs out of the GActionSheet? Here is a team folder for Communications... and here is a user stuart.donaldson@gmail.com who is a member of one or more groups with access to that drive or folder."
+Outcome [developer-facing]: `src/SPIKE.js` adds a `SPIKE_ENABLED`-gated `spike_check_access` (+ `spike_seed_access` test-matrix helper) route. Confirmed against the real Communications Shared Drive: `getAccess()` alone does not expand group membership (A4 refuted as literally stated); the fallback (`Drive.Permissions.list` + `AdminDirectory.Members.get`, not `.hasMember()` which rejects external memberKeys) correctly resolves it. Cases (a) direct VIEW, (b) direct EDIT, (c) group-conferred (load-bearing), (d) no-access-negative all PASS; (e) link-share blocked by Drive policy at the Shared Drive root (informative, non-blocking). Route disabled (`SPIKE_ENABLED=false`) and redeployed inert after testing.
+Outcome [internal]: Gate (§7 of `docs/verified-board-portal-plan.md`) cleared — both S1 and S2 green. `gts-79dw.2` closed; `gts-1hyh` unblocked.
+Open: `docs/verified-board-portal-plan.md` §4's architecture diagram and §8a's propagation list still need revision to reflect the ADR-0002 split before Milestone 1 build begins.
+
+### Objective 2: Capture reusable GAS/Admin-SDK gotchas for future projects  [accreted]
+Transition: Picked up immediately after S2 passed, prompted directly: "it sounds like we learned some useful stuff that is reuseable. let's capture the learning from this perhaps in ../GAS-Core knowledge-base or maybe if we're going to build on it here, make sure we have it here in our docs folder and then a plan to move it to GAS-Core."
+Rationale: The debugging session surfaced several non-obvious, project-agnostic Apps Script/Admin-SDK gotchas (OAuth consent-screen scope registration vs. manifest declaration, Admin SDK API enablement, `Members.hasMember` vs `Members.get` for external members, `DriveApp.setSharing` failing on Shared Drive roots) worth preserving beyond this one spike.
+Outcome [developer-facing]: Added `knowledge-base/references/gas-admin-directory-external-groups.md` (full gotcha list + reference implementation pointer) and new `docs/OPERATIONS.md` §Failure Modes rows in GActionSheet.
+Outcome [internal]: Updated `GAS-Core/best-practices/README.md` (separate repo, left uncommitted for the developer): marked the existing "Standard-GCP-project OAuth provisioning" noted pattern as a confirmed second occurrence ready for elevation, and added a new noted-pattern row for the group-conferred-access mechanism itself (first occurrence).
+
+### Key Learnings:
+- `AdminDirectory.Members.hasMember(groupKey, memberKey)` throws `Invalid Input: memberKey` for external (non-domain) memberKeys even when they are confirmed members — use `Members.get(groupKey, memberKey)` instead (catch the thrown 404 as "not a member").
+- A newly-added OAuth scope in `appsscript.json` is silently dropped unless it is *also* registered on the OAuth consent screen in GCP Console (separate manual step from the manifest) — and the underlying advanced-service API (e.g. Admin SDK API) must be separately Enabled in the Library, or the consent prompt for the new scope never appears at all, with no error at that step.
+- Forcing re-authorization after adding a scope requires revoking the app's grant at `myaccount.google.com/permissions` and then re-running (from the *same* deploying account) an editor function that actually calls the new service — a function that returns early "authorizes successfully" with an incomplete token.
+- `DriveApp.setSharing()` throws `Cannot use this operation on a shared drive item` for Shared-Drive-rooted folders (`0A...`-prefixed IDs); use `Drive.Permissions.insert`/`.remove` (v2 advanced service, `supportsAllDrives:true`) instead. Google also outright rejects `type:'anyone'` sharing on a Shared Drive's top-level folder by policy.
+## 2026-07-23 18:20:00
+_session 96d25270-e1f6-47b0-a58b-8b4347f554c8 · v3 · 07-23_
+
+### Objective 1: Diagnose the bd-run-beads test-gate failure for gts-79dw.4.2
+Rationale: User killed a `bd-run-beads` full-regression test gate after 18 minutes with no useful output, concerned the run had stalled and would need a costly restart; needed to know the real cause before touching anything.
+Outcome [internal]: Mapped the `.tests.log` dot-string to pytest's collection order and reproduced the failure directly — a 401 from `docs.google.com/.../export?format=xlsx`, traced to a stale `.auth/user.json` Playwright session cookie (`tests/helpers/download.py::download_xlsx`), not a stale GAS WebApp deployment (confirmed reachable via `call_webapp.py`). Run wasn't hung — the full 331-test suite is genuinely slow (~28s/test against live Google APIs).
+
+### Objective 2: Resume and close gts-79dw.4.2, correctly scoped
+Rationale: Once the user refreshed `.auth/user.json` and confirmed the isolated test passed, reviewed the worker's new `tests/test_verify_access.py` (a test-first, `xfail(strict=True)` contract for the not-yet-implemented `verify_and_resolve_access` route) and ran it standalone (2 xfail, 3 skip, as designed) before committing. Kicked off the full 331-test regression gate as the default next step; user pushed back hard: "that was a bad call to run that complete and long regression cycle in this case without having good reason... if it was following some standard blanket rule then the rule is broken." The bead added zero production code, so the full live-Google E2E suite added cost without adding signal.
+Rejected: running the complete regression suite as the default gate for a test-only bead with no production code changes — overridden by the user; killed the background run mid-flight.
+Outcome [developer-facing]: Committed and closed `gts-79dw.4.2` on the scoped test result alone.
+Outcome [internal]: Logged a follow-up note on `gts-notes` to investigate whether `bd-run-beads`'s gate should scope by change risk, surface *why* a long regression run is warranted before spending the time, and let the runner distinguish "slow but progressing" from "stalled" in its own output.
+Open: `gts-79dw.4.1` (the actual route implementation) is still open and next in the `bd-run-beads` queue for epic `gts-79dw.4`.
+## 2026-07-26 07:08:30
+_session 57db8ac0 · v3 · 07-25→07-26_
+
+### Objective 1: Resolve gts-dr8j — make true soft returns (Shift+Enter) survive the sheet→doc flush
+Rationale: The purpose is legibility, not fidelity for its own sake — "actions that get captured into the spreadsheet retain soft return as the contribution of the soft return formatting can be very helpful in reading and understanding an action." An author breaks an action across lines deliberately, and collapsing that to spaces destroys authored meaning every time the action is read in the sheet. Round-trip fidelity is the *means*: preserving the break in the sheet is worthless if the next flush overwrites the doc with a flattened version, which is why the bead was blocking gts-dou2 rather than the reverse.
+Rationale (mechanism): The bead's four open questions were all empirical — "Does the Docs API v1 public REST surface support inserting a soft line break at all?" — and its design field insisted on settling them against a live doc, "not something to resolve by reading docs alone." The answer turned out to be readable from the API reference after all, then confirmed live: `InsertTextRequest` documents that control characters U+0000–U+0008 and U+000C–U+001F are stripped from inserted text. `\r` (U+000D) sits inside that range, `\n` (U+000A) survives but is documented to "implicitly create a new Paragraph", and U+000B (vertical tab) is in neither bucket — the one character that yields a genuine soft return. This corrects gts-kkm7.5's root-cause analysis, which had condemned `\r` and `\v` together; `\r` was always doomed, `\v` was never tried.
+Rejected: adding a throwaway diagnostic route to `SPIKE.js` (the project's established spike pattern) to probe the API — the round-trip test the AC required is itself the live-doc proof, so a separate probe would have cost an extra deploy cycle for a strictly weaker artifact.
+Rejected: closing on the fast targeted-subset gate that the backstop rules explicitly permit for an `[IMP]`-style bead. The change rewrote `_normalizeActionText`, which every sheet-write site funnels through, so `regression=pending` would have been an honest label on a dishonest risk assessment.
+Rejected: the space-collapse workaround itself, and with it the two `gts-2eui` tests that asserted it — retargeted rather than deleted, since the `upsert_action_rows` INSERT/UPDATE paths they cover are still real; only the invariant moved (normalize the break's *spelling*, preserve the break).
+Outcome [user-facing]: An action authored across several lines now reads that way in the spreadsheet, and keeps reading that way after any flush — the authored line structure is no longer flattened to spaces doc→sheet→doc. Closed gts-dr8j, gts-dou2 (fixed here — the sheet-side change was only safe once flush could reinsert a real break), and gts-kkm7.5 (superseded per gts-dr8j's AC).
+Outcome [developer-facing]: `SyncManager.js` gains `_toSoftReturnText` (`\n`→U+000B) applied at `_buildFlushRequests`, the single chokepoint every flush call site passes through; the single-token fast-path parser now normalizes line endings too, so both parsers return one spelling. Three further consumers hardened *beyond the bead's scope* because preserving `\n` in the sheet would otherwise have traded one bug for three: `_applyActionFragment` (a bare `\n` split imported chip fragments onto a new paragraph), `_trackerRowsMatch` and two `VerifySync` comparisons (rendered cell text read via `getText()` need not spell the break as the desired string does — a permanent unfixable consistency issue and a full tracker re-render on every sync). Committed d65c472 on `fix/gts-dr8j-soft-returns`, scoped to 9 files.
+Outcome [developer-facing]: New `test_soft_return_survives_sidebar_status_flush` covers two flush call sites (syncDocument batch + sidebar live-doc rescan), reading the durable doc surface through a new `paragraph_texts_with_breaks` helper that renders `<w:br/>` as `\n` — python-docx's `para.text` drops it silently, which would make a real soft return indistinguishable from no separator, precisely the failure under test. Proven to fail before acceptance per the project backstop rule, via two deployed-and-reverted negative controls.
+Outcome [internal]: Filed gts-jnsf for an oracle bug found while establishing the regression baseline, and appended the U+000B finding to the shared `DocsAPI/DOCS_API_FINDINGS.md` since the stripping rule is reusable across the other Docs projects.
+Open: four pre-existing failures left untriaged (`test_link_preview_card_status_change`, three `test_sidebar`) — offered to triage, not taken up. Also: master does not have this change; the flush behavior is live in TEST only until the branch merges.
+
+### Key Learnings:
+- Docs REST `insertText`: U+000B (vertical tab) is the soft-line-break character. `\r` is silently stripped per the documented U+000C–U+001F range; `\n` creates a new paragraph. No `lineBreak` element exists in the public `Paragraph.elements` schema — the character *is* the mechanism.
+- Silent character-stripping by `insertText` has a diagnostic tell: if a later request in the same batch targets an index computed from the string length you *sent*, it surfaces as `Invalid requests[N].updateTextStyle: Index X must be less than the end index of the referenced segment, X`. A batch that only inserts text strips silently with no error at all. The old space-collapse masked this permanently by keeping lengths matching.
+- The harness's `TaskStop` reported success but did **not** kill the `pytest` child, which kept running and writing. Two suites then shared one GAS deployment and one test spreadsheet and produced a convincing false regression (`test_b7_write_routes`). The tell is non-monotonic timestamps in the log — a FINISH at 22:25:41 printed after a START at 22:25:59. Always `pgrep -af "python3 -m pytest"` after a TaskStop, and finish all source edits before deploying once and running once.
+- `verify_consistency`'s doc-name staleness check (gts-k1g9) reads the document's "actual current title" from the exported `.docx core_properties.title`, which Google leaves as the literal constant `"Word Document"`. The assertion cannot pass regardless of product behavior — an oracle bug, not a flake (gts-jnsf).
+- Comparing a full-suite run against a recorded baseline (`comm` over the sorted FAILED lists) turns "is this mine?" from a judgment call into a computation: 5 failed/324 passed vs a baseline 11 failed/317 passed, zero new names.
+## 2026-07-26 10:15:00
+_session b68ba5e9 · v3 · 07-25→07-26_
+
+### Objective 1: Evaluate the full-suite test run (test-full-run.txt) and triage its 11 failures
+Rationale: A raw 52-minute, 331-test run with 11 failures is not actionable on its own — the value is in separating deterministic code bugs from Google-infrastructure flake so only the real regressions get filed and fixed, rather than chasing a flaky SSL timeout or reflexively re-running the whole suite.
+Rejected: user asked directly whether the run should have stopped at the first failure (`pytest -x`). Concluded no, for this full-suite/backstop shape of run specifically: `-x` would have stopped at 21:28 on an infra flake (`test_b7_write_routes`) and never surfaced the two real bugs, which didn't appear until 12 and 28 minutes later — costing several more ~50-minute reruns to trickle them out one at a time. `-x` earns its keep for fast local iteration on a known fix, not for a completeness-oriented full pass.
+Outcome [internal]: Bucketed the 11 failures: 2 deterministic real bugs (soft-return `\n`→space collapse; `created_date` format/timezone mismatch), 4 Google-infrastructure flakes (HTTP 500 "error reading from storage", SSL read timeout), 2 uncertain (link-preview card body empty, sidebar Import button timeout). Filed `gts-dou2` and `gts-cges` for the two confirmed bugs.
+Outcome [developer-facing]: Added `pytest_runtest_logstart`/`pytest_runtest_logfinish` hooks to `tests/conftest.py`, printing `[HH:MM:SS] START/FINISH <nodeid>` via the terminal reporter — bypasses pytest's stdout capture so timestamps land in a captured run log without `-s`. Verified live against `tests/test_ai_n_token.py`. Filed and closed `gts-jukj`; per the developer's ask this replaces the prior post-hoc reconstruction (summing junit.xml per-test durations from the suite-level start timestamp) with a first-class capability.
+Open: `gts-cges` (created_date mismatch) and the two uncertain failures (link-preview, sidebar Import button) left unfiled/untouched at session-pause.
+
+### Objective 2: Catch up on branch state after another session's work, and close out triage  [accreted]
+Transition: Picked up in a later turn after a separate session (on `fix/gts-dr8j-soft-returns`) had independently landed the soft-return fix and done further triage; needed to reconcile bead/branch state before continuing rather than duplicate that work.
+Rationale: "file a bead for the untriaged issue, then recommend a fix order and which should be fixed in the same session vs unique sessions considering context and cost effectiveness" — the ask was explicitly to optimize for session cost (deploy cycles, live-browser repro cost, shared file/subsystem context), not just list open bugs.
+Outcome [internal]: Confirmed `gts-dou2` closed for real (commit `d65c472`, root-caused to U+000B being the one control character Docs REST `insertText` doesn't strip or reinterpret) and that the branch is 1 commit ahead of master, unmerged. Surfaced two bugs filed by the other session (`gts-durq` Import-button timeout, `gts-jnsf` doc-name oracle always-fails bug) and a re-baselined regression count (5 failed/324 passed vs. the 11/317 baseline, zero new failure names).
+Outcome [developer-facing]: Filed `gts-4d50` for the last untriaged failure (`test_link_preview_card_status_change`, card frame body empty rather than timing out).
+Outcome [internal]: Recommended fix-order/session-grouping for the 4 remaining open bugs: merge the soft-return branch and commit the timestamp hook first; batch `gts-cges` + `gts-jnsf` in one session (same files/subsystem — oracle comparisons in `scn/assertions.py`/`scn/session.py`, no deploy needed); batch `gts-durq` + `gts-4d50` in a separate session (both need a live-browser repro in the same sidebar area, but may have unrelated root causes — investigate together, don't assume one fix).
+Open: none of the 4 remaining bugs (`gts-cges`, `gts-durq`, `gts-jnsf`, `gts-4d50`) have been started; the timestamp-hook commit and branch merge recommended in Objective 2's own output are still pending.
+## 2026-07-26 12:55:00
+_session 7306875b · v3 · 07-26_
+
+### Objective 1: Housekeeping — commit outstanding timestamp hook, merge fix/gts-dr8j-soft-returns to master
+Rationale: Per plan-0726.txt's recommended fix order, this is "cheap and unblocks everything else" — developing session 1's fixes on a diverging branch would mean re-resolving the soft-return changes in a rebase later.
+Outcome [developer-facing]: Committed tests/conftest.py's pytest_runtest_logstart/logfinish hooks (gts-jukj, previously verified but never committed) bundled with accumulated bd-export/deployment-ledger/allure-history/Version.js churn (6b214a6), then merged fix/gts-dr8j-soft-returns into master (32ead0e) — soft-return fix (gts-dr8j, gts-dou2) now on master.
+
+### Objective 2: Fix gts-cges + gts-jnsf — SHEET-surface oracle-comparison bugs
+Rationale: Both are pure Python-test-harness bugs in the same oracle-comparison code path (scn/assertions.py / scn/session.py), root cause already diagnosed per the plan — edit-and-verify work, not investigation.
+Outcome [developer-facing]: gts-cges — SheetReader (scn/surfaces.py) now keeps created_date/modified_date as raw xlsx datetime values instead of stringifying; check_present_consistent (scn/assertions.py) normalizes both the SHEET value and the webapp's ISO-8601 UTC string to UTC before comparing. America/Los_Angeles confirmed empirically (not guessed) as the ActionSheet's spreadsheet timezone by diffing a real row's xlsx datetime against its find_sheet_actions JSON value — exact 7h match.
+Outcome [developer-facing]: gts-jnsf — verify_consistency(scope=SHEET)'s doc-name staleness check (scn/session.py) now sources the oracle from a new fetch_doc_title() helper (tests/helpers/download.py) reading the live Drive title off the doc edit-page <title> tag, replacing .docx core_properties.title (always the placeholder "Word Document", so the old assertion could never pass).
+Outcome [internal]: Closed both beads with regression=pending (134 unit tests + 3 live tests green — test_journey, test_sidebar_bootstrap_sync, test_tracker_insert_button — but full pytest -x not run this session).
+Open: Session 2 (gts-durq + gts-4d50, live-UI sidebar issues) deliberately left for a separate session per the plan's cost-profile reasoning — needs live-browser repro, different subsystem.
+
+### Key Learnings:
+- Google Sheets/xlsx datetime cells carry no timezone info of their own — the wall-clock value written reflects the spreadsheet's own timezone setting, independent of the Apps Script project's appsscript.json timeZone (which was America/New_York here, not the 7h-offset PDT actually observed).
+- The doc's live Drive title is readable without any Drive API/OAuth setup: GET the doc's /edit page with the existing cookie-authed session and parse the `<title>Name - Google Docs</title>` tag — reachable from the Python harness with zero new GAS routes or deploys.
+
+## 2026-07-26 13:20:00
+_session 5b3bdced · v3 · 07-26_
+
+### Objective 1: Execute plan-0726.txt Session 2 — live-browser repro and fix for gts-durq + gts-4d50
+Rationale: Both bugs required an actual browser repro to even classify (same root cause or two unrelated ones) before either could be fixed; the project already has self-contained headless Playwright infrastructure (saved auth state, per-file browser_page fixtures), so no new test investment was needed — ran the existing tests directly against a redeployed TEST environment.
+Rejected: Considered folding this into a single combined fix; investigation confirmed the two bugs are unrelated (ARIA accessible-name mismatch vs. render-completeness oracle gap), so kept as separate commits and separate bead closures per the plan's explicit guidance.
+Outcome [developer-facing]: gts-durq fixed — removed `setAltText` from the sidebar Import button (WorkspaceAddonCard.js); its altText had been overriding the button's ARIA accessible name away from its visible text "Import", so `get_by_role(name=/^import$/i)` never matched. Confirmed live via a Playwright dump of every sidebar button's role/aria-label before and after.
+Outcome [developer-facing]: gts-4d50 fixed — added `UiDriver._wait_card_body_populated()` (scn/ui.py), shared by `hover()` and `open_link_preview()`, requiring non-empty `inner_text()` before treating a CardService iframe body as ready (previously `state="visible"` alone was accepted, letting a stale/mid-render empty body pass).
+Outcome [developer-facing]: Both fixes verified together in a targeted pytest subset (`tests/test_sidebar.py` + `tests/test_link_preview.py`, 9 tests, all passed) against a redeployed TEST environment; both beads closed with `regression=pending` pending a full `pytest -x` run before merge.
+
+## 2026-07-26 20:52:00
+_session 52460c9e-31e9-493e-86ed-1a80c31976b0 · v3 · 07-26_
+
+### Objective 1: Implement gts-79dw.4.5 — sync entry point gated on write tier
+Rationale: P1 in the verified-board-portal critical path (plan-0726a.txt) — unblocked and needed before .4.7's UI slice can be reviewed as one working experience with .4.3 and .4.5 together. User asked to "prioritize clear maintainable code, refactoring and reusing when it adds clarity rather than proliferating multiple slightly different ways of doing things."
+Outcome [developer-facing]: Added `src/BoardSync.js` (`_handleBoardSyncDocument`) and routed doPost action `board_sync_document` in `src/WebApp.js`, following the same shape as the existing `verify_and_resolve_access`/`list_board_actions` routes and reusing `_resolveIdentityAndAccessTier` (shared with .4.1/.4.3) and the existing `syncDocument()` deployer-context sync path (`SyncManager.js`) rather than writing a new sync implementation.
+Outcome [user-facing]: EDIT-tier callers can now trigger a board-document sync via the web app; VIEW/NONE-tier callers are rejected before sync runs (verified live against TEST deploy: garbage token → `{ok:false, outcome:"rejected-NONE"}`).
+Outcome [internal]: Targeted pytest subset (test_verify_access.py, test_sync_all.py) run clean — 7 passed, 3 skipped (real-GIS-token cases, unconfigured here). bd bead closed with `regression=pending` per CLAUDE.md backstop rules; full `pytest -x` still owed before merge-gate or gts-79dw.4.8.
+Open: Changes uncommitted per conservative git policy — src/BoardSync.js (new) + src/WebApp.js route wiring awaiting explicit commit approval.
+
+## 2026-07-27 11:18:53
+_session 0fa32967 · v3 · 07-26→07-27_
+
+### Objective 1: Make the team portal reviewable against real data without growing a third way to read actions
+Rationale: The View A review (gts-79dw.4.7) is a perceptual gate — it can only judge how the status column reads if it sees real, user-typed status vocabulary, so the fixture could not be fabricated. Two near-duplicate team-scoped readers already existed and a third was about to appear. The operator set the standard up front: "prioritize clear maintainable code, refactoring and reusing when it adds clarity rather than proliferating multiple sligtly different ways of doing things." So the reader was consolidated first and the fixture captured through it, rather than bolting filter parameters onto the frozen production contract to serve a one-off capture.
+Rejected: adding optional filter params to `list_importable_actions`. It is a frozen contract with an existing regression suite; widening it for a fixture capture would have made the test suite the thing protecting the wrong shape. A separate test-gated route keeps the production contract byte-identical.
+Outcome [developer-facing]: `_readTeamActions(teamId, opts)` extracted as the single team-scoped reader; `_listImportableActionsData` reduced to a gate-plus-delegate wrapper. Projection handled by an explicit field list so a new field cannot silently widen the frozen contract. `list_importable_actions` verified byte-identical — existing tests passed unmodified.
+Outcome [developer-facing]: One test-token-gated `read_team_actions` route; `call_action()` extracted from `call_webapp.py` so scripts reuse the sanctioned auth/URL path instead of re-deriving it.
+Open: the captured View A fixture still holds test-suite residue rather than real board data. The initial reading — that the real teams simply had no data — was wrong; their rows had been archived by the Shared Drive defect found later in the session. Needs a re-capture against Board/Communications now that they list again.
+
+### Objective 2: Stop the system silently deleting a team's work, and get the lost work back  [accreted]
+Transition: the operator reported a document's action items missing from the spreadsheet — "something went wrong in the last week" — which outranked the planned work and was still actively recurring.
+Rationale: Drive `files.list` was called without the all-drives flags, so every document on a Shared Drive was invisible; `syncAll` read that invisibility as deletion and archived the rows 24h later. Three defects compounded: the flags, treating absence from a bulk listing as proof of deletion, and a one-way mark that meant a wrongly-marked document could never recover. Fixing only the first two would have been cosmetic — every already-damaged document would have stayed dead. The operator stopped the work mid-flight to ask for an explanation before continuing, which was the right call.
+Rejected: using `sync_action_rows` as a "rescan". It does not read the document — it reconciles against caller-supplied state, so sending only a docId asserted "this document is empty" and stamped all 7 rows Deleted. A mutating call made before reading the route; reverted, and filed as gts-aiaz since that destructive branch is reachable with no signal of intent.
+Rejected: relaxing the already-marked skip to "fall through if present in the listing". `files.list` returns trashed files too, so ~150 dead docs were re-processed every sweep (notFound 3→154) and the harness timed out. Corrected to fall through only for documents that are present *and* not trashed.
+Outcome [user-facing]: All 7 actions of "2026-06-03 CC Meeting Notes" restored and stable across later sweeps; Communications lists again. Shared Drive documents no longer vanish — Drive listing went 1430→3972 documents.
+Outcome [developer-facing]: gts-rskf fixed across four call sites via one `_driveUrl` helper; per-doc probe with explicit found/gone/unknown so an inconclusive Drive response never costs rows; stale not-found marks now self-heal.
+Open: Board's damage predates the log window — rows archived before the fix need deliberate restoration. Archive-before-heal ordering left for the operator to decide rather than reordered unilaterally.
+
+### Objective 3: Keep the document and the sheet from corrupting each other's text  [accreted]
+Transition: the operator noticed while reviewing the recovered board document that "AI-3 after syncing ended up merging or pulling in the following line item", and separately diagnosed AI-2 themselves.
+Rationale: Two independent parser defects, both in `_parseParagraphAsFloatingAction`. Action text is taken to the end of the paragraph, so a soft-return continuation line is absorbed and its line break degrades to a space; and the status regex anchors to end-of-text, so the operator's own note — "i think ai-2 may be a problem where they had added the text done after the (status) in parenthesis" — defeats detection and the flush appends a second status token. Investigated but deliberately not fixed: the absorption fix has a real design question (multi-line action text is intended), and guessing at it during a long session would have been worse than recording it.
+Outcome [developer-facing]: Read-only `dump_doc_paragraphs` route added — recurses into table cells and reports index ranges, list nesting and text. Paragraph-boundary questions are now observable instead of guessed at.
+Outcome [internal]: gts-jxrw and gts-v0py filed with reproductions. Notably, forcing a flush against the live document proved adjacent list items do *not* merge, narrowing the trigger to soft-return continuations and saving the fix from chasing the wrong structure.
+
+### Objective 4: Make the in-document summary table trustworthy after a spreadsheet edit  [accreted]
+Transition: the operator reported that a cell edit reaches the floating action but never the Action Item Summary table, and asked for a bead; then asked for a purpose-built reproduction rather than testing against their live document.
+Rationale: The first hypothesis — a stale document read racing the REST write — was disproved by reproduction, which is exactly why the operator's "construct a test document with the necessary complexity to repro this" mattered: a controlled document showed the sheet-edit path never called the refresh at all. The refresh had been removed with a `syncDocument()` call in cb88d91 to fix an unrelated race. Restoring the call alone still failed; the desired rows were computed from a document read that *is* stale on that path, so the earlier "disproved" verdict was too strong and had to be corrected. Both fixes were needed.
+Rejected: the operator's cell-level compare-and-write, deferred rather than declined — "Should the fix be to locate the table and walk-through the table doing a compare and write if different on each AI in the table". Right shape long-term, but as a second writer alongside the rebuild it would violate the session's own single-way-of-doing-things standard, and it needs latency measurement to justify the extra branch. Filed as gts-07kt with the constraints recorded.
+Outcome [user-facing]: A spreadsheet cell edit now updates both the floating action and its summary-table row.
+Outcome [developer-facing]: `edit_cell_via_trigger` fixture invokes `onActionSheetEdit` with a real Range — the only way to exercise that entry point, since doPost writes cannot fire installable triggers. That untestability is why the entry point had no coverage.
+Outcome [developer-facing]: `scripts/repro_tracker_stale.py` builds a throwaway document and returns a pass/fail oracle; it flipped 0→2 across the fix.
+
+### Key Learnings:
+After a Docs REST write, a `DocumentApp` read in the same execution can return pre-write content — never derive "desired state" from a DocumentApp re-read when the sheet already holds the authoritative value.
+Drive `files.list` returns trashed files unless excluded, and omits Shared Drive content entirely without `includeItemsFromAllDrives`/`corpora=allDrives`. Shared Drive root ids are ~19 chars starting `0A`; My Drive folder ids are 33 chars.
+`tracker.skip / rendered rows match desired rows` in Axiom is the signature of a stale-desired-state bug, not evidence that nothing needed doing.
+Axiom pads every event with the union of all field names, so a doc id appearing as a *key* with a null value matches a naive substring search across every event.
+
+## 2026-07-27 14:05:00
+_session 34f19f32 · v3 · 07-27_
+
+### Objective 1: Close out the fixture capture (G1a) and build the View A mockup that the AC-freeze review needs (G1b)
+Rationale: plan-0726a.txt's whole ordering exists to reach one human review early, and G1a's own open item said the captured fixture still held test-suite residue rather than real team data — reviewing a perceptual oracle against fabricated-looking rows would have frozen an AC blind to the real status vocabulary. The operator's standing standard for this work is "prioritize clear maintainable code, refactoring and reusing when it adds clarity rather than proliferating multiple slightly different ways of doing things", which decided two calls below.
+Rejected: copying the status synonym lists into the page. The portal has to bucket and icon arbitrary user-typed statuses exactly as the add-on and the document do; a second copy of `isResolved`'s vocabulary in JavaScript would have been a drift-prone duplicate of the display authority the review agenda explicitly says to inherit. Instead the five inline word lists in `SyncManager.js` were folded into one `_STATUS_SYNONYMS` table that every `is<State>()` reads, and `getStatusVocabulary()` publishes it over the `read_team_actions` route — one source, served rather than restated. Cost: one extra TEST deploy cycle. (This choice was itself overturned later in the session — see Objective 2.)
+Rejected: capturing a single team. No real team carries every filter state — Communications has seven open actions and no resolved ones; Board is the only team with a resolved row and therefore the only one that can show the 60-day window boundary. The capture script now takes repeatable `--team-id` and `--mine`, so the reviewer switches teams in the page instead of the fixture being padded to look complete.
+Outcome [developer-facing]: `docs/team-portal-fixture.json` re-captured against real teams (Communications + Board, four real assignees, real Open/In Progress/Done vocabulary) now that the Shared Drive archive defect that had emptied them is fixed.
+Outcome [user-facing]: `docs/team-portal-mockup.html` — the complete View A: action list grouped by document, status filter Open/Closed/All and scope Everyone/Mine backed by real server results, resolved-within window offering only captured windows, per-document sync control, per-row Edit at EDIT tier, and an assignee status control (canonical picker plus free text) shown only on the signed-in identity's own rows. Team, identity and access tier are switchable so the review can see each mode. Read paths wired; every write affordance reports what it would call and does nothing.
+Outcome [internal]: Verified by rendering, not by assertion — the oracle is perceptual (ADR-0013 Slice). Targeted subset `test_contract`, `test_status_token_parens`, `test_import` green, which is the regression proof that `list_importable_actions` stayed byte-identical through the synonym-table refactor.
+Outcome [user-facing]: Two review-readiness corrections from the operator reading the built page, applied in place rather than deferred to the review: the window control read "Resolved within N days" while sitting over an All list containing open rows, and `_readTeamActions` ages out resolved rows only — so it now reads "Include resolved from the last N days". "Updated within" was rejected as the fix: it would have promised an age filter on open rows that does not exist, freezing a false AC. Also confirmed which header controls are simulation-only (identity, access tier) versus a real design question (team switching, which a member of several teams genuinely needs).
+Open: whether a stale OPEN action should ever age out of the list — today it never does, at any window. Raised by the relabelling, recorded for the review to settle.
+Open: `tests/test_team_scope.py::test_team_scope` fails at S1a on a 60s Axiom log wait, reproduced twice. Axiom shows the `sync.teamScope.resolved` events were emitted correctly with the right teamId, so this is harness read-back lag, not a product regression; filed as `gts-9a1m` rather than worked around. The AC-freeze review itself is the next action and is a human step — nothing downstream of it should be guessed at.
+
+### Objective 2: Correct the status-sharing design after operator challenge
+Rationale: the operator's point was that the reuse requirement exists for maintainability, clarity and simplicity, and the mechanism built in Objective 1 delivered none of them. Serving the synonym table to the page centralised the words but left the page re-implementing the matching over it — five hops of machinery (table, publisher, wire field, capture hoist, fixture block) plus a second implementation of the rule, to avoid duplicating ten lines. The duplicated part was the logic, which is the part that drifts, and it already had: the page needed a `normStatus()` the server did not have.
+Rejected: shared client/server JavaScript. Workable — GAS concatenates into one global scope so a UMD-ish file loads both sides, and HtmlService could inline it outright — but it answers "how do we ship the rules to the client" when the better question is why the client evaluates rules at all.
+Outcome [developer-facing]: `getStatusDisplay(status)` resolves a free-text status to `{bucket, resolved, icon}` once, server-side; `_readTeamActions` stamps `status_bucket`/`status_resolved`/`status_icon` on every row; `getStatusIconUrl` delegates to it so its three-branch fallback exists once. `getStatusVocabulary()` deleted, the route serves `getStatusIconButtons()` as `statusOptions` — the picker list the sidebar already uses. The page lost `bucketOf`, `isResolved`, `iconFor` and `normStatus` entirely.
+Outcome [user-facing]: fixing the matching in one place fixed it for real — `_matchesState` now normalizes separators, so canonical "In Progress" lands in the InProgress bucket. It previously matched no state at all (the synonym list spells it "in-progress"), and that fix now applies to the sheet and the sidebar, not just the portal.
+Outcome [internal]: `list_importable_actions` verified unaffected by a direct live call — row keys are exactly `IMPORTABLE_ACTION_FIELDS`, no `status_*` leakage.
+Open: the targeted subset is no longer a clean gate — `test_import_access_filter` and `test_import_flow_forward_sync` both died on the same 60s Axiom read-back timeout as `test_team_scope`, with the events present in Axiom afterwards. Three tests, one signature; recorded on `gts-9a1m`. A test that dies on its log wait never reaches its downstream assertions, so the byte-identity proof came from the direct call above rather than from the suite.
+
+### Key Learnings:
+- Reuse means one implementation of a rule, not one copy of its data. Publishing a table to a second surface that then re-implements the matching over it centralises the part that does not drift and duplicates the part that does.
+- When a surface cannot call the function, ship it the conclusion, not the rule.
+- A perceptual review needs the display authority, not a lookalike: serving `getStatusVocabulary()` to the static page made "does the status column read right" a question about the real system rather than about the mockup's own copy of the rules.
+- Canonical status strings and their synonym spellings differ by separator ("In Progress" vs "in-progress"), so any client-side bucketing has to normalize before matching or the canonical value falls out of its own bucket.
+
+## 2026-07-29 06:06:00
+_session 7194785e · v3 · 07-28→07-29_
+
+### Objective 1: Produce a dependency-ordered punch list for making the static portal page list actions by caller identity
+Rationale: Starting point was a plain question — what has to happen before `https://nuuc-it.github.io/Static/pub/AS/` shows a signed-in visitor their own team's actions — answered by reading `docs/verified-team-portal-plan.md` §11/§12 and the live bd graph rather than assuming the plan doc's narrative order matched bd's actual dependency edges (it didn't; corrected the sequence against `bd show` output for each bead).
+Outcome [internal]: Ordered list of 8 beads (`gts-79dw.4.16/.4.11/.4.12/.4.3/.4.17/.4.5/.4.7/.4.10`) with the real dependency graph, handed back to the developer for a go-ahead before any execution.
+
+### Objective 2: Execute the bead chain — multi-folder team portal listing, live and identity-gated
+Rationale: Developer approved running the chain via sequential sonnet subagents, "no commits until the end" so the working tree stays reviewable as one unit; each bead's agent got a self-contained brief (bead contract, prior beads' current code state since everything is uncommitted, explicit no-commit/no-push constraint).
+Rejected: closing beads on a full `pytest -x` gate — developer's existing backstop-rule convention (Slice-phase beads close on a targeted-subset gate with `regression=pending`, full-suite hardening deferred to `gts-79dw.4.8`) was followed throughout instead.
+Outcome [developer-facing]: `gts-79dw.4.16` (fixture: `TestTeamA`, two folders with differing access, two tracked/seeded/synced docs — provisioned directly, plus new reusable `scripts/create_team_fixture_doc.py`), `.4.11` (consolidated three team-scoped readers into `_readTeamActions`, `assertTeamAccess` multi-folder fix, Board→Team rename: `BoardListing.js`/`BoardSync.js` → `TeamListing.js`/`TeamSync.js`), `.4.12` (multi-folder tier resolution + per-document write re-authorization, `_authorizeDocWrite`), `.4.3` (`list_team_actions` rebuilt to the frozen §12.1 contract — `statusFilter`/`scope`/`statusOptions`, all 6 frozen invariants proven by new `tests/test_team_listing.py`), `.4.17` (`list_my_teams` route, R21), `.4.5` (confirmed already satisfied by `.4.11`/`.4.12`'s work, no separate change needed) all closed.
+Open: two non-blocking follow-ups the agents filed while executing — `gts-vc3m` (TestTeamA teamId collides between two different test fixtures, breaks `test_team_view_page`) and `gts-pfyx` (shared Axiom log dataset `nuuts` at its 257-column schema limit, silently drops new log fields).
+
+### Objective 3: Discover and fix that GActionSheet never adopted NUUC-Dispatch's signed-identity-assertion contract  [accreted]
+Transition: while reasoning about how bead `.4.7`'s live page would actually authenticate, cross-repo reading of `../NUUC-Dispatch/docs/interfaces/signed-identity-assertion.md` and its work-log surfaced that `src/AccessControl.js` (built across already-closed beads `.4.1`/`.4.2`) verifies a raw Google ID token directly — impossible for a true external `@gmail` caller, since GActionSheet's own GCP project's consent screen is Internal-only by design (that's the whole reason the NUUC-Dispatch split exists). This was flagged but left undone in the plan doc's own §7 and had gone unaddressed through four subsequent beads built on top of it.
+Rationale: developer chose to fix it immediately rather than defer ("Fix now, insert as bead 5.5") given every downstream bead inherits the gap.
+Rejected: reusing the existing `TEST_TOKEN` fixture gate to provision the new HMAC secret — developer explicitly chose a real, permanent, narrowly-scoped admin route instead ("build a minimal[] route following the same model we use here as we are likely to extend it in the future"), modeled on NUUC-Dispatch's own bootstrap-secret + `setScriptProperties` pattern, rather than blurring the test/production credential boundary.
+Outcome [developer-facing]: filed and closed `gts-79dw.4.18` — `_verifySignedAssertion` (HMAC-SHA256, constant-time compare, `kid`/`alg`/`iss`/`aud`/`exp` checks) replaces raw-tokeninfo verification; every browser-facing route's wire field renamed `idToken`→`assertion`; new `tests/test_signed_assertion.py` (8 cases, all green: valid verifies, tampered signature/wrong aud/expired exp/unknown kid/wrong alg fail closed, a raw Google ID token is correctly rejected). New `src/Admin.js` — GActionSheet's first admin-route infrastructure (bootstrap-once `ADMIN_SECRET`, `setScriptProperties`, gated independently of `WEBAPP_SECRET`/`TEST_TOKEN`) — used to provision `ASSERTION_KEY_GACTIONSHEET_1` identically on both GActionSheet and (via NUUC-Dispatch's own existing admin route, no NUUC-Dispatch source touched) NUUC-Dispatch.
+
+### Objective 4: Build the live portal page and its publish path
+Rationale: continuation of Objective 2's chain once Objective 3 unblocked real identity verification — bead `.4.7`'s own notes established no live HTML page existed in either repo yet, so this was a from-scratch build, not a wire-up.
+Outcome [developer-facing]: real `index.html` built at `/home/stuar/proj/Static/pub/AS/` (GIS sign-in → NUUC-Dispatch `verify_identity` → GActionSheet `list_my_teams`/`list_team_actions`/`team_sync_document`, rendering per the frozen §12 mockup contract, sync wired live, edit/status-change rendered tier-gated but inert per scope). `gts-79dw.4.10` confirmed GitHub Pages plain push-to-serve needs no build step, and added a cross-origin regression test (`tests/playwright/cors_team_portal.test.js`) plus a guard re-confirming the Phase-1 anonymous preview page is unaffected.
+Open: both `.4.7` and `.4.10` deliberately left `in_progress` (not closed) — their own gates require `gts-79dw.4.8` (hardening) green first, and `.4.10`'s AC needs the actual `git push` of the `Static` repo, which is outside agent authority and still pending a human decision. A real interactive browser sign-in test is also still needed — no agent can complete Google's OAuth flow. Stopped here at developer's explicit instruction, before starting `.4.8`.
+
+### Key Learnings:
+`run_fixture`'s per-fixture payload data is every top-level JSON key except `action`/`testToken`/`fixture`/`testDocId` — NOT a nested `data: {...}` object, despite that being an easy first guess from the fixture handlers' own `data.folderId`-style destructuring.
+GAS's `AI:`/`AI-N:` action-token parser expects the assignee email immediately after the tag (`"AI: user@x.com text"`), not appended after a separator like `--`.
+
+## 2026-07-29 14:35:00
+_session f0440e77 · v3 · 07-29_
+
+### Objective 1: Close the two non-blocking follow-up beads filed by the prior session's implementation chain
+Rationale: `gts-vc3m` (a test-fixture teamId collision) and `gts-pfyx` (Axiom silently dropping new log fields at the dataset's 257-column limit) were filed mid-chain while building the verified team action portal — the multi-session goal of a static web page where a non-domain (external) caller signs in and sees their own team's action items, filtered by team and gated by resolved access tier. Both were cleared before trusting the hardening test's own signal, via isolated sonnet subagents run one at a time (not in parallel) because both required redeploying the shared GAS test deployment and running two redeploys concurrently against the same script risks one agent's push clobbering the other's in-flight edit.
+Outcome [developer-facing]: `gts-vc3m` closed — root cause was deeper than filed: `setup_team_scope_fixture` and the standing multi-folder ACL fixture (`gts-79dw.4.16`) shared not just the teamId literal `TestTeamA` but the same physical Drive folder. Fix reprovisions `setup_team_scope_fixture` under its own `TestTeamScopeA`/`TestTeamScopeAChild` literals and distinct folders, fully decoupled from the ACL fixture's `TestTeamA` identity.
+Outcome [developer-facing]: `gts-pfyx` closed — `GasLogger._postToAxiom` now sets a self-healing `AXIOM_INGEST_DEGRADED` script property (status, truncated body, timestamp) on any non-2xx Axiom response and clears it on the next success, exposed via `get_test_config.axiomIngestDegraded`; verified live by forcing a real Axiom 400 (unseen field name) and confirming detection plus auto-clear.
+Both closed with `regression=pending` (targeted-subset verification per this project's Backstop rules, not full-suite).
+
+### Objective 2: Author and verify the blocking hardening test for the verified team action portal (gts-79dw.4.8)
+Rationale: this is the ADR-0013 close-gate for the slice built across the prior session (`.4.16`/`.4.11`/`.4.12`/`.4.3`/`.4.17`/`.4.5`/`.4.7`/`.4.10`) — the page a non-domain caller actually lands on cannot be called done until the frozen contract (`docs/verified-team-portal-plan.md` §12) is proven by a test authored blind, with no access to the slice implementation, per the bead's own "no shared context" authoring constraint.
+Outcome [developer-facing]: `tests/test_team_portal_hardening.py` authored strictly against §12 (list_team_actions statusFilter/windowDays/scope invariants, R13b dead-document exclusion, fail-closed access, cross-team leakage negative, `list_my_teams`/R21 highest-tier-wins and fail-closed negative, write-tier gating) — 20 passed, 2 skipped (edit/status-change paths out of this bead's scope), all green on first run.
+Open: the full-suite `pytest -x` Backstop confirmation (required before `.4.8` and the slice can formally close) hit two different intermittent "non-JSON echo-page" client responses from the GAS `/exec` endpoint. `clasp logs` confirmed both underlying actions executed correctly server-side (e.g. `test.find_sheet_actions` logged success at the same timestamp) — the failure is in Google's response delivery, not our logic, most likely aggravated by the volume of redeploys and full-suite runs stacked back to back this session across three agents. `gts-79dw.4.8` therefore left open rather than closed; needs one clean full-suite run once the webapp has sat idle for a while.
+
+### Key Learnings:
+Resuming a background subagent that stopped early (e.g. it backgrounded a long test and checked before it finished) re-pays its entire prior transcript — observed 118K–150K tokens per resume on this session's beads. Cheaper to instruct agents explicitly to block on a foreground wait (`while kill -0 $PID; do sleep N; done`) rather than `run_in_background` + early check, and cheaper still, once an agent is already looping on this, to finish the verification directly in the main session (poll the PID/log file it left behind) rather than resuming it again.
+`clasp logs` is the tiebreaker when a Python test reports a "Non-JSON response... redirected to script.googleusercontent.com/macros/echo": if the corresponding `webapp.request`/action-specific log line shows the action completed normally server-side at the same timestamp, the failure is client-side response delivery (GAS `/exec` redirect flakiness), not a functional regression — don't chase it as one.
+
+## 2026-07-29 16:10:00
+_session 9ae87fa9 · v3 · 07-29_
+
+### Objective 1: Diagnose and fix redundant Google re-authentication on the team-actions portal
+Rationale: user reported the portal at nuuc-it.github.io/Static/pub/AS/ took 30s to sign into on first visit and was "much faster" but still slow on a second, HAR-recorded visit — "I should not need to authenticate against google, that should have been cached or saved in the browser's local cache or storage." HAR analysis (two captures) showed the GIS widget itself was fast (~1.5s, by design non-cacheable) but the frontend's `state = {assertion: null, ...}` was purely in-memory, so every page load discarded a still-valid NUUC-Dispatch-issued assertion and re-ran the full Google sign-in + `verify_identity` exchange (~2.7s) on top of GActionSheet's own `list_my_teams`/`list_team_actions` data-fetch latency (8.2s + 4.3s, a separate, unaddressed issue). Fixing the reuse gap collided with NUUC-Dispatch's existing Accepted ADR-0002, which had explicitly rejected both a 30-day assertion TTL and a sliding refresh token in favor of a 60-minute TTL with silent GIS `auto_select` renewal — a renewal path the frontend had actually left wired off (`data-auto_select="false"`). Presented both the ADR-conformant fix (silent renewal, short TTL) and the override; user chose to override: "let's bump it to 45 day TTL and supersede the ADR."
+Rejected: the ADR-0002-conformant option (enable `auto_select` for invisible renewal, keep the 60-minute TTL) was implemented as the first-choice recommendation but not selected — user explicitly chose the longer-TTL path instead, accepting the wider replay window ADR-0002 had warned about.
+Outcome [developer-facing]: NUUC-Dispatch `src/Assertion.js` TTL raised 3600s → 3,888,000s (45 days); new `knowledge-base/adr/0003-45-day-assertion-ttl.md` supersedes ADR-0002 decision 3 only (decisions 1/2/4/5 retained), with ADR-0002's header/status updated per this project's immutability rule (supersede, don't edit); `docs/interfaces/signed-identity-assertion.md` and `test/assertion.test.js` updated to match; NUUC-Dispatch's full suite passes 21/21.
+Outcome [user-facing]: Static `pub/AS/index.html` now persists `{assertion, exp, sub, email}` to `localStorage` on sign-in and reuses it directly (skipping Google + `verify_identity` entirely) on any page load where the cached assertion isn't within 5 minutes of its own `exp`; `signOut` clears the cache; on-page copy updated to disclose the 45-day local cache (previously claimed nothing was stored).
+Open: NUUC-Dispatch's webapp needs redeploying for the new TTL to take effect — no repo in this change (NUUC-Dispatch, Static, or GActionSheet) was committed, pushed, or deployed; user has not yet said whether to proceed with that. The two GAS-side data-fetch calls (`list_my_teams` 8.2s, `list_team_actions` 4.3s) remain unaddressed as a separate performance issue.
+## 2026-07-30 13:05:00
+_session 4006196a · v3 · 07-29→07-30_
+
+### Objective 1: Diagnose gts-pytest5.log failure and resume pytest --sw
+Rationale: First failure (`test_sidebar_header_branding`) was an SSL read TimeoutError on `_post_fixture("clear_homepage_error_force")`; Axiom GAS-side logs showed no matching `run_fixture` request landed, pointing to a client/network hiccup rather than a code regression. Re-running `pytest --sw` surfaced the real blocker: an account-chooser "Signed out" page — the captured Playwright session (`.auth/user.json`, last refreshed 2026-07-23) had expired.
+Outcome [developer-facing]: Root-caused to session expiry, not a code bug; `pytest --sw` left blocked pending re-authentication.
+
+### Objective 2: Redesign Playwright auth storage as a shared, identity-keyed scheme  [accreted]
+Transition: fixing the expiry surfaced the actual recurring cost — re-running the interactive Google login separately per project. User: "i use playwright from multiple accounts on multiple projects and I would like to have a single location to share the account authorization between the projects."
+Rationale: Files are keyed by real account identity (slug), not by role — "the role information is the key thing the testing code needs, it does not need to know which [account]." Each project maps its own role names to a slug via `local.settings.json`'s `playwrightAccounts`; an auto-maintained `accounts.json` registry under `$PLAYWRIGHT_AUTH_DIR` (`.envrc`, default `~/.playwright`) records which real email each slug holds plus a capture timestamp, populated by scraping the signed-in email post-login rather than manual entry.
+Rejected: an initial `$PLAYWRIGHT_AUTH_FILE`-as-single-env-var design (one shared file for the primary account only) — superseded once multi-account sharing across all 5 project roles became the actual requirement. Also rejected: requiring `--account=<slug>` up front on every capture — user pointed out the script already scrapes the email, so the slug should auto-derive from it by default, with `--account` only as an override.
+Outcome [developer-facing]: `scripts/playwright-auth.js` (`resolveAuthFile`) and `scn/session.py::resolve_auth_file()` as the single resolution point (with a fixed Python fallback-path bug — it previously ignored `role` and always returned `user.json`); wired into 5 test fixtures, `auth.setup.js`, `manage-deployments.js`, `gas-inspect.js`, `playwright.config.js`, `probe.test.js`, `addon_helpers.js`. `auth.setup.js` rewritten to capture to memory before naming, auto-derive the slug from the detected email, warn on an `--account` mismatch against the registry, and never discard a successful login on failed detection — it prompts for a slug interactively or stages the session with a printed `--apply=<path> --account=<slug>` command. Both resolvers now emit a one-time-per-role warning when a role falls back to the project-local `.auth/<role>.json`, and `tests/conftest.py` additionally routes that warning through pytest's `terminalreporter.write_line()` so it survives output capture on a passing run — user: "Otherwise someone using this could miss the feature entirely."
+Outcome [internal]: `local.settings.json` (git-ignored) updated with `"playwrightAccounts": {"primary": "sdonaldson.json"}`; `local.settings.example.json` given a template placeholder for new clones.
+
+### Objective 3: Document the design as a reusable, portable standard  [accreted]
+Transition: explicit ask to make the pattern applicable to other projects, not just describe it locally.
+Rationale: mechanics (identity registry, resolver contract, capture-tool contract, the two-layer visibility requirement for the missing-mapping warning) belong in a project-agnostic standard; a project's own role taxonomy stays local.
+Outcome [developer-facing]: `/mnt/c/dev/DevStandard/docs/standards/playwright-shared-auth.md` written (problem, design, resolver/capture-tool contracts, porting checklist, failure-pattern rationale). Canonical vendorable scripts copied to `/mnt/c/dev/DevStandard/tools/playwright-auth/` (`playwright-auth.js`, `auth.setup.js`, `README.md`). GActionSheet's `.auth/README.md` and `docs/OPERATIONS.md` cross-link back to the standard instead of re-explaining the mechanics.
+
+### Key Learnings:
+Google's account-chooser "Signed out" page (`accounts.google.com/.../accountchooser`) is a reliable, distinguishable failure signature for an expired Playwright `storageState` — button text follows the pattern `"<Name>\n<email>\nSigned out"`, scrapeable the same way the auto-detect-email step reads `myaccount.google.com`.
+
+## 2026-07-30 22:13:32
+_session 855b41ba-7085-47f7-bb01-3809dda19d21 · v3 · 07-30_
+
+### Objective 1: Resolve gts-iwa0 — deploy the pending Axiom logging-schema code
+Rationale: Picked up from a prior-session handoff doc (plan-0730-axiom-schema.txt) tracked by gts-iwa0. GasLogger.js/Version.js/manage-deployments.js/scn/reporter.py had code adding `env` and `docId`/`docIds` as real top-level Axiom columns (hoisted out of the new nested `data` payload), written but not yet deployed. User confirmed it was still wanted, and asked to also hoist `eu` (acting-user email) as a new top-level column in the same pass.
+Outcome [developer-facing]: Deployed to TEST; verified via `clasp logs` + `scripts/query_axiom.py` that `env`/`docId`/`eu` land as real top-level Axiom columns and are correctly excluded from the nested `data` object, with no new ingest errors.
+
+### Objective 2: Diagnose and fix a full `pytest --sw` run to green  [accreted]
+Transition: user asked me to look at a failed pytest log (`/tmp/gts-pytest7.log`) after cleaning logs and redeploying, then to keep resuming `pytest --sw` through the whole 378-test suite.
+Rationale: most of the effort went into correctly distinguishing real regressions from environmental noise — a genuine network outage plus a host sleep/resume mid-session (confirmed via `dmesg` DNS failures and a large wall-clock/monotonic-time gap), and the already-documented GAS-WebApp 404 throttle pattern — each of which needed a retry to classify rather than being treated as a code bug.
+Rejected: initially removed `TriggerManager.js`'s 30-min `syncAll` time-based trigger, believing it was the root cause of a GAS-execution-quota collision with pytest runs (backed by one correlated clasp-logs observation). Reverted after finding `gts-li3g` (opened earlier the same day) had already investigated the identical trigger and explicitly rejected disabling it as a fix, quoting the user's own reasoning: "a test run that dies/is interrupted before the re-enable step leaves the trigger permanently off in that environment... fails open." The real fix belongs in gts-li3g (a per-docId `LockService` lock), not here.
+Outcome [developer-facing]: Fixed a real bug in `tests/helpers/gas_log.py`'s Axiom query reshaper — it was treating the whole raw Axiom match (including stale, null-padded legacy top-level columns like a pre-nesting `count` field) as the event's `data` payload instead of unpacking the actual nested `data` object, silently shadowing real fields with `None` and breaking several `test_import.py` assertions. This gap was exposed by gts-iwa0's data-nesting change. Also fixed 5 Playwright helper scripts (`tests/helpers/download.py`, `tests/playwright/{open_sheet,invoke_gas,invoke_gas_batch,seed_doc}.js`) that hardcoded the stale, expired project-local `.auth/user.json` instead of resolving through the shared cross-project auth taxonomy already wired into `playwright.config.js`/`addon_helpers.js`/`probe.test.js`.
+Outcome [internal]: Full 378-test suite passes clean end to end (`pytest --sw` completed with `last_failed: null`).
+
+### Key Learnings:
+Repeated SSL-read `TimeoutError`s across multiple retries of the same test, even in isolation, can mean the host slept/suspended mid-run rather than a code regression — compare `date` against the test's own START/FINISH log timestamps (a large wall-clock gap versus the reported `monotonic()`-based duration means the host slept) and check `dmesg | tail` for WSL2 `getaddrinfo() failed` entries confirming a real network drop.
+This project has a single shared Apps Script project (one `scriptId`) across test/dev/prod deployments — triggers are script-scoped, not per-deployment, so there is no clean way to gate a trigger to "test environment only" without a separate script/deployment.
+## 2026-07-31 12:45:00
+_session a0ffcbd5 · v3 · 07-31_
+
+### Objective 1: Close out gts-79dw.4 (verified team action portal epic) via clean-context subagents, one bead at a time
+Rationale: User directive at session start — "for each bead we take on, do it in an agent with a clean context to minimize drift and token use." Mid-session the user also relaxed this project's default Backstop rule for the round: "focus on implementation beads first with a test for that delivery... mark items as regression:pending until we have been through the full pytest -sw regression suite... we'll do the regression before the merge and commit," reasoning that the full suite is expensive (50+ min) and paying it per-bead was prohibitive across a multi-bead batch.
+Rejected: CLAUDE.md's standard Backstop rule (full `pytest -x` before any hardening [TST] bead closes) — explicitly overridden by the user for this session in favor of targeted per-bead tests plus `regression=pending`, with one deferred `pytest -sw` batch pass before merge.
+Outcome [developer-facing]: Implemented the epic's remaining open children, each via an isolated background agent: View B verified document view (gts-79dw.4.13, new `src/DocView.js`, `get_document_actions` route) + its twin gts-79dw.4.19; the read-path hardening suite gts-79dw.4.8 (20 passed, 2 documented skips); chip-link handoff to the portal (gts-79dw.4.9 + twin 4.9.2, `_handlePreviewNotice` CTA); write-path routes `team_edit_action`/`team_patch_status` (gts-79dw.4.14, new `src/TeamActionWrite.js`, R17 assignee-at-VIEW-tier rule verified live via Axiom log spot-check); and the write-path hardening suite (gts-79dw.4.15, 7 passed, 3 documented skips, R3b cross-folder negative proven non-vacuous). gts-79dw.4 reached 20/20 children complete.
+Outcome [user-facing]: Live human sign-in test at the portal's real URL (closing gts-79dw.4.7's ADR-0013 review gate) surfaced a UX gap — the page looked stuck during the identity-exchange network round trip, with no progressive rendering and a poorly-placed loading spinner. Filed and shipped gts-79dw.4.20 same-session: a distinct "Signing you in…"/"Resuming your session…" transitional state, identity rendered as soon as known (before team/action data arrives), and the spinner moved to the title line. Pushed to the live portal (`nuuc-it.github.io/Static/pub/AS/`) alongside the earlier 45-day auth-cache commit, both with explicit user go-ahead before each push.
+Outcome [internal]: Saved a `bd remember` note (`deploy-must-push-static-repo`) that any portal deploy must also push `/home/stuar/proj/Static` — GActionSheet's own `pnpm run deploy:test`/`deploy:prod` only redeploys the GAS WebApp and never touches the separate GitHub Pages-hosted frontend repo, a gap that bit gts-79dw.4.7/.4.10 earlier in the epic's history.
+Open: Full `pytest -sw` regression pass across the whole batch is still owed before merge, per the user's deferred-regression policy — every bead closed this session carries `regression=pending`. A `teamAEditEmail` fixture gap (no test identity configured with EDIT, vs VIEW, tier on the test team folders) leaves 5 tests skipped across the two hardening suites (documented, not fabricated, matches a pre-existing gap `tests/test_team_portal_hardening.py` already carried). Whether to close the gts-79dw.4 epic itself now or hold it open until the regression pass completes was left for the user to decide.
+
+### Key Learnings:
+GitHub Pages hosting for a sibling static-frontend repo (`/home/stuar/proj/Static`) is plain serve-on-push with no build step — `git push origin main` *is* the deploy command, and it's easy to forget since it's invisible from the primary repo's own `pnpm run deploy:*` scripts.
+
+## 2026-08-01 01:35:00
+_session 6ad83913 · v3 · 07-31→08-01_
+
+### Objective 1: Close out the P0/P1 live data-loss and concurrency bug backlog
+Rationale: autonomously executed plan-fix.md's Sessions 1-4 (one fresh agent per session) to eliminate a backlog of silent data-loss and correctness bugs already causing user-reported incidents in the sync engine, plus a performance batching pass.
+Outcome [user-facing]: Shared Drive docs no longer falsely marked "Doc Not Found"; team assignment now correctly re-derives on folder moves instead of trusting a stale cache; duplicate globalId rows collapse automatically; sync_action_rows no longer mass-deletes rows on a payload missing doc-state; the floating-action parser no longer absorbs the next unrelated line into an action or mis-parses status tokens followed by text; concurrent syncs on the same doc no longer race and revert a user's Dirty sheet edit; syncAll's Drive/webapp calls are now batched per sweep instead of per-doc.
+Outcome [developer-facing]: 16 beads closed (gts-rskf, gts-m33k, gts-b6dm, gts-sl64, gts-aiaz, gts-binf, gts-6hzy, gts-jxrw, gts-v0py, gts-jav4, gts-li3g, gts-kkm7.1/.2/.3/.4) with Backstop-proven regression coverage; plan-fix.md checklists and Result sections updated per session; `regression=pending` set per CLAUDE.md's deferred-full-suite Backstop scope.
+Open: Session 4's post-Backstop redeploy hit Apps Script's 200-version project cap — TEST is currently serving a stale pre-fix build (missing the concurrency lock) until old versions are manually pruned via the Apps Script IDE (no clasp/API path exists). Filed gts-ieul (P1) to track it; loop paused pending that manual action before Session 5 can safely run its live gate.
+
+### Objective 2: Harden the live-backend test harness against a recurring GAS routing flake  [accreted]
+Transition: repeated non-JSON echo-page and HTTP 404 failures were blocking Session 1/2's gates; investigated at the developer's prompt rather than waved off as ambient flake.
+Rationale: confirmed the failure recurred 50+ minutes after a deploy, ruling out a simple propagation-window theory ("is the concern that propagation is flakey for the first 30 seconds... or is a fixed delay the fix?") — pointed instead to the /exec→echo redirect intermittently being replayed as GET. Developer confirmed the direction: "yes lets implement that now."
+Outcome [developer-facing]: added a bounded 3-attempt retry (covering both the echo-page and HTTP-404 symptoms) to `scn/session.py`'s `_http_post` and `scripts/call_webapp.py`'s `call()`, keeping the two mirrored per the project's existing convention.
+
+### Objective 3: Establish conventions to keep the growing regression suite and orchestration cost sustainable  [accreted]
+Transition: developer flagged two related sustainability risks mid-session — regression-suite runtime growing unbounded as `[TST]` work accumulates ("we cannot be increasing the length of our regression run"), and the orchestration itself burning tokens faster than the session's time budget ("we are burning through context like crazy... are we being inefficient").
+Rationale: syncAll() dominates live-test cost, so batching independent scenarios' setup into one sweep amortizes it; separately, subagents were re-reading verbose `-v` pytest output across redundant full-gate reruns and repeatedly ending their turn to wait on their own background processes instead of blocking synchronously.
+Rejected: retrofitting the batching convention onto Sessions 1/2's already-written tests — deferred as its own follow-up bead instead of reworking already-completed work mid-flight.
+Outcome [developer-facing]: documented a "batch scenario setups per live syncAll() sweep" convention in plan-context.md (with explicit when-not-to-batch exceptions) for Sessions 3+ to follow; filed gts-ir1f to retrofit the existing tests later.
+Outcome [internal]: switched the orchestration pattern starting with Session 3 — ran deploys/gates directly via backgrounded Bash with quiet (`-q`) output instead of delegating the full wait to agents, and tightened later session-launch prompts with explicit efficiency rules (synchronous blocking on own background commands, infra-flake triage before assuming a code bug, no redundant full reruns).
+## 2026-08-01 13:45:00
+_session c3c523c7 · v3 · 08-01_
+
+### Objective 1: Drive plan-fix.md's remaining FIX/IMP/INF/TST cleanup sessions (5-10) to closure via coordinated subagents
+Rationale: continuing the autonomous `/loop` execution of the plan-fix.md backlog started in the prior session (Sessions 1-4); each session ran in a fresh, isolated agent per the established one-session-per-agent pattern, with this session's own job being independent verification — never trusting an agent's self-reported "done" without directly running `bd show <id>` and grepping plan-fix.md for leftover placeholder text — and correcting a recurring subagent failure mode as it kept resurfacing.
+Rejected: trusting agent self-reports at face value. Session 5's agent reported all four beads closed while `bd show` still showed two `IN_PROGRESS` and plan-fix.md still had a literal unfilled placeholder ("[See final outcome below — filled in once the live run completes.]") — caught only by independently verifying rather than relaying the summary, and required two follow-up SendMessage rounds to actually finish.
+Outcome [developer-facing]: Sessions 5-9 closed — 15 beads (gts-q2sq, gts-9a1m, gts-930o, gts-89t6, gts-70wo, gts-t6hx, gts-933t, gts-1o7g, gts-3sgr, gts-g7ep, gts-hp89, gts-d99c, gts-1pk, gts-zocq, gts-y2mm) independently verified CLOSED via direct `bd show`, each carrying `regression=pending` and a Result section in plan-fix.md; gts-iwa0 correctly left OPEN (remaining steps are Axiom-console-only, owner-side, not code-side).
+Outcome [user-facing]: configFormat sampling now applies a sampled reference doc's chip style to future chip writes across documents, with a clean reset path (gts-d99c/gts-1pk); inline bold/italic formatting typed directly in a doc now survives scan→sheet→flush→rescan instead of being silently flattened by configFormat's uniform action-text style (gts-zocq/gts-y2mm); harness-only false positives (noisy `.error`-tagged log lines, an Axiom read-back race that could permanently miss a just-logged event under load, stale UI-driver mocks, xlsx sub-second date jitter, load-correlated Playwright timeouts) no longer cause test failures unrelated to the product.
+Rationale: ADR-0022 (dropping `bold`/`italic` from Config's uniform action-text style mask so inline runs own them exclusively) is a genuine behavior change to a shipped feature (configFormat). Per this project's repeated precedent of never silently approving such changes, the implementing agent shipped it as an isolated, cheaply-reversible default but explicitly flagged it "PENDING EXPLICIT USER CONFIRMATION" rather than assuming approval. Surfaced to the user directly; response: "Approve (keep as implemented)" — ADR-0022 updated from Proposed to Accepted.
+Outcome [developer-facing]: ADR-0022 status updated to Accepted, confirmed 2026-08-01.
+Outcome [internal]: Session 10 (gts-46qv, gts-csbv.1, gts-6rv6, gts-dxz3) was interrupted mid-investigation by the user ("lets stop here") before any code was written — confirmed via `git diff` that the working tree's changed-file list matched Session 9's known output exactly, so nothing needed reverting. Per the user's follow-up ask ("lets unclaim the beads"), all four beads were reset from `IN_PROGRESS` back to `OPEN` via `bd update --status open`, leaving that session's scope untouched for a future pass.
+Open: Session 10's four beads and the after-all-sessions full `pytest -sw` merge gate remain outstanding. Working tree left uncommitted per the conservative git policy through the end of this objective.
+
+### Key Learnings:
+Agents spawned via the Agent tool do not reliably receive completion notifications for their own backgrounded Bash calls the way the top-level orchestrating session does for the agent itself stopping — only the latter produces a `<task-notification>`. An agent that backgrounds a `pytest`/deploy command and then waits for "the notification" can stall indefinitely. Fix: every spawned-agent prompt must explicitly forbid `run_in_background: true` and instruct foreground (blocking) Bash calls with a long `timeout` instead — this recurred across Sessions 5, 6, 8, and 9 before being made a standing instruction in every subsequent session-launch prompt.
+## 2026-08-07 11:04:07
+_session 60a07521-56d1-4063-8fc1-0c72cbd34cfa · v3 · 08-07_
+
+### Objective 1: Run S5 (merge gate) of plan-0806-flake-recovery.md — full `pytest -x`, flip `regression=verified`
+Rationale: All of S5's prerequisites (S1–S4: retry-gap fix, diagnostics-ordering fix, live attempt #6, triage) were DONE; S5 was the plan's only remaining section, gating `gts-ir1f`'s close.
+Rejected: On hitting the first failure (F10), a workaround or silent retry was rejected in favor of stopping and triaging — per the plan's own Global rules ("known test failures are never a basis for proceeding autonomously") and this project's Backstop rules.
+Outcome [internal]: Deployed TEST clean (`v0.2.2 Rev. Aug 7 05:21`), ran full `pytest -x` (447 collected) → stopped at 82/447 on a new failure class (F10 candidate): `TrackerTable.js:49`'s unretried `DocumentApp.openById` hit Google's transient "Service Documents failed" error. S2's diagnostics fix confirmed working (screenshot showed the live editor, not post-trash chrome). Triaged, documented in the plan's S5 Result block, and stopped for a human decision rather than retrying blind.
+Outcome [internal]: Human authorized one re-run to test the "F10 was a one-off" theory. Re-run hit a *different*, already-known F1/F7 client-transport flake (exhausted `_http_post` retry on a non-JSON echo-page response) at a different test, never re-reaching F10. Two consecutive full-suite runs, two different pre-existing-class failures, neither completing — recommended against a further blind re-run and stopped again for direction. `bd note`d on `gts-ir1f`; plan file and status ledger updated throughout.
+Open: S5 itself (full clean `pytest -x`, `regression=verified` flips, `gts-ir1f` close decision, `/doc-trigger-check`) is still not done — the F1/F7 client-transport flake rate observed across 3 live runs today (S5's two + a later confirmation run) suggests a single clean full-suite pass may not be a safe bet without first raising `_HTTP_POST_MAX_ATTEMPTS`/backoff or pursuing the fast/slow-tier + `-n` parallelism items already flagged (unstarted) in `docs/regression-suite-health-review-2026-08-05.md`.
+
+### Objective 2: Fix F10 with a reusable GAS-side retry wrapper, applied wherever the same class of call is at risk  [accreted]
+Transition: mid-triage, the developer redirected explicitly rather than continuing to just wait on a decision: "ok fix the issue by doing retries, but consider making a retry utility wrapper... scan for other similar calls known to have this sort of problem and make sure we are using the wrapper."
+Rationale: `gts-pm72` had already fixed the equivalent problem for Drive REST calls (HTTP-response-code-based transient errors) but only in `SyncManager.js`'s folder-walk; `DocumentApp.openById`/`SpreadsheetApp.openById`/`DriveApp.getFileById`\|`getFolderById` throw exceptions instead of returning a response code, so that fix never covered them, and no sweep had ever been done for the exception-based sibling class.
+Outcome [developer-facing]: New `src/RetryUtil.js::withGasRetry(label, fn, options)` — bounded retry (3 attempts, 1s backoff), retryable-vs-real error classification by message pattern, GasLogger logging of every attempt/exhaustion/recovery tagged with a caller-supplied call-site label. Applied across 19 production call sites in 7 files (`SyncManager.js`, `TrackerTable.js`, `VerifySync.js`, `WebApp.js`, `WorkspaceAddonCard.js`, `AccessControl.js`, `SheetSetup.js`), deliberately excluding `TestFixtures.js`/`SPIKE.js`/`PROBE.js` (test/spike scaffolding) and `GasLogger.js`'s own internal Drive call (circular-dependency risk) — both noted as scope boundaries in the bead, not oversights.
+Outcome [developer-facing]: New `tests/test_bops_gas_retry_backstop.py` — 3 live backstop tests, all PASS: retry-engagement-and-recovery within budget, bounded exhaustion (still throws + logs after exactly 3 attempts, `TrackerTable`'s pre-existing `tracker.error` catch unchanged), and non-retryable classification (proven via a dedicated pure-function self-test fixture rather than a live not-found doc). Bead `gts-bops` created, worked, and closed with `regression=pending` (targeted subset only; full-suite merge gate still outstanding).
+Outcome [internal]: A bonus confirmation re-run of `test_journey.py::test_journey` (the test F10 was first caught in) was inconclusive — it hit the same F1/F7 client-transport flake as Objective 1 before ever reaching the fixed code path, the 3rd such instance in the session.
+Open: S5's full-suite `pytest -x` re-run (now with `gts-bops`'s fix included) is the next step for a fresh session; `gts-ir1f` stays open until that passes clean.
+
+## 2026-08-12 — Governance exporter comment-traceability + Extensions-menu regression triage
+
+### Objective 1: Fix two live GAS runtime errors reported from the sidebar export action
+"Docs is not defined" → `src/appsscript.json`'s `enabledAdvancedServices` was missing the Docs v1 advanced service despite `Procedure-Exporter.js` calling `Docs.Documents.get(...)`. Fixed by adding the `Docs` binding.
+Follow-up "Invalid field selection comments" on `drive.comments.list` → the existing `Drive` advanced-service symbol is pinned to v2 (required by `SPIKE.js`'s Permissions calls) but the comments call used v3 field-selector syntax. Fixed by adding a second binding `DriveV3` (v3) alongside the existing v2 `Drive`, and repointing `getDriveComments_` at `DriveV3.Comments.list` — v2 call sites untouched.
+
+### Objective 2: Build bidirectional comment-to-document traceability (user request, gts-ipoy)
+Problem: the Drive Comments API's `anchor` field is an opaque, undocumented "kix" encoding — it does not map to Docs API `startIndex`/`endIndex` offsets, so it is unusable as a location signal. Quoted-text matching against exported block text is the only viable anchoring mechanism.
+Built in `src/Procedure-Exporter.js` (schema bumped `2.0` → `2.1`, doc'd in new `docs/procedure-exporter.md` §10.1):
+- `associateCommentsToBlocks_` rewritten as a 4-tier matcher (exact substring → single-block prefix → cross-paragraph window up to 3 blocks via new `findMultiBlockMatch_` → Jaccard word-overlap fuzzy via new `findFuzzyBlockMatch_`, min score 0.7 + min margin 0.15 over runner-up), each comment stamped with an explicit `association_basis` including first-class `no_quoted_text`/`unmatched` terminal states (previously an empty array with no signal).
+- `normalizeForMatch_` extended to fold curly quotes/dashes/ellipsis and strip Drive's truncation ellipsis before comparison.
+- Forward direction (comment → doc): comments gain `associated_unit_ids` + `section_path` (root→leaf breadcrumb via new `unitAncestryPath_`) + `citation_hint`.
+- Reverse direction (doc → comment): blocks gained `unit_id` (new back-reference); units aggregate `comment_ids` from their blocks.
+- `diagnostics.unmatched_comments` count + warning so an unresolved comment is visible in the export output itself.
+Verified via a standalone Node `vm`-sandbox harness exercising all 4 tiers + both terminal states + the unit/block aggregation — all correct. Caught and fixed two of my own bugs pre-verification: a stray mixed-Cyrillic typo in a function name, and an ambiguity-detection bug in the multi-block matcher (an `Array.forEach`'s early-return only exited its own callback, so a quote genuinely ambiguous across two units could silently resolve to whichever unit's `forEach` ran first — rewritten to collect all candidate windows doc-wide and require exactly one before returning a match).
+`bd`: folded into existing `gts-ipoy` ([IMP], already open for the exporter's card-action integration + design-gap hardening) rather than a new bead — same file, same twin `[TST]` (`gts-2glm`) will need to cover this too. `node --check` clean; **no live `pnpm run deploy:test` + real-document verification has been run yet** — all verification so far is synthetic (real `quoted_file_content.value` truncation/formatting from an actual Drive comment hasn't been observed).
+
+### Objective 3: User reports the add-on's Extensions-menu entry point stopped appearing
+Suspected cause: something in the ~74-file / ~10k-line delta accumulated on `tmp/pr3-pr4-combined` since the last commit against `master` (`0b19e92`, 2026-07-30) — most plausibly the verified-team-portal work (`ffbe11f` et al.) or today's `universalActions`/advanced-service additions to `src/appsscript.json`. Not yet root-caused.
+Plan agreed with user: commit today's export work in isolation, then stand up a separate checkout at the ~3-weeks-ago commit (`7bcf40c`, 2026-07-22 — last commit before the `gts-79dw` Spike S2 / verified-team-portal chain started) to test whether the Extensions menu reappears there. Decision: do this via a **new branch pointed at the old commit + a `git worktree`**, not by rewriting/moving `tmp/pr3-pr4-combined`'s history — the branch has commits other sessions/PRs depend on (`gts-79dw-verified-team-portal`, `plan-fix-cleanup-sessions-1-9` are merged into it), so history rewrite was rejected as unnecessarily destructive when a non-destructive branch-and-worktree does the same diagnostic job.
+Open: menu regression not yet reproduced/bisected; live `pnpm run deploy:test` verification of the comment-traceability work still outstanding; `[TST]` twin (`gts-2glm`) still not started.
+
+## 2026-08-13 — Resume governance-exporter work: status review, worktree cleanup, commit outstanding retry-thread work
+_session d0fc8820-c094-4cbf-b74a-44ba629f2635 · v3 · 08-13_
+
+### Objective 1: Reorient on repo/branch state and remove stale git worktrees
+Rationale: returning after a prior-session revert to an older commit ("to verify some work"), the developer needed ground truth on branch/worktree state and what the pre-existing 44 uncommitted files represented before resuming the export feature.
+Outcome [internal]: confirmed current branch `tmp/pr3-pr4-combined` already contains the governance-exporter merge (`361bf04`) — no work was lost in the earlier revert. Identified and removed three stale git worktrees plus their branches: two `worktree-agent-*` copies under `/mnt/c/dev/GActionSheet/.claude/worktrees/` whose only uncommitted edits were against `src/DocumentNormalizer.js`/`src/FloatingActionParser.js`, both files already deleted from the codebase (`fd3249b`, "remove legacy AI-prefix modules"); and `/home/stuar/proj/GActionSheet-menu-regression-3wk` (`spike/menu-regression-3wk-ago`), already an ancestor of current HEAD with only deploy-stamp noise uncommitted — this was the "older version" folder from the recent revert-to-verify detour, superseded once ground truth was confirmed.
+
+### Objective 2: Commit the retry/flake-recovery thread's outstanding work (gts-pm72, gts-hroj, gts-ir1f-in-progress)
+Rationale: `gts-pm72` (GAS-side Drive REST 5xx retry) and `gts-hroj` (diagnostics-hook-ordering fix) were closed in bd with live-verified backstop proof back on 2026-08-06/07 (see this log's 2026-08-07 entry), but the code was never committed to git — the repo was left in a state where bd's closed status and git's working tree disagreed. Committing now clears that inconsistency before resuming `gts-ipoy`/`gts-2glm` (governance exporter) work.
+Outcome [developer-facing]: committed `src/RetryUtil.js`'s `withGasRetry` wrapper (19 production call sites across `SyncManager.js`, `TrackerTable.js`, `VerifySync.js`, `WebApp.js`, `WorkspaceAddonCard.js`, `AccessControl.js`, `SheetSetup.js`), `SyncManager.js`'s `_fetchDriveWithRetry` Drive-REST retry helper, the diagnostics-hook-ordering fix (doc-trashing moved from each test's own `finally:` block to a pytest fixture finalizer), backstop tests (`test_bops_gas_retry_backstop.py`, `test_hroj_diagnostics_backstop.py`, `test_duration_instrumentation.py`, `test_fixture_invoke_retry.py`), and `gts-ir1f`'s in-progress `syncAll()`-batching retrofit for `test_sync_all.py` and `test_team_folder_reconciliation.py`.
+Open: `gts-ir1f` itself remains `in_progress`/`regression=pending` — the retrofit of `test_import.py` and `test_team_scope.py` is not finished, and the full-suite `pytest -x` merge gate flagged in the 2026-08-07 entry is still outstanding. Next work resumes on the governance exporter: `gts-2glm` (hardening tests, currently unstarted, blocking `gts-ipoy`'s close).
+
+## 2026-08-13 10:20:00
+_session 6f8c9c91-f4ed-4ff2-8ce0-45409c63d7a6 · v3 · 08-13_
+
+### Objective 1: Get gts-2glm's live test suite (tests/test_governance_export.py) to green and close the bead
+Rationale: Resumed from HANDOFF-08-13-testing-2glm.md at the exact point it left off — the 8-test file was written but never run. Driving it to green surfaced two real, previously-undetected production defects in src/Procedure-Exporter.js rather than just test-authoring mistakes: `old_paren_prefix`'s regex (`/^\(OLD\)\b/i`) could never match realistic `"(OLD) Something"` text because `\b` never fires between two non-word characters (`)` and a space) — it only ever matched the unrealistic glued form `"(OLD)Something"`, meaning the (OLD)-prefix historical-state rule was silently dead for the space-separated case that is the actual documented convention. Separately, GOVERNANCE_UNIT_PATTERNS' kind classification is start-anchored, so an `(OLD)`-prefixed policy heading fell through to the generic `section` fallback instead of being recognized as `policy` — fixed by stripping a leading semantic-state marker before kind matching only, leaving title/semantic_state detection on the full text.
+Rejected: none — both fixes were the direct, minimal correction once root-caused; no alternative design was floated.
+Outcome [developer-facing]: 2 production bugs fixed in src/Procedure-Exporter.js (old_paren_prefix regex; stripLeadingStateMarker_ added for kind matching), 2 test-authoring bugs fixed in tests/test_governance_export.py (old_dash_prefix seed text; historical_block selector was matching the heading's own auto-emitted block instead of the plain paragraph). All 8 tests green live against TEST (confirmed with a full clean re-run). Diagnosed but did not fix a one-time flake in scn/session.py's `_http_post` echo/404 retry logic duplicating a non-idempotent seed_doc_content insert — logged as a known risk class in gts-2glm's bd notes, not reproduced on rerun.
+Outcome [internal]: gts-2glm closed (regression=pending — targeted-subset gate only, full-suite pytest -x still outstanding). Two follow-up beads filed per user decision rather than blocking close: gts-wido (pure-function coverage for suggestion_groups/autoText, since the Docs API can't seed those live) and gts-g21w (table mid-cell unit-switch + comment-match tiers 2-4, an ADR-0013 open-seams entry). gts-ipoy's dependency on gts-2glm is now satisfied; gts-ipoy itself remains open on its own separate card-action-integration scope.
+Open: full-suite `pytest -x` merge-gate run still outstanding (also blocked on the unrelated gts-ir1f thread per project convention); production changes (src/Procedure-Exporter.js, src/WebApp.js, tests/test_governance_export.py) remain uncommitted pending user approval.
+
+## 2026-08-14 08:22:53
+_session a563eefb-d6d3-4d20-b510-80595e7dba98 · v3 · 08-14_
+
+### Objective 1: Governance export gts-6cq2 — conditional block-text emission + omit-empty structural arrays
+Rationale: A real 9.27MB export sample showed 93.5% of blocks (unchanged revision_summary) carrying byte-identical all_text/baseline_text/proposed_text copies plus a 4th copy in runs[].text — 993KB of pure duplication feeding an LLM/RAG consumer the same sentence 3-4x. createBlock_ now emits a single canonical `text` field for unchanged blocks and the full trio only for blocks with revision activity; five structural arrays (kind_evidence, semantic_state_evidence, color_signals, comment_ids, runs[].revision.evidence) are omitted rather than emitted empty. Followed the project's twin-ticket convention: created paired [TST] gts-2k9h since none existed for this already-frozen AC.
+Outcome [developer-facing]: schema_version bumped 2.1→2.2; blockAllText_/blockBaselineText_/blockProposedText_ fallback accessors added at every read site (comment matching, views builder); tests/test_governance_export.py extended (5 new tests, 5 assertions updated); fast gate 14/14 passed; deployed to TEST.
+Outcome [internal]: gts-6cq2 closed regression=pending; gts-2k9h left open to run full pytest -x and flip to verified.
+
+### Objective 2: Confirm a live export ran against the correct deployment  [accreted]
+Transition: user initiated a real export immediately after the gts-6cq2 deploy and asked me to confirm it ran against the fix.
+Rationale: Verify via clasp logs rather than assume — container-bound Docs triggers (onOpen/menu exports) run whatever revision is currently cached on the doc's script container, independent of the WebApp deployment version already verified separately.
+Outcome [internal]: First export ran on a stale cached revision (Aug 13 23:36, pre-fix) despite the WebApp deployment showing the correct Aug 14 01:39 build — confirmed propagation lag, a known category of issue for this project. Diagnosed via clasp logs' per-stage `version` field; user reopened the doc and a subsequent `onOpen.start` picked up the correct revision.
+
+### Objective 3: Version-footer UI request + Gemini comment-anchor spike re-check  [accreted]
+Transition: user asked for a visible version indicator right after hitting the stale-deployment issue, then in the same turn passed along external (Gemini) feedback on the unresolved comment-anchoring gap to evaluate.
+Rationale: "add the version string as a footer so i can easily confirm visually which is running" — direct UI aid tied to Objective 2's diagnosis. Gemini's anchor-decode claims were specific enough to test literally rather than dismiss from memory, so reopened the already-closed gts-6ls9 spike instead of re-deriving from scratch.
+Rejected: none — both Gemini candidates were tested as stated, not assumed correct or incorrect.
+Outcome [user-facing]: ExportProgressDialog.html now renders BUILD_INFO.version as a fixed footer (gts-st5j).
+Outcome [internal]: gts-6ls9 re-check confirmed no-go on both Gemini candidates — includeDeleted:true made zero difference (57/57 still null-quoted); the anchor.m.q JSON-decode path is inapplicable on this document (0/57 anchors are the json_revision_anchor form). Finding appended to docs/procedure-exporter.md §10.2 as a dated addendum; spike flag re-disabled and redeployed clean.
+
+### Objective 4: ChatGPT LLM-consumer feedback — TOC handling, control-char normalization, opt-in whole-document views  [accreted]
+Transition: user forwarded a second round of external feedback (this time from the format's actual LLM consumer) for evaluation against the same sample document.
+Rationale: Each of the 5 recommendations was checked against real export data before deciding what to build — 2 were already correctly implemented (comment-anchor unresolved-marking, color/revision independence), 1 was a confirmed real bug (TOC lines misclassified as duplicate governance units — verified live via a new gated toc_probe spike op showing TOC entries carry a direct textStyle.link.heading), and 2 were data-backed tradeoffs the user chose on (whole-document views default, control-char normalization scope). "Recommended generator updates" were not applied blindly — went in as candidates to verify, per the user's own established pattern this session.
+Rejected: none of the 5 recommendations were rejected outright; 2 needed no code change since they were already satisfied by existing design (documented back to ChatGPT via the spec rather than silently ignored).
+Outcome [user-facing]: document.toc is a new top-level array (title/displayed_page/target_heading_id/url) so an LLM consumer can answer "what page is X on" without polluting the governance-unit tree; live-verified against the real doc — 228 correct entries, all 8 prior fake TOC-duplicate units gone.
+Outcome [developer-facing]: GOV_EXPORT_SCHEMA_VERSION 2.2→2.3; normalizeDerivedText_ added (NBSP/vertical-tab normalized in derived text only, runs[].text stays byte-exact); views.baseline_text/proposed_text now opt-in via options.includeWholeDocumentViews (default false); tests/test_governance_export.py extended further (18/18 passing); twin-ticket gts-1nw8/gts-crzl closed regression=pending, follow-up gts-r40j filed for the TOC entry-shape coverage gap (insertTableOfContents is not a valid Docs API request — confirmed live — so it can't be seeded per-test).
+Open: full pytest -x (whole suite) has not been run this session — both gts-2k9h and gts-crzl/gts-1nw8's regression state stay "pending" until that happens; nothing committed or pushed.
+
+### Key Learnings:
+Container-bound Apps Script triggers (onOpen, menu handlers) run whatever revision is cached on the document's script container, which can lag behind a freshly-verified WebApp deployment — reopening the doc forces the container to pick up the latest push.
+Google Docs' `insertTableOfContents` is not a valid Docs API v1 batchUpdate request ("Unknown name ... Cannot find field") — TOC insertion is a UI-only feature with no public API surface, same category as suggested-edit creation.
+A TOC entry's link-bearing run carries `textStyle.link.heading.{id, tabId}` — a direct, API-provided pointer to the target heading, not something requiring text-position matching.
+
+## 2026-08-18 04:08:49
+_session 600dc30f · v3 · 08-18 (unattended bd-run-beads batch)_
+
+Orchestrator: `bd-run-beads -t '' --allow-dirty --claude 'do not run a full regression test suite for this bead, i will run that separately' 4m7l 7389 ppfg zg2t`. Four beads, each executed by its own isolated session; full-suite regression deliberately deferred per the runner instruction ("i will run that separately") and is not represented in this entry. Logs: `.bd-run-beads/20260818-040849Z`.
+
+### Objective 1: Close two live-backend test-harness reliability gaps found during regression re-verification (gts-kkm7, Axiom log-wait)
+Sessions: 4m7l (7a0f3225-f8a2-4ca7-9511-0232c61f45e8, 946s, $1.59, commit 1de462b) · 7389 (80f218e2-fb5b-4d97-bca9-6dfe3acba5e2, 262s, $0.38, commit c42345d)
+Rationale: Both fixes came out of re-verifying prior regressions against the live GAS backend rather than from new feature work. 4m7l: the TEST corpus grows unboundedly across a day of pytest runs because ArchiveManager's 24h "Doc Not Found" grace window (correct for production) never expires trashed test docs within a single day's sessions, so `sync_all`'s real execution time climbs with corpus size and starts racing the fixture's client-side timeout (observed 106→171 docs in one session). 7389: a live-Axiom event the test's own bounded `_wait_for_log_axiom` poll had already timed out on turned out to genuinely exist in Axiom — not an Axiom ingest-latency or query-construction bug, but `TestWebApp.js`'s `_handleRunFixture` (the dispatcher every fixture-driven test call goes through) never calling `GasLogger.flush()`, so buffered log entries sat in per-execution memory until an unrelated later request crossed the flush threshold or the instance recycled and the entry was lost outright — landing in Axiom, when it landed at all, stamped with the *original* request's timestamp, which reads as "was there all along" to a human cross-referencing after the fact.
+Rejected: 4m7l considered shortening the production 24h archive threshold; rejected because that's a production-safety knob (guards against transient Drive blips), not a test-corpus-hygiene problem — fixed at the test-fixture layer instead, reusing the unmodified production `ArchiveManager.archive()` sweep against backdated rows.
+Outcome [developer-facing]: New GAS fixture `purge_stale_test_docs` (src/TestFixtures.js) backdates `Doc Not Found` Actions rows past the grace window and runs the production archive sweep; wired into `tests/conftest.py` to run once per pytest session so the shared TEST corpus stays bounded. `fixture.sync_document` also now retries (bounded, 12×3s) on a `locked-skip` result instead of reporting `synced:true` on what was actually a no-op, to honor `ScenarioSession.sync()`'s durable-convergence contract.
+Outcome [developer-facing]: `_handleRunFixture` now calls `GasLogger.flush()` unconditionally before the HTTP response returns (matching every other WebApp.js route), making fixture-driven log entries synchronously durable instead of leaving delivery to buffer-threshold/warm-instance luck. Note: this flush call shipped inside 4m7l's commit (1de462b, `src/TestWebApp.js`); bead 7389's own commit (c42345d) recorded only the bd-side root-cause/resolution notes.
+
+### Objective 2: Fix windowDays boundary dropping a resolved row that should be retained (gts-79dw.4.8)
+Sessions: ppfg (6f71c0c8-1471-40c3-b67d-024ea7b78511, 862s, $1.80, commit af020ad)
+Rationale: Direct repro plus GAS-side instrumentation (temporary debug log, removed after use) showed this was not a cutoff-computation defect in `_readTeamActions` — logged `cutoffMs`/`modifiedMs` pairs across the test's two sequential read calls showed the row's absolute modified timestamp was fixed while `cutoffMs` (computed server-side, `Date.now()`-derived, per call) kept advancing with real elapsed wall-clock time between requests. The corpus-size-scaling DocData/Actions reads (a known cost per gts-kkm7) pushed the cutoff computation later than "now" actually was when the caller's request landed, silently narrowing the retention window on a large TEST corpus.
+Outcome [user-facing]: `_readTeamActions` (src/WebApp.js) now snapshots `cutoffMs` before the scaling reads instead of after, so the retention window reflects the request's actual arrival time rather than a time pushed later by read latency.
+Outcome [developer-facing]: `tests/test_team_listing.py`'s boundary test margin raised 8s→3600s — same documented client/server clock-jitter hazard `test_team_portal_hardening.py:214` already works around with a day-scale margin; 4 sequential HTTP round trips against the live backend were observed eating the entire 8s margin on their own with no actual defect present.
+
+### Objective 3: Fix tab-navigation Back not restoring cached DocStatus state on a second round-trip (gts-gdll)
+Sessions: zg2t (1806bc0c-8d5c-445f-a07e-712c7372734d, 912s, $0.95, commit b443d33)
+Rationale: `onImportBack`/`onNotifyBack` (src/WorkspaceAddonCard.js) called `buildHomepageCard()` with no opts, so `includeDocScan` stayed false and `_buildHomepageState` always returned the "Not loaded" placeholder on every Back-navigation, discarding any previously-scanned DocStatus state — matching the reported screenshot exactly.
+Outcome [user-facing]: Back-navigation from Import/Notify now restores the last real doc scan instead of resetting to the placeholder. Added a per-user `CacheService` cache (10 min TTL, keyed by doc ID) written whenever a full scan actually runs; Back reads it via a new `allowCachedState` opt, falling back to the placeholder only if nothing has been cached yet.
+
+### Key Learnings:
+A GAS log-wait "the event was in Axiom all along" false negative is not necessarily an Axiom latency issue — check whether the dispatcher the test call goes through actually flushes the per-execution log buffer before returning; a delayed flush still stamps the original request's timestamp, which is indistinguishable from ingest latency after the fact.
+
+## 2026-08-18 08:58:30
+_session f13b1966·110e906d·644c5c7f·7c57398e · v3 · runner es3l 283i.1_
+
+### Objective 1: Regression re-verification and bead closure sweep
+Rationale: Runner invocation explicitly scoped work to targeted checks only — "do not run a full regression test suite for this bead, i will run that separately" — so this run re-verified specific prior fixes rather than re-implementing them. gts-h1vn re-checked gts-li3g's sync lock now that its Axiom-polling blocker (gts-7389) was closed; gts-1tbe re-checked the gts-28q mid-text-parenthetical stripping fix; es3l re-checked export-folder-isolation hardening coverage.
+Outcome [internal]: All three beads closed clean. gts-h1vn: `tests/test_sync_concurrency.py::test_sync_lock_serializes_concurrent_syncdocument_for_same_doc` run 3x targeted, all green, no Axiom timeout — lock mechanism confirmed not regressed, no code change. gts-1tbe and es3l: per `git show`, their commits (dfaad2a, 2a3d50e) touch only `.beads/*.jsonl` bookkeeping — the `_extractStatusTokenTracked` fix (src/SyncManager.js) and the export-folder-isolation hardening tests (tests/test_governance_export.py) were already present in the tree as of an earlier commit (1de462b); this run confirmed and closed both rather than authoring new code/tests. (bd notes for gts-1tbe describe authoring the fix directly — commit evidence says otherwise; noted as a discrepancy between notes and shipped diff, deferring to the commit per instruction.)
+
+### Objective 2: Design spike — raw Docs API capture for embedded-image + box/table content
+Rationale: gts-283i.1 resolves an open question left by docs/procedure-exporter.md §19.3 — where a later, out-of-band vision-LLM description pass writes an image's `description` back to, since the exporter itself always emits `description: null`.
+Outcome [developer-facing]: Added knowledge-base/adr/0025-image-description-sidecar-writeback.md (Accepted) — decision is a sidecar file (`<document-name>-image-descriptions.json`, keyed by `image_ref`) merged at RAG-ingestion read time, never an in-place edit of the governance JSON, to keep the exporter's output deterministic (§17 principle 8) and avoid re-paying vision-LLM cost on unchanged images across re-exports. Updated docs/procedure-exporter.md and knowledge-base/references/gts-283i-raw-capture/README.md accordingly.
+
+### Key Learnings:
+`bd-run-beads` closure commits for re-verification/already-fixed beads can be bookkeeping-only (`.beads/*.jsonl` diff, no src/test diff) — when a bead's notes claim code authored in-session, confirm against `git show`/`git log -S` before crediting the run with new code, since the underlying change may predate the run.
+
+## 2026-08-19 06:45:00
+_session fe97fce5 · v3 · 08-19_
+
+### Objective 1: Implement gts-283i.4 — embedded image extraction in the governance exporter (§19.3)
+Rationale: A paragraph containing only an inline image (diagram/flowchart) produced no block and was silently invisible in the export — the primary motivating case (flowcharts/diagrams) was completely unrecoverable from the JSON. Closes the exporter-side half of the contract; a separate out-of-band tool fills in `description` later via a sidecar file (ADR-0025), never editing this JSON in place.
+Outcome [developer-facing]: `processParagraph_` now handles `inlineObjectElement` (image-only paragraphs no longer skipped); new `extractInlineImage_`/`processInlineImages_` fetch `contentUri` via `UrlFetchApp` during the same execution and save to a lazily-created `<title>-images/` Drive subfolder; new `image` block kind + `document.images[]` (§13.4 omission-convention wired in) + `diagnostics.images` + `export.complete` images field; `getExportFolder_` resolution moved earlier so the images subfolder exists before the first JSON stringify; `schema_version` bumped 2.3→2.4.
+Outcome [developer-facing]: `appsscript.json` `urlFetchWhitelist` extended with `https://*.googleusercontent.com/` — discovered live (not guessed) that the image `contentUri` fetch is otherwise rejected by the manifest whitelist.
+Outcome [developer-facing]: Verified live against gts-283i.1's raw-capture doc — 6/6 images extracted, image_ref names stable across a re-export (idempotency), extensions correctly derived per-image from content-type (mixed jpg/png). Targeted subset (test_governance_export.py + test_export_dialog.py, 27/27) green, including 2 pre-existing schema-version-pin tests updated for the 2.4 bump (one renamed). Closed with regression=pending per Backstop rules — full pytest -x deferred to gts-283i.5 (hardening TST, already created and blocked on this bead).
+Open: docs/procedure-exporter.md §19.3 deliberately left under "§19 Proposed Enhancements" rather than moved to its natural home, matching how §19.2 stays there while its bead (283i.2) is still open — left for whoever closes gts-283i.5.
+
+## 2026-08-19 09:45:00
+_session 25758cdd · v3 · 08-19_
+
+### Objective 1: Add `--images` download support to `scripts/export_governance.py`
+Rationale: The governance export JSON represents embedded images only as metadata (`drive_file_id` + `image_ref` pointers into Drive), not inline bytes — the PDF snapshot is the only artifact that carries rendered image content. The developer asked for the actual image files, downloaded locally into a `<filename>` folder, on top of the existing JSON/PDF export. Reviewing the prior session's partial implementation before extending it surfaced two real defects: `from scn.session import resolve_auth_file` silently `ModuleNotFoundError`'d (the script's own sys.path[0] is `scripts/`, not the project root) and was masked by a bare `except ImportError`, degrading to an unauthenticated session instead of failing loudly; and the download retry loop caught `HTTPError` inside the same broad `except`, so a 403/404 (bad file id, no access) wastefully retried 3x with backoff before failing the same way. Local image-folder naming was aligned to `getImagesFolder_()`'s existing `<title>-images/` convention already used server-side in `src/Procedure-Exporter.js`, rather than inventing a new local naming scheme.
+Outcome [developer-facing]: Fixed the sys.path/import bug (project root now explicitly inserted) and narrowed the retry condition to 429/5xx only; `_authed_session()` now raises a clear, actionable error when no Playwright auth file is found instead of degrading silently.
+Outcome [user-facing]: `--images` flag added to `scripts/export_governance.py` — downloads all embedded images from `document.images[].drive_file_id` into a `<title>-images/` subfolder alongside the JSON/PDF, using the same cookie-based Drive auth mechanism as the existing xlsx/docx test-download helpers.
+Outcome [internal]: Verified live against the testmanual doc (`1zQkRAczbRjB0iRD2OhpHsqXvHsmskE8VI7VNx8vE5yE`) — `--pdf --images` downloaded 6/6 embedded images (4 JPEG, 2 PNG), confirmed as genuine valid images via `file`, not error/interstitial pages. Saved the doc id to `bd remember` (key `testmanual-doc-id`) so future sessions can reference "the testmanual" without re-deriving the id.
+Open: No automated `[TST]` coverage exists for `--images` — flagged to the developer as a dev-utility script (not product code), open whether it warrants a twin-ticket per the project's testing convention.
+
+### Key Learnings:
+The `/uc?export=download&id=<fileId>` Drive endpoint accepts the same Playwright-captured browser session cookies used for the project's existing `.docx`/`.xlsx` export downloads (`tests/helpers/download.py`) — no separate OAuth/service-account setup needed for raw Drive file bytes, as long as the authed account (role `primary`) is the same identity that owns/can access the file.
+
+## 2026-08-20 12:45:00
+_session 5f880a3b-8193-4adb-a5cf-56e3052c78d6 · v3 · 08-20_
+
+### Objective 1: Make batching-count regression assertions immune to shared-TEST-account contention (TD-PLAN Stage 1 / gts-obry.1)
+Rationale: The full 2026-08-20 sweep saw `test_kkm7_batching.py` and `test_uuse_scoped_listing.py` fail on "exactly ONE batched call" assertions seeing N>1 events — the third occurrence of this failure shape (after `gts-moy1.2`'s docCount=66 spontaneous-sweep observation and `gts-li3g`'s confirmed same-doc race), both times traced to the account's installed 30-minute `syncAll` time-based trigger firing inside a test's log-fence window rather than a real batching/dedup regression. Isolated pre-fix re-runs of both tests passed clean, corroborating contention over a code regression. Closing the loop meant not just confirming the hypothesis but making the class of failure structurally impossible: while wiring the `op`/`parentOp` correlation the fix depends on, found the correlation mechanism itself (`GasLogger.startOp`, shipped earlier this session) silently reset `parentOp` to null on any nested `startOp()` call — exactly what `syncAll()` does internally — and that self-calls back into the WebApp (`_markDocNotFound`, `sync_action_rows`, the add-on cards' `_callWebApp` helpers) were only propagating their own local op one hop, not the original caller's op, so correlation broke on any multi-hop chain. Both were root-caused and fixed before the diagnostic could be trusted.
+Rejected: Treating "isolated re-run passed" as sufficient to close the bead without shipping the correlation fix — the plan's own AC required extending the existing fence-matching mechanism, not just recording a verdict.
+Outcome [developer-facing]: `tests/helpers/gas_log.py` gained `matches_op(match_fn, op_id)`, scoping a batching-count assertion to only the log entries chained from that call's own opId; applied to `test_kkm7_batching.py` and `test_uuse_scoped_listing.py`'s exactly-ONE assertions, with a new offline unit test (`tests/test_gas_log_op_correlation.py`, 4 cases) proving the wrapper's accept/reject logic without a live backend.
+Outcome [developer-facing]: `GasLogger.js::startOp()` no longer wipes an established `parentOp` on a nested call (falls back to the existing value instead of unconditionally resetting to null); added `getParentOp()` and switched all 5 self-call sites (`SyncManager.js` ×2, `WorkspaceAddonCard.js` ×2, `EditorAddonCard.js`) to propagate the root caller's opId instead of their own one-hop-local op, so op/parentOp correlation now chains correctly across multi-hop WebApp self-calls. Deployed to TEST and live-verified: both previously-failing tests pass in isolation with the batching count correctly scoped to the sweep's own opId.
+Outcome [internal]: `docs/OPERATIONS.md` documents the shared-account contention constraint (Failure Modes table) and the op/parentOp correlation pattern for future batching-count assertions (Test observability section), including the known `call_webapp.py` gap (manual probes don't populate opId).
+Outcome [internal]: `gts-obry.1` closed with verdict "contention confirmed" and full findings on the bead; `regression=pending` per Backstop rules pending a full `pytest -x` (targeted-subset gate of 18 tests across the touched surface passed clean, including `gts-obry.2`'s own failing test in isolation as a useful side data point).
+Open: No live Apps Script Triggers-panel check was possible this session (no interactive Google-authenticated browser context, no test-support route exposes `ScriptApp.getProjectTriggers()`) — the contention verdict rests on strong circumstantial/historical evidence (confirmed trigger install history + two prior incidents), not a direct live read. `gts-obry.2` and `gts-obry.3` (TD-PLAN's next two stages) remain open.
+
+### Key Learnings:
+GAS's `doPost`-scoped `GasLogger` module state (`_currentOp`/`_parentOp`) is shared across the whole request's call stack, including nested self-calls back into the same WebApp via `UrlFetchApp.fetch` — but each such self-call is a genuinely separate `doPost` execution with its own fresh module state, so op/parentOp correlation across such a hop only survives if the payload explicitly carries the ROOT caller's id forward (`getParentOp() || getCurrentOp()`), not the current execution's own freshly-minted op.
+
+## 2026-08-20 12:52:00
+_session faf05085 · v3 · 08-20_
+
+### Objective 1: Clear the `sync.locked.skip` log-observability gap flagged against the per-docId sync lock (TD-PLAN-20-08 Stage 2 / `gts-obry.2`)
+Rationale: `gts-obry.2` left it undetermined whether `syncDocument()`'s per-docId advisory lock (the `gts-li3g` fix, which serializes overlapping syncs of the same doc so a stale read can't revert a Dirty sheet-authoritative row) had regressed its own observability — i.e. whether the lock-skip branch had silently stopped emitting the `sync.locked.skip` log tag a caller relies on to see the skip happened — versus the failure being infra noise from the same shared-account contention family `gts-obry.1` had just confirmed (the installed 30-min `syncAll` trigger colliding with in-flight test activity). The plan's own rule was to disambiguate, not guess: grep the code path directly, then get a second, dedicated isolated data point before drawing a conclusion.
+Outcome [developer-facing]: Confirmed via direct grep (not assumption) that `SyncManager.js::syncDocument()`'s lock-skip branch (`src/SyncManager.js:149-159`) still calls `GasLogger.log('sync.locked.skip', ...)` unconditionally on the skip path — no rename, no removal, no drift from a refactor. A dedicated isolated re-run of `test_sync_concurrency.py::test_sync_lock_serializes_concurrent_syncdocument_for_same_doc` against the live TEST backend passed clean (91.46s) — the second independent clean pass for this exact test (the first came incidentally out of `gts-obry.1`'s own targeted-subset gate). Closed `gts-obry.2` as a full-suite-duration contention flake in the same family as `gts-obry.1`'s confirmed 30-min-trigger contention, cross-referenced on the bead; no code change made. Set `regression=verified` on `gts-obry.2` (isolated scope — the branch-level Backstop gate still needs a subsequent full `pytest -x`, which stays with the user per this session's instruction not to run it).
+Outcome [internal]: `docs/OPERATIONS.md`'s existing shared-account-contention Failure Modes row extended (not duplicated) to name the inverse symptom shape this bead surfaced — an expected log event missing within its bounded wait, alongside the row's existing duplicate-event shape — citing `gts-obry.2` as the corroborating incident. `TD-PLAN-20-08.md`'s Stage 2 AC checklist and epic-level status line updated to reflect the closed state.
+
+### Key Learnings:
+None — this segment confirmed existing hypotheses rather than surfacing a new platform fact.
+
+## 2026-08-20 13:41:00
+_session faf05085 · v3 · 08-20_
+
+### Objective 1: Clear the sidebar per-row status-control UI-timeout gap flagged against the homepage sidebar mutation entry points (TD-PLAN-20-08 §1/§2b, `gts-obry.3` — the last open child of the `gts-obry` triage epic)
+Rationale: `gts-obry.3` was the `gts-cw5`/`gts-gdll` sign-off regression test for the homepage sidebar's per-row mutation controls (sync/set-status/delete), so a real regression there is higher-signal than an ordinary UI flake and needed disambiguating rather than assumed away — especially since this branch (`tmp/pr3-pr4-combined`) carries a substantial `WorkspaceAddonCard.js` change (the `gts-8py3`/`gts-zg2t` lazy doc-scan gating) that touches the exact card-build path the failing locator depends on.
+Outcome [developer-facing]: Isolated re-run of `test_sidebar.py::test_tab_navigation_docstatus_regression` against the live TEST backend passed clean (149.50s, well within the 15s per-row-locator budget). Reviewed this branch's `WorkspaceAddonCard.js` diff proactively (even though the isolated run already passed) and confirmed the new `includeDocScan`/`allowCachedState` doc-scan-gating opts don't touch the per-row status button's `aria-label` contract — `getStatusIconButtons()` is untouched by this branch and `onSyncNow()` correctly passes `includeDocScan: true`, so no code-path mismatch exists. Closed `gts-obry.3` with verdict recorded on the bead: known full-suite-duration/load flake, no code change, no timeout-budget change (single occurrence, not a recurring pattern). Set `regression=verified` on `gts-obry.3` (isolated scope).
+Outcome [internal]: All three children of the `gts-obry` triage epic (`.1`, `.2`, `.3`) are now closed. Appended a note to the epic explaining it is deliberately left open pending a full `pytest -x` run, which the user is running externally this session (not run by this agent, per explicit instruction). `TD-PLAN-20-08.md` updated throughout: §1's epic-level AC and child-status table, §2b's Stage 3 AC checklist, and the "Suggested next-session order" list (items 1-2 struck through as done, item 3 — `gts-ir1f` — marked next up).
+
+### Key Learnings:
+This project has no `pytest-playwright` plugin installed (its Playwright driving is hand-rolled via `scn/ui.py`, not the pytest-playwright fixture layer), so there are no `--tracing`/`--video` CLI flags to reach for when a bead's contract asks for "isolation with tracing/video" — the standing `capture_failure()` mechanism (`gts-3tkf`) already covers that intent by screenshotting + dumping frame/locator diagnostics automatically on any UI-test failure.
+## 2026-08-20 (TD-PLAN §3 session)
+_session d2176d69 · v3 · 08-20_
+
+### Objective 1: Unblock the syncAll() permutation-batching retrofit (gts-ir1f) by confirming the client-side retry layer it was failing against
+Rationale: `TD-PLAN-20-08.md` §3 flagged `gts-ir1f` (batching independent live-`syncAll()` scenarios into single sweeps to cut full-suite wall-clock) as blocked on a suspected unhardened `_http_post` retry, based on 5 failed attempts hitting `/exec` routing flake before test logic ever ran. Investigating the bead's own notes first (per this project's process rule to trust bead history over the plan snapshot) showed the premise was stale: the real gap was a *separate* HTTP implementation (`invoke_fixture`, on the session-scoped autouse fixture path) bypassing `_http_post`'s existing retry entirely — already root-caused and fixed as `gts-z6bx` on 2026-08-07, with a live-verified clean 6th attempt the same day. `_http_post`'s own retry logic was confirmed unchanged since before attempt #5 via `git blame` (pre-dates the bead).
+Outcome [developer-facing]: Confirmed no code change needed on the retry layer — `gts-z6bx`'s fix already covers it, and both target batching conversions (`test_team_folder_reconciliation.py`, `test_sync_all.py`) are present and committed with per-file wall-clock evidence already on the bead. Findings appended to `gts-ir1f`'s notes so this doesn't get re-derived from scratch again.
+Outcome [internal]: `TD-PLAN-20-08.md` §3 and its "Suggested next-session order" updated to correct the stale premise and mark the AC items done, with `gts-moy1.3` promoted to next-up.
+Open: `gts-ir1f` itself stays `IN_PROGRESS`/`regression=pending` — blocked on `gts-lirp` (open, unrelated Import-tab stale-DOM-read bug), which is a genuine separate root cause outside this stage's scope. Not closed this session.
+
+### Key Learnings:
+Three independent HTTP-POST implementations existed in this test harness (`scn/session.py::_http_post`, `scripts/call_webapp.py::call`, `tests/helpers/fixture_invoke.py::invoke_fixture`) with retry hardening applied inconsistently across them — a live-backend flake investigation should check all callers of the WebApp, not just the primary `_http_post` choke point, when triaging "test failed before logic ran" symptoms.
+
+## 2026-08-20 14:15:00
+_session f14896e7 · v3 · 08-20_
+
+### Objective 1: Disambiguate the `gts-zocq` inline-formatting bold-run leak (TD-PLAN-20-08 stage 4)
+Rationale: TD-PLAN-20-08 flagged `gts-moy1.3` (a plain-text action reportedly leaking a bold `sheetRuns` entry via the Sheets write/read path) as a cheap, already-diagnosed fix ready to close the last child of the `gts-moy1` triage epic — but the bead's own notes had already flagged its "adjacent sheet row/cell write" leak mechanism as "unverified, check first," so per the plan's own disambiguation rule the session verified before fixing rather than implementing against the stated hypothesis.
+Rejected: writing a fix for the format-bleed hypothesis directly — two isolated re-runs (the test alone, then the full `test_inline_formatting.py` file so the bold/italic seed test runs immediately before this one against the same shared TEST Actions sheet, deliberately exercising the bead's own named mechanism) both passed clean with `sheetRuns == []`, and a code review of both the write path (`WebApp.js::_handleSyncActionRows`) and read path (`SyncManager.js::_richTextRunsForCell`/`_runsFromRichTextRuns`) found no defect. The original failure's source log (2026-08-18) is gone; the next available full-sweep log (2026-08-20) already shows this test passing.
+Outcome [developer-facing]: `gts-moy1.3` closed as an unreproduced flake in the same family as `gts-obry` (shared TEST-account contention) — no code change made. Parent epic `gts-moy1` closed (last child resolved). `gts-zocq`'s `regression` label flipped `pending` → `verified`, pointing at `gts-moy1.3`'s notes.
+Outcome [internal]: TD-PLAN-20-08.md's §5 and "Suggested next-session order" updated to record the disambiguation outcome and correct the stale "already-diagnosed" framing.
+
+### Key Learnings:
+Apps Script's `Range.appendRow()` does not appear to inherit `RichTextValue`/bold formatting from the row immediately above the newly appended row (tested directly against the project's shared TEST Actions sheet) — ruling out that specific format-bleed mechanism as a general risk for this write path, at least for the plain-append case.
+
+## 2026-08-20 16:58:00
+_session 9ec0923b · v3 · 08-20_
+
+### Objective 1: Close out TD-PLAN-20-08.md Stage 0 — make the op/parentOp correlation fix actually protect the batching-assertion test family it was built for, and clear the two remaining post-sweep failures
+Rationale: TD-PLAN-20-08.md's §0 tracked two live-sweep failures (`gts-7vo2.1`/`.2`) surfaced by the second `pytest -x` run of the day. `gts-7vo2.1` was a mechanical test-code bug (wrong exception type caught). `gts-7vo2.2` was direct empirical proof of the shared-TEST-account contention theory §2 had already diagnosed but left unresolved — caught this time by the very op-correlation mechanism (`gts-obry.1`'s `matches_op`) built to detect it, so the fix was to finish teaching it to *filter out* contamination, not just flag it, and extend that same filter to the one batching-assertion test that wasn't yet using it.
+Rejected: initially assumed `gas_log.py` needed a new `op`/`parentOp` filtering mode per the bead's literal AC wording; a prior-art check (required before writing new plumbing, per this project's I12 rule) found `matches_op` already existed and unit-tested from `gts-obry.1` — so the actual gap was narrower: only `test_sync_all_op_propagates_to_webapp` (j8cn) wasn't using it yet, kkm7/uuse already were.
+Outcome [developer-facing]: `tests/test_sidebar.py`'s error-fallback except clause widened from `except TimeoutError:` to `except Exception:`, matching what `open_sidebar` can actually raise on either of its two timeout paths. `tests/test_sync_all.py::test_sync_all_op_propagates_to_webapp` now mints its own sweep `opId` up front (kkm7/uuse convention) and filters through `matches_op` instead of reading the sweep's op back from logs after the fact. `docs/OPERATIONS.md`'s contention Failure Modes row updated to record the filter is now in use by all three tests it was built for, plus this occurrence's trigger-timing finding.
+Outcome [internal]: Trigger-timing cross-check (via `query_axiom.py`) disproved `gts-li3g`'s 30-min installed trigger as this occurrence's contamination source — the contaminating `sync.all.start` series fired every ~2-3 min, not 30; a concurrent TEST-account session/process is the actual source. Running the two isolated re-runs concurrently by accident produced a live, self-inflicted contamination failure via a *second*, still-unscoped contention vector (`scn/session.py`'s bare-fence GAS-error-scan helper) — noted on the bead as a candidate follow-up, not fixed (out of this stage's scope). All 4 affected tests (sidebar, j8cn, kkm7, uuse) verified green together in sequential isolation. Both child beads and the `gts-7vo2` epic closed; TD-PLAN-20-08.md's new §0 AC checklist and next-session order updated to reflect closure.
+
+### Key Learnings:
+Axiom log timestamps are UTC; `scn/ui.py`'s own `TimeoutError`-raising convention only covers its *own* deadline-exceeded paths — a `wait_for`/`click` call inside it can still leak Playwright's un-normalized `TimeoutError` to the caller, so a caller-side `except TimeoutError:` guarding an `open_sidebar()` call is not reliable without checking which path is expected to time out.
+
+## 2026-08-20 (TD-PLAN §4 session, gts-283i.2)
+_session 1d244b06-99e1-4b8a-ad53-c706b9e3c139 · v3 · 08-20_
+
+### Objective 1: Close gts-283i.2 — direct browser download from the classic-menu governance export dialog (§19.2)
+Rationale: TD-PLAN-20-08's suggested next-session order pointed at the `gts-283i` epic sweep next; `.2` was already `IN_PROGRESS` (started 2026-08-19) with its implementation substantially written but uncommitted and unverified this session, so picking it up meant verifying and closing existing work rather than authoring from scratch.
+Outcome [developer-facing]: Found `runExportForDialog` (src/Procedure-Exporter.js) and `ExportProgressDialog.html` already implementing the frozen contract — the server reuses `exportGovernance_`'s own `jsonString` (avoiding a costly re-stringify that a prior session's own comment says regressed `test_export_dialog_status_transitions_running_then_done` from ~152s to ~494s before the reuse fix), and the dialog's `triggerDownload_` builds a Blob/data-URL `<a download>` for JSON and base64-decoded PDF alongside the existing unchanged Drive-link path. `WebApp.js`'s `run_export_for_dialog_test` route already surfaces `jsonContent`/`pdfBase64` for headless testing. CardService path (`_buildExportResultSection_`) confirmed untouched, per scope.
+Outcome [internal]: Deployed to TEST (`pnpm run deploy:test`, v0.2.2 Rev Aug 20 17:39). Targeted gate `tests/test_export_dialog.py` 5/5 PASSED (224.93s) — covers the entry points and `jsonFileId`/`pdfFileId` shape, but not `jsonContent`/`pdfBase64` field correctness specifically; that assertion is left for `gts-283i.3` (hardening TST, no-shared-context rule) rather than authored here. Manually probed the response-size open question from §19.2 against 'the testmanual' doc (6 embedded images, exportPdf=true) via `call_webapp.py` — succeeded at ~12.5MB total payload — but this is not the full production Governance Manual the doc's own open question names, so the question is only partially retired; flagged on the bead as a residual risk, not closed.
+Outcome [internal]: `gts-283i.2` closed with `regression=pending` (targeted-subset gate only). Its blocking dependent `gts-283i.3` is now unblocked — 3/5 of the `gts-283i` epic's children are closed.
+Open: `src/Procedure-Exporter.js`, `src/ExportProgressDialog.html`, `src/WebApp.js`, `tests/test_export_dialog.py` remain uncommitted in the working tree — commit needs explicit go-ahead per this project's conservative git policy.
+
+### Key Learnings:
+None new — reused this project's own reuse-existing-mechanism practice (jsonString) and no-shared-context twin-ticket convention.
+
+## 2026-08-21 (post-close check-in)
+_session 1d244b06-99e1-4b8a-ad53-c706b9e3c139 · v3 · 08-21_
+
+### Objective 1: Commit the accumulated TD-PLAN-20-08 working tree
+Rationale: `gts-283i.2`'s close (previous entry) left its 4 touched files uncommitted per this project's conservative git policy, pending explicit go-ahead — the developer gave that go-ahead this turn ("commit all tracked files now"). The same working tree also carries every other already-closed TD-PLAN-20-08 fix (op/parentOp correlation propagation, sidebar exception-type fix, folder-isolation/image-extraction work) that had accumulated across prior sessions without a commit boundary.
+Outcome [internal]: All tracked (modified, not untracked) files committed in one commit spanning the TD-PLAN-20-08 session arc — see commit message for the itemized breakdown. Untracked files (`TD-PLAN-20-08.md`, `scripts/export_governance.py`, `tests/test_export_dialog.py`, `tests/test_gas_log_op_correlation.py`, and a stray `.TD-PLAN-20-08.md.swp`) left unstaged per the "tracked files" scoping of the request.
+Open: Untracked files above were not committed — flag for a follow-up commit/`git add` decision if they're meant to ship too; the `.swp` file in particular should probably just be deleted, not committed.
+
+## 2026-08-25 20:35:00
+_session 46e03100 · v3 · 08-25_
+
+### Objective 1: Freeze the block-correlation and schema contract so the DOCX export pipeline's nine stages can be built without their authors reading each other's code
+Rationale: ADR-0026 pivots document export from the Docs API to a locally-parsed `.docx` source, and names exactly one substantive design question it authorises but does not answer — how `w:commentReference` ids and OOXML run positions map onto the existing `block__****` identity scheme. OOXML run offsets and Docs structural indices are different coordinate systems, so this is a schema-version question, not an implementation detail, and nothing downstream can start until it is frozen. The stage's stated must-not-do — no pipeline code — held.
+Two owner constraints shaped the contract more than the OOXML did. First, back-port alignment: the Python pipeline is a local re-implementation of the GAS exporter *plus* new capability, and some of that capability may later be back-ported into the JavaScript, so every structural choice stays as close to `src/Procedure-Exporter.js`'s decomposition as the source format allows and each deviation must be named and justified. Second, on where extracted images land: "The image extraction should be local to a document specific folder for the given document we are working on. Again this is a python, local execution mirroring of the current GAS functionality."
+Rejected: synthesising a character offset to mimic the Docs API's `startIndex`. It would *look* like a Docs index, invite comparison with one, and be wrong. Ordinal-based ids won instead — incremented once per *emitted* block, so a diverted TOC line consumes no ordinal. The consequence is deliberate and load-bearing: cross-implementation id stability becomes an explicit non-goal, which means the stage-7 differential oracle must align structurally (traversal position + normalised text) and any oracle design that joins on `id` is invalid.
+Rejected: a `2.5` minor bump. Ids change derivation, `association_basis` and `possible_authors` are removed rather than deprecated, and `location` gains two required fields — that is a major. GAS stays frozen at 2.4, and the Python artifact carries `producer: "python-document-export"` so the oracle treats its *absence* as "GAS produced this" and can run without editing frozen code.
+Outcome [developer-facing]: `docs/interfaces/document-export-contract.md` — 450 lines, schema 3.0. Covers coordinate systems and the ordinal id scheme, comment anchoring (`anchor_basis` replacing `association_basis`; a range spanning blocks yields ONE record with N block ids), the revision model, image extraction, the full degrading-field table, the schema-version rationale, and the Python CLI's public surface with `build_export(docx_bytes, ...) -> dict` as a network-free filesystem-free offline seam. `docs/interfaces/` is new to this repo.
+Outcome [developer-facing]: the fourth design question — reconciling `w:ins`/`w:del` run splits with block text offsets — is dissolved rather than answered. Those elements wrap whole `w:r` elements, so revision state is a property of a run, not a range, and no offset reconciliation exists to do.
+Outcome [internal]: `gts-lm0a` closed against all six AC items.
+
+### Objective 2: Settle what happens to the four hardening beads that were written against the exporter ADR-0026 has since frozen  [accreted]
+Transition: the freeze made four already-filed `[TST]`/`[IMP]` beads ambiguous the moment it landed — ADR-0026's own Consequences say a frozen baseline needs no new hardening tests, since tests written to protect code nothing will modify protect nothing. Leaving them silently open would have let stage 2 start against an unresolved test surface, so the decision was staged alongside the contract rather than after it.
+Rationale: the split that mattered was not "GAS or Python" but "is the *invariant* portable, and are the *assertions*?" Every one of the four had portable intent; only two had portable assertions. Separating those let three of the four close without losing coverage.
+Outcome [developer-facing]: `gts-0rho`'s AC #6 rewritten to absorb the four image invariants from `gts-283i.5`, re-expressed against local CLI output per contract §7.4 — on-disk file existence with an image content type, `image_ref` idempotency across re-export, `alt_description` null and never fabricated, and `document.images` omitted entirely (not `[]`) for an image-free document.
+Outcome [internal]: `gts-283i.3` closed superseded (a GAS/CardService dialog return shape with no Python analogue; its portable intent is contract §7.3's three-tier acquisition model, exercised by stage 2). `gts-283i.5` closed against the new AC. `gts-e7ca` ratified as staged — pure portable schema shape, stays a stage-7 row, closes with `gts-0rho` AC #3. `gts-uenq` closed with all four recorded.
+Outcome [internal]: `knowledge-base/staging/document-export.md` gained a §Disposition table and a stage-7 row; §Handoffs gained the stage-1 entry (Done · Found · Next stages must know · Deliberately not done).
+
+### Objective 3: Keep the contract from being orphaned when the staging document that references it is deleted
+Transition: surfaced by the stage-close `/doc-trigger-check`, which the plan mandates per stage.
+Rationale: the check confirmed rather than assumed the expected answer — document export appears zero times in `docs/CONTEXT.md`, `docs/OPERATIONS.md` and `README.md`, and once in `docs/DESIGN.md`, but that gap is stage 9's by plan, so it is deferred and not drift. What the check *did* find is not deferred: `gts-odpk` AC #8 deletes the staging doc at plan close, and the staging doc is currently one of only two things pointing at the contract. Nothing in stage 9 required linking it from a permanent document.
+Outcome [internal]: `gts-odpk` gained AC #9 requiring the contract be linked from DESIGN.md (and from `docs/document-exporter.md` once `gts-fadg` lands). `gts-28hx` gained a note that AC #6(d) cannot run without an image-free `.docx` in the stage-2 fixture corpus.
+Open: whether the schema 3.0 bump warrants its own ADR, or is adequately covered as a resolution of the questions ADR-0026 explicitly deferred. Not decided; flagged for the owner.
+Open: epic `gts-283i` now has all five children closed but was left open deliberately — outside `gts-uenq`'s scope, and three children carry `regression=pending` debt that stage 9 pays.
+
+### Key Learnings:
+The prior session in this stage (sessions `0573cb14`/`144f8133`/`1b0823fb`, 08-25 19:46–20:13 — ADR-0026, the nine-stage staging plan, and the contract's first draft) has no work-log entry. Objective 1 above reconstructs it from `/tmp/HANDOFF-GAS.md` and the artifacts, not from those transcripts; a coverage audit will still flag them as capture gaps.
+
+## 2026-08-25 21:23:15
+_session ed89ed5a-7f1f-4939-976b-2b5d545bd148 · v3 · 08-25_
+
+### Objective 1: Build the offline .docx-export harness (stage `docx-harness`, `gts-28hx`)
+Rationale: ADR-0026 moved document-export JSON generation to a local Python pipeline parsing a downloaded `.docx`, closing a corpus-coverage hole where Drive-hosted native `.docx` files are entirely invisible to the Docs-API-based GAS exporter. This stage builds the package skeleton, acquisition, and diagnostics every later structural pass (comments, revisions, images) lands into, plus the checked-in fixture corpus that lets those passes be tested with no live Google auth.
+Outcome [developer-facing]: `document_export/` package (`schema.py`, `package.py`, `acquire.py`, `build.py`, `cli.py`) and `scripts/export_document.py` shim, implementing the frozen contract at `docs/interfaces/document-export-contract.md`. `build_export(docx_bytes, ...)` is pure (no network, no filesystem writes) and emits a near-empty schema-3.0 artifact (document metadata + diagnostics; no blocks/comments/revisions/images yet).
+Outcome [developer-facing]: Hand-built OOXML fixture corpus (`document_export/fixtures/golden.docx` + `golden-no-images.docx`, with a README mapping feature to location) exercising comments (threaded + resolved), tracked changes (including inserted-then-deleted), a table with a mid-cell unit-switch, a numbered list, a TOC field, and an inline image.
+Outcome [developer-facing]: `tests/test_document_export_harness.py` — 18 offline tests, all green. All six of `gts-28hx`'s AC verified, including a live run against ADR-0026's confirmed Drive-hosted native `.docx` (`1aK1jDQY6kfGs4op1t8hZrpN-pzrAMPNF`) that the GAS exporter cannot see at all.
+Outcome [internal]: Filed `gts-2moy` — `tests/conftest.py`'s session-scoped autouse fixtures require a live GAS test-token session for *any* test under `tests/`, including this stage's fully offline module; worked around with `pytest --noconftest` for this stage's gate, but will recur for every offline test stages 3-7 add.
+
+Periodically audit this log: python3 ~/.claude/skills/work-log-audit/scripts/work-log-lint.py work-log.md --since 2026-08-25 --coverage
+## 2026-08-27 06:15:00
+_session e902e073 · v3 · 08-27_
+
+### Objective 1: Restore confidence in the regression suite after a full sweep collapsed under a stale test token
+Rationale: A 635-test sweep produced 104 failures + 73 errors; user directive was explicit — "do not rerun the regression tests, it is very expensive and time consuming... after an initial triage to identify primary causes, create beads to address the primary issues. then in an agent with a clear context, iterate over the beads to claim and resolve" — so the goal was root-causing from the existing log plus targeted, not full, reverification. Triage found every failure/error bottomed out in the same `scn.session.FixtureTokenError` (test-token-unauthorized), not per-test defects. Verifying the fix (targeted single-file runs, not the full suite) then surfaced two further, genuinely distinct pre-existing regressions.
+Outcome [internal]: `pnpm run deploy:test` refreshed the rejected test token (gts-5959, closed) — confirmed the token, not a code defect, was blocking the whole suite.
+Outcome [developer-facing]: Fixed a real regression from same-day commit 90a3da0 — `_handleRunFixture` (`src/TestWebApp.js`) was unconditionally clobbering a caller-supplied `docId` with an empty string, silently no-opping `move_doc_to_folder` for several test files (gts-8gev, closed).
+Outcome [developer-facing]: Fixed `tests/test_sidebar.py`'s version-label regex, stale since the gas-static conversion dropped the leading "v" from `BUILD_INFO.version` (gts-kqvk, closed) — confirmed via two independent full-file runs; one spurious timeout in the process was traced to two verification runs contending for the same GAS/Docs backend concurrently, not a defect.
+
+### Objective 2: Prevent the next stale-token sweep from burning a full 635-test run before anyone reads the root cause  [accreted]
+Transition: raised by the user directly after Objective 1 closed out — "should we issue a new test token when we push new deployment to avoid the test tokens expiring?" — prompted by having just paid the cost this session's triage was meant to avoid.
+Rationale: Investigation showed the token-refresh mechanism already exists (`registerTestToken` in `scripts/deploy-hooks.js`, run on every `pnpm run deploy:test`, 24h TTL) — so the gap wasn't "no refresh on deploy." The real exposure: `set_test_token` overwrites a single server-side value, so a concurrent/overlapping `deploy:test` (another session, CI) can invalidate a token whose local `testTokenExpiresAt` still looks valid, and the local expiry check alone can't see that. The failure only surfaces once a live call fails mid-suite — after collection has already fanned a stale token into 100+ downstream results.
+Outcome [internal]: Filed gts-d6nz — a session-scoped pytest pre-flight check that makes one cheap live call before the suite proceeds, failing fast with the known fix instead of letting a stale token cascade through the full collection. Left the concrete mechanism (conftest.py fixture vs. reusing a WebApp.js version-style endpoint) open for whoever implements it.
+
+### Key Learnings:
+`test-token-unauthorized` (vs. `test-token-expired`) does not imply the local cached `testTokenExpiresAt` is stale — the server-side test token is a single overwritable value, so a concurrent `deploy:test` elsewhere invalidates any locally-cached token regardless of its recorded expiry.
+Running two Playwright/pytest suites concurrently against the same GAS/Docs backend produces spurious UI-timeout failures (contention, not defects) — cross-check a suspicious single-test failure against any concurrently-running verification pass before filing it as a regression.
+
+## 2026-08-27 (session close)
+_session e3740e57 · v3 · 08-27_
+
+### Objective 1: Diagnose why a newly created floating action ("didn't sync automatically, chip appeared missing") confused the operator
+Rationale: User expected `@create action` to write directly into the ActionSheet and was confused when it didn't, then separately couldn't find the inserted chip in the document.
+Outcome [internal]: Confirmed by design — `_submitCreateAction` intentionally only inserts the doc-side chip; the sheet row is deferred to the next sync to stay within the GAS 30s execution limit (comment in `src/EditorAddonCard.js`). Confirmed via Axiom logs (`insertChip.done`, cursorIndex=331) and a live `dump_doc_paragraphs` read that ACT-9 was in fact inserted — at the cursor's actual position near the top of the doc, not in the "Action Items" section the user expected, which is why it looked like it "went away."
+
+### Objective 2: Diagnose newly reported regression — action text flushed sheet→doc renders entirely bold [accreted]
+Transition: Raised as a new, unrelated bug report right after Objective 1 closed; investigated in the same session while the doc-inspection tooling (dump_raw_docs_api) was already warm.
+Rationale: User: "action items when written into the doc are now being written entirely in bold." Needed a concrete root cause, not just a repro.
+Outcome [developer-facing]: Root cause identified — ADR-0022 / commit `533d8b8` (2026-08-01) removed `bold`/`italic` from `_actionTextStyleRequest`'s field mask (`src/SyncManager.js`), intending per-run inline-formatting requests (gts-zocq) to own bold/italic exclusively. Gap: when a sheet cell carries no rich-text runs (the common plain-text case), the per-run reapply loop is a no-op, so nothing ever resets bold — the newly-inserted action text inherits whatever ambient style Docs REST insertion assigns at that position, which is empirically bold (confirmed live on ACT-3 in doc `1CJ5WXZE…` via `dump_raw_docs_api`). ADR-0022 itself flags this exact risk as "assumed, not confirmed... reverting is a two-line diff." Proposed fix (not yet implemented, pending user go-ahead): reinstate an explicit `bold:false,italic:false` base reset, then let per-run requests override on top (ADR-0022 option (a)).
+Open: Fix not yet implemented — awaiting user decision on whether to proceed via the twin-ticket `[FIX]` flow or file a bd issue first.
+
+## 2026-08-27 08:19:39
+_session 7c1e6279-06f2-47b5-b505-2f091b926568 · v3 · 08-27_
+
+### Objective 1: Let an operator force-refresh every ACT/AI action item's rendering in a doc, independent of data changes
+Rationale: Normal sync only rewrites an action paragraph when its underlying data diverges from the sheet (sheetWin, new assignment, duplicate copy, missing status). A doc whose actions already match the sheet is invisible to that diff, so a rendering-only change (chip URL scheme, badge, run/field formatting) never reaches already-converged items — the user's actual complaint ("sync seems to only sync what we have... I want to force an update of the google doc"). User directed the fix explicitly: "create it. make sure to refactor, extend or reuse existing mechanisms rather than proliferating copies."
+Outcome [user-facing]: New Docs "Action Sync" menu item "Force Refresh Style" (menuForceRefreshActiveDoc) rewrites every canonical action paragraph in the active doc to current rendering, bypassing the diff.
+Outcome [developer-facing]: syncDocument(docId, opts) gained an opts.force flag that adds every canonical globalId to the existing toFlush map unconditionally, reusing the same _flushActionParagraphs path — no new lock/scan/flush mechanism. sync.complete now carries forced:<bool>; a new sync.forceFlush {docId,count} log line signals a force-only flush for test/Axiom assertions. Refactor pass: extracted a shared _buildFlushEntry(cf, globalId, overrides) helper and replaced 5 near-identical toFlush object-literal blocks (sheetWin/new-assign/duplicate/missing-status/force) with calls to it, per the user's reuse-not-proliferate instruction.
+Outcome [developer-facing]: Twin-ticket pair gts-t78c [IMP] / gts-iqpp [TST] created and claimed with full pre-code contract (entry points, log tags, AC). Followed ATDD red→green→refactor: two new tests in tests/test_menu_entry_points.py (force-flush proof via sync.forceFlush log assertion; non-regression absence check for default sync) written first and confirmed failing, then implementation made them pass, then the refactor was re-verified against a redeployed TEST build.
+Open: Full pytest -x sweep (required by this repo's Backstop rule before closing a [TST] bead) had not yet been run when the session was interrupted — deploy of the refactored build (v0.2.3.26) and the targeted test_menu_entry_points.py re-run were in flight. Beads gts-t78c/gts-iqpp remain open/claimed, not yet closed.
+## 2026-08-27 21:55:00
+_session a84e01ae · v3 · 08-27_
+
+### Objective 1: Audit ADR-0027's tracking coverage before starting new work
+Rationale: Before touching the floating-action grammar/link-preservation ADR, confirm every rule it states already has implementation and hardening-test beads tracked, rather than assuming gaps exist.
+Outcome [internal]: Traced all 16 rules against `bd` — every rule already had a closed `[IMP]` and an open `[TST]` twin (gts-mmyc/gts-nrxn, gts-q23h/gts-ucdz, gts-xvlu/gts-thwh, gts-nuur+gts-eezz+gts-u0kh/gts-82s2, gts-jn8o/gts-tz5x); no new beads were needed. Flagged two follow-ups instead of filing new beads: the ADR's `Status: Proposed` header looked stale given gts-4l1a's own close note, and two uncommitted test files (test_field_continuation_flush.py, test_hyperlink_preservation.py) matched open/closed beads but weren't yet claimed or committed.
+
+### Objective 2: Give the floating-action reference example a canonical, round-trippable source instead of hand-typed ADR prose  [accreted]
+Transition: the user asked directly to implement gts-colw (the rule-16 reference-doc bead) and to fold the five open `[TST]` beads' cases into one consolidated verification script against it — a new goal picked up once the audit above was done.
+Rationale: ADR-0027's rules 5a/8/9/15 worked examples were hand-typed and free to drift from real parser behavior; gts-colw's brief called for a human-editable canonical Doc backed by a git-diffable text format precise enough to regenerate the Doc from scratch. User's framing: "you would then draft the modified markdown, and use that to create the script. it's not a one-off script. it's a bi-directional script. i can then review either the markdown or the google doc and extend it."
+Rejected: literal UI hand-authoring of the canonical Doc (gts-colw's original AC wording) — infeasible for an agent; user approved scripting it via `DocumentApp` calls instead, with the Doc left open for the user to edit afterward.
+Outcome [developer-facing]: Designed and shipped Action Portable Text (APT) v1 (`docs/interfaces/action-portable-text.md`) plus `src/PortableText.js` (`encodeDocToApt`/`decodeAptIntoDoc`), built via raw Docs REST `batchUpdate` after discovering empirically that `DocumentApp#appendText` silently drops a literal soft-return character and has no PERSON-chip insertion API at all. Created the permanent canonical reference Doc (21 actions + 1 prose + 1 malformed paragraph covering every ADR-0027 rule and every doc-content-representable case across the five open `[TST]` beads), checked in `tests/fixtures/action-reference.apt.txt`, and wrote the consolidated `tests/test_adr0027_reference_document.py`, sectioned by bead.
+Outcome [developer-facing]: When the user hand-edited the canonical Doc (adding bold/italic examples) and asked to push the fix back and confirm bidirectionality, found and fixed two real bugs surfaced only by that live round trip: `decode_reference_document` was append-only against an already-populated doc (a correction push silently duplicated all content instead of replacing it — fixed by clearing the body first) and `_aptMatchSpan` treated a link's inner text as fully opaque (a chip-badge's bold+link token wrote literal asterisk characters into the doc instead of reconstructing the nesting — fixed by recognizing whole-width bold/italic nesting inside a link span). Re-verified `encode(decode(x)) == x` against the corrected, now-synced-and-hand-edited Doc: exact match.
+Open: whether the canonical Doc's own auto-materialized sync (chip badges, default statuses) was the user running Sync now deliberately or exposure to the discovery sweep worth guarding against; a likely off-by-one bug in `SyncManager.js`'s "materialize missing status" flush path that truncates a link run by one character, found but not yet filed as its own bead.
+
+### Key Learnings:
+`DocumentApp`'s high-level API (`appendText`, etc.) silently mangles a literal U+000B soft-return character (round-trips as a plain space) and has no method to insert a PERSON chip — both require going through the raw Docs REST API `batchUpdate` (`insertText`, `insertPerson`), matching the project's existing `_buildFlushRequests`/`_insertTrackerAssigneeChips` precedent rather than an oversight.
+
+## 2026-08-27 19:23:07
+_session 3590c0c8 · v3 · 08-27_
+
+### Objective 1: Retire 'governance' terminology from the document exporter in favor of 'document' (gts-284o)
+Rationale: The exporter is named for the corpus that happened to seed it (the Governance Manual) rather than what it does — it processes any structured authoritative document. User confirmed at session start: "I am good with the GDX prefix for the doc exporter work, and go ahead removing the term governance in favor of document."
+Rejected: GAS output filename was renamed straight to `-document.json` first, but that collided with a documented invariant (`docs/interfaces/document-export-contract.md` §7.4) keeping the GAS and Python artifacts distinctly named so both can sit in one directory for the differential oracle. Resolved with the user mid-session to `-gas.json` (GAS/Docs-API side) / `-docx.json` (Python/.docx side) instead.
+Rejected: `docs/suite-composition-deployment.md` stated WebApp `action` strings and GasLogger tags are "unchanged by any stage." User chose to proceed with renaming them anyway (`export_governance_json` → `export_document_json`, `governance_export.*` → `document_export.*`); that doc's wording was corrected to describe gts-284o as the one landed exception rather than reverted.
+Outcome [developer-facing]: Renamed all governance→document identifiers, the wire action string, log tags, and the output-filename scheme across `src/Procedure-Exporter.js`, `WebApp.js`, `MenuHandler.js`, `ExportFolderMap.js`, `WorkspaceAddonCard.js`, `appsscript.json`, `ExportProgressDialog.html`, `document_export/structure.py` (found and fixed a live violation of that package's own "governance must not appear" contract), and every Python test/support call site; bumped `DOC_EXPORT_SCHEMA_VERSION` 2.4→2.5; renamed `tests/test_governance_export.py`→`tests/test_document_export.py` and `scripts/export_governance.py`→`scripts/export_gas.py`; amended ADR-0026 with the completed-migration mapping.
+Outcome [user-facing]: `ExportProgressDialog.html`'s user-visible copy and downloaded-file naming no longer say "governance."
+Outcome [internal]: Deployed to TEST (v0.2.3.34); offline harness 88/90 green (2 pre-existing unrelated schema-drift failures); live `test_document_export.py` + `test_export_dialog.py` 27/27 green; forced the export-error path over the wire and found a genuine pre-existing bug (`_handleExportDocumentJson`'s catch block never flushes GasLogger, so its error tag can't reach Axiom regardless of name) — filed as gts-tbs8 rather than fixed inline. Deferred `docs/procedure-exporter.md`'s file rename and content restructuring to the already-ticketed gts-fadg (distinct, larger charter) rather than duplicate/collide with it; left the exact identifier mapping as a comment there. gts-284o closed with `regression=pending` (targeted gate only, full `pytest -x` not run per project convention); closing it unblocked `gts-9omu`.
+
+### Key Learnings:
+`GasLogger.log()` calls in this codebase must be paired with an explicit `GasLogger.flush()` in the same code path — there is no implicit flush-on-response in `doPost`, so a missing flush silently drops events rather than erroring.
+## 2026-08-28 05:24:12
+_session ae234f88 · v3 · 08-28_
+
+### Objective 1: Split the ADR-0027 grammar reference into per-boundary corpora and wire a shared round-trip check
+Rationale: The staged APT-testing plan's thesis is moving the floating-action grammar out of test-construction code and into data, verdict into one differ; stage `apt-scenarios` (`gts-ndb8`) is where "what a corpus is" gets settled — the scenario-triple format and the corpus split are one design decision, done together so the shape isn't invented twice.
+Outcome [developer-facing]: `action-reference.apt.txt` split into 5 doc-less, per-boundary golden corpora under `tests/fixtures/` (grammar-matrix, unparseable-reporting, hyperlink-roundtrip, field-continuation, dual-prefix), each `serves:` naming exactly one `[TST]` bead and every action record carrying a decision-9 prose annotation (`apt_lib.unannotated_records` lints it, proven to fail on an unannotated record before acceptance).
+Outcome [developer-facing]: Scenario-triple format landed as `apt_lib.Scenario`/`load_scenario` plus one `<name>.scenario.json` per corpus encoding the degenerate "sync once" case; a new generic pytest lane (`tests/test_apt_corpus_check.py`) decodes each corpus into a fresh doc, syncs once, re-encodes, and asserts `apt_lib.diff_apt(...).clean` — the same differ the CLI and pytest both call. A non-`sync` mutation kind fails loudly rather than being silently skipped, since that's stage `apt-lanes`'s job.
+Outcome [internal]: 20 new offline unit tests (`tests/test_apt_scenario_format.py`, all `no_live_session`) plus all 6 live round-trip scenarios green against the real GAS backend; caught and fixed one bug in the process (an unescaped literal `>` in a hand-authored annotation — APT's own escaping rule applies inside annotation prose same as any other text). `action-reference.apt.txt` and `tests/test_adr0027_reference_document.py` left deliberately untouched, coexisting with the split corpora until `act-retire` per the plan's own thesis. `docs/interfaces/action-portable-text.md` gained "Split per-boundary corpora" and "Scenario triples" sections; the staging doc's execution-order table and revision log updated. `gts-ndb8` closed (`regression=pending`, targeted gate only); `gts-83s5` (stage `apt-v2-containers`) now unblocked.
+
+### Key Learnings:
+APT's `ACT-N`/`AI-N` token digits are literal text written by `decodeAptIntoDoc`, not renumbered on read — a record's N stays stable when moved between corpus files, so splitting/duplicating records across new files needed no digit bookkeeping.
+## 2026-08-28 10:15:00
+_session d6c766c5 · v3 · 08-28_
+
+### Objective 1: Live-verify the sheet-edit-flush and @create boundary APT test lanes (staged plan `apt-testing.md`, stage `apt-lanes`)
+Rationale: Both lanes (`gts-iz9i`, `gts-pi1s`) had been written and offline-verified in a prior session but not confirmed clean against the real GAS backend — completing that live verification is what lets the batched-scenario lane runner actually replace the paragraph-builder tests it's meant to retire.
+Rejected: none — the prior session's handoff (`/tmp/HANDOFF-stage6.md`) already specified the exact probe-and-bless workflow to use, so this session executed it rather than redesigning.
+Outcome [developer-facing]: `scripts/apt_lib.py`'s N-normalisation extended to also see through the same N repeated inside a re-flushed badge's chip-preview URL (`ain=` param), fixing a genuine differ gap the flush lane's first live run exposed — proven to fail before the fix via a new regression case in `tests/test_apt_differ.py`.
+Outcome [developer-facing]: `create-lane-start` golden corpus fixed for APT's underscore-escaping convention (unpaired leading `_` must be escaped in annotation prose, same rule already documented for `list-and-table-containers.apt.txt`).
+Outcome [internal]: `tests/test_apt_flush_lane.py` and `tests/test_apt_create_lane.py` both live-clean against the real GAS test backend; full offline `apt_*` suite (176 tests) green. `gts-iz9i`/`gts-pi1s` closed with `regression=pending` (targeted gate, per project Backstop default); `gts-45fg` (stage `act-retire`) now unblocked. Staged plan `knowledge-base/staging/apt-testing.md` updated (execution-order table + revision log).
+
+## 2026-08-28 23:11:27
+_session de20f3d0 · v3 · 08-28_
+
+### Objective 1: Give APT testing an oracle that can contradict the system it tests
+Rationale: Every APT scenario asserted `encode(sync(decode(X))) == X` with input and expected the same corpus, and every golden was blessed off the running add-on — so a sync that scanned nothing satisfied all of them, which is how 20 of 21 actions in the canonical reference Doc went unscanned and then became rows marked *Deleted* with the suite green. The correction is twin-track independence: parse the document in Python straight from ADR-0027's written grammar, and make the ActionSheet answer to that parse. The stage's own *Must not* — "read `tests/fixtures/*.apt.txt` while authoring the parser" — was the load-bearing constraint, since deriving the parser from corpora the implementation produced would rebuild the same circularity one layer down.
+Outcome [developer-facing]: `tests/helpers/doc_inspect.py:floating_actions()` re-authored as a full ADR-0027 grammar parse — token, chip/text assignee, header-line-scoped status (with the gts-1tbe position refinement), soft-return continuation blocks, `Field: value` lines, present-but-unlinked tokens, rule-6 unparseable paragraphs and pending bare triggers, across body / list-item / table-cell containers. Detection no longer depends on `w:numPr`, the pre-ADR-0027 checklist grammar it had been stuck on.
+Outcome [developer-facing]: `tests/helpers/doc_sheet_agreement.py` — a bidirectional doc↔sheet assertion whose expected value comes only from that parse; a *Deleted* row is no longer exempt from needing a doc counterpart, which is the specific exemption that hid the incident.
+Outcome [developer-facing]: `tests/helpers/docx_build.py` lets any grammar case be constructed offline (soft returns, tabs, chips, link runs, bold, list items, table cells), so new grammar assertions need neither a live Doc nor a GAS deploy — 37 of the 41 new tests run with no network at all.
+Outcome [internal]: `scn/surfaces.py:SheetReader` now reads the `custom_fields` column, which had been in the contract since ADR-0027 rule 9 but never surfaced, and its cell lookup no longer raises `IndexError` on a short row.
+Outcome [internal]: Running the new oracle against the canonical Doc immediately corrected two of the plan's own premises — the Doc holds 21 tokened actions *plus* one deliberate rule-6 paragraph, and all 21 tokens currently carry their chip-badge link, so stage `apt-repair` has less to repair than assumed. Both recorded as AC on the downstream beads rather than as prose.
+Open: no live lane calls `assert_doc_sheet_agreement` yet — deliberately left to stage `apt-lane-guards`, so the assertion is not tuned to a state stage `apt-repair` has not yet fixed.
+
+### Key Learnings:
+A PERSON chip exports to `.docx` with the *email* as its display text, not a resolved display name — a doc-side `assignee_name` therefore carries no claim to compare against the sheet's. And `python-docx`'s `para.text` drops both `<w:br/>` and `<w:tab/>`, which is precisely why ADR-0027's `SR` terminal and rule 8's field-label tab were invisible to the old helper.
+
+## 2026-08-29 01:20:00
+_session c822b171 · v3 · 08-29_
+
+### Objective 1: Make the force-flush re-render reachable without a browser, so a corpus repair can be driven from the command line
+Rationale: Stage `apt-repair` has to re-render every action paragraph in the canonical ADR-0027 reference Doc, and force-flush — the only sync path that rewrites a paragraph whose sheet and doc data already agree — was reachable only from the Docs menu and from a GAS-side test fixture. Both need a browser. Without a route, the repair is a manual click-through that nothing can re-run or assert.
+Rejected: the stage's own premise. `gts-366c` said to thread `force` through "the route at `WebApp.js:445`", but that line is inside `_handleRegister` — the doGet `?cmd=register` browser form, neither doPost nor secret-gated, and registration has no converged state to re-flush. The other two doPost paths to `syncDocument()` were `team_sync_document` (OAuth assertion + EDIT tier) and the testToken `run_fixture` fixture, neither usable by `call_webapp.py`. Owner chose a new secret-gated doPost route; the AC was rewritten to a frozen contract before any code was written.
+Outcome [user-facing]: `python scripts/call_webapp.py sync_document --data '{"docId": "...", "force": true}'` now forces a full re-render of one document from the command line. `force` is compared `=== true`, so a shell-quoted `"true"` deliberately does *not* trigger a whole-document rewrite — the response's `forced` field is what says so, and `result: 'locked-skip'` distinguishes "raced a concurrent sync and did nothing" from success.
+Outcome [developer-facing]: `src/WebApp.js`'s `_handleSyncDocument`, registered in `src/ContractSchema.js` (`routeNames` + `messages`) and `scripts/call_webapp.py`'s `_SECRET_ROUTES`; `tests/test_force_refresh_route.py` (5 tests) covers the route's call-site. The two absence-asserting tests (`force` omitted, `force:'true'`) are the proven-to-fail pair for the positive one: a route that always forced would pass the happy path and fail both.
+Outcome [internal]: The force entry-point audit came back complete with no gap — exactly two production call-sites pass `{force}` into `syncDocument()`, both now covered. The table, including every *non*-forcing `syncDocument()` call-site so the audit is falsifiable, is a note on `gts-gssn`. Red run: 5 failed against v0.2.3.37; green after deploying v0.2.3.38: 12 passed with `tests/test_menu_entry_points.py`. Both beads closed `regression=pending`.
+Open: `gts-c7fp` — `doPost`'s terminal `else` branch appends a row to the bound spreadsheet's *active* sheet for any unrecognised secret-gated action and answers plain-text `'ok'`, so the red run wrote 20 junk rows into TEST `SyncState!A912:A932`. The cleanup needs a sheet mutation with no sanctioned wrapper, so it is left for an owner decision rather than done here.
+
+### Key Learnings:
+An action name that is not on the deployed build does not fail — it writes. `doPost`'s legacy-POC fallthrough sits below the secret gate, so a red-phase test against an undeployed route mutates the spreadsheet once per HTTP attempt (five, given `_http_post`'s non-JSON retry). Relatedly, the secret gate's `unauthorized` is plain text rather than JSON, which every sanctioned caller reads as GAS deployment-propagation lag — an auth failure costs ~90s of backoff and then misdiagnoses itself.
+
+## 2026-09-02 17:45:00
+_session unknown · v3 · 08-29→09-02 (session-miner backfill across multiple sessions, not a single transcript)_
+
+### Objective 1: Make the automated test suite actually prove floating-action sync works, instead of passing vacuously
+Rationale (inferred): Manual review of the canonical reference document turned up floating actions the scanner silently missed, even though the existing automated suite reported green — the suite's own oracle compared the system's output to itself, so a sync that did nothing still passed.
+Rejected: Continuing to patch the existing suite in place; the oracle itself (identity comparison) had to be replaced, not just individual test cases.
+Outcome [user-facing]: Silent sync failures (actions typed into a document but never tracked) are now caught by an independent parser of the document grammar, checked against the tracking sheet, rather than by a test that can be satisfied by doing nothing.
+Outcome [developer-facing]: New doc-vs-sheet agreement checker, lane guards (short scan counts, stale deployed build, "Deleted" rows), and genuine before/after test corpora; ~40 tests migrated onto a shared-document batching pattern, cutting a 5-minute test run to under 2 minutes; pytest split into fast/local/live tiers.
+Outcome [internal]: The gap traced back to a 2026-06-02 lesson that had been captured too narrowly (named specific functions instead of the general failure class); a staged planning document was also lost on retirement before being committed, and had to be reconstructed from session history — prompting a broader look at when planning docs need to be preserved.
+
+### Objective 2: Keep continuation-line indent and character styling configurable and correct on sync, without unwanted reformatting
+Rationale (inferred): Continuation lines under an action needed a configurable indent, and the visual style in the document needed to reliably match configuration — but only when a user actually asked for a re-sync of that document, not silently in the background.
+Rejected: none — resolved directly by design discussion which sync entry points are allowed to restyle a document a user may be actively viewing.
+Outcome [user-facing]: New config options for continuation-line indent; typing a plain action token directly into a document now picks up correct chip/link/bold styling on the next explicit "Document Sync," matching what "Force Refresh Style" already guaranteed. Background syncs and the sheet-side "Sync All" no longer restyle documents out from under someone viewing them.
+Outcome [internal]: A one-character offset bug in the re-flush formatting logic was corrupting bold/italic/link formatting in the live document on every re-flush of an assigned action — found only because the user manually reviewed the document and flagged it sharply ("0 stars"), which is what triggered the test-oracle rebuild in Objective 1.
+
+### Objective 3: Keep the Team Actions tracking sheet free of stale/orphaned rows without deleting documents that are legitimately untouched
+Rationale (inferred): The tracking sheet accumulated broken-link and blank-name rows over time, degrading usability and test cost, so the cleanup sweep needed widening — but widening it too far risked treating "no actions yet" as "abandoned."
+Rejected: A widened eviction rule that treated any tracked document with zero action rows as litter — this deleted documents within about a second of the user registering and syncing them, discovered live during hands-on testing, not by any test.
+Outcome [user-facing]: Hyperlinked document names in the tracking sheet are preserved instead of being flattened to plain text; a one-time cleanup removed ~86 leaked test documents and thousands of stale rows. A newly-registered document with no actions yet is no longer at risk of being auto-deleted.
+Outcome [internal]: Eviction is now scoped to documents explicitly marked "Doc Not Found," not inferred from an empty action list.
+
+### Objective 4: Let a team admin scan their Drive folder for action documents that were never registered for tracking
+Rationale (inferred): Some documents contain action items but were never added to tracking, and there was no way to find them short of manual review.
+Rejected: A single-shot scan that fit within Google Apps Script's ~4.5-minute request budget — this couldn't finish scanning a large folder (261 documents) and restarted from zero every time it was re-run.
+Outcome [user-facing]: Admins now see a "Scan for untracked docs" option on their team's portal view; it resumes across multiple runs instead of restarting, with visible progress. The scan recognizes both current and legacy action-token formats, so older historical documents are found too.
+Outcome [internal]: An intermediate, faster document-read approach leaked real document content (meeting notes, names) into logs for about 3 minutes (~86 events) during manual testing of this feature — fixed by reverting to the codebase's existing safe read pattern and hardening the logger against ever emitting raw exception text. A same-day retrospective (requested by the user, who noted the feature "seemed to take an inordinate amount of time and context") found the overrun came from idle polling of background work, repeated attempts to avoid a proven existing pattern for an unvalidated performance guess, and scope quietly growing from a single fix into a cross-repo feature without being re-scoped.
+
+### Objective 5: Let a user see actions across every team they have access to, not just one team at a time, and make the portal load faster
+Rationale (inferred): Users with access to multiple teams had no combined view, and the portal was reported as slow to load.
+Outcome [user-facing]: New "All teams" option on the team switcher, grouped by team and by document with independent expand/collapse; per-team sync/edit permissions are now correctly scoped instead of one blanket permission for the whole page. A permissions bug was also fixed where access inherited from a Shared Drive (rather than granted directly on a team folder) wasn't recognized, so some users saw view-only when they actually had edit access.
+Outcome [internal]: Page load was doing the same team-access check twice per load and re-opening the spreadsheet twice per request; fixed via per-request memoization and de-duplication.
+
+### Objective 6: Make sure add-on menu actions always run the current deployed code, never a stale cached version
+Rationale (inferred): A Force Sync from the document's menu ran a two-day-old build even though the web app was already serving current code, traced to a version pin in the add-on's own installation that the normal deploy process never touched.
+Outcome [user-facing]: Sync, Force Refresh, and Insert Tracker Table menu/sidebar actions now always run whatever is currently live on the verified web deployment, closing the stale-build gap permanently rather than requiring an extra manual step after every future deploy.
+
+### Objective 7: Warn users when their portal page is running an outdated build
+Rationale (inferred): Following an established pattern from another project, the portal needed to tell users when the client they're looking at doesn't match the currently deployed server.
+Outcome [user-facing]: A build-version footer and a dismissible "reload" banner appear when the loaded page and the server version disagree.
+
+### Objective 8: Reduce how often the app re-reads the Actions sheet during normal use
+Rationale (inferred): The Actions sheet read is the app's most frequent operation; reducing repeated reads was part of the broader page-load and test-cost reduction effort alongside Objective 5.
+Outcome [internal]: A per-request snapshot now serves repeated reads from memory instead of re-reading the sheet each time, cutting an O(number-of-documents) read pattern down to a small constant number of reads. A longer-lived, cross-request cache was designed but deliberately deferred until the in-memory version's benefit is actually measured.
+
+### Key Learnings:
+A test oracle that compares a system's own output to itself (encode(sync(decode(x))) == x) can pass on a sync that does nothing — this class of vacuous-assertion risk needs to be checked wherever a test's expected value is derived from the same system under test, not treated as a one-off fix scoped to the functions where it was first found.

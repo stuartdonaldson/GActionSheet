@@ -7,11 +7,11 @@ ADR-0014 (team-scope model — sender-identity rationale)
 
 ## Context
 
-EPIC-E (`GTaskSheet-gc43`, Notify tab) and the deferred **Assignee reminder** Funnel entry
+EPIC-E (`gts-gc43`, Notify tab) and the deferred **Assignee reminder** Funnel entry
 (`knowledge-base/ROADMAP.md` §Funnel) both send HTML reminder emails listing an assignee's
 open actions. No canonical email-sending standard existed in this project, so the two features
 risked two parallel, divergent email-template implementations. This [INF] decision
-(`GTaskSheet-tv54`) records one standard before any email-send IMP work (`GTaskSheet-f3v9`)
+(`gts-tv54`) records one standard before any email-send IMP work (`gts-f3v9`)
 begins.
 
 A reusable, externally maintained pattern already exists:
@@ -39,7 +39,7 @@ Project-specific bindings:
    authorization. `MailApp`'s deployer-identity send is the wrong sender for a peer reminder.
 
 3. **Required scope.** `https://www.googleapis.com/auth/gmail.send` must be added to
-   `src/appsscript.json` `oauthScopes` (the IMP slice `GTaskSheet-f3v9` carries the manifest
+   `src/appsscript.json` `oauthScopes` (the IMP slice `gts-f3v9` carries the manifest
    change; it is not yet present).
 
 4. **Template location and naming.** The `.html` template lives in the Apps Script project root
@@ -61,12 +61,12 @@ Project-specific bindings:
 7. **Delivery policy (test isolation).** All sends route through `sendConfiguredEmail_()`, which
    honours an `Email Test Mode` Config-sheet flag and redirects to a safe test recipient with a
    TEST MODE banner. This keeps the EPIC-E acceptance and template `[TST]` runs
-   (`GTaskSheet-twwo`, `GTaskSheet-ay5w`) from emailing real assignees. Direct `GmailApp`/`MailApp`
+   (`gts-twwo`, `gts-ay5w`) from emailing real assignees. Direct `GmailApp`/`MailApp`
    calls that bypass the wrapper are disallowed.
 
 ## Consequences
 
-- **Easier:** `GTaskSheet-f3v9` implements against a fixed contract; `GTaskSheet-twwo` asserts
+- **Easier:** `gts-f3v9` implements against a fixed contract; `gts-twwo` asserts
   rendering/escaping against a known renderer/builder boundary (Node-unit-testable without
   mocking, per the practice's `HtmlService` guard); the Assignee Reminder funnel item, when
   promoted, reuses the same template/renderer with no second design pass.

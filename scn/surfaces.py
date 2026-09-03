@@ -21,35 +21,12 @@ from scn.ai import ai
 from scn import contract as _contract
 
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-_AI_TOKEN_RE = re.compile(r"^(AI-\d+):\s*")
 _EMAIL_RE = re.compile(r"[\w.+\-]+@[\w\-]+(?:\.[a-z]{2,})+", re.IGNORECASE)
-_STATUS_RE = re.compile(r"\s*\(([^)]+)\)\s*$")
 _HYPERLINK_FORMULA_RE = re.compile(r'^=HYPERLINK\("([^"]+)"(?:,"([^"]*)")?\)', re.IGNORECASE)
 _GDOC_ID_RE = re.compile(r"/document/d/([^/]+)/")
 _DRIVE_ID_RE = re.compile(r"[?&]id=([a-zA-Z0-9_-]+)")
 _TRACKER_HEADING = "Action Item Summary"
 _TRACKER_HEADING_OLD = "=== Tracked Actions ==="  # legacy; accepted for back-compat
-
-
-def _email_by_rid(document_part) -> dict[str, str]:
-    """Build rId → email map from a document part's hyperlink relationships."""
-    import urllib.parse as _urlparse
-    result: dict[str, str] = {}
-    try:
-        for rel in document_part.rels.values():
-            if "hyperlink" not in rel.reltype:
-                continue
-            url = rel.target_ref or ""
-            m = re.match(r"mailto:([^\?&]+)", url, re.IGNORECASE)
-            if m:
-                result[rel.rId] = m.group(1).strip()
-                continue
-            m = re.search(r"[?&]email=([^&]+)", url, re.IGNORECASE)
-            if m:
-                result[rel.rId] = _urlparse.unquote(m.group(1)).strip()
-    except Exception:
-        pass
-    return result
 
 
 def _iter_block_items(document):
@@ -110,98 +87,40 @@ def _find_action_url_in_cell(cell) -> str | None:
     return None
 
 
+_ASSIGNEE_SOURCE_MAP = {"chip": "chip", "text": "parsed", None: None}
+
+
 class DocReader:
     """Read floating-action ai records from a .docx (DOC surface, §16.5).
 
-    Detection uses the AI-N: text token (ADR-0008). Returns all matching
-    paragraphs including multiple occurrences of the same action_id — the
-    engine/assertions enforce the identical-occurrence invariant.
+    Derives its records from ``tests.helpers.doc_inspect.floating_actions`` —
+    the full ADR-0027 grammar parser (gts-1ej4) — rather than maintaining a
+    second, weaker parser here. Detection is still the ACT-N:/AI-N: text
+    token (ADR-0008; dual-prefix per ADR-0023 — ACT-N: canonical on write,
+    AI-N: permanently read-compatible). Returns all matching paragraphs
+    including multiple occurrences of the same action_id — the
+    engine/assertions enforce the identical-occurrence invariant. A bare
+    ``AI:``/``ACT:`` trigger (no number yet) and an unparseable paragraph
+    (ADR-0027 rule 6) are not "established" actions and are excluded, matching
+    this reader's pre-convergence behavior.
     """
 
     def read(self, docx_bytes: bytes, doc_id: str) -> list[ai]:
-        document = _docx_pkg.Document(io.BytesIO(docx_bytes))
-        email_map = _email_by_rid(document.part)
+        from tests.helpers import doc_inspect
+
+        document = doc_inspect.load_doc(docx_bytes)
         results = []
-
-        for para in document.paragraphs:
-            result = self._parse_paragraph(para, email_map)
-            if result is not None:
-                results.append(result)
-
+        for parsed in doc_inspect.floating_actions(document):
+            if parsed.token is None:  # bare trigger or unparseable (rule 6)
+                continue
+            results.append(ai(
+                action=parsed.action_text,
+                assignee=parsed.assignee_email,
+                action_id=parsed.token,
+                status=parsed.status,
+                assignee_source=_ASSIGNEE_SOURCE_MAP[parsed.assignee_source],
+            ))
         return results
-
-    def _parse_paragraph(self, para, email_map: dict[str, str]) -> ai | None:
-        # Build non-chip text (chip display runs excluded) to detect the AI-N: token.
-        # Also record the first chip rId encountered for assignee extraction.
-        non_chip_parts: list[str] = []
-        first_chip_email: str | None = None
-        chip_display_text: str = ""
-
-        for child in para._element:
-            local = child.tag.split("}")[-1] if "}" in child.tag else child.tag
-            if local == "hyperlink":
-                r_id = child.get(f"{{{_R_NS}}}id", "")
-                email = email_map.get(r_id)
-                if email and first_chip_email is None:
-                    first_chip_email = email
-                    # Capture chip display text to exclude it from action text
-                    chip_text_parts = [
-                        t_el.text for t_el in child.iter(qn("w:t")) if t_el.text
-                    ]
-                    chip_display_text = "".join(chip_text_parts)
-                else:
-                    # Non-email hyperlink or second chip — include its text
-                    for t_el in child.iter(qn("w:t")):
-                        if t_el.text:
-                            non_chip_parts.append(t_el.text)
-            else:
-                for t_el in child.iter(qn("w:t")):
-                    if t_el.text:
-                        non_chip_parts.append(t_el.text)
-
-        non_chip_text = "".join(non_chip_parts).strip()
-
-        # Detect AI-N: token
-        m_token = _AI_TOKEN_RE.match(non_chip_text)
-        if not m_token:
-            return None
-
-        action_id = m_token.group(1)
-        remainder = non_chip_text[m_token.end():]
-
-        # Resolve assignee + assignee_source
-        assignee: str | None = None
-        assignee_source: str | None = None
-
-        if first_chip_email:
-            assignee = first_chip_email
-            assignee_source = "chip"
-            # remainder is already without chip text (non_chip_parts excludes chip)
-        else:
-            em = _EMAIL_RE.match(remainder)
-            if em:
-                assignee = em.group(0)
-                assignee_source = "parsed"
-                remainder = remainder[em.end():].strip()
-
-        # Strip trailing (Status) token
-        status: str | None = None
-        sm = _STATUS_RE.search(remainder)
-        if sm:
-            status = sm.group(1).strip() or None
-            remainder = remainder[: sm.start()].strip()
-
-        action_text = remainder.strip()
-        if not action_text:
-            return None
-
-        return ai(
-            action=action_text,
-            assignee=assignee,
-            action_id=action_id,
-            status=status,
-            assignee_source=assignee_source,
-        )
 
 
 class SheetReader:
@@ -234,8 +153,8 @@ class SheetReader:
 
             def _cell_val(field: str):
                 idx = col.get(field)
-                if idx is None:
-                    return None
+                if idx is None or idx > len(row):
+                    return None  # short row: a trailing optional column (custom_fields)
                 c = row[idx - 1]
                 v = c.value
                 return str(v) if v is not None else None
@@ -250,10 +169,18 @@ class SheetReader:
             obj.global_id = _cell_val("global_id")
             obj.assignee_name = _cell_val("assignee_name")
             obj.sync_status = _cell_val("sync_status") or ""
+            # ADR-0027 rule 9: additive, optional column; raw JSON text here, decoded
+            # by the consumer (tests/helpers/doc_sheet_agreement.py) rather than in
+            # this reader, which stays a plain cell-to-record mapper.
+            obj.custom_fields = _cell_val("custom_fields")
             obj.doc_id = derived_doc_id
             obj.doc_name = derived_doc_name
-            obj.created_date = _cell_val("created_date")
-            obj.modified_date = _cell_val("modified_date")
+            # created_date/modified_date: keep the raw cell value (a naive datetime,
+            # spreadsheet-local wall clock — Sheets/xlsx datetimes carry no zone info)
+            # rather than stringifying, so assertions._normalize_date can convert it
+            # for comparison against the ISO-8601 UTC strings the webapp returns.
+            obj.created_date = row[col["created_date"] - 1].value
+            obj.modified_date = row[col["modified_date"] - 1].value
             results.append(obj)
 
         return results

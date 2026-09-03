@@ -16,11 +16,31 @@ Last updated: 2026-05-22 (GActionSheet project, sdonaldson@northlakeuu.org, stua
 
 ## UI Location & Visibility
 
-**New-style Workspace Add-ons never appear in the top Extensions menu dropdown.** They appear exclusively as custom icons in the vertical side panel on the far-right edge of the host application (Gmail, Docs, Calendar, etc.).
+**New-style Workspace Add-on surfaces (`homepageTrigger` cards, `universalActions`) do not reliably appear in the top Extensions menu dropdown.** They are designed to appear as custom icons in the vertical side panel on the far-right edge of the host application (Gmail, Docs, Calendar, etc.), and that is the surface to build a fallback entry point around — see "universalActions not appearing" below.
 
 - **Collapsed panel gotcha:** The right-side panel is often collapsed by default. To reveal it, click the tiny chevron (`<` / "Show side panel") in the absolute **bottom-right corner** of the screen.
-- **Extensions > Add-ons > Get add-ons** is a Marketplace storefront shortcut only — installing from there still routes Workspace Add-ons to the side panel, not the Extensions menu.
+- **Extensions > Add-ons > Get add-ons / Manage add-ons** is a Marketplace storefront shortcut only — installing from there still routes Workspace Add-ons to the side panel, not the Extensions menu. A greyed-out **"View document add-ons"** entry alongside those two is normal/expected, not a misconfiguration signal.
 - **+ Button Illusion:** The `+` button on the right side panel also opens the Marketplace storefront. It cannot be used to install a test deployment by ID — that must be done from the Apps Script editor (Deploy → Test deployments → Install).
+
+### What *does* legitimately show up under Extensions — and why it's easy to mistake for the add-on
+
+A **container-bound script's legacy `onOpen()` simple trigger** (`SpreadsheetApp.getUi().createMenu(...)` / `DocumentApp.getUi().createMenu(...)`) is a *different* mechanism from the new-style `addOns` manifest, but current Google Workspace UI nests its output **under the Extensions dropdown** (as `Extensions > <Your Menu Name> > items...`), not as its own top-level menu bar entry the way older Google Workspace UI used to render it. Google also auto-appends a generic **`Help`** item after your own menu items in that submenu — you did not add it, and it links to generic script help, not anything in your code.
+
+**This is easy to confuse with the new-style add-on surface not working, especially when the project is bound to one host but installed as an add-on on another:** a script can be container-bound to e.g. a Google **Sheet** while also being configured (via `addOns.docs`) as an installable add-on for **Docs**. When installed on a Doc, Google invokes that same script's `onOpen(e)` simple trigger too — as part of the add-on's editor lifecycle — even though the script isn't bound to that Doc. The result: a legacy bound-script menu (e.g. "Action Sync") shows up correctly under a Doc's Extensions menu, which looks like confirmation the add-on install is fully working — but it proves nothing about whether `homepageTrigger`/`universalActions` (the actual new-style add-on surfaces) are reachable at all. Check those independently, in the side panel, not by inference from the legacy menu appearing.
+
+### `universalActions` not appearing under Extensions — build a card fallback
+
+Manifest-declared `addOns.common.universalActions` entries are *supposed to* surface via the add-on's own entry point (side panel card overflow, or `Extensions > Add-ons > <Add-on Name>` on some hosts), separately from the legacy bound-script menu above. In practice, on at least one test-install configuration (GActionSheet, 2026-08), these entries did not appear anywhere in the Extensions menu at all, and it was never conclusively root-caused whether that requires additional Marketplace SDK configuration beyond a correct `appsscript.json`.
+
+**Don't block a feature's usability on resolving that.** Add a `CardService` button (or button set) directly to the add-on's `homepageTrigger` card as a fallback entry point that calls the same handler function the `universalActions` entry points at. The side panel card is the one surface confirmed to work reliably across configurations; treat `universalActions` as a bonus surface, not the primary one, until proven otherwise in your specific install.
+
+### The Marketplace SDK "Application Configuration" deployment version is a separate binding per host app — and it's easy to break silently
+
+The GCP Marketplace SDK's **Application Configuration** page has its own explicit field selecting *which Apps Script deployment version* the Workspace apps (Docs, Sheets, etc.) are bound to. This is **not** the same thing as `clasp`'s deployment ID/version, and it is **not** automatically kept in sync with it — it's a separate pointer you set (and can forget you set) in the GCP console.
+
+If that pointer references a deployment version that no longer exists (e.g. it was deleted/pruned via `clasp deployments` cleanup, or a new versioned deployment was cut and the old one removed), the practical symptom is **partial, asymmetric breakage**: surfaces that route through the Marketplace SDK binding (the new-style add-on's homepage card, universal actions) can stop working for the affected host app(s), while surfaces that don't depend on that binding (a bound-script's own `onOpen()` menu, since it fires via direct container binding/editor-add-on install lifecycle rather than through the Marketplace SDK config) **keep working fine**. This asymmetry — "the doc side is broken but the sheet side is fine" or vice versa — looks exactly like a code regression between two host-app configs (`addOns.docs` vs `addOns.common`) and can send you bisecting commits for a problem that isn't in the code at all.
+
+**Diagnostic:** if one host app's add-on surface (say, Docs) stops working while the same code's other surface (say, the Sheets container-bound menu) keeps working, check the Marketplace SDK Application Configuration's referenced deployment version *before* suspecting a manifest/code regression — confirm it still exists and points at a current deployment, not a pruned one.
 
 ---
 

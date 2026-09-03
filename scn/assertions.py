@@ -7,12 +7,57 @@ Design: docs/atdd/scenario-harness-design.md §3.7, §5
 Returns None on pass, an error string on failure.
 Consumed by engine.py's drain procedure and importable standalone by session.py (.7).
 """
+import datetime
 import re
+import zoneinfo
 
 from scn.contacts import TEST_CONTACTS, expected_name
 from scn.engine import Surface
 
-_AI_N_RE = re.compile(r"^AI-\d+$")
+_AI_N_RE = re.compile(r"^(?:ACT|AI)-\d+$")  # ADR-0023: dual-prefix, ACT-N canonical on write
+
+# Test ActionSheet's spreadsheet timezone (confirmed empirically: xlsx-exported
+# created_date/modified_date cells run exactly 7h behind the webapp's ISO-8601
+# UTC value for every row checked, matching PDT). Sheets/xlsx datetime cells
+# carry no zone info of their own -- this is the one fact needed to interpret
+# them (gts-cges).
+_SHEET_TZ = zoneinfo.ZoneInfo("America/Los_Angeles")
+
+# created_date/modified_date are sourced from two independent serialization
+# paths -- the webapp's live JS Date.toISOString() (millisecond-precision) vs
+# the SHEET surface's .xlsx export (openpyxl-parsed from a Sheets datetime
+# cell). Both describe the same underlying write, but the xlsx export has been
+# observed to lose up to several hundred ms of sub-second precision on the
+# same row that another read of the identical cell reproduced exactly --
+# empirically a serialization artifact of the .xlsx date encoding, not a
+# genuine second write. Exact equality is therefore too strict; tolerate a
+# small delta so the check still catches a genuinely different timestamp
+# (e.g. a mistaken overwrite) without flaking on export rounding (gts-cges
+# follow-up).
+_DATE_TOLERANCE = datetime.timedelta(seconds=2)
+
+
+def _normalize_date(value):
+    """Coerce a date/datetime value (str or datetime, tz-aware or naive) to UTC.
+
+    - Naive datetime (e.g. from SheetReader's xlsx cell): assumed to be in the
+      ActionSheet's spreadsheet timezone (_SHEET_TZ).
+    - ISO-8601 string (e.g. webapp JSON, trailing 'Z'): parsed directly.
+    - Anything else (already tz-aware datetime, unparseable string): returned
+      as-is so the caller falls back to plain equality.
+    """
+    if isinstance(value, datetime.datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=_SHEET_TZ)
+        return value.astimezone(datetime.timezone.utc)
+    if isinstance(value, str):
+        try:
+            return datetime.datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            ).astimezone(datetime.timezone.utc)
+        except ValueError:
+            return value
+    return value
 
 
 def _find_matches(expected: dict, actuals: list) -> list:
@@ -33,7 +78,7 @@ def check_present_consistent(
     """Check that a matching action exists on `surface` and its fields are correct (§16.6).
 
     Matching key: expected['action_id'] if set, else expected['action'] text.
-    Checks: action text; action_id (exact if set, else valid AI-N); status (if set);
+    Checks: action text; action_id (exact if set, else valid ACT-N/AI-N); status (if set);
     assignee email (if set); assignee_name (if reader set it, via expected_name());
     global_id, created_date, modified_date (GTaskSheet-k1g9) -- compared only when
     present in `expected` AND the reader populated the same attribute on `actual`
@@ -78,7 +123,7 @@ def check_present_consistent(
         else:
             if not actual.action_id or not _AI_N_RE.match(actual.action_id):
                 return (
-                    f"[{tag}] UI: expected a valid AI-N, got: {actual.action_id!r}"
+                    f"[{tag}] UI: expected a valid ACT-N/AI-N, got: {actual.action_id!r}"
                 )
         if "status" in expected:
             if actual.status != expected["status"]:
@@ -95,7 +140,7 @@ def check_present_consistent(
             f"expected={expected['action']!r}, actual={actual.action!r}"
         )
 
-    # action_id: exact match if pinned, else any valid AI-N
+    # action_id: exact match if pinned, else any valid ACT-N/AI-N
     if "action_id" in expected:
         if actual.action_id != expected["action_id"]:
             return (
@@ -105,7 +150,7 @@ def check_present_consistent(
     else:
         if not actual.action_id or not _AI_N_RE.match(actual.action_id):
             return (
-                f"[{tag}] {surface.value}: expected a valid AI-N, got: {actual.action_id!r}"
+                f"[{tag}] {surface.value}: expected a valid ACT-N/AI-N, got: {actual.action_id!r}"
             )
 
     # status (checked only when set in expected)
@@ -141,7 +186,16 @@ def check_present_consistent(
         if field_name in expected and hasattr(actual, field_name):
             exp_val = expected[field_name]
             act_val = getattr(actual, field_name)
-            if act_val != exp_val:
+            if field_name in ("created_date", "modified_date"):
+                norm_act = _normalize_date(act_val)
+                norm_exp = _normalize_date(exp_val)
+                if isinstance(norm_act, datetime.datetime) and isinstance(norm_exp, datetime.datetime):
+                    mismatch = abs(norm_act - norm_exp) > _DATE_TOLERANCE
+                else:
+                    mismatch = norm_act != norm_exp
+            else:
+                mismatch = act_val != exp_val
+            if mismatch:
                 return (
                     f"[{tag}] {surface.value}: {field_name} mismatch: "
                     f"expected={exp_val!r}, actual={act_val!r}"

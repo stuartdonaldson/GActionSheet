@@ -72,7 +72,8 @@ function _resolveDocFolderId(ss) {
     return folderId;
   }
 
-  var file = DriveApp.getFileById(ss.getId());
+  var file = withGasRetry('SheetSetup._resolveDocFolderId:DriveApp.getFileById',
+    function () { return DriveApp.getFileById(ss.getId()); });
   var iter = file.getParents();
   folderId = iter.hasNext() ? iter.next().getId() : DriveApp.getRootFolder().getId();
 

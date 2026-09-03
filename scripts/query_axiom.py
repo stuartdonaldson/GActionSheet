@@ -88,12 +88,20 @@ def query(dataset: str, token: str, *, limit: int, since: timedelta,
 
 def _print_table(matches: list[dict]) -> None:
     for m in matches:
-        data = m.get("data", {})
-        nonnull = {k: v for k, v in data.items() if v not in (None, "", {})}
+        row = m.get("data", {})
+        nonnull = {k: v for k, v in row.items() if v not in (None, "", {})}
         side = nonnull.pop("side", "?")
         name = nonnull.pop("name", "?")
         nonnull.pop("version", None)
         nonnull.pop("caller", None)
+        # GAS-side events (gts-pfyx follow-up) nest their per-event payload
+        # under one 'data' field instead of spreading it as top-level keys
+        # (avoids minting a new Axiom column per distinct field name ever
+        # logged). Python-side events (scn/reporter.py) still use a fixed,
+        # flat schema (detail/phase/dur_s/...) with no such nesting.
+        payload = nonnull.pop("data", None)
+        if isinstance(payload, dict):
+            nonnull.update({k: v for k, v in payload.items() if v not in (None, "", {})})
         detail = " ".join(f"{k}={v}" for k, v in nonnull.items())
         print(f"{m['_time']}  {side:<6} {name:<32} {detail}")
 

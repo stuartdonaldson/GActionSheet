@@ -13,6 +13,10 @@ import pytest
 from scn.ui import Card, UiDriver, _parse_timeout
 from scn.engine import Severity
 
+# gts-aqpk: fast/local tier -- this module makes no live GAS/Google round trip
+# (verified offline with sockets blocked). See docs/OPERATIONS.md "Test tiers".
+pytestmark = pytest.mark.no_live_session
+
 
 # ---------------------------------------------------------------------------
 # _parse_timeout

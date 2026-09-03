@@ -86,6 +86,10 @@ def emit_standalone_event(settings: dict, *, run_id: str, name: str, dur_s: floa
                 "name": name,
                 "dur_s": round(dur_s, 3),
                 "side": "python",
+                # Always 'test' today -- ScenarioSession/Reporter only ever talk to
+                # webappTestUrl. Promote to a real parameter if that changes (gts-iwa0
+                # follow-up: matches GasLogger.js's top-level 'env' column).
+                "env": "test",
                 "run_id": run_id,
             }],
             timeout=_AXIOM_TIMEOUT_S,
@@ -185,7 +189,7 @@ class Reporter:
             # Axiom defaults to ingestion time, which collapses every event in
             # one flushed batch to ~the same timestamp (GTaskSheet-ishz.1 finding).
             self._axiom_buffer.append(
-                {**rec, "_time": rec["t_wall"], "side": "python", "run_id": self._run_id}
+                {**rec, "_time": rec["t_wall"], "side": "python", "env": "test", "run_id": self._run_id}
             )
             if len(self._axiom_buffer) >= _AXIOM_FLUSH_THRESHOLD:
                 self.flush_axiom()

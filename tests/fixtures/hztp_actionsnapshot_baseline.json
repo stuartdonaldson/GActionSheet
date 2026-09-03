@@ -1,0 +1,38 @@
+{
+  "docId": "1yvlfcdXmqIUfoMAve377pqZHuS9ViA6lSH7htKRISGs",
+  "globalId": "1yvlfcdXmqIUfoMAve377pqZHuS9ViA6lSH7htKRISGs/ACT-1",
+  "action_id": "ACT-1",
+  "doc_scoped_reader": [
+    {
+      "action": "hztp-ac3 pinned baseline action",
+      "assignee": null,
+      "action_id": "ACT-1",
+      "status": "Open",
+      "assignee_source": null,
+      "global_id": "1yvlfcdXmqIUfoMAve377pqZHuS9ViA6lSH7htKRISGs/ACT-1",
+      "assignee_name": "",
+      "sync_status": "",
+      "doc_id": "1yvlfcdXmqIUfoMAve377pqZHuS9ViA6lSH7htKRISGs",
+      "doc_name": "GActionSheet-Test-journey-20260902-b2cd",
+      "created_date": "2026-09-02T13:49:01.722Z",
+      "modified_date": "2026-09-02T13:49:01.722Z"
+    }
+  ],
+  "whole_sheet_reader": [
+    {
+      "action": "hztp-ac3 pinned baseline action",
+      "assignee": null,
+      "action_id": "ACT-1",
+      "status": "Open",
+      "assignee_source": null,
+      "global_id": "1yvlfcdXmqIUfoMAve377pqZHuS9ViA6lSH7htKRISGs/ACT-1",
+      "assignee_name": null,
+      "sync_status": "",
+      "custom_fields": "{}",
+      "doc_id": "1yvlfcdXmqIUfoMAve377pqZHuS9ViA6lSH7htKRISGs",
+      "doc_name": "GActionSheet-Test-journey-20260902-b2cd",
+      "created_date": "2026-09-02 06:49:01.722000",
+      "modified_date": "2026-09-02 06:49:01.722000"
+    }
+  ]
+}

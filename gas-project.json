@@ -1,0 +1,45 @@
+{
+  "$comment": [
+    "PROJECT TRUTH — committed on purpose. GAS-Core adr/0004: per-env identifiers of external",
+    "resources live here, where a wrong ID is caught in review once instead of on every machine.",
+    "Machine truth and secrets (clasp auth, admin secrets, API tokens, the static-host checkout",
+    "path, the deploymentId cache the deploy writes back) stay in the gitignored",
+    "local.settings.json — see local.settings.example.json.",
+    "",
+    "GActionSheet is lineage A: ONE script project holds both named deployments (TEST-WEB-APP,",
+    "PROD-WEB-APP), told apart by an anchor in the deployment description — so 'test' and",
+    "'production' below share one scriptId and one sheetId (the single bound container",
+    "spreadsheet), unlike a lineage-B project where each env is its own script project.",
+    "",
+    "envs.<target>.scriptId / .sheetId are read by gas-deploy (>= v1.4.0). local.settings.json",
+    "still carries its own copies of scriptId/testSheetId too — tests/conftest.py's script_id",
+    "fixture and tests/playwright/editor_helpers.js read local.settings.json directly, not through",
+    "gas-deploy's loader, so the legacy keys stay live rather than becoming a second silent drift.",
+    "Pointed out at this conversion (GAS-Core-rgh); folding those two readers onto this file too is",
+    "left for the estate-wide key-convergence pass, not this stage.",
+    "",
+    "envs.<target>.static and staticHosts are read by this project's scripts/static-pages.js, which",
+    "composes gas-static's config from them; gas-deploy ignores them."
+  ],
+
+  "envs": {
+    "test": {
+      "scriptId": "12EKX7dQiO1Wf7rvv94Adgpbh3nac0OetsZMTD_1lme3y2o1KLYdKcTXi",
+      "sheetId": "10UCsEHPL2RjA1IduUSFDSaA2lpkoCuZY79sIjratH_s",
+      "static": { "host": "nuuc", "dest": "pub/AS-sit" }
+    },
+    "production": {
+      "scriptId": "12EKX7dQiO1Wf7rvv94Adgpbh3nac0OetsZMTD_1lme3y2o1KLYdKcTXi",
+      "sheetId": "10UCsEHPL2RjA1IduUSFDSaA2lpkoCuZY79sIjratH_s",
+      "static": { "host": "nuuc", "dest": "pub/AS" }
+    }
+  },
+
+  "staticHosts": {
+    "nuuc": {
+      "repo": "nuuc-it/Static",
+      "pagesUrl": "https://nuuc-it.github.io/Static/",
+      "repoKey": "staticPortalRepoPath"
+    }
+  }
+}

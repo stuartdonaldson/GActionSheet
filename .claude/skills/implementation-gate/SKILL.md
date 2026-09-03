@@ -12,12 +12,12 @@ description: >-
   documentation-only, config-only, or test-only changes with no new logic.
 metadata:
   category: process
-  version: "2.2"
+  version: "2.3"
   status: documented
   validation: untested
   priority: high
   created: "2026-03-26"
-  last_updated: "2026-07-01"
+  last_updated: "2026-08-20"
   depends_on: []
   conflicts_with: []
   related_skills: [test-functional, lessons-learned]
@@ -69,13 +69,17 @@ Each step enforces a named principle and adds the gate-specific fail condition t
    Then declare the current phase (red / green / refactor, or slice / hardening) and comply with its read restriction. The internal unit loop within Green is implementation-track TDD (I8).
 
    **Ordering is negotiable; coverage-before-merge is not** — whichever path, the durable invariants and every state-modifying entry point (T17) are tested before merge. When implement-first (Slice) is chosen, three guardrails keep that invariant honest: (1) harden the durable invariant, not the volatile surface still under review (T23 durable-invariant rule); (2) a blocking hardening `[TST]` bead exists and the slice is not done until it is green (ADR-0013); (3) the hardening assertion is proven to fail against the frozen contract (Step 3 proof-of-effectiveness). *Diagnostic:* if the test is dramatically harder to write than the implementation, that asymmetry names the regime — immature harness (invest and amortize), perceptual oracle (use review, harden only the invariant), or a churning contract (slice first). | **Fail:** if no oracle/phase can be declared, the work is not ready — return to Step 3.
-   *(Lever under test — GTaskSheet-m65t; pending DevStandard T23 promotion.)*
+   *(Lever under test — gts-m65t; pending DevStandard T23 promotion.)*
+
+   - **Evidence-log entry (enforces gts-m65t's promotion AC):** immediately after declaring the oracle type, append one row to `docs/methodology/oracle-ordering-lever.md`'s Evidence log table: `Date` = today; `Project` = this project's name; `Feature / bead` = the issue id from Step 2; `Oracle type` = as just declared; `Outcome / friction` = `pending — declared, ordering not yet followed to close`. This is what makes the declaration durable across sessions instead of evaporating at session end (the gap that left the log empty for 7 weeks after the lever's 2026-07-01 deploy — see `gts-m65t` bead notes). | **Fail:** if Step 4 completes without this row appended, the declaration is not gate-complete — do not proceed to Step 5.
+   - **Evidence-log closure (enforces gts-m65t's promotion AC):** at the point this feature's ordering is actually followed to completion — the `[IMP]` close gate (Step 6) for a specifiable/test-first feature, or the hardening `[TST]`'s close for a perceptual/Slice feature — find that feature's row (grep the table for its bead id) and edit its `Outcome / friction` cell in place: replace the `pending` placeholder with what happened (ordering followed cleanly / friction encountered — describe it / oracle partition failed to classify the work — describe why). A perceptual/Slice row must also confirm whether all three guardrails (durable-invariant-only smoke, blocking hardening bead, proven-to-fail assertion) were observed. | **Fail:** if oracle type was declared under this feature's bead but its row still reads `pending` when the feature closes, closure is not gate-complete — update the row before closing the issue.
 
 5. **Test-before-commit** (enforces I5, T5) → before staging, run the narrowest test covering the current AC; in red, confirm the test exists and is listed failing; in green/refactor, it must pass. | **Fail:** if no test exists, write one first — staging is blocked until a test runs; if the runner is unavailable, record the block on the issue before staging.
 
 5.5. **Test-infrastructure compatibility check** — before committing to an implementation approach, confirm it is compatible with the existing test harness: detection/seed format the harness expects, route/contract shape the test fixtures call, sheet/doc structure assumptions, and log tags the harness waits on. | **Fail:** if the approach would change any of these without a corresponding harness update, surface the mismatch and resolve it before writing code — do not let it surface later as a harness false-negative or false-positive.
 
 6. **[IMP] close gate** (enforces I5, T5) → before closing any `[IMP]` issue or merging, run the full `pytest -x` regression suite, not only the narrowest test for the current AC. | **Fail:** if the suite has pre-existing failures unrelated to this change, do not close or merge autonomously — present the debt state and wait for an explicit decision (CLAUDE.md backstop rule).
+   - If Step 4 declared an oracle type for this feature, this is also the evidence-log closure point for a specifiable/test-first feature — see Step 4's closure sub-step.
 
 7. **Crash-fix rule** (enforces I10) — apply only when fixing a crash during in-progress feature work → identify the feature in flight → read its AC before applying any fix → apply the fix → run the feature's AC tests. | **Fail:** "no crash" is not done — "AC tests pass" is done; if AC tests are unavailable, create an issue for AC authoring before closing the fix.
 
@@ -87,6 +91,7 @@ Each step enforces a named principle and adds the gate-specific fail condition t
 - [ ] AC and contract read; "done" stated in one sentence before writing code
 - [ ] For new integrity/quality assertions: contract states how the assertion's effectiveness will be proven (failure demonstration), not just that it passes
 - [ ] Oracle type declared (specifiable → test-first; perceptual → Slice); for perceptual, why an assertion can't cheaply pre-specify "correct" is stated
+- [ ] Evidence-log row appended to `docs/methodology/oracle-ordering-lever.md` at declaration (pending outcome), and that row's outcome updated at close (verify: row no longer reads `pending`)
 - [ ] ATDD phase declared explicitly (red/green/refactor, or slice/hardening)
 - [ ] In red phase: no implementation files read (verify: read calls target specs and test files only, per I7)
 - [ ] Test run completed before staging (verify: test output shown in session)
@@ -132,4 +137,4 @@ Hooks are OPTIONAL — use them only after repeated gate-bypass incidents; skip 
 **Prevented by:** Step 7 (I10) — done is "AC tests pass," not "no crash."
 
 ---
-_Document generated 2026-06-08; updated 2026-06-18 (GTaskSheet-mpi9: proof-of-effectiveness sub-step, test-infra compatibility check, full-suite close gate); updated 2026-07-01 (GTaskSheet-m65t: oracle & phase declaration — lever under test, pending DevStandard T23 promotion)._
+_Document generated 2026-06-08; updated 2026-06-18 (gts-mpi9: proof-of-effectiveness sub-step, test-infra compatibility check, full-suite close gate); updated 2026-07-01 (gts-m65t: oracle & phase declaration — lever under test, pending DevStandard T23 promotion); updated 2026-08-20 (gts-m65t: evidence-log entry/closure sub-steps — the declaration step was disconnected from `docs/methodology/oracle-ordering-lever.md`'s Evidence log, leaving it empty 7 weeks after deploy; Step 4 now appends a row at declaration and Step 6 (or the hardening `[TST]`'s close, for Slice) closes it out)._

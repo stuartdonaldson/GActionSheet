@@ -17,18 +17,41 @@ var _USER_GUIDE_URL = 'https://stuartdonaldson.github.io/GActionSheet/docs/USER_
  * @param {boolean=} opts.skipSheetFetch  When true, omit the verify_action_rows HTTP call.
  *   Used after sidebar mutations where the sheet was just patched and is known correct —
  *   avoids a second ~3s WebApp round-trip just to rebuild the card.
+ * @param {boolean=} opts.includeDocScan  When true, walk the doc body
+ *   (_collectFloatingActionState/_readTrackerTableState) to populate the action list and
+ *   tracker status. Defaults to false — the cold homepageTrigger open (Google calls
+ *   buildHomepageCard() with no opts at all) and plain back-navigation (onImportBack/
+ *   onNotifyBack) never scan, since that walk scales with document size and was measured
+ *   pushing the platform's ~44s card-build budget on large docs (gts-8py3 follow-up: the
+ *   user's own report after the self-HTTP-call fix — a *small* doc's sidebar opened fine,
+ *   pointing at the doc scan itself as the remaining cost on large docs). Every call site
+ *   that follows an actual doc mutation (Sync, tracker insert, status set, delete) passes
+ *   includeDocScan: true explicitly so its refreshed card reflects that mutation.
+ * @param {boolean=} opts.allowCachedState  When true and includeDocScan is false, restore
+ *   the last real scan's homepageState from cache instead of the "Not loaded" placeholder
+ *   (gts-zg2t). Used by onImportBack/onNotifyBack so Back-navigation shows cached state
+ *   rather than resetting the card. No-op if nothing has been cached yet.
  */
 function buildHomepageCard(opts) {
   var skipSheetFetch = !!(opts && opts.skipSheetFetch);
+  var includeDocScan = !!(opts && opts.includeDocScan);
+  var allowCachedState = !!(opts && opts.allowCachedState);
+  var _t0 = Date.now();
 
   try {
-    // Test-only error injection (GTaskSheet-rvwu AC-5 coverage) — never set
+    // Test-only error injection (gts-rvwu AC-5 coverage) — never set
     // outside the test harness; see TestFixtures.js 'force_homepage_error'.
     if (PropertiesService.getScriptProperties().getProperty('_TEST_FORCE_HOMEPAGE_ERROR')) {
       throw new Error('Forced error (test fixture)');
     }
 
+    // Unconditional (not PROBE-gated) — the doc-reopen call right below is
+    // the first potentially-slow call in this function and previously had
+    // zero instrumentation ahead of it, so a hang there produced a total
+    // blackout in the logs (gts-8py3).
+    GasLogger.log('addon.homepage.start', {});
     var doc = _resolveActiveDocForRead(DocumentApp.getActiveDocument());
+    GasLogger.log('addon.homepage.doc_resolved', { ms: Date.now() - _t0, docId: doc ? doc.getId() : '' });
 
     // [PROBE]
     PROBE_log('sidebar.' + PROBE_docState(doc), { docId: doc ? doc.getId() : '' });
@@ -48,7 +71,7 @@ function buildHomepageCard(opts) {
         )
       );
     } else {
-      var homepageState = _buildHomepageState(doc, skipSheetFetch);
+      var homepageState = _buildHomepageState(doc, skipSheetFetch, includeDocScan, allowCachedState);
       header.setSubtitle(homepageState.docName);
       card
         .addSection(_buildOverviewSection(homepageState))
@@ -67,9 +90,11 @@ function buildHomepageCard(opts) {
         .addWidget(CardService.newTextParagraph().setText(BUILD_INFO.version))
     );
 
+    GasLogger.log('addon.homepage.complete', { ms: Date.now() - _t0 });
+    GasLogger.flush();
     return card.build();
   } catch (e) {
-    GasLogger.log('addon.homepage.error', { msg: e.message, stack: e.stack || '' });
+    GasLogger.log('addon.homepage.error', { msg: e.message, stack: e.stack || '', ms: Date.now() - _t0 });
     GasLogger.flush();
 
     return CardService.newCardBuilder()
@@ -109,7 +134,6 @@ function _buildTopButtonsSection() {
       .addButton(
         CardService.newTextButton()
           .setText('Import')
-          .setAltText('View unresolved actions and import them')
           .setOnClickAction(_buildCardAction('onShowImport'))
       )
       .addButton(
@@ -124,6 +148,13 @@ function _buildTopButtonsSection() {
       )
   );
 }
+
+// Export is not on this card (gts-s7ut, superseding gts-7ca7's sidebar
+// button): it's reachable only from the classic Docs 'Action Sync' menu
+// (MenuHandler.js -> menuShowExportDialog -> Procedure-Exporter.js's
+// showDocumentExportDialog_), since a live progress dialog requires
+// Ui.showModalDialog, which CardService action handlers can't call. See
+// the design note atop Procedure-Exporter.js's export-dialog entry points.
 
 function onShowImport(e) { // eslint-disable-line no-unused-vars
   var doc = DocumentApp.getActiveDocument();
@@ -141,13 +172,13 @@ function onShowNotify(e) { // eslint-disable-line no-unused-vars
 
 function onImportBack(e) { // eslint-disable-line no-unused-vars
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ allowCachedState: true })))
     .build();
 }
 
 function onNotifyBack(e) { // eslint-disable-line no-unused-vars
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ allowCachedState: true })))
     .build();
 }
 
@@ -185,7 +216,7 @@ function _buildNotifyCard() {
 
 /**
  * Card action handler for the Import card's "Select all" button (AC-2,
- * GTaskSheet-fgh4). Re-renders the Import card with every checklist item
+ * gts-fgh4). Re-renders the Import card with every checklist item
  * across ALL source-doc groups pre-selected — server-side, so the client
  * never needs to be trusted with the full selection set.
  */
@@ -198,13 +229,13 @@ function onImportSelectAll(e) { // eslint-disable-line no-unused-vars
 }
 
 /**
- * Import tab body — AC-1 read+render (GTaskSheet-eore). Calls
+ * Import tab body — AC-1 read+render (gts-eore). Calls
  * list_importable_actions for OPEN team-scoped actions from OTHER documents,
  * then renders one CardSection per source document: a header TextParagraph
  * linking to the document, followed by a CHECK_BOX SelectionInput (one item
  * per action, fieldName 'importSelection::'+doc_id, value=global_id) per the
  * frozen contract (epic-d-import-contract-seams). Also renders the "Select
- * all" / "Import selected" buttons (AC-2, GTaskSheet-fgh4): Select all
+ * all" / "Import selected" buttons (AC-2, gts-fgh4): Select all
  * re-renders this section with selectAll=true so every item across all
  * groups is pre-checked server-side; Import selected submits to _submitImport.
  *
@@ -278,9 +309,9 @@ function _buildImportTabSection(docId, selectAll) {
 
     for (var a = 0; a < grp.actions.length; a++) {
       var action = grp.actions[a];
-      var n = parseGlobalId(action.global_id).N;
+      var actionId = parseGlobalId(action.global_id).actionId;
       selectionInput.addItem(
-        'AI-' + n + ' · ' + _escapeAddonHtml(action.action_text),
+        actionId + ' · ' + _escapeAddonHtml(action.action_text),
         action.global_id,
         !!selectAll
       );
@@ -310,7 +341,7 @@ function _buildImportTabSection(docId, selectAll) {
 }
 
 /**
- * Placeholder Notify tab body (GTaskSheet-0r0s). Business logic lands in EPIC-E.
+ * Placeholder Notify tab body (gts-0r0s). Business logic lands in EPIC-E.
  */
 function _buildNotifyTabSection() {
   return CardService.newCardSection().addWidget(
@@ -324,7 +355,8 @@ function _resolveActiveDocForRead(doc) {
   }
 
   try {
-    return DocumentApp.openById(doc.getId());
+    return withGasRetry('WorkspaceAddonCard._resolveActiveDocForRead:DocumentApp.openById',
+      function () { return DocumentApp.openById(doc.getId()); });
   } catch (e) {
     GasLogger.log('addon.doc.reopen_failed', { msg: e.message });
     GasLogger.flush();
@@ -333,6 +365,13 @@ function _resolveActiveDocForRead(doc) {
 }
 
 
+/**
+ * ADR-0030: dispatches through the Web App proxy (_callWebAppProxy) instead of
+ * calling insertTrackerTable(docId) in-process under the add-on binding, so
+ * this card action's behavior always matches the deployed
+ * TEST-WEB-APP/PROD-WEB-APP revision regardless of the Marketplace SDK's
+ * pinned deployment version.
+ */
 function onInsertTrackerTable() {
   var doc = DocumentApp.getActiveDocument();
   if (!doc) {
@@ -341,21 +380,26 @@ function onInsertTrackerTable() {
       .build();
   }
 
-  try {
-    insertTrackerTable(doc.getId());
+  var resp = _callWebAppProxy('insert_tracker_table', { docId: doc.getId() }, 'addon.tracker.error');
+  if (!resp || resp.ok !== true) {
     return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Tracker refreshed'))
-      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
-      .build();
-  } catch (e) {
-    GasLogger.log('addon.tracker.error', { msg: e.message });
-    GasLogger.flush();
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Tracker refresh failed: ' + e.message))
+      .setNotification(CardService.newNotification().setText(
+        'Tracker refresh failed' + (resp && resp.error ? ': ' + resp.error : '')))
       .build();
   }
+  return CardService.newActionResponseBuilder()
+    .setNotification(CardService.newNotification().setText('Tracker refreshed'))
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ includeDocScan: true })))
+    .build();
 }
 
+/**
+ * ADR-0030: dispatches through the Web App proxy instead of calling
+ * syncDocument()/insertTrackerTable() in-process under the add-on binding — see
+ * onInsertTrackerTable. trackerPresent is read locally (read-only, no
+ * staleness risk per ADR-0030's "out of scope" list) before the proxied sync,
+ * to decide whether the tracker also needs a proxied refresh afterward.
+ */
 function onSyncNow() {
   var doc = DocumentApp.getActiveDocument();
   if (!doc) {
@@ -363,23 +407,32 @@ function onSyncNow() {
       .setNotification(CardService.newNotification().setText('No active document'))
       .build();
   }
-  try {
-    var trackerPresent = _readTrackerTableState(doc).found;
-    syncDocument(doc.getId());
-    if (trackerPresent) {
-      insertTrackerTable(doc.getId());
-    }
+  var trackerPresent = _readTrackerTableState(doc).found;
+  var docId = doc.getId();
+
+  var syncResp = _callWebAppProxy('sync_document', { docId: docId }, 'addon.sync.error');
+  if (!syncResp || syncResp.ok !== true) {
     return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Sync complete'))
-      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
-      .build();
-  } catch (e) {
-    GasLogger.log('addon.sync.error', { msg: e.message });
-    GasLogger.flush();
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Sync failed: ' + e.message))
+      .setNotification(CardService.newNotification().setText(
+        'Sync failed' + (syncResp && syncResp.error ? ': ' + syncResp.error : '')))
       .build();
   }
+
+  if (trackerPresent) {
+    var trackerResp = _callWebAppProxy('insert_tracker_table', { docId: docId }, 'addon.tracker.error');
+    if (!trackerResp || trackerResp.ok !== true) {
+      return CardService.newActionResponseBuilder()
+        .setNotification(CardService.newNotification().setText(
+          'Sync complete, but tracker refresh failed' + (trackerResp && trackerResp.error ? ': ' + trackerResp.error : '')))
+        .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ includeDocScan: true })))
+        .build();
+    }
+  }
+
+  return CardService.newActionResponseBuilder()
+    .setNotification(CardService.newNotification().setText('Sync complete'))
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ includeDocScan: true })))
+    .build();
 }
 
 
@@ -439,7 +492,33 @@ function _safeGetDocTitle(doc) {
   }
 }
 
-function _buildHomepageState(doc, skipSheetFetch) {
+function _buildHomepageState(doc, skipSheetFetch, includeDocScan, allowCachedState) {
+  if (!includeDocScan) {
+    // Doc not scanned this build (gts-8py3 follow-up) — no floatingActions/tracker
+    // read, so nothing here can claim "no actions found"; say so explicitly instead
+    // of rendering a misleadingly-empty list. EXCEPTION (gts-zg2t): plain
+    // back-navigation (onImportBack/onNotifyBack) passes allowCachedState so a
+    // *second* Back round-trip restores the last real scan instead of resetting
+    // to this placeholder — the cache is written below whenever a full scan
+    // actually runs, so it's always at least as fresh as the last mutation.
+    if (allowCachedState) {
+      var cached = _readCachedHomepageState(doc.getId());
+      if (cached) {
+        return cached;
+      }
+    }
+    return {
+      docName: _safeGetDocTitle(doc),
+      floatingActions: [],
+      docScanSkipped: true,
+      trackerFound: false,
+      sheetRowCount: 0,
+      syncState: 'Not loaded',
+      syncMeta: 'Click Sync to scan this document for actions.',
+      statusBreakdown: {}
+    };
+  }
+
   var floatingActions = _collectFloatingActionState(doc);
   var tracker = _readTrackerTableState(doc);
   var sheetRows = [];
@@ -473,15 +552,57 @@ function _buildHomepageState(doc, skipSheetFetch) {
     }
   }
 
-  return {
+  var homepageState = {
     docName: _safeGetDocTitle(doc),
     floatingActions: floatingActions,
+    docScanSkipped: false,
     trackerFound: tracker.found,
     sheetRowCount: skipSheetFetch ? floatingActions.length : sheetRows.length,
     syncState: syncState,
     syncMeta: syncMeta,
     statusBreakdown: _summarizeStatuses(floatingActions)
   };
+  _writeCachedHomepageState(doc.getId(), homepageState);
+  return homepageState;
+}
+
+// ---------------------------------------------------------------------------
+// Homepage-state cache (gts-zg2t) — lets a plain Back-navigation
+// (onImportBack/onNotifyBack) restore the last real doc scan instead of
+// resetting to the "Not loaded" placeholder. Per-user (CardService homepage
+// state is per-viewer, not shared), short TTL so a stale scan can't outlive
+// a user's active session by much. Written only when a full scan actually
+// runs (includeDocScan: true), so cost stays exactly what gts-8py3 intended —
+// Back itself never triggers a scan.
+var _HOMEPAGE_STATE_CACHE_TTL_SECONDS = 600; // 10 min
+
+function _homepageStateCacheKey(docId) {
+  return 'homepageState_' + docId;
+}
+
+function _readCachedHomepageState(docId) {
+  try {
+    var raw = CacheService.getUserCache().get(_homepageStateCacheKey(docId));
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    GasLogger.log('addon.homepage.cache_read_error', { msg: e.message });
+    return null;
+  }
+}
+
+function _writeCachedHomepageState(docId, homepageState) {
+  try {
+    CacheService.getUserCache().put(
+      _homepageStateCacheKey(docId),
+      JSON.stringify(homepageState),
+      _HOMEPAGE_STATE_CACHE_TTL_SECONDS
+    );
+  } catch (e) {
+    // Cache is a best-effort restore aid, not a durable store — a write
+    // failure (e.g. >100KB value on a very large doc) must not break the
+    // scan itself.
+    GasLogger.log('addon.homepage.cache_write_error', { msg: e.message });
+  }
 }
 
 function _buildOverviewSection(homepageState) {
@@ -498,6 +619,14 @@ function _buildOverviewSection(homepageState) {
 
 
 function _buildActionListSection(homepageState) {
+  if (homepageState.docScanSkipped) {
+    var placeholderSection = CardService.newCardSection().setHeader('Actions for this document');
+    placeholderSection.addWidget(
+      CardService.newTextParagraph().setText('Click Sync to load the action list.')
+    );
+    return placeholderSection;
+  }
+
   var header = 'Actions for this document (' + homepageState.floatingActions.length + ')';
   var section = CardService.newCardSection().setHeader(header);
 
@@ -508,7 +637,7 @@ function _buildActionListSection(homepageState) {
     return section;
   }
 
-  // Render in AI-N order rather than document order (GTaskSheet-kkm7.6),
+  // Render in AI-N order rather than document order (gts-kkm7.6),
   // mirroring the Import tab's existing per-group AI-N sort above. Sort a
   // local copy only — homepageState.floatingActions stays in doc-scan order
   // for its other consumers (missing-anchor count, status summary, Tracker
@@ -524,6 +653,17 @@ function _buildActionListSection(homepageState) {
     return aN - bN;
   });
 
+  // gts-zocq rendering decision (per-surface, documented not silent):
+  // CardService's DecoratedText.setText() DOES support a small inline-HTML
+  // subset (<b>/<i>/<u>/<font>/<a>), so this surface COULD honour bold/italic
+  // runs if they were plumbed through this reader — unlike the tracker table
+  // (genuine API ceiling, see TrackerTable.js). Not done this session: the
+  // read path here (homepageState.floatingActions, sourced from the doc scan
+  // directly) would need its own explicit decision on how <b>/<i> composes
+  // with _escapeAddonHtml's existing escaping (tags must be re-injected AFTER
+  // escaping the surrounding text, not before). DELIBERATELY FLATTENED for
+  // now; left as a follow-up candidate for ROADMAP §Funnel, not a filed gap
+  // bead (no user report asks for sidebar formatting fidelity today).
   for (var i = 0; i < sortedActions.length; i++) {
     var action = sortedActions[i];
     var assignee = action.assigneeName || action.assigneeEmail || 'Unassigned';
@@ -720,7 +860,8 @@ function sidebarSetStatus(globalId, newStatus, docId) {
     docId = activeDoc ? activeDoc.getId() : '';
   }
 
-  var doc = DocumentApp.openById(docId);
+  var doc = withGasRetry('WorkspaceAddonCard.sidebarSetStatus:DocumentApp.openById',
+    function () { return DocumentApp.openById(docId); });
   var t1  = Date.now();
 
   // Scan to get current action state for the flush
@@ -741,13 +882,17 @@ function sidebarSetStatus(globalId, newStatus, docId) {
     var N     = parseGlobalId(globalId).N;
     var token = ScriptApp.getOAuthToken();
     _flushActionParagraph(docId, token, N, globalId,
-      currentAction.actionText, newStatus, currentAction.assigneeEmail, currentAction.assigneeName);
+      currentAction.actionText, newStatus, currentAction.assigneeEmail, currentAction.assigneeName,
+      currentAction.runs, // gts-zocq: preserve the doc's own just-scanned inline runs
+      currentAction.customFields); // gts-t6xs: preserve the doc's own just-scanned field lines
     var t3 = Date.now();
 
     _patchActionStatus(globalId, newStatus);
     var t4 = Date.now();
 
-    if (hasTracker) insertTrackerTable(docId);
+    // ADR-0030: proxy through the Web App instead of calling insertTrackerTable()
+    // in-process under the add-on binding, matching _patchActionStatus above.
+    if (hasTracker) _callWebAppProxy('insert_tracker_table', { docId: docId }, 'sidebar.tracker.error');
     var t5 = Date.now();
 
     GasLogger.log('sidebar.status-set.complete', {
@@ -783,7 +928,8 @@ function sidebarDeleteAction(globalId, docId) {
     var activeDoc = DocumentApp.getActiveDocument();
     docId = activeDoc ? activeDoc.getId() : '';
   }
-  var doc  = DocumentApp.openById(docId);
+  var doc  = withGasRetry('WorkspaceAddonCard.sidebarDeleteAction:DocumentApp.openById',
+    function () { return DocumentApp.openById(docId); });
   var para = _findParaByGlobalId(doc, globalId);
 
   var deleted = false;
@@ -807,72 +953,88 @@ function sidebarDeleteAction(globalId, docId) {
 }
 
 /**
+ * Calls a WEBAPP_SECRET-gated Web App route from the add-on binding (ADR-0012's
+ * two-layer auth: OAuth Bearer for GAS's own HTTP gate, WEBAPP_SECRET in the
+ * payload for application auth), so a state-mutating add-on entry point's actual
+ * behavior always matches the currently deployed TEST-WEB-APP/PROD-WEB-APP
+ * revision, never the (possibly stale) Marketplace-pinned binding executing this
+ * call (ADR-0030, knowledge-base/adr/0030-addon-entry-points-proxy-through-webapp.md).
+ *
+ * Returns the parsed JSON response body, or null on any failure (missing
+ * WEBAPP_URL, thrown UrlFetchApp exception, non-200, or a non-JSON body) — the
+ * caller decides how to surface that (toast/alert); this helper only logs it
+ * under errorTag so it isn't silently swallowed.
+ *
+ * @param {string} action    Web App `action` field (e.g. 'patch_action_status').
+ * @param {Object} payload   Action-specific fields merged into the request body.
+ * @param {string} errorTag  GasLogger tag for a failed call.
+ * @return {Object|null}
+ */
+function _callWebAppProxy(action, payload, errorTag) {
+  var webAppUrl = getWebAppUrl();
+  var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
+
+  if (!webAppUrl) {
+    GasLogger.log(errorTag, { msg: 'WEBAPP_URL not set', action: action });
+    return null;
+  }
+
+  var body = {
+    secret:        secret || '',
+    action:        action,
+    clientVersion: BUILD_INFO.version,
+    caller:        _getIdentity(),
+    opId:          (GasLogger.getParentOp() || GasLogger.getCurrentOp())
+  };
+  for (var k in payload) body[k] = payload[k];
+
+  var oauthToken = ScriptApp.getOAuthToken();
+  var resp;
+  try {
+    resp = UrlFetchApp.fetch(webAppUrl, {
+      method:             'post',
+      contentType:        'application/json',
+      muteHttpExceptions: true,
+      headers:            { 'Authorization': 'Bearer ' + oauthToken },
+      payload:            JSON.stringify(body)
+    });
+  } catch (e) {
+    GasLogger.log(errorTag, { msg: action + ' UrlFetchApp threw: ' + e.message, action: action });
+    return null;
+  }
+
+  if (resp.getResponseCode() !== 200) {
+    GasLogger.log(errorTag, { msg: action + ' HTTP ' + resp.getResponseCode(), action: action });
+    return null;
+  }
+
+  try {
+    return JSON.parse(resp.getContentText());
+  } catch (e) {
+    GasLogger.log(errorTag, { msg: action + ' non-JSON response: ' + e.message, action: action });
+    return null;
+  }
+}
+
+/**
  * Calls the Web App proxy to update Status + Date Modified for a single ActionSheet
  * row, and clears any stale 'Dirty' Sync Status flag.  Used by sidebarSetStatus in
  * place of the full syncDocument round-trip.
  */
 function _patchActionStatus(globalId, newStatus) {
-  var webAppUrl = getWebAppUrl();
-  var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
-
-  if (!webAppUrl) {
-    GasLogger.log('sidebar.patch.error', { msg: 'WEBAPP_URL not set' });
-    return;
-  }
-
-  var oauthToken = ScriptApp.getOAuthToken();
-  var resp = UrlFetchApp.fetch(webAppUrl, {
-    method:             'post',
-    contentType:        'application/json',
-    muteHttpExceptions: true,
-    headers:            { 'Authorization': 'Bearer ' + oauthToken },
-    payload:            JSON.stringify({
-      secret:        secret || '',
-      action:        'patch_action_status',
-      clientVersion: BUILD_INFO.version,
-      caller:        _getIdentity(),
-      opId:          GasLogger.getCurrentOp(),
-      globalId:      globalId,
-      newStatus:     newStatus
-    })
-  });
-
-  if (resp.getResponseCode() !== 200) {
-    GasLogger.log('sidebar.patch.error', { msg: 'patch_action_status HTTP ' + resp.getResponseCode() });
-  }
+  // Response shape is {patched:0|1} (or {error,patched:0}), not {ok:true} — a
+  // null return here already means _callWebAppProxy logged the failure
+  // (missing WEBAPP_URL / thrown fetch / non-200 / non-JSON); nothing further
+  // to check on success.
+  _callWebAppProxy('patch_action_status', { globalId: globalId, newStatus: newStatus }, 'sidebar.patch.error');
 }
 
 /**
  * Calls the Web App proxy to permanently delete an ActionSheet row by globalId.
  */
 function _deleteActionRowFromSheet(globalId) {
-  var webAppUrl = getWebAppUrl();
-  var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
-
-  if (!webAppUrl) {
-    GasLogger.log('sidebar.delete.error', { msg: 'WEBAPP_URL not set' });
-    return;
-  }
-
-  var oauthToken = ScriptApp.getOAuthToken();
-  var resp = UrlFetchApp.fetch(webAppUrl, {
-    method:             'post',
-    contentType:        'application/json',
-    muteHttpExceptions: true,
-    headers:            { 'Authorization': 'Bearer ' + oauthToken },
-    payload:            JSON.stringify({
-      secret:        secret || '',
-      action:        'delete_action_row',
-      clientVersion: BUILD_INFO.version,
-      caller:        _getIdentity(),
-      opId:          GasLogger.getCurrentOp(),
-      globalId:      globalId
-    })
-  });
-
-  if (resp.getResponseCode() !== 200) {
-    GasLogger.log('sidebar.delete.error', { msg: 'delete_action_row HTTP ' + resp.getResponseCode() });
-  }
+  // Response shape is {deleted:0|1} (or {error,deleted:0}) — see _patchActionStatus.
+  _callWebAppProxy('delete_action_row', { globalId: globalId }, 'sidebar.delete.error');
 }
 
 // ---------------------------------------------------------------------------
@@ -898,7 +1060,7 @@ function onSetActionStatus(e) {
     var tA = Date.now();
     sidebarSetStatus(globalId, newStatus);
     var tB = Date.now();
-    var card = buildHomepageCard({ skipSheetFetch: true });
+    var card = buildHomepageCard({ skipSheetFetch: true, includeDocScan: true });
     var tC = Date.now();
     GasLogger.log('sidebar.status-set.handler', {
       ms: { sidebarSetStatus: tB - tA, buildHomepageCard: tC - tB, total: tC - tA }
@@ -927,7 +1089,7 @@ function onDeleteAction(e) {
   return CardService.newActionResponseBuilder()
     .setNotification(CardService.newNotification().setText('Action deleted'))
     .setNavigation(CardService.newNavigation().updateCard(
-      buildHomepageCard({ skipSheetFetch: true })
+      buildHomepageCard({ skipSheetFetch: true, includeDocScan: true })
     ))
     .build();
 }

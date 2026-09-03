@@ -1,0 +1,10 @@
+{
+  "name": "unparseable-reporting-verify",
+  "input": "unparseable-reporting",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "unparseable-reporting",
+  "serves": ["gts-xvlu"],
+  "batch": "apt-lanes-scanner"
+}

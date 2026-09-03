@@ -1,0 +1,9 @@
+<!-- kind: golden -->
+<!-- name: flush-lane-sheetwin -->
+<!-- serves: gts-iz9i -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Case (gts-iz9i, entry point 1): sheetWin flush base. Established with an explicit token and status so the batch's establishing sync does not also hit the missing-status materialization block.
+
+AI-101: ep1 sheetwin lane base (Open)<SR>
+Target: ep1 lane value

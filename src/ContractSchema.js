@@ -44,7 +44,7 @@ var CONTRACT_SCHEMA = Object.freeze({
   // configFormat() (MenuHandler.js -> SyncManager.js) writes one row per
   // Key ('ai_token' | 'action_text') sampled from a reference document's
   // first floating action; _getActionFormatConfig() reads it back to style
-  // every subsequent doc write (GTaskSheet-d99c). Value is a JSON-encoded
+  // every subsequent doc write (gts-d99c). Value is a JSON-encoded
   // {fontFamily, fontSize, color, bold, italic, underline} object rather than
   // one column per field, so adding a new style property never requires a
   // schema/column change.
@@ -53,6 +53,25 @@ var CONTRACT_SCHEMA = Object.freeze({
     columnsByField: Object.freeze({
       key: 1,
       value: 2
+    })
+  }),
+
+  // gts-z6j0 — docId -> export-folder index, one row per document ever
+  // exported. Lives in a spreadsheet created inside EXPORT_ROOT_FOLDER_ID
+  // (see src/ExportFolderMap.js), keyed by Doc Id rather than Doc Title
+  // because document titles collide and folder identity must not. Meta Json
+  // is deliberately open-ended (empty object today) for other small
+  // per-export metadata, mirroring sheetConfig's Key/Value JSON-value
+  // convention above -- adding a field there never requires a column change.
+  sheetExportIndex: Object.freeze({
+    headers: Object.freeze(['Doc Id', 'Doc Title', 'Folder Id', 'Created At', 'Last Exported At', 'Meta Json']),
+    columnsByField: Object.freeze({
+      doc_id: 1,
+      doc_title: 2,
+      folder_id: 3,
+      created_at: 4,
+      last_exported_at: 5,
+      meta_json: 6
     })
   }),
 
@@ -70,7 +89,8 @@ var CONTRACT_SCHEMA = Object.freeze({
       'doc_name',
       'created_date',
       'modified_date',
-      'sync_status'
+      'sync_status',
+      'custom_fields'
     ]),
 
     headers: Object.freeze([
@@ -84,9 +104,19 @@ var CONTRACT_SCHEMA = Object.freeze({
       'Document',
       'Date Created',
       'Date Modified',
-      'Sync Status'
+      'Sync Status',
+      'Custom Fields'
     ]),
 
+    // gts-nuur / ADR-0024 (schema half): custom_fields is ADDITIVE and
+    // OPTIONAL, the same additive contract the `runs` field established
+    // (gts-zocq) -- every pre-existing code path (appendRow's positional
+    // arrays, SHEET_HEADERS.length-driven read ranges) keeps working
+    // unchanged with this column blank. Cell holds JSON of
+    // {FieldName: {text: string, runs: Array<{start,end,bold,italic,link}>}}
+    // per ADR-0028 rule 6 -- never a bare string, so a hyperlink or inline
+    // format inside a field value survives. action_text NEVER carries JSON;
+    // this column exists precisely so it doesn't have to.
     columnsByField: Object.freeze({
       global_id: 1,
       file_id: 2,
@@ -98,7 +128,8 @@ var CONTRACT_SCHEMA = Object.freeze({
       document_formula: 8,
       created_date: 9,
       modified_date: 10,
-      sync_status: 11
+      sync_status: 11,
+      custom_fields: 12
     })
   }),
 
@@ -106,8 +137,11 @@ var CONTRACT_SCHEMA = Object.freeze({
     routeNames: Object.freeze([
       'set_test_token',
       'set_axiom_config',
+      'set_export_config',
       'upsert_action_rows',
       'sync_action_rows',
+      'sync_document',
+      'insert_tracker_table',
       'verify_action_rows',
       'mark_doc_not_found',
       'delete_action_row',
@@ -120,15 +154,24 @@ var CONTRACT_SCHEMA = Object.freeze({
     // Routes that run in the WebApp but exist to support the ATDD harness — they
     // operate on production data/behaviour yet have no production caller. Kept out
     // of routeNames so production route enumeration stays clean. Gated to the test
-    // token. Pre-code contract for GTaskSheet-5vwu.2; implemented by .9.
+    // token. Pre-code contract for gts-5vwu.2; implemented by .9.
     testRouteNames: Object.freeze([
       'edit_action_row',          // the §16.9 `edit_sheet` act
       'find_sheet_actions',       // the §16.9 `find_sheet_actions` read query
+      'dump_doc_paragraphs',      // read-only Docs structural dump for paragraph-
+                                   // boundary diagnosis (flush merge defects)
+      'dump_raw_docs_api',        // gts-283i.1: unfiltered Docs.Documents.get()
+                                   // JSON dump for design-spike raw-capture assets
+                                   // (embedded-image / box-table structure)
+      'read_team_actions',        // gts-79dw.4.11: the team-scoped reader's full
+                                   // filter surface, for capturing the View A
+                                   // (gts-79dw.4.7) review fixture — kept off the
+                                   // production list_importable_actions contract
       'verify_chip_integrity',    // post-sync doc chip assertion (6ov.8)
-      'import_selected_for_test', // GTaskSheet-8qe5: interactive-test-entry-point for
+      'import_selected_for_test', // gts-8qe5: interactive-test-entry-point for
                                    // AC-2/AC-3 (Import tab CHECK_BOX selection cannot be
-                                   // driven via Playwright — EPIC GTaskSheet-pw5x)
-      'forward_action_rows_test'  // GTaskSheet-apcu: drives _handleForwardActionRows'
+                                   // driven via Playwright — EPIC gts-pw5x)
+      'forward_action_rows_test'  // gts-apcu: drives _handleForwardActionRows'
                                    // core loop directly with an explicit forwards[]
                                    // payload, bypassing _listImportableActionsData's
                                    // resolved/Forwarded filter — the only way to reach
@@ -147,10 +190,79 @@ var CONTRACT_SCHEMA = Object.freeze({
       // drained, so the harness's convergence primitive is simply "await the
       // response" — no log polling (§16.11 #4).
       //   Completion signal: the synchronous JSON response, returned only post-drain.
+      // gts-zocq (2026-08-01): each docState row MAY additionally carry
+      // `runs: [{start, end, bold, italic}]` — character-offset spans (into
+      // that row's own actionText, end-exclusive) of inline bold/italic
+      // formatting sampled from the doc at scan time. ADDITIVE and OPTIONAL:
+      // omitted or empty means "no inline formatting" (the pre-gts-zocq
+      // behavior, unchanged) — an older caller that never sends `runs` keeps
+      // working exactly as before. Row identity/consistency comparisons
+      // (_rowIdentityKey, VerifySync.js, TrackerTable.js._trackerRowsMatch)
+      // deliberately compare actionText/action only — `runs` never
+      // participates in identity, so a formatting-only change does not
+      // orphan a row, mark it Dirty, or force a tracker re-render.
+      //
+      // SCOPE OF THAT RULE — read before citing it (ADR-0031 §Context):
+      // it is about `runs` participating in ROW IDENTITY, i.e. the
+      // DOC -> SHEET direction. A user bolding a word in the document must
+      // not make their row look content-changed and get orphaned. That is
+      // all it says.
+      //
+      // It is NOT a general "formatting never triggers a flush" invariant,
+      // and has been misread as one (see ADR-0031 §Context for the specific
+      // misreading and what it cost). Config-driven rendering conformance —
+      // SR Indent / Field SR Indent / ai_token / action_text, ADR-0031 —
+      // compares the DOCUMENT against CONFIG, a different axis entirely. It
+      // never touches _rowIdentityKey, sheetWins, orphan detection or
+      // _trackerRowsMatch, so it needs no carve-out from this note and does
+      // not conflict with it. Precedent for a rendering-conformance flush
+      // predicate already exists in tree: SyncManager.js's missing-explicit-
+      // status materialize loop flushes an action whose content matches the
+      // sheet purely because its rendered form lacks a status token.
+      // gts-u0kh (2026-08-26): each docState row MAY additionally carry
+      // `customFields: {FieldName: {text, runs}}` (ADR-0027 rule 5/5a scanned
+      // field-line blocks). ADDITIVE and OPTIONAL, same contract as `runs`
+      // above -- omitted or {} means "no custom fields" and an older caller
+      // that never sends it keeps working unchanged. Written JSON-encoded
+      // into the Actions sheet's custom_fields column (columnsByField above)
+      // on both the appendRow (new-row) and doc-authoritative update paths;
+      // NOT yet persisted through the Dirty/sheetWins flush path (gts-t6xs
+      // -- the doc remains the sole source of truth for custom_fields until
+      // sheet-side persistence of edits ships).
       sync_action_rows: Object.freeze({
         request:  Object.freeze(['action', 'testToken', 'docId']),
         response: Object.freeze(['ok', 'sheetWins', 'docWins', 'queueDrained']),
         completionSignal: 'synchronous response after ACTION_SHEET_QUEUE drains (§16.11 #4)'
+      }),
+
+      // sync_document — WEBAPP_SECRET-gated document sync with an opt-in force
+      // flush (gts-366c). The only non-browser route to syncDocument(docId,
+      // {force:true}); before it, force was reachable only from the Docs menu.
+      // `force` is compared strictly against true (same gate discipline as
+      // sync_action_rows' `scanned`), so a JSON string "true" does NOT force.
+      // `result` carries syncDocument()'s own return — 'locked-skip' when it
+      // raced a concurrent execution for the per-doc lock and did nothing,
+      // else null — so a caller can tell a forced sync apart from a no-op.
+      //   Completion signal: sync.complete {docId, upserted, updated, forced};
+      //   additionally sync.forceFlush {docId, count} when force flushed >= 1.
+      sync_document: Object.freeze({
+        request:  Object.freeze(['action', 'secret', 'docId', 'force']),
+        response: Object.freeze(['ok', 'docId', 'forced', 'result']),
+        completionSignal: "synchronous response; GasLogger 'sync.complete' with forced=<force>"
+      }),
+
+      // insert_tracker_table — WEBAPP_SECRET-gated proxy target for
+      // insertTrackerTable(docId) (gts-6vzm, ADR-0030
+      // knowledge-base/adr/0030-addon-entry-points-proxy-through-webapp.md): the
+      // document-mutation half of the add-on entry points not already covered by
+      // sync_document. `result` is always null (insertTrackerTable() has no
+      // return value) — durable state (the rendered tracker table) is the oracle.
+      //   Completion signal: GasLogger 'tracker.insert.complete' {docId, rowCount},
+      //   or 'tracker.skip' {docId, ...} when the rendered table already matches.
+      insert_tracker_table: Object.freeze({
+        request:  Object.freeze(['action', 'secret', 'docId']),
+        response: Object.freeze(['ok', 'docId', 'result']),
+        completionSignal: "synchronous response; GasLogger 'tracker.insert.complete' or 'tracker.skip'"
       }),
 
       // edit_action_row — simulate a user editing one ActionSheet field over the API.
@@ -197,7 +309,7 @@ var CONTRACT_SCHEMA = Object.freeze({
         completionSignal: 'synchronous response; rows scoped to docId'
       }),
 
-      // list_importable_actions — Import tab AC-1 (GTaskSheet-eore). Read-only;
+      // list_importable_actions — Import tab AC-1 (gts-eore). Read-only;
       // returns OPEN actions from OTHER documents in the current doc's team
       // scope (DocData join on docId -> Team Id), gated by assertTeamAccess.
       // Access failure or unknown team -> { ok:true, teamId, rows:[] }, never
@@ -211,7 +323,7 @@ var CONTRACT_SCHEMA = Object.freeze({
         completionSignal: "synchronous response; rows scoped to current doc's team, excluding current doc"
       }),
 
-      // forward_action_rows — Import tab AC-3 (GTaskSheet-st24). Marks each
+      // forward_action_rows — Import tab AC-3 (gts-st24). Marks each
       // imported SOURCE action as 'Forwarded' (already counted as resolved
       // via isDelegated's 'forwarded' word), appends a
       // ' [Forward:<targetDocName> AI-<n>]' suffix to its Action text, and
@@ -224,8 +336,8 @@ var CONTRACT_SCHEMA = Object.freeze({
         completionSignal: "synchronous response; source rows stamped Status='Forwarded' + Sync Status='Dirty'"
       }),
 
-      // import_selected_for_test — GTaskSheet-8qe5 interactive-test-entry-point
-      // (EPIC GTaskSheet-pw5x). Drives the same core logic as _submitImport's
+      // import_selected_for_test — gts-8qe5 interactive-test-entry-point
+      // (EPIC gts-pw5x). Drives the same core logic as _submitImport's
       // AC-2/AC-3 loop (_importSelectedRows: insert chip fragment, upsert
       // ActionSheet rows, forward source rows) with an explicit globalIds
       // selection instead of CardService form-collected checkboxes. Inserts at
@@ -237,7 +349,26 @@ var CONTRACT_SCHEMA = Object.freeze({
         completionSignal: "synchronous response; same as _submitImport's IMPORT_SELECTED.done"
       }),
 
-      // forward_action_rows_test — GTaskSheet-apcu test-only route. Same
+      // read_team_actions — gts-79dw.4.11 test-only route over the shared
+      // team-scoped reader (_readTeamActions). Read-only; testToken-gated with
+      // no team-access gate of its own. `teamId` or `docId` (resolved to a team
+      // via its DocData row) selects the scope; statusFilter 'open'|'closed'|
+      // 'all', windowDays (age limit on resolved rows), excludeDocId and
+      // assigneeEmail are the narrowings. Rows carry the full reader projection
+      // (list_importable_actions' fields plus modified_date and the status_*
+      // display fields), sorted doc_name ASC then AI-N ASC. Each row carries
+      // getStatusDisplay()'s bucket/resolved/icon for its status so no consumer
+      // re-derives the bucketing; `statusOptions` is getStatusIconButtons(),
+      // the same canonical picker list the sidebar offers.
+      //   Completion signal: synchronous response; GasLogger 'teamActions.read'.
+      read_team_actions: Object.freeze({
+        request:  Object.freeze(['action', 'testToken', 'teamId', 'docId', 'statusFilter',
+                                 'windowDays', 'excludeDocId', 'assigneeEmail']),
+        response: Object.freeze(['ok', 'teamId', 'rows', 'statusOptions']),
+        completionSignal: 'synchronous response; rows scoped to teamId under the requested filters'
+      }),
+
+      // forward_action_rows_test — gts-apcu test-only route. Same
       // forwards[]/targetDocName shape and seen[]/isResolved guard as the
       // production forward_action_rows, testToken-gated instead of
       // secret-gated so a test can pass an explicit duplicate/already-

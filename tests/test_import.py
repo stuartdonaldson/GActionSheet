@@ -26,7 +26,7 @@ import pytest
 from scn.ai import ai
 from scn.engine import CheckpointKind, Surface
 from scn.reporter import emit_standalone_event
-from scn.session import ScenarioSession
+from scn.session import ScenarioSession, resolve_auth_file
 from scn.ui import UiDriver
 from tests.helpers.access_filter import assert_visible_set, import_adapter, visible_doc_set
 from tests.helpers.gas_log import assert_log, clear_logs
@@ -49,7 +49,7 @@ def browser_page(settings, request):
     """
     from playwright.sync_api import sync_playwright
 
-    auth = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+    auth = resolve_auth_file()
     run_id = request.node.name
     t0 = time.monotonic()
     with sync_playwright() as pw:
@@ -168,11 +168,11 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         # check — see _seed_import_candidate's docstring for why they skip
         # the real sync() round trip.
         scn_sibling = new_doc()
-        _seed_import_candidate(scn_sibling, "TestTeamA", "Import-filter sibling action")
+        _seed_import_candidate(scn_sibling, "TestTeamScopeA", "Import-filter sibling action")
 
         # ── Absent — different team (negative half of P1-P3) ────────────────
         scn_other = new_doc()
-        _seed_import_candidate(scn_other, "TestTeamAChild", "Import-filter other-team action")
+        _seed_import_candidate(scn_other, "TestTeamScopeAChild", "Import-filter other-team action")
 
         fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
         scn_target.ui.show_tab("Import")
@@ -214,7 +214,7 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         # of a real sync() followed by a separate _set_docdata override.
         scn_trashed = new_doc()
         _seed_import_candidate(
-            scn_trashed, "TestTeamA", "Import-filter trashed-doc action",
+            scn_trashed, "TestTeamScopeA", "Import-filter trashed-doc action",
             sync_status="Deleted",
         )
 
@@ -269,11 +269,11 @@ def test_import_access_filter(settings, gas_log_dir, browser_page, request):
         )
         scn_p4.checkpoint(STEP, on=frozenset({Surface.UI}))
     finally:
+        # Doc-trashing is deferred to a pytest finalizer registered by
+        # new_doc(request=request) (gts-hroj) -- only the drain-invariant
+        # check runs here, so the UI-failure-diagnostics hook still sees the
+        # doc pre-trash on a failure.
         for scn in sessions:
-            try:
-                scn._post_route("end_journey_session", {"docId": scn.doc_id})
-            except Exception:
-                pass
             scn.engine.close()
 
 
@@ -302,12 +302,12 @@ def test_team_view_page(settings, gas_log_dir, request):
         team_a_child = teams["testTeamAChild"]
 
         team_rows = {r.get("teamId"): r for r in scn_setup._post_fixture("get_team_data_rows").get("data", {}).get("rows", [])}
-        assert not (team_rows.get("TestTeamA") or {}).get("teamLink"), (
+        assert not (team_rows.get("TestTeamScopeA") or {}).get("teamLink"), (
             "testTeamA fixture row unexpectedly has a Team Link — this test exercises "
             "the no-link fallback case"
         )
 
-        # ── Doc with 1 open + 1 resolved action, in TestTeamA ────────────────
+        # ── Doc with 1 open + 1 resolved action, in TestTeamScopeA ────────────────
         scn_open = new_doc()
         _move_to_folder(scn_open, team_a)
         scn_open.sync()
@@ -332,7 +332,7 @@ def test_team_view_page(settings, gas_log_dir, request):
         _seed_open_action(scn_other_team, "Team-view other-team action")
 
         def check_team_view():
-            html = scn_setup.fetch_team_view_html("TestTeamA")
+            html = scn_setup.fetch_team_view_html("TestTeamScopeA")
             if open_doc_name not in html:
                 return f"team view missing open-action doc {open_doc_name!r}: {html!r}"
             if "Team-view open action" in html or "Team-view resolved action" in html:
@@ -365,11 +365,11 @@ def test_team_view_page(settings, gas_log_dir, request):
             f"unknown teamId should not be echoed back: {html_unknown!r}"
         )
     finally:
+        # Doc-trashing is deferred to a pytest finalizer registered by
+        # new_doc(request=request) (gts-hroj) -- only the drain-invariant
+        # check runs here, so the UI-failure-diagnostics hook still sees the
+        # doc pre-trash on a failure.
         for scn in sessions:
-            try:
-                scn._post_route("end_journey_session", {"docId": scn.doc_id})
-            except Exception:
-                pass
             scn.engine.close()
 
 
@@ -390,7 +390,6 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
         setup_resp = scn_setup._post_fixture("setup_team_scope_fixture")
         teams = setup_resp.get("data") or {}
         team_a = teams["testTeamA"]
-        team_a_child = teams["testTeamAChild"]
 
         # ── Seed: target + 2 sources in testTeamA, 1 other-team negative ────
         scn_target = new_doc()
@@ -409,10 +408,14 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
         scn_src2.sync()
         src2_action = _seed_open_action(scn_src2, "Import-flow source-2 action")
 
+        # scn_other is pure leadup state for AC-1's other-team negative check
+        # (never opened/synced in this test), so it skips the real sync()
+        # round trip the same way test_import_access_filter's scn_other does
+        # — see _seed_import_candidate's docstring for why that's safe here
+        # (list_importable_actions never reads doc content, only the
+        # Actions-row + DocData join this helper fabricates directly).
         scn_other = new_doc()
-        _move_to_folder(scn_other, team_a_child)
-        scn_other.sync()
-        _seed_open_action(scn_other, "Import-flow other-team action")
+        _seed_import_candidate(scn_other, "TestTeamScopeAChild", "Import-flow other-team action")
 
         # ── AC-1: Import tab list — grouped by doc_name ASC, AI-N ASC within ─
         scn_target.ui.show_tab("Import")
@@ -487,7 +490,7 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
             new_rows.sort(key=lambda r: int(r.action_id.split("-")[1]))
             ns = [int(r.action_id.split("-")[1]) for r in new_rows]
             if ns != list(range(ns[0], ns[0] + len(ns))):
-                return f"new AI-N not sequential: {ns}"
+                return f"new ACT-N not sequential: {ns}"
             carried = {r.action for r in new_rows}
             if src1_action.action not in carried or src2_action.action not in carried:
                 return f"source action text not carried over: {carried}"
@@ -523,7 +526,7 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
                     return f"source row {src_action.global_id} not found after import"
                 if row.status != "Forwarded":
                     return f"source row {src_action.global_id} status={row.status!r}, expected 'Forwarded'"
-                if f"[Forward:{target_doc_name} AI-" not in row.action:
+                if f"[Forward:{target_doc_name} ACT-" not in row.action:
                     return f"source row {src_action.global_id} action missing forward suffix: {row.action!r}"
                 if row.sync_status != "Dirty":
                     return f"source row {src_action.global_id} sync_status={row.sync_status!r}, expected 'Dirty'"
@@ -556,11 +559,11 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
         scn_src1.sync()
         scn_src2.sync()
     finally:
+        # Doc-trashing is deferred to a pytest finalizer registered by
+        # new_doc(request=request) (gts-hroj) -- only the drain-invariant
+        # check runs here, so the UI-failure-diagnostics hook still sees the
+        # doc pre-trash on a failure.
         for scn in sessions:
-            try:
-                scn._post_route("end_journey_session", {"docId": scn.doc_id})
-            except Exception:
-                pass
             scn.engine.close()
 
 

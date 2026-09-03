@@ -1,6 +1,9 @@
 # ADR-0017: Verified identity for chip-link action editing
 
-**Status:** Proposed _(revised 2026-06-14 after validation — supersedes the original GIS-in-iframe draft; see `knowledge-base/adr/probes/0017-validation.md`)_
+**Status:** Superseded by ADR-0021 (Phase 2 only — the OAuth auth-code-redirect design,
+external-host rejection, and Phase 1/Phase 2 split are all reversed; Phase 1's
+anonymous chip-preview notice is retained unchanged, see ADR-0021 Decision §4)
+_(revised 2026-06-14 after validation — supersedes the original GIS-in-iframe draft; see `knowledge-base/adr/probes/0017-validation.md`)_
 **Date:** 2026-06-14
 **Relates to:** ADR-0012 (web app two-layer auth), `docs/security-architecture.md` §1-3
 (execution identity model, trust boundaries, `_getIdentity()`), F3 (globalId-keyed
@@ -57,8 +60,8 @@ could be *any* Google account. Before exposing the action text or allowing an ed
 Google-account holder who knows or guesses the chip `globalId` could read confidential
 information. The mechanism (deployer-side Drive permissions check vs. requesting a Drive read
 scope from the user) is an open question with a safe default of **deny → fall back to the Phase 1
-notice**. Tracked as `GTaskSheet-1hyh`, a blocking dependency of the Phase 2 edit
-(`GTaskSheet-6dlp`).
+notice**. Tracked as `gts-1hyh`, a blocking dependency of the Phase 2 edit
+(`gts-6dlp`).
 
 #### Blocking dependencies (Phase 2 — operator GCP-console tasks; code is blocked until done)
 
@@ -144,9 +147,9 @@ access is enforced by Drive ACL. Full content and editing are deferred to Phase 
 verified identity, and every status change records the verified `au` in the audit log.
 
 **Two distinct gates in Phase 2 — both required:**
-1. **Authentication** — OAuth verifies *who* the caller is (`GTaskSheet-6dlp`).
+1. **Authentication** — OAuth verifies *who* the caller is (`gts-6dlp`).
 2. **Authorization** — the verified identity must hold Drive access to the referenced document
-   before any confidential content or edit is exposed (`GTaskSheet-1hyh`). Verified-but-
+   before any confidential content or edit is exposed (`gts-1hyh`). Verified-but-
    unauthorized access (any Google account, no file access) must be denied — falling back to the
    Phase 1 notice — or it becomes a confidential-data leak to any Google user holding a
    `globalId`. Default-deny when access cannot be positively confirmed.
@@ -169,5 +172,5 @@ verified identity, and every status change records the verified `au` in the audi
 
 | Phase | Epic | Children |
 |---|---|---|
-| Phase 1 (interim) — **done** | `GTaskSheet-krz5` — Anonymous chip-preview notice (closed) | `mus0` [IMP] (closed), `zb3l` [TST] (closed) — `doGet ?cmd=preview` implemented in `src/WebApp.js` (`_handlePreviewNotice` / `_renderPreviewNotice`), covered by `tests/test_chip_preview.py` |
-| Phase 2 (deferred) | `GTaskSheet-79dw` — Authorized web app AI editing | `hc6v` [INF], `1hyh` [IMP authz], `6dlp` [IMP edit] (blocked by hc6v + 1hyh) |
+| Phase 1 (interim) — **done** | `gts-krz5` — Anonymous chip-preview notice (closed) | `mus0` [IMP] (closed), `zb3l` [TST] (closed) — `doGet ?cmd=preview` implemented in `src/WebApp.js` (`_handlePreviewNotice` / `_renderPreviewNotice`), covered by `tests/test_chip_preview.py` |
+| Phase 2 (deferred) | `gts-79dw` — Authorized web app AI editing | `hc6v` [INF], `1hyh` [IMP authz], `6dlp` [IMP edit] (blocked by hc6v + 1hyh) |

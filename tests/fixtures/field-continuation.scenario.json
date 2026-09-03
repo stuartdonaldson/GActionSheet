@@ -1,0 +1,12 @@
+{
+  "name": "field-continuation",
+  "input": "field-continuation",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "field-continuation-expected",
+  "serves": [
+    "gts-82s2"
+  ],
+  "batch": "apt-corpus-batch"
+}

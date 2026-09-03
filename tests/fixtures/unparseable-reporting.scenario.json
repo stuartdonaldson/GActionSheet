@@ -1,0 +1,13 @@
+{
+  "name": "unparseable-reporting",
+  "input": "unparseable-reporting",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "unparseable-reporting",
+  "serves": [
+    "gts-thwh",
+    "gts-xvlu"
+  ],
+  "batch": "apt-corpus-batch"
+}

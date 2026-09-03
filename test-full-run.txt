@@ -1,0 +1,1494 @@
+stuar@Locutus:~/proj/GActionSheet$ pnpm run test:full
+$ pnpm run test:prep && /mnt/c/dev/venvs/uv1/bin/python3 -m pytest --alluredir=test-results/allure-results --junitxml=test-results/junit/pytest.xml && npx playwright test --config tests/playwright/playwright.config.js
+$ /mnt/c/dev/venvs/uv1/bin/python3 write-environment.py
+OK    history copied from /home/stuar/proj/GActionSheet/allure-report/history
+OK    environment.properties (@311)
+=================================================================== test session starts ====================================================================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0
+rootdir: /home/stuar/proj/GActionSheet
+configfile: pyproject.toml
+testpaths: tests
+plugins: allure-pytest-2.16.0, anyio-4.13.0, dotenv-0.5.2
+collected 331 items
+
+tests/test_ai_n_token.py ...                                                                                                                         [  0%]
+tests/test_archive.py .                                                                                                                              [  1%]
+tests/test_b7_write_routes.py F.....                                                                                                                 [  3%]
+tests/test_chip_preview.py ..                                                                                                                        [  3%]
+tests/test_contract.py ....                                                                                                                          [  4%]
+tests/test_epic_a_slice.py .....                                                                                                                     [  6%]
+tests/test_floating_action_scanner.py .......FFF                                                                                                     [  9%]
+tests/test_import.py ..F.                                                                                                                            [ 10%]
+tests/test_infrastructure.py ......                                                                                                                  [ 12%]
+tests/test_journey.py F                                                                                                                              [ 12%]
+tests/test_journey_acts_1_3.py .                                                                                                                     [ 12%]
+tests/test_link_preview.py F                                                                                                                         [ 13%]
+tests/test_menu_entry_points.py .....                                                                                                                [ 14%]
+tests/test_poc_features.py .                                                                                                                         [ 15%]
+tests/test_scn_ai.py .........................                                                                                                       [ 22%]
+tests/test_scn_engine.py ..................................................................                                                          [ 42%]
+tests/test_scn_reporter.py ......................                                                                                                    [ 49%]
+tests/test_scn_session.py ..........................................                                                                                 [ 61%]
+tests/test_scn_surfaces.py ..........................                                                                                                [ 69%]
+tests/test_scn_ui.py .............................................................................                                                   [ 93%]
+tests/test_sidebar.py FF.F....                                                                                                                       [ 95%]
+tests/test_status_token_parens.py .                                                                                                                  [ 95%]
+tests/test_sync_all.py ..F..                                                                                                                         [ 97%]
+tests/test_team_scope.py .                                                                                                                           [ 97%]
+tests/test_tracker_view_only.py ..                                                                                                                   [ 98%]
+tests/test_ui_smoke.py .                                                                                                                             [ 98%]
+tests/test_verify_access.py ..sss                                                                                                                    [100%]
+
+========================================================================= FAILURES =========================================================================
+___________________________________________________________________ test_b7_write_routes ___________________________________________________________________
+
+scn = <scn.session.ScenarioSession object at 0x7138dac299a0>
+
+    def test_b7_write_routes(scn):
+        # ── SETUP — seed three actions; sync; pin auto-assigned IDs ──────────────────
+        #   Distinct action texts → unique identity keys for find_sheet_actions lookups.
+        #   Status left UNSET — these are tokenless items (default Open path).
+        target_edit = ai(action="B7 action to be sheet-edited verifying Dirty stamp and sheet-wins path")
+        target_status = ai(action="B7 action whose status changes via set_status async convergence path")
+        target_delete = ai(action="B7 action to be deleted verifying Deleted stamp and doc removal")
+
+        for a in (target_edit, target_status, target_delete):
+            scn.append_paragraph(a.as_text())   # pure doc mutation; no action until sync
+
+        scn.sync()                              # Scenario C: bidirectional reconcile; queue drains
+
+        # Pin IDs now so we can address rows by globalId in the write acts below
+        _pin_ids(scn, [target_edit, target_status, target_delete])
+
+        # entry_point: sync_action_rows -- the bidirectional-reconcile route POSTed by
+        # scn.sync() above (Scenario C), distinct from the syncDocument-tagged checks in
+        # test_team_scope.py (GTaskSheet-rz4k.2). Durable result: the doc-seeded action
+        # now exists as a sheet row (already confirmed by _pin_ids above; tag it here
+        # for entry-point coverage).
+        scn.verify(target_edit, on=SHEET, tag="[rz4k.2 sync_action_rows]", entry_point="sync_action_rows")
+        scn.checkpoint(STEP)
+
+        # AC2 (sjj): verify the auto-assigned globalIds match the expected format {docId}/AI-{N}
+        # action_id holds only the AI-N suffix; the session assembles the full globalId as
+        # "{doc_id}/{action_id}" when addressing write routes (§16.11 #3).
+        for label, a in [("edit", target_edit), ("status", target_status), ("delete", target_delete)]:
+            assembled = f"{scn.doc_id}/{a.action_id or ''}"
+            assert _GLOBAL_ID_RE.match(assembled), (
+                f"[B7 AC2] {label} assembled globalId format invalid: {assembled!r} "
+                "(expected '{docId}/AI-{N}')"
+            )
+
+        # ── ACT A — edit_sheet: Dirty stamp + sheet-wins on next sync ────────────────
+        #
+        #   The API path replicates onActionSheetEdit: it stamps Sync Status='Dirty' +
+        #   Date Modified before responding (§16.11 #2; ContractSchema.js edit_action_row).
+        #   Dirty → sheet wins on the following sync (ADR-0009 §B):
+        #   the new status flushes doc-ward (paragraph updated to "(In Progress)").
+
+        # Covers §15 test_03 (assignee_email field) + test_04 (action_text) + test_05 (status).
+        # Conflict test (§15 test_07): doc currently shows "Open"; sheet will be Dirty "In Progress"
+        # → sheet wins confirms the conflict is resolved in sheet's favour.
+        scn.edit_sheet(target_edit, status="In Progress")
+
+        # Contract: synchronous response; Sync Status = 'Dirty' immediately (§16.11 #2 completion signal)
+>       rows_after_edit = scn.find_sheet_actions()
+                          ^^^^^^^^^^^^^^^^^^^^^^^^
+
+/mnt/c/dev/GActionSheet/tests/test_b7_write_routes.py:112:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scn/session.py:521: in find_sheet_actions
+    resp = self._post_route("find_sheet_actions", {"docId": self.doc_id})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scn/session.py:277: in _post_route
+    return self._post(payload)
+           ^^^^^^^^^^^^^^^^^^^
+scn/session.py:262: in _post
+    result = _http_post(url, payload, timeout)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scn/session.py:113: in _http_post
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:215: in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:515: in open
+    response = self._open(req, data)
+               ^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:532: in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+/usr/lib/python3.12/urllib/request.py:492: in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:1392: in https_open
+    return self.do_open(http.client.HTTPSConnection, req,
+/usr/lib/python3.12/urllib/request.py:1348: in do_open
+    r = h.getresponse()
+        ^^^^^^^^^^^^^^^
+/usr/lib/python3.12/http/client.py:1448: in getresponse
+    response.begin()
+/usr/lib/python3.12/http/client.py:336: in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/http/client.py:297: in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/socket.py:707: in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/ssl.py:1252: in recv_into
+    return self.read(nbytes, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <ssl.SSLSocket [closed] fd=-1, family=2, type=1, proto=6>, len = 8192, buffer = <memory at 0x7138db87ec80>
+
+    def read(self, len=1024, buffer=None):
+        """Read up to LEN bytes and return them.
+        Return zero-length string on EOF."""
+
+        self._checkClosed()
+        if self._sslobj is None:
+            raise ValueError("Read on closed or unwrapped SSL socket.")
+        try:
+            if buffer is not None:
+>               return self._sslobj.read(len, buffer)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E               TimeoutError: The read operation timed out
+
+/usr/lib/python3.12/ssl.py:1104: TimeoutError
+_______________________________________________________ test_soft_return_continuation_in_action_text _______________________________________________________
+
+settings = {'axiomDataset': 'nuuts', 'axiomQueryToken': 'xaat-79be4f4a-de00-4bd1-a7dc-0e99fb52d2ff', 'axiomToken': 'xaat-d5844657-0792-40a5-b923-3b43aa16f389', 'gasLogDir': '/mnt/g/My Drive/GAS-Logger/GTaskSheet', ...}
+request = <FixtureRequest for <Function test_soft_return_continuation_in_action_text>>
+
+    def test_soft_return_continuation_in_action_text(settings, request):
+        """AC-T2: Soft-return continuation lines after the token are part of action
+        text (to end of paragraph)."""
+        scn = ScenarioSession.new_doc(settings, request=request)
+        try:
+            scn._post_fixture("append_doc_soft_paragraph",
+                              {"text": "context\nAI-1: action text\ncontinuation line"})
+            scn.sync()
+
+>           row = _find_action(scn, "action text\ncontinuation line")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/mnt/c/dev/GActionSheet/tests/test_floating_action_scanner.py:196:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scn = <scn.session.ScenarioSession object at 0x7138db61cb30>, action_text = 'action text\ncontinuation line'
+
+    def _find_action(scn, action_text):
+        rows = scn.find_sheet_actions()
+        row = next((r for r in rows if r.action == action_text), None)
+>       assert row is not None, (
+            f"action {action_text!r} not found in sheet after sync; "
+            f"rows={[r.action for r in rows]!r}"
+        )
+E       AssertionError: action 'action text\ncontinuation line' not found in sheet after sync; rows=['action text continuation line']
+E       assert None is not None
+
+/mnt/c/dev/GActionSheet/tests/test_floating_action_scanner.py:34: AssertionError
+________________________________________________________ test_soft_return_bare_ai_with_continuation ________________________________________________________
+
+settings = {'axiomDataset': 'nuuts', 'axiomQueryToken': 'xaat-79be4f4a-de00-4bd1-a7dc-0e99fb52d2ff', 'axiomToken': 'xaat-d5844657-0792-40a5-b923-3b43aa16f389', 'gasLogDir': '/mnt/g/My Drive/GAS-Logger/GTaskSheet', ...}
+request = <FixtureRequest for <Function test_soft_return_bare_ai_with_continuation>>
+
+    def test_soft_return_bare_ai_with_continuation(settings, request):
+        """AC-T3: A bare AI: token followed by soft-return continuation lines
+        produces one row with the continuation included in action text; the bare
+        token is assigned a number by _assignPlaceholderTokens."""
+        scn = ScenarioSession.new_doc(settings, request=request)
+        try:
+            scn._post_fixture("append_doc_soft_paragraph",
+                              {"text": "context\nAI: bare action\ncontinuation"})
+            scn.sync()
+
+>           row = _find_action(scn, "bare action\ncontinuation")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/mnt/c/dev/GActionSheet/tests/test_floating_action_scanner.py:212:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scn = <scn.session.ScenarioSession object at 0x7138db736d80>, action_text = 'bare action\ncontinuation'
+
+    def _find_action(scn, action_text):
+        rows = scn.find_sheet_actions()
+        row = next((r for r in rows if r.action == action_text), None)
+>       assert row is not None, (
+            f"action {action_text!r} not found in sheet after sync; "
+            f"rows={[r.action for r in rows]!r}"
+        )
+E       AssertionError: action 'bare action\ncontinuation' not found in sheet after sync; rows=['bare action continuation']
+E       assert None is not None
+
+/mnt/c/dev/GActionSheet/tests/test_floating_action_scanner.py:34: AssertionError
+______________________________________________________ test_soft_return_context_and_multiline_action _______________________________________________________
+
+settings = {'axiomDataset': 'nuuts', 'axiomQueryToken': 'xaat-79be4f4a-de00-4bd1-a7dc-0e99fb52d2ff', 'axiomToken': 'xaat-d5844657-0792-40a5-b923-3b43aa16f389', 'gasLogDir': '/mnt/g/My Drive/GAS-Logger/GTaskSheet', ...}
+request = <FixtureRequest for <Function test_soft_return_context_and_multiline_action>>
+
+    def test_soft_return_context_and_multiline_action(settings, request):
+        """AC-T4: Context intro before the token is excluded; all soft-return lines
+        after the token through end of paragraph are included in action text."""
+        scn = ScenarioSession.new_doc(settings, request=request)
+        try:
+            scn._post_fixture("append_doc_soft_paragraph",
+                              {"text": "context intro\nAI-1: main action\nline 2\nline 3"})
+            scn.sync()
+
+>           row = _find_action(scn, "main action\nline 2\nline 3")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/mnt/c/dev/GActionSheet/tests/test_floating_action_scanner.py:227:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scn = <scn.session.ScenarioSession object at 0x7138da9dbe00>, action_text = 'main action\nline 2\nline 3'
+
+    def _find_action(scn, action_text):
+        rows = scn.find_sheet_actions()
+        row = next((r for r in rows if r.action == action_text), None)
+>       assert row is not None, (
+            f"action {action_text!r} not found in sheet after sync; "
+            f"rows={[r.action for r in rows]!r}"
+        )
+E       AssertionError: action 'main action\nline 2\nline 3' not found in sheet after sync; rows=['main action line 2 line 3']
+E       assert None is not None
+
+/mnt/c/dev/GActionSheet/tests/test_floating_action_scanner.py:34: AssertionError
+______________________________________________________________ test_import_flow_forward_sync _______________________________________________________________
+
+url = 'https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec'
+payload = {'action': 'run_fixture', 'fixture': 'get_docdata_row', 'testDocId': '1qIAzGSj2TBqLQfrDG6Uors0jPbX29MlDvbERmL7_sfg', 'testToken': '86811032-fa33-4304-961e-4397fe398a45'}
+timeout = 360
+
+    def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
+        """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors."""
+        if not url:
+            raise RuntimeError(
+                "webappTestUrl not set in local.settings.json"
+            )
+
+        data = json.dumps(payload).encode("utf-8")
+        headers: dict = {"Content-Type": "application/json"}
+        # /dev URLs require Google auth; inject saved Playwright cookies when present.
+        if url.endswith("/dev"):
+            cookie = _load_auth_cookie_header()
+            if cookie:
+                headers["Cookie"] = cookie
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+>           with urllib.request.urlopen(req, timeout=timeout) as resp:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scn/session.py:113:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/urllib/request.py:215: in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:521: in open
+    response = meth(req, response)
+               ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:630: in http_response
+    response = self.parent.error(
+/usr/lib/python3.12/urllib/request.py:559: in error
+    return self._call_chain(*args)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:492: in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <urllib.request.HTTPDefaultErrorHandler object at 0x7138dbfb5d00>, req = <urllib.request.Request object at 0x7138d9f69310>
+fp = <http.client.HTTPResponse object at 0x7138d9f6ba00>, code = 500, msg = 'Internal Server Error'
+hdrs = <http.client.HTTPMessage object at 0x7138d9f68590>
+
+    def http_error_default(self, req, fp, code, msg, hdrs):
+>       raise HTTPError(req.full_url, code, msg, hdrs, fp)
+E       urllib.error.HTTPError: HTTP Error 500: Internal Server Error
+
+/usr/lib/python3.12/urllib/request.py:639: HTTPError
+
+The above exception was the direct cause of the following exception:
+
+settings = {'axiomDataset': 'nuuts', 'axiomQueryToken': 'xaat-79be4f4a-de00-4bd1-a7dc-0e99fb52d2ff', 'axiomToken': 'xaat-d5844657-0792-40a5-b923-3b43aa16f389', 'gasLogDir': '/mnt/g/My Drive/GAS-Logger/GTaskSheet', ...}
+gas_log_dir = '/mnt/g/My Drive/GAS-Logger/GTaskSheet', browser_page = <Page url='about:blank'>
+request = <FixtureRequest for <Function test_import_flow_forward_sync>>
+
+    def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
+        sessions = []
+
+        def new_doc():
+            s = ScenarioSession.new_doc(settings, request=request)
+            sessions.append(s)
+            return s
+
+        try:
+            scn_setup = new_doc()
+            setup_resp = scn_setup._post_fixture("setup_team_scope_fixture")
+            teams = setup_resp.get("data") or {}
+            team_a = teams["testTeamA"]
+            team_a_child = teams["testTeamAChild"]
+
+            # ── Seed: target + 2 sources in testTeamA, 1 other-team negative ────
+            scn_target = new_doc()
+            _move_to_folder(scn_target, team_a)
+            scn_target.sync()
+            scn_target.ui = UiDriver(browser_page, doc_id=scn_target.doc_id)
+>           target_doc_name = _docdata_row(scn_target).get("docName")
+                              ^^^^^^^^^^^^^^^^^^^^^^^^
+
+/mnt/c/dev/GActionSheet/tests/test_import.py:400:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/mnt/c/dev/GActionSheet/tests/test_import.py:83: in _docdata_row
+    resp = scn._post_fixture("get_docdata_row")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scn/session.py:289: in _post_fixture
+    return self._post(payload)
+           ^^^^^^^^^^^^^^^^^^^
+scn/session.py:262: in _post
+    result = _http_post(url, payload, timeout)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+url = 'https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec'
+payload = {'action': 'run_fixture', 'fixture': 'get_docdata_row', 'testDocId': '1qIAzGSj2TBqLQfrDG6Uors0jPbX29MlDvbERmL7_sfg', 'testToken': '86811032-fa33-4304-961e-4397fe398a45'}
+timeout = 360
+
+    def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
+        """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors."""
+        if not url:
+            raise RuntimeError(
+                "webappTestUrl not set in local.settings.json"
+            )
+
+        data = json.dumps(payload).encode("utf-8")
+        headers: dict = {"Content-Type": "application/json"}
+        # /dev URLs require Google auth; inject saved Playwright cookies when present.
+        if url.endswith("/dev"):
+            cookie = _load_auth_cookie_header()
+            if cookie:
+                headers["Cookie"] = cookie
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+                final_url = resp.geturl()
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+>           raise RuntimeError(
+                f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw!r}"
+            ) from exc
+E           RuntimeError: HTTP 500 from GAS WebApp (action='run_fixture'): '<!DOCTYPE html><html><head><script nonce="GNeja4YeX1-dnp6ryL7k0A">window[\'ppConfig\'] = {productName: \'26981ed0d57bbad37e728ff58134270c\', deleteIsEnforced:  false , sealIsEnforced:  false , heartbeatRate:  0.5 , periodicReportingRateMillis:  60000.0 , disableAllReporting:  false };(function(){\'use strict\';function k(a){var b=0;return function(){return b<a.length?{done:!1,value:a[b++]}:{done:!0}}}function l(a){var b=typeof Symbol!="undefined"&&Symbol.iterator&&a[Symbol.iterator];if(b)return b.call(a);if(typeof a.length=="number")return{next:k(a)};throw Error(String(a)+" is not an iterable or ArrayLike");}var m=typeof Object.defineProperties=="function"?Object.defineProperty:function(a,b,c){if(a==Array.prototype||a==Object.prototype)return a;a[b]=c.value;return a};\nfunction n(a){a=["object"==typeof globalThis&&globalThis,a,"object"==typeof window&&window,"object"==typeof self&&self,"object"==typeof global&&global];for(var b=0;b<a.length;++b){var c=a[b];if(c&&c.Math==Math)return c}throw Error("Cannot find global object");}var p=n(this);function q(a,b){if(b)a:{var c=p;a=a.split(".");for(var d=0;d<a.length-1;d++){var e=a[d];if(!(e in c))break a;c=c[e]}a=a[a.length-1];d=c[a];b=b(d);b!=d&&b!=null&&m(c,a,{configurable:!0,writable:!0,value:b})}}\nq("Object.is",function(a){return a?a:function(b,c){return b===c?b!==0||1/b===1/c:b!==b&&c!==c}});q("Array.prototype.includes",function(a){return a?a:function(b,c){var d=this;d instanceof String&&(d=String(d));var e=d.length;c=c||0;for(c<0&&(c=Math.max(c+e,0));c<e;c++){var f=d[c];if(f===b||Object.is(f,b))return!0}return!1}});\nq("String.prototype.includes",function(a){return a?a:function(b,c){if(this==null)throw new TypeError("The \'this\' value for String.prototype.includes must not be null or undefined");if(b instanceof RegExp)throw new TypeError("First argument to String.prototype.includes must not be a regular expression");return this.indexOf(b,c||0)!==-1}});function r(a,b,c){a("https://csp.withgoogle.com/csp/proto/"+encodeURIComponent(b),JSON.stringify(c))}function t(){var a;if((a=window.ppConfig)==null?0:a.disableAllReporting)return function(){};var b,c,d,e;return(e=(b=window)==null?void 0:(c=b.navigator)==null?void 0:(d=c.sendBeacon)==null?void 0:d.bind(navigator))!=null?e:u}function u(a,b){var c=new XMLHttpRequest;c.open("POST",a);c.send(b)}\nfunction v(){var a=(w=Object.prototype)==null?void 0:w.__lookupGetter__("__proto__"),b=x,c=y;return function(){var d=a.call(this),e,f,g,h;r(c,b,{type:"ACCESS_GET",origin:(f=window.location.origin)!=null?f:"unknown",report:{className:(g=d==null?void 0:(e=d.constructor)==null?void 0:e.name)!=null?g:"unknown",stackTrace:(h=Error().stack)!=null?h:"unknown"}});return d}}\nfunction z(){var a=(A=Object.prototype)==null?void 0:A.__lookupSetter__("__proto__"),b=x,c=y;return function(d){d=a.call(this,d);var e,f,g,h;r(c,b,{type:"ACCESS_SET",origin:(f=window.location.origin)!=null?f:"unknown",report:{className:(g=d==null?void 0:(e=d.constructor)==null?void 0:e.name)!=null?g:"unknown",stackTrace:(h=Error().stack)!=null?h:"unknown"}});return d}}function B(a,b){C(a.productName,b);setInterval(function(){C(a.productName,b)},a.periodicReportingRateMillis)}\nvar D="constructor __defineGetter__ __defineSetter__ hasOwnProperty __lookupGetter__ __lookupSetter__ isPrototypeOf propertyIsEnumerable toString valueOf __proto__ toLocaleString x_ngfn_x".split(" "),E=D.concat,F=navigator.userAgent.match(/Firefox\\/([0-9]+)\\./),G=(!F||F.length<2?0:Number(F[1])<75)?["toSource"]:[],H;if(G instanceof Array)H=G;else{for(var I=l(G),J,K=[];!(J=I.next()).done;)K.push(J.value);H=K}var L=E.call(D,H),M=[];\nfunction C(a,b){for(var c=[],d=l(Object.getOwnPropertyNames(Object.prototype)),e=d.next();!e.done;e=d.next())e=e.value,L.includes(e)||M.includes(e)||c.push(e);e=Object.prototype;d=[];for(var f=0;f<c.length;f++){var g=c[f];d[f]={name:g,descriptor:Object.getOwnPropertyDescriptor(Object.prototype,g),type:typeof e[g]}}if(d.length!==0){c=l(d);for(e=c.next();!e.done;e=c.next())M.push(e.value.name);var h;r(b,a,{type:"SEAL",origin:(h=window.location.origin)!=null?h:"unknown",report:{blockers:d}})}};var N=Math.random(),O=t(),P=window.ppConfig;P&&(P.disableAllReporting||P.deleteIsEnforced&&P.sealIsEnforced||N<P.heartbeatRate&&r(O,P.productName,{origin:window.location.origin,type:"HEARTBEAT"}));var y=t(),Q=window.ppConfig;if(Q)if(Q.deleteIsEnforced)delete Object.prototype.__proto__;else if(!Q.disableAllReporting){var x=Q.productName;try{var w,A;Object.defineProperty(Object.prototype,"__proto__",{enumerable:!1,get:v(),set:z()})}catch(a){}}\n(function(){var a=t(),b=window.ppConfig;b&&(b.sealIsEnforced?Object.seal(Object.prototype):b.disableAllReporting||(document.readyState!=="loading"?B(b,a):document.addEventListener("DOMContentLoaded",function(){B(b,a)})))})();}).call(this);\n</script><link rel="shortcut icon" href="//ssl.gstatic.com/docs/script/images/favicon.ico"><title>Error</title><style type="text/css" nonce="dM3LlM-WmP4Tk5DkKf-4Rw">body {background-color: #fff; margin: 0; padding: 0;}.errorMessage {font-family: Arial,sans-serif; font-size: 12pt; font-weight: bold; line-height: 150%; padding-top: 25px;}</style></head><body style="margin:20px"><div><img alt="Google Apps Script" src="//ssl.gstatic.com/docs/script/images/logo.png"></div><div style="text-align:center;font-family:monospace;margin:50px auto 0;max-width:600px">We&#39;re sorry, a server error occurred while reading from storage. Error code INTERNAL.</div></body></html>'
+
+scn/session.py:118: RuntimeError
+--------------------------------------------------------- UI failure diagnostics (GTaskSheet-3tkf) ---------------------------------------------------------
+Screenshot: /home/stuar/proj/GActionSheet/test-results/FAIL-tests-test-import-py-test-import-flow-forward-sync.png
+Frames:
+  about:blank
+Visible buttons:
+  (no visible buttons found in any frame)
+_______________________________________________________________________ test_journey _______________________________________________________________________
+
+url = 'https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec'
+payload = {'action': 'patch_action_status', 'global_id': '1izxBUzqS_EaoYNB56fowkln88bb6qks50607dGs7jZ0/AI-14', 'status': 'In Progress', 'testToken': '86811032-fa33-4304-961e-4397fe398a45'}
+timeout = 360
+
+    def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
+        """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors."""
+        if not url:
+            raise RuntimeError(
+                "webappTestUrl not set in local.settings.json"
+            )
+
+        data = json.dumps(payload).encode("utf-8")
+        headers: dict = {"Content-Type": "application/json"}
+        # /dev URLs require Google auth; inject saved Playwright cookies when present.
+        if url.endswith("/dev"):
+            cookie = _load_auth_cookie_header()
+            if cookie:
+                headers["Cookie"] = cookie
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+>           with urllib.request.urlopen(req, timeout=timeout) as resp:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scn/session.py:113:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/urllib/request.py:215: in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:521: in open
+    response = meth(req, response)
+               ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:630: in http_response
+    response = self.parent.error(
+/usr/lib/python3.12/urllib/request.py:559: in error
+    return self._call_chain(*args)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:492: in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <urllib.request.HTTPDefaultErrorHandler object at 0x7138dbfb5d00>, req = <urllib.request.Request object at 0x7138da9e4f50>
+fp = <http.client.HTTPResponse object at 0x7138da4c4940>, code = 500, msg = 'Internal Server Error'
+hdrs = <http.client.HTTPMessage object at 0x7138da4c48f0>
+
+    def http_error_default(self, req, fp, code, msg, hdrs):
+>       raise HTTPError(req.full_url, code, msg, hdrs, fp)
+E       urllib.error.HTTPError: HTTP Error 500: Internal Server Error
+
+/usr/lib/python3.12/urllib/request.py:639: HTTPError
+
+The above exception was the direct cause of the following exception:
+
+scn = <scn.session.ScenarioSession object at 0x7138d8c30ec0>, expected_version = 'v0.2.2 (Rev. Jul 24, 2026 16:36) (TEST)'
+gas_log_dir = '/mnt/g/My Drive/GAS-Logger/GTaskSheet'
+
+    def test_journey(scn, expected_version, gas_log_dir):
+        # ── Act 0 — pre-flight: confirm the add-on test deployment is installed
+        # and serving thd just deployed ────────────────────────────────────
+        try:
+            sidebar = scn.ui.open_sidebar()
+        except TimeoutError as e:
+            pytest.fail(
+                "Add-on test deployment not installed (or not loading) in this "
+                f"Google account: sidebar did not load ({e}). One-time setup: "
+                "Apps Script editor -> Deploy -> Test deployments -> Install as "
+                "Add-on. SeeERATIONS.md, Running Tests section."
+            )
+
+        version_text = scn.ui.read_version(sidebar)
+        assert version_text == expected_version, (
+            f"Add-on sidebar reports version {version_text!r}, expected "
+            f"{expected_version!r} (src/Version.js BUILD_INFO.version, just "
+            "stamped by npm run deploy:test). The installed add-on test "
+            "deployment is stale -- reinstall it: Apps Script editor -> Deploy "
+            "-> Test deployments -> Install as Add-on."
+        )
+
+        # ── Act 1 — author types five AI lines into a blank doc ───────────────────
+        #   status left UNSET on plain items (non-default status requires explicit token)
+        unassigned = ai(action="This tag and text confirms creation of an unassigned action item")
+        with_email = ai(
+            action="This tag and email address along with this text confirms email-assignee creation",
+            assignee="aitest@example.com",
+      explicit_5 = ai(
+            action="This tag and text confirms pre-assigning a specific action ID",
+            action_id="AI-5",
+        )
+        domain_usr = ai(
+            action="This tag email and text confirms domain-user name resolution",
+            assignee="minister@northlakeuu.org",
+            action_id="AI-9",
+        )
+        started_ip = ai(action="An action the author starts in progress", status="In Progress")
+        backlogged = ai(action="An action with a non-standard status", status="Backlog")
+
+        for a in (unassigned, with_email, explicit_5, domain_usr, started_ip, backlogged):
+            scn.append_paragraph(a.as_text())  # pure doc mutation; no action implied yet
+
+        # ── Act 2 — sync converts the lines into actions (Scenario C) ─────────────
+        scn.sync()
+
+        # pin what we expect the conversion to produce, then verify across surfaces
+        unassigned.status = "Open"
+        with_email.status = "Open"             # tokenless →etected Open
+        explicit_5.status = "Open"
+        domain_usr.status = "Open"
+        # explicit_5 / domain_usr already carry AI-5 / AI-9; started_ip keeps In Progress
+        # backlogged keeps "Backlog" — non-standard status, exercises status-other.png chip path
+
+        # Resolve auto-assigned action_ids from the sheet — §16.10 shows "AI-1" / "AI-2" but
+        # those assume a clean sheet; the live sheet accumulates IDs across runs.
+        _action_map = {
+            unassigned.action: unassi
+            with_email.action: with_email,
+            started_ip.action: started_ip,
+            backlogged.action: backlogged,
+        }
+        for row in scn.find_sheet_actions():
+            target = _action_map.get(row.action)
+            if target is not None:
+                target.action_id = row.action_id
+        assert unassigned.action_id is not None, "unassigned action not found in sheet after sync"
+        assert with_email.action_id is not None, "with_email action not found in sheet after sync"
+        assert started_ip.action_id is not None, "started_ip action not found in sheet after sync"
+        assert backlogged.action_id is not None, "backlogged action not found in sheet after sync"
+
+        for a in (unassigned, with_email, explicit_5, domain_usr, started_ip, backlogged):
+            scn.verify_all_expectations(a, tag="[journey sync-create]")     # doc+sheet (+tracker when present); all fields
+        scn.verify_consistency(scope=DOC)      # §16.7 checklist + chip integrity (6ov.8)
+
+       # [zc21] DocData consistency: action_count/resolved_count match both the
+        # document's floating actions and the ActionSheet, and Team Id matches the
+        # document's teamScope appProperty. Filtered to DocData.* issues — other
+        # _runConsistencyChecks findings (e.g. assigneeName) are out of scope for
+        # zc21 and tracked separately (GTaskSheet-mpe1).
+        _vc = (scn._post_fixture("verify_consistency").get("data") or {})
+        _vc_docdata_issues = [i for i in _vc.get("issue, []) if i.startswith("DocData.")]
+        assert not _vc_docdata_issues, f"[zc21] verify_consistency failed: {_vc_docdata_issues}"
+
+        scn.checkpoint(INTEGRITY)             # capture docx+xlsx; drain the above
+
+        # ── Act 3 — insert the tracker table and re-sync ──────────────────────────
+        # Real call-site: the sidebar Insert tracker button (R2-impl).
+        scn.mark("act3.pre-insert-tracker")
+        with scn.assert_no_addon_erro       scn.ui.insert_tracker_button(timeout="30s")
+        scn.mark("act3.post-insert-tracker")
+        scn.sync()
+        scn.mark("act3.post-sync")
+        for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
+            # entry_point: card call-site for the sidebar "Insert tracker" button
+            # (onInsertTrackerTable -> insertTrackerTable) — GTaskSheet-rz4k.3
+            scn.verify(a, on=TRACKER, tag="[journey tracker-present]", entry_point="onInsertTrackerTable")  # column for assignee as chip
+        scn.checkpoint(STEP)
+
+        # rwz AC4: tracker ID cells are hyperlinked to chip URLs
+        id_urls = scn.tracker_id_urls()
+        scn.mark("act3.post-tracker-id-urls")
+        for a in (unassigned, with_email, explicit_5, domain_usr, started_ip):
+            url = id_urls.get(a.action_id, "")
+            assert url and "docId=" in url and "ain=" in url, (
+                f"Tracker ID cell for {a.action_id!r} missing chip URL hyperlink; got {url!r}"
+            )
+
+        # ─Act 3b — open the homepage sidebar, sync, verify action list ────────
+        # R3-impl: sidebar_sync() added here so the Sync Now entry point appears as a
+        # scn call-site in the canonical journey matrix (entry-point coverage invariant).
+        sidebar = scn.ui.open_sidebar()
+        scn.expect_visible(sidebar, timeout="15s")
+        scn.mark("act3b.pre-sidebar-sync")
+        with scn.assert_no_addon_error():
+            scn.ui.sidebar_sync(timeout="60s")  # entry-point call-site:ync Now button
+        scn.mark("act3b.post-sidebar-sync")
+        # rwz AC3a: action row shows AI-N • topLabel pattern (explicit_5 is always anchored)
+        sidebar.frame.get_by_text(explicit_5.action_id + " •", exact=False).wait_for(
+            state="visible", timeout=5000
+        )
+        # rwz AC3b: delete button present for anchored actions
+        sidebar.frame.locator('[aria-label="Delete action"]').first.wait_for(
+            state="visible", timeout=5000
+        )
+        scn.mark("act3b.d)
+
+        # GTaskSheet-yuvq: durable-state assertion that the sidebar "Sync now" click
+        # (onSyncNow, doc-context) ran _syncTeamScope to completion and upserted the
+        # DocData row for this doc — the exact call-site that crashed before
+        # SyncManager.js:70's _openActionSheetSpreadsheet() fix (getActiveSpreadsheet()
+        # is null in doc-context).
+        def _docdata_row_written() -> str | None:
+            row = (scn._post_fixture("get_docdata_row").get("data") or {}).get("row")
+          if row is None:
+                return f"DocData row missing for {scn.doc_id} after onSyncNow sidebar sync"
+            return None
+
+        scn.expect_callable(
+            _docdata_row_written, on=SHEET, tag="[journey onSyncNow]",
+            entry_point="syncDocument.onSyncNow",
+        )
+
+        # ── Act 4 — @create through the editor UI (Playwright phase begins) ───────
+        created = ai(
+            action="Creating an action via the @-menu trigger",
+            assignsdonaldson@northlakeuu.org",
+        )
+        scn.mark("act4.pre-create-action")
+        _fence = clear_logs(gas_log_dir) if gas_log_dir else 0.0
+        scn.ui.create_action(created)      # fills @-menu form; autocomplete (in TEST_CONTACTS)
+        # GTaskSheet-5vr6: cursor lands on an empty paragraph (Ctrl+End+Enter before
+        # @create) — the chip-insertion path that used to throw on an empty
+        # paragraph/list-item. actionTrigger.done confirms _submitCreateAction
+        # ran to completionithout the uncaught _insertActionChip exception.
+        assert_log(
+            gas_log_dir, _fence,
+            lambda e: e.get("tag") == "actionTrigger.done",
+            "[5vr6] create_action done",
+        )
+
+        # action_id left UNSET — next id is ambiguous after AI-1,2,5,9; resolved at D3 below
+        # entry_point: editor add-on @-menu create-action submit (_submitCreateAction) —
+        # this DOC-surface check is the durable result of the chip insertion it performs
+        # (GTaskSheet-r3)
+        scn.verify(created, on=DOC, status="Open", tag="[journey ui-create]", entry_point="_submitCreateAction")  # cheap doc probe, now
+        scn.verify(created, on=SHEET, status="Open", at=INTEGRITY, tag="[journey ui-create]")  # async sheet write → defer
+
+        # GTaskSheet-5ab2c9c-regression: _submitCreateAction no longer upserts the
+        # sheet row itself (doc is source of truth; "the sheet row will be created
+        # by the next sync" — EditorAddonCard.js comment). The deferred SHEET
+    # expectation above needs that sync to actually happen before the
+        # checkpoint reads the sheet, or it observes a row that was never written.
+        scn.sync()
+
+        # D1: drain the Open SHEET expectation before set_status changes it (Coordination Log)
+        scn.checkpoint(INTEGRITY)
+
+        # D3: resolve created.action_id from live doc (ambiguous until post-sync)
+        for item in scn.doc_items():
+            if item.action == created.action:
+                created.action_id = item.action_id
+                break
+        assert created.action_id is not None, (
+            f"created action not found in doc after Act 4 INTEGRITY; "
+            f"expected action text: {created.action!r}"
+        )
+
+        # ── Act 5 — change status via the link-preview path (standard run) ────
+        # The rendered onLinkPreview card is NOT exercised here: rendering it
+        # requires a cursor-placement + retry sequence (Ctrl+F -> Enter -> Escape,
+        # move away, re-place — GTaskSheet-39jk/cug8) that takes ~1-2 min and is
+        # covered separately by tests/test_link_preview.py (rwz AC1/AC2 header +
+        # globalId bubble + in-card status click, ENTRY_POINT_DEFERRED). The
+        # standard journey drives the status change through the same core the
+        # card's status control invokes (patch_action_status) and asserts the
+        # durable result, keeping this journey fast.
+>       scn.link_preview_status_change(created, "In Progress")  # patch_action_status core
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/mnt/c/dev/GActionSheet/tests/test_journey.py:298:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scn/session.py:487: in link_preview_status_change
+    self.set_status(target, status)
+scn/session.py:469: in set_status
+    self._post_route("patch_action_status", {"global_id": self._gid(target), "status": status})
+scn/session.py:277: in _post_route
+    return self._post(payload)
+           ^^^^^^^^^^^^^^^^^^^
+scn/session.py:262: in _post
+    result = _http_post(url, payload, timeout)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+url = 'https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec'
+payload = {'action': 'patch_action_status', 'global_id': '1izxBUzqS_EaoYNB56fowkln88bb6qks50607dGs7jZ0/AI-14', 'status': 'In Progress', 'testToken': '86811032-fa33-4304-961e-4397fe398a45'}
+timeout = 360
+
+    def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
+        """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors."""
+        if not url:
+            raise RuntimeError(
+                "webappTestUrl not set in local.settings.json"
+            )
+
+        data = json.dumps(payload).encode("utf-8")
+        headers: dict = {"Content-Type": "application/json"}
+        # /dev URLs require Google auth; inject saved Playwright cookies when present.
+        if url.endswith("/dev"):
+            cookie = _load_auth_cookie_header()
+            if cookie:
+                headers["Cookie"] = cookie
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+                final_url = resp.geturl()
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+>           raise RuntimeError(
+                f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw!r}"
+            ) from exc
+E           RuntimeError: HTTP 500 from GAS WebApp (action='patch_action_status'): '<!DOCTYPE html><html><head><script nonce="XJ5vh3zC6B2f92GuJ7XKWA">window[\'ppConfig\'] = {productName: \'26981ed0d57bbad37e728ff58134270c\', deleteIsEnforced:  false , sealIsEnforced:  false , heartbeatRate:  0.5 , periodicReportingRateMillis:  60000.0 , disableAllReporting:  false };(function(){\'use strict\';function k(a){var b=0;return function(){return b<a.length?{done:!1,value:a[b++]}:{done:!0}}}function l(a){var b=typeof Symbol!="undefined"&&Symbol.iterator&&a[Symbol.iterator];if(b)return b.call(a);if(typeof a.length=="number")return{next:k(a)};throw Error(String(a)+" is not an iterable or ArrayLike");}var m=typeof Object.defineProperties=="function"?Object.defineProperty:function(a,b,c){if(a==Array.prototype||a==Object.prototype)return a;a[b]=c.value;return a};\nfunction n(a){a=["object"==typeof globalThis&&globalThis,a,"object"==typeof window&&window,"object"==typeof self&&self,"object"==typeof global&&global];for(var b=0;b<a.length;++b){var c=a[b];if(c&&c.Math==Math)return c}throw Error("Cannot find global object");}var p=n(this);function q(a,b){if(b)a:{var c=p;a=a.split(".");for(var d=0;d<a.length-1;d++){var e=a[d];if(!(e in c))break a;c=c[e]}a=a[a.length-1];d=c[a];b=b(d);b!=d&&b!=null&&m(c,a,{configurable:!0,writable:!0,value:b})}}\nq("Object.is",function(a){return a?a:function(b,c){return b===c?b!==0||1/b===1/c:b!==b&&c!==c}});q("Array.prototype.includes",function(a){return a?a:function(b,c){var d=this;d instanceof String&&(d=String(d));var e=d.length;c=c||0;for(c<0&&(c=Math.max(c+e,0));c<e;c++){var f=d[c];if(f===b||Object.is(f,b))return!0}return!1}});\nq("String.prototype.includes",function(a){return a?a:function(b,c){if(this==null)throw new TypeError("The \'this\' value for String.prototype.includes must not be null or undefined");if(b instanceof RegExp)throw new TypeError("First argument to String.prototype.includes must not be a regular expression");return this.indexOf(b,c||0)!==-1}});function r(a,b,c){a("https://csp.withgoogle.com/csp/proto/"+encodeURIComponent(b),JSON.stringify(c))}function t(){var a;if((a=window.ppConfig)==null?0:a.disableAllReporting)return function(){};var b,c,d,e;return(e=(b=window)==null?void 0:(c=b.navigator)==null?void 0:(d=c.sendBeacon)==null?void 0:d.bind(navigator))!=null?e:u}function u(a,b){var c=new XMLHttpRequest;c.open("POST",a);c.send(b)}\nfunction v(){var a=(w=Object.prototype)==null?void 0:w.__lookupGetter__("__proto__"),b=x,c=y;return function(){var d=a.call(this),e,f,g,h;r(c,b,{type:"ACCESS_GET",origin:(f=window.location.origin)!=null?f:"unknown",report:{className:(g=d==null?void 0:(e=d.constructor)==null?void 0:e.name)!=null?g:"unknown",stackTrace:(h=Error().stack)!=null?h:"unknown"}});return d}}\nfunction z(){var a=(A=Object.prototype)==null?void 0:A.__lookupSetter__("__proto__"),b=x,c=y;return function(d){d=a.call(this,d);var e,f,g,h;r(c,b,{type:"ACCESS_SET",origin:(f=window.location.origin)!=null?f:"unknown",report:{className:(g=d==null?void 0:(e=d.constructor)==null?void 0:e.name)!=null?g:"unknown",stackTrace:(h=Error().stack)!=null?h:"unknown"}});return d}}function B(a,b){C(a.productName,b);setInterval(function(){C(a.productName,b)},a.periodicReportingRateMillis)}\nvar D="constructor __defineGetter__ __defineSetter__ hasOwnProperty __lookupGetter__ __lookupSetter__ isPrototypeOf propertyIsEnumerable toString valueOf __proto__ toLocaleString x_ngfn_x".split(" "),E=D.concat,F=navigator.userAgent.match(/Firefox\\/([0-9]+)\\./),G=(!F||F.length<2?0:Number(F[1])<75)?["toSource"]:[],H;if(G instanceof Array)H=G;else{for(var I=l(G),J,K=[];!(J=I.next()).done;)K.push(J.value);H=K}var L=E.call(D,H),M=[];\nfunction C(a,b){for(var c=[],d=l(Object.getOwnPropertyNames(Object.prototype)),e=d.next();!e.done;e=d.next())e=e.value,L.includes(e)||M.includes(e)||c.push(e);e=Object.prototype;d=[];for(var f=0;f<c.length;f++){var g=c[f];d[f]={name:g,descriptor:Object.getOwnPropertyDescriptor(Object.prototype,g),type:typeof e[g]}}if(d.length!==0){c=l(d);for(e=c.next();!e.done;e=c.next())M.push(e.value.name);var h;r(b,a,{type:"SEAL",origin:(h=window.location.origin)!=null?h:"unknown",report:{blockers:d}})}};var N=Math.random(),O=t(),P=window.ppConfig;P&&(P.disableAllReporting||P.deleteIsEnforced&&P.sealIsEnforced||N<P.heartbeatRate&&r(O,P.productName,{origin:window.location.origin,type:"HEARTBEAT"}));var y=t(),Q=window.ppConfig;if(Q)if(Q.deleteIsEnforced)delete Object.prototype.__proto__;else if(!Q.disableAllReporting){var x=Q.productName;try{var w,A;Object.defineProperty(Object.prototype,"__proto__",{enumerable:!1,get:v(),set:z()})}catch(a){}}\n(function(){var a=t(),b=window.ppConfig;b&&(b.sealIsEnforced?Object.seal(Object.prototype):b.disableAllReporting||(document.readyState!=="loading"?B(b,a):document.addEventListener("DOMContentLoaded",function(){B(b,a)})))})();}).call(this);\n</script><link rel="shortcut icon" href="//ssl.gstatic.com/docs/script/images/favicon.ico"><title>Error</title><style type="text/css" nonce="SjJLroijD9aERHWFBzKBnA">body {background-color: #fff; margin: 0; padding: 0;}.errorMessage {font-family: Arial,sans-serif; font-size: 12pt; font-weight: bold; line-height: 150%; padding-top: 25px;}</style></head><body style="margin:20px"><div><img alt="Google Apps Script" src="//ssl.gstatic.com/docs/script/images/logo.png"></div><div style="text-align:center;font-family:monospace;margin:50px auto 0;max-width:600px">We&#39;re sorry, a server error occurred while reading from storage. Error code INTERNAL.</div></body></html>'
+
+scn/session.py:118: RuntimeError
+--------------------------------------------------------- UI failure diagnostics (GTaskSheet-3tkf) ---------------------------------------------------------
+Screenshot: /home/stuar/proj/GActionSheet/test-results/FAIL-tests-test-journey-py-test-journey.png
+Frames:
+  https://docs.google.com/document/d/1izxBUzqS_EaoYNB56fowkln88bb6qks50607dGs7jZ0/edit?pli=1&tab=t.0
+  about:blank
+  https://accounts.google.com/RotateCookiesPage?og_pid=25&rot=3&origin=https%3A%2F%2Fdocs.google.com&exp_id=0
+  https://clients6.google.com/static/proxy.html?usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.9vdPKhB0RUg.O%2Fd%3D1%2Frs%3DAHpOoo97anj7zZ432JcN58tqJJp_A6WeOw%2Fm%3D__features__#parent=https%3A%2F%2Fdocs.google.com&rpctoken=647790997
+  about:blank
+  https://docs.google.com/offline/iframeapi?ouid=u6140dc93d20f7c1a&sa=5#csid=CJbQ8fSB7ZUDFSieXQMdlbkBOg&cd=1
+  about:blank
+  https://docs.google.com/_/og/bscframe
+  https://contacts.google.com/widget/hovercard/v/2?theme=light&origin=https%3A%2F%2Fdocs.google.com&usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.9vdPKhB0RUg.O%2Fd%3D1%2Frs%3DAHpOoo97anj7zZ432JcN58tqJJp_A6WeOw%2Fm%3D__features__#id=I__HC_94253229&_gfid=I__HC_94253229&parent=https%3A%2F%2Fdocs.google.com&pfname=&rpctoken=29902051
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=true&ha=5&dtp=0&dcs=false
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=false&ha=5&dtp=0&dcs=true
+Visible buttons:
+  https://docs.google.com/document/d/1izxBUzqS_EaoYNB56fowkln88bb6qks50607dGs7jZ0/edit?pli=1&tab=t.0: buttons=['\xa0', '', '', '', '', '\xa0', '\xa0\nShare', '', '', '', '', '', '', '', '', '', '', 'Editing', '', '', '', '', '', '']
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=true&ha=5&dtp=0&dcs=false: buttons=['', '', 'Sync', 'Import', 'Notify', 'Insert Tracker', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'User Guide']
+___________________________________________________________ test_link_preview_card_status_change ___________________________________________________________
+
+scn = <scn.session.ScenarioSession object at 0x7138d9b02cc0>
+
+    def test_link_preview_card_status_change(scn):
+        """Cursor-place an AI-N chip to render its onLinkPreview card, then set
+        its status to "In Progress" via the in-card control (GTaskSheet-cug8)."""
+        seed = ai(action="Link-preview card status-change check")
+        scn.append_paragraph(seed.as_text())
+        scn.sync()
+
+        rows = scn.find_sheet_actions()
+        match = next((r for r in rows if "Link-preview card status-change check" in (r.action or "")), None)
+        assert match is not None, f"seeded action not found after sync; rows={rows}"
+        action_id = match.action_id
+        assert action_id, f"synced action has no AI-N id: {match}"
+
+        card = scn.ui.open_link_preview(action_id, timeout="120s")
+
+        # rwz AC1: card header shows "AI-N: <action text>"
+        body_text = card.frame.locator("body").first.inner_text()
+>       assert f"{action_id}:" in body_text, f"card header missing {action_id!r}: {body_text!r}"
+E       AssertionError: card header missing 'AI-1': ''
+E       assert 'AI-1:' in ''
+
+/mnt/c/dev/GActionSheet/tests/test_link_preview.py:88: AssertionError
+--------------------------------------------------------- UI failure diagnostics (GTaskSheet-3tkf) ---------------------------------------------------------
+Screenshot: /home/stuar/proj/GActionSheet/test-results/FAIL-tests-test-link-preview-py-test-link-preview-card-status-change.png
+Frames:
+  https://docs.google.com/document/d/1wXdNuV2V-Q_kQW7wihtCYKtXqpCu_0sTQOWDJMPWuqE/edit?pli=1&tab=t.0
+  about:blank
+  https://accounts.google.com/RotateCookiesPage?og_pid=25&rot=3&origin=https%3A%2F%2Fdocs.google.com&exp_id=0
+  https://clients6.google.com/static/proxy.html?usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.9vdPKhB0RUg.O%2Fd%3D1%2Frs%3DAHpOoo97anj7zZ432JcN58tqJJp_A6WeOw%2Fm%3D__features__#parent=https%3A%2F%2Fdocs.google.com&rpctoken=695233167
+  about:blank
+  https://docs.google.com/offline/iframeapi?ouid=u6140dc93d20f7c1a&sa=5#csid=CNaPh9uC7ZUDFSNA3gYdW50J8w&cd=1
+  about:blank
+  https://docs.google.com/_/og/bscframe
+  https://contacts.google.com/widget/hovercard/v/2?theme=light&origin=https%3A%2F%2Fdocs.google.com&usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.9vdPKhB0RUg.O%2Fd%3D1%2Frs%3DAHpOoo97anj7zZ432JcN58tqJJp_A6WeOw%2Fm%3D__features__#id=I__HC_94253229&_gfid=I__HC_94253229&parent=https%3A%2F%2Fdocs.google.com&pfname=&rpctoken=17851556
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=false&ha=5&dtp=0&dcs=true
+Visible buttons:
+  https://docs.google.com/document/d/1wXdNuV2V-Q_kQW7wihtCYKtXqpCu_0sTQOWDJMPWuqE/edit?pli=1&tab=t.0: buttons=['\xa0', '', '', '', '', '\xa0', '\xa0\nShare', '', '', '', '', '', '', '', '', '', '\xa0', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'Editing', '', '', '', '', '', '', '\xa0\nShow tabs & outlines\nTab 1\nTab 1']
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=false&ha=5&dtp=0&dcs=true: buttons=['', '', '', '', '']
+_______________________________________________________________ test_sidebar_bootstrap_sync ________________________________________________________________
+
+settings = {'axiomDataset': 'nuuts', 'axiomQueryToken': 'xaat-79be4f4a-de00-4bd1-a7dc-0e99fb52d2ff', 'axiomToken': 'xaat-d5844657-0792-40a5-b923-3b43aa16f389', 'gasLogDir': '/mnt/g/My Drive/GAS-Logger/GTaskSheet', ...}
+browser_page = <Page url='https://docs.google.com/document/d/1VNUiZkr5BOpQhUkgwEdjDMr8u985REfBLQZft9CzwJM/edit?pli=1&tab=t.0'>
+
+    def test_sidebar_bootstrap_sync(settings, browser_page):
+        """Sync bootstraps action rows: sidebar goes from (0) to (N) anchored actions.
+
+        Entry point under test: sidebar_sync() — the homepage Sync button.
+        Unique behavior: (0)→(N) refresh on first open of a pre-seeded doc.
+        Row correctness verified on SHEET (no tracker present post-sync; G1 binding:
+        per-row  is NOT UI state — sidebar row text migrates to a non-UI surface).
+        """
+        s = ScenarioSession.new_doc(settings)
+        s.ui = UiDriver(browser_page, doc_id=s.doc_id)
+        try:
+            s._post_fixture("uc_a_permutations")
+
+            card = s.ui.open_sidebar(timeout="45s")
+            # Pre-sync: 0 floating actions visible (raw shell assert; NOT an ai expectation — G1)
+            card.frame.get_by_text("actions for this document (0)", exact=False).wait_for(
+                state="vle", timeout=30000
+            )
+
+            s.ui.sidebar_sync(timeout="60s")  # ENTRY POINT: Sync Now button
+            s.sync()  # durable convergence to ActionSheet (§16.11 #4; sidebar_sync is async)
+
+            # Resolve action_ids from live sheet (accumulates across runs; doc-scoped)
+            rows = s.find_sheet_actions()
+            anchored = [r for r in rows if r.action_id is not None]
+            assert anchored, "Expected at least one anchored action after sidebar_sync"
+
+            # Multirow sidebar is for firing acts, not per-row UI drains (R2 guidance).
+            # Per-row UI verification requires hovering the action's preview card.
+            # Bootstrap uniqueness is the (0)->(N) refresh; individual row correctness
+            # is verified via SHEET (no tracker in this fixture path; G1 binding).
+            for a in anchored:
+                s.verify(a, on=SHEET, tag="[sidebar sync-SHEET]")
+            s.verify_consistency(scope=DOC)   # server authority: ok, 0 issues
+>           s.checkpoint(INTEGRITY)
+
+/mnt/c/dev/GActionSheet/tests/test_sidebar.py:103:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scn/session.py:894: in checkpoint
+    warnings, drained_records = self.engine.drain(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scn.engine.CheckpointEngine object at 0x7138db61e720>, kind = <CheckpointKind.INTEGRITY: 'INTEGRITY'>, label = None, on = None
+read = <function ScenarioSession.checkpoint.<locals>.read at 0x7138dbf7bba0>
+read_consistency = <function ScenarioSession.checkpoint.<locals>.read_consistency at 0x7138db8eff60>
+step_cm = <bound method NullReporter.allure_step of <scn.reporter.NullReporter object at 0x7138db61c6b0>>
+on_ui_fail = <bound method ScenarioSession._attach_ui_failure_screenshot of <scn.session.ScenarioSession object at 0x7138db61d310>>
+
+    def drain(
+        self,
+        kind: CheckpointKind,
+        label: str | None = None,
+        on: frozenset | None = None,
+        read: Callable[[Surface], list] | None = None,
+        read_consistency: Callable[[], dict] | None = None,
+        step_cm: Callable[[str], "contextlib.AbstractContextManager"] | None = None,
+        on_ui_fail: Callable[[Surface, str, str], None] | None = None,
+    ) -> tuple[list[str], list[tuple[str, str, str, str]]]:
+        """Evaluate queued expectations at checkpoint (kind, label).
+
+        Returns (warnings, drained_records) where drained_records is a list of
+        (tag, surface_value, 'PASS'|'WARN', entry_point) for each surface retired this
+        drain (T24). entry_point is '' unless the expectation tagged one (T1/T17).
+
+        Raises AssertionError on a FAIL-severity miss.
+        Implements §4.5 steps 1–5 verbatim.
+
+        Args:
+            kind: STEP or INTEGRITY.
+            label: optional checkpoint label (for at="<label>" targeting).
+            onxplicit observable surface set for STEP; if None, computed from pending remainders.
+            read: callable Surface → list[ai]; called at most once per surface per drain.
+            read_consistency: called at INTEGRITY for needs_consistency expectations; None = skip.
+            step_cm (R6, GTaskSheet-16kh): if given, called as step_cm(f"{tag} {surface}")
+                to wrap each per-surface check in an Allure step. None = no wrapping.
+            on_ui_fail (R6, GTaskSheet-16kh): if given, call as
+                on_ui_fail(surface, tag, error) immediately before raising on a
+                Surface.UI FAIL-severity miss (e.g. to attach a screenshot).
+        """
+        # Delayed import avoids circular dependency (assertions.py imports Surface from here)
+        from scn.assertions import check_present_consistent, check_absent
+
+        if read is None:
+            read = lambda s: []
+
+        warnings: list[str] = []
+        drained_records: list[tuple[str, str, str, str]] = []
+        targetable = [e for e in self._queue if _is_targetable(e, kind, label)]
+
+        # §4.4 OBS computation
+        if kind == CheckpointKind.INTEGRITY:
+            obs = _INTEGRITY_OBS                # UI excluded: live-only, STEP-drained (R1-impl G2)
+        elif on is not None:
+            obs = on
+        else:
+            obs = (
+                frozenset().union(*(e.remaining for e in targetable))
+                if targetable
+                else frozenset()
+            )
+
+        # Read each surface at most onc across all expectations in this drain
+        _cache: dict[Surface, list] = {}
+
+        def get_actuals(surface: Surface) -> list:
+            if surface not in _cache:
+                _cache[surface] = read(surface)
+            return _cache[surface]
+
+        # Fire read_consistency() at most once per drain() call regardless of how
+        # many expectations in this drain carry needs_consistency=True (GTaskSheet-k1g9).
+        # Mirrors the get_actuals per-surface cache above — same drain, same cost mol.
+        _consistency_cache: dict = {"fetched": False}
+
+        def get_consistency() -> None:
+            if not _consistency_cache["fetched"]:
+                if read_consistency is not None:
+                    read_consistency()
+                _consistency_cache["fetched"] = True
+
+        to_retire: list[Expectation] = []
+
+        for e in targetable:
+            # §4.5 step 2 — evaluate only surfaces observable here and still remaining
+            observable_here = e.remaining & obs
+
+             surface in list(observable_here):
+                cm = step_cm(f"{e.tag} {surface.value}") if step_cm else contextlib.nullcontext()
+                with cm:
+                    if e.kind == "CALLABLE":
+                        # Generic check: a zero-arg callable returning None (pass) or an
+                        # error string (fail). Reuses the standard drain/ac-emission path
+                        # for expectations that aren't ai-shaped (e.g. Team Scope state) —
+                        # see GTaskSht-me6w.6 / sdlc-testing-principles.md T24.
+                        error = e.expected["check"]()
+                    else:
+                        check_fn = (
+                            check_present_consistent
+                            if e.kind == "PRESENT_CONSISTENT"
+                            else check_absent
+                        )
+                        # within= bounded poll: UI surface only; bypasses _cache for live DOM re-read
+                        if e.within is not None and surface == Surface.UI:
+                            error = _poll_until_pass(read, surface, check_fn, e.expected, e.tag, e.within)
+                        else:
+                            actuals = get_actuals(surface)
+                            error = check_fn(e.expected, actuals, surface, e.tag)
+
+                    if error is None:
+                        e.remaining.discard(surface)
+                        drained_records.append((e.tag, surface.value, "PASS", e.entry_point))
+                    elif e.severity == Severity.WARN:
+                        # WARN: record warning AND drop surface to prevent dangling (§4.5 step 2)
+                        warnings.append(f"WARN [{e.tag}] surface={surface.value}: {error}")
+                        e.remaining.discard(surface)
+                        drained_records.append((e.tag, surface.value, "WARN", e.entry_point))
+                    else:
+                        if surface == Surface.UI and on_ui_fail is not None:
+                            on_ui_fail(surface, e.tag error)
+>                       raise AssertionError(error)
+E                       AssertionError: [[sidebar sync-SHEET]] SHEET: created_date mismatch: expected='2026-07-25T04:50:05.110Z', actual='2026-07-24 21:50:05.110000'
+
+scn/engine.py:259: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+settings = {'axiomDataset': 'nuuts', 'axiomQueryToken': 'xaat-79be4f4a-de00-4bd1-a7dc-0e99fb52d2ff', 'axiomToken': 'xaat-d5844657-0792-40a5-b923-3b43aa16f389', 'gasLogDir': '/mnt/g/My Drive/GAS-Logger/GTaskSheet', ...}
+browser_page = <Page url='https://docs.google.com/document/d/1VNUiZkr5BOpQhUkgwEdjDMr8u985REfBLQZft9CzwJM/edit?pli=1&tab=t.0'>
+
+    def test_sidebar_bootstrap_sync(settings, browser_page):
+        """Sync bootstraps action rows: sidebar goes from (0) to (N) anchored actions.
+
+        Entry point under test: sidebar_sync() — the homepage Sync button.
+        Unique behavior: (0)→(N) refresh on first open of a pre-seeded doc.
+        Row correctness verified on SHEET tracker present post-sync; G1 binding:
+        per-row TEXT is NOT UI state — sidebar row text migrates to a non-UI surface).
+        """
+        s = ScenarioSession.new_doc(settings)
+        s.ui = UiDriver(browser_page, doc_id=s.doc_id)
+        try:
+            s._post_fixture("uc_a_permutations")
+
+            card = s.ui.open_sidebar(timeout="45s")
+            # Pre-sync: 0 floating actions visible (raw shell assert; NOT an ai expectation — G1)
+            card.frame.get_by_text("actions for this doct (0)", exact=False).wait_for(
+                state="visible", timeout=30000
+            )
+
+            s.ui.sidebar_sync(timeout="60s")  # ENTRY POINT: Sync Now button
+            s.sync()  # durable convergence to ActionSheet (§16.11 #4; sidebar_sync is async)
+
+            # Resolve action_ids from live sheet (accumulates across runs; doc-scoped)
+            rows = s.find_sheet_actions()
+            anchored = [r for r in rows if r.action_id is not None]
+            assert anchored, "Expected at least oe anchored action after sidebar_sync"
+
+            # Multi-row sidebar is for firing acts, not per-row UI drains (R2 guidance).
+            # Per-row UI verification requires hovering the action's preview card.
+            # Bootstrap uniqueness is the (0)->(N) refresh; individual row correctness
+            # is verified via SHEET (no tracker in this fixture path; G1 binding).
+            for a in anchored:
+                s.verify(a, on=SHEET, tag="[sidebar sync-SHEET]")
+            s.verify_consistency(scope=DOC)   # server authority: ok, 0 issues
+            s.checkpoint(INTEGRITY)
+        finally:
+>           s.close()
+
+/mnt/c/dev/GActionSheet/tests/test_sidebar.py:105:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scn/session.py:414: in close
+    self.engine.close()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scn.engine.CheckpointEngine object at 0x7138db61e720>
+
+    def close(self) -> None:
+        """Assert the queue is empty; raise DrainInvariantError if not (§4.6).
+
+        A non-empty queue means an expectation was declared but never verified — a test failure.
+        """
+        if self._queue:
+            dangling = [
+                (e.seq, {s.value for s in e.remaining}, e.tag)
+                for e in self._queue
+            ]
+>           raise DrainInvariantError(dling)
+E           scn.engine.DrainInvariantError: Non-empty expectation queue at close(): seq=0 remaining={'SHEET'} tag=[sidebar sync-SHEET]; seq=1 remaining={'SHEET'} tag=[sidebar sync-SHEET]; seq=2 remaining={'SHEET'} tag=[sidebar sync-SHEET]
+
+scn/engine.py:302: DrainInvariantError
+--------------------------------------------------------- UI failure diagnostics (GTaskSheet-3tkf) ---------------------------------------------------------
+Screenshot: /home/stuar/proj/GActionSheet/test-results/FAIL-tests-test-sidebar-py-test-sidebar-bootstrap-sync.png
+Frames:
+  https://docs.google.com/document/d/1VNUiZkr5BOpQhUkgwEdjDMr8u985REfBLQZft9CzwJM/edit?pli=1&tab=t.0
+  about:blank
+  https://accounts.google.com/RotateCookiesPage?og_pid=25&rot=3&origin=https%3A%2F%2Fdocs.google.com&exp_id=0
+  about:blank
+  https://docs.google.com/offline/iframeapi?ouid=u6140dc93d20f7c1a&sa=5#csid=CI2U2b-D7ZUDFTi2TwkdNYs9Rg&cd=1
+  about:blank
+  https://clients6.google.com/static/proxy.html?usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.9vdPKhB0RUg.O%2Fd%3D1%2Frs%3DAHpOoo97anj7zZ432JcN58tqJJp_A6WeOw%2Fm%3D__features__#parent=https%3A%2F%2Fdocs.google.com&rpctoken=804737110
+  https://docs.google.com/_/og/bscframe
+  https://contacts.google.com/widget/hovercard/v/2?theme=light&origin=https%3A%2F%2Fdocs.google.com&usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.9vdPKhB0RUg.O%2Fd%3D1%2Frs%3DAHpOoo97anj7zZ432JcN58tqJJp_A6WeOw%2Fm%3D__features__#id=I__HC_94253229&_gfid=I__HC_94253229&parent=https%3A%2F%2Fdocs.google.com&pfname=&rpctoken=34624562
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=true&ha=5&dtp=0&dcs=false
+Visible buttons:
+  https://docs.google.com/document/d/1VNUiZkr5BOpQhUkgwEdjDMr8u985REfBLQZft9CzwJM/edit?pli=1&tab=t.0: buttons=['Go to Docs home screen', 'Take out of trash']
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=true&ha=5&dtp=0&dcs=false: buttons=['', '', 'Sync', 'Import', 'Notify', 'Insert Tracker', 'User Guide']
+________________________________________________________________ test_tracker_insert_button ________________________________________________________________
+
+settings = {'axiomDataset': 'nuuts', 'axiomQueryToken': 'xaat-79be4f4a-de00-4bd1-a7dc-0e99fb52d2ff', 'axiomToken': 'xaat-d5844657-0792-40a5-b923-3b43aa16f389', 'gasLogDir': '/mnt/g/My Drive/GAS-Logger/GTaskSheet', ...}
+browser_page = <Page url='https://docs.google.com/document/d/1oaglUkDIwPyCOoKA9dfOVnfGMapzmv2ecW0JlLxQ3rU/edit?tab=t.0'>
+
+    def test_tracker_insert_button(settings, browser_page):
+        """Insert tracker button inserts a tracker table; full consistency passes.
+
+        Entry point under test: insert_tracker_button() — the sidebar Insert tracker button.
+        Per-row field truth (id/action/status non-empty) verified via verify(on=TRACKER).
+        """
+        s = ScenarioSession.new_doc(settings)
+        s.ui = UiDriver(browser_page, doc_id=s.doc_id)
+        try:
+            s._post_fixture("uc_permutations")
+
+            s.ui.open_sidebar(timeout="45s")
+            s.ui.sidebar_sync(timeout="60s")          # anchor floating actions first
+            s.sync()  # durable convergence to ActionSheet (§16.11 #4)
+
+            s.ui.insert_tracker_button(timeout="30s")  # ENTRY POINT: Insert tracker button
+
+            rows = s.find_sheet_actions()
+            anchored = [r for r in rows if r.action_id is not None]
+            assert anchored, "Expected anchored actions after sync + tracker insert"
+
+           # Per-row field truth via SHEET (xlsx download; no docx export cache lag).
+            # TRACKER completeness (tracker==floating==matched) is verified via the live
+            # GAS verify_consistency call below — avoids the docx export cache lag that
+            # affects direct verify(on=TRACKER) reads right after _insertTrackerIdLinks.
+            for a in anchored:
+                s.verify(a, on=SHEET, tag="[sidebar tracker-insert]")
+            s.verify_consistency(scope=DOC)   # live GAS: tcker==floating==matched, 0 issues
+>           s.checkpoint(INTEGRITY)
+
+/mnt/c/dev/GActionSheet/tests/test_sidebar.py:140:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scn/session.py:894: in checkpoint
+    warnings, drained_records = self.engine.drain(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scn.engine.CheckpointEngine object at 0x7138d9d2eb40>, kind = <CheckpointKind.INTEGRITY: 'INTEGRITY'>, label = None, on = None
+read = <function ScenarioSession.checkpoint.<locals>.read at 0x7138daab89a0>
+read_consistency = <function ScenarioSession.checkpoint.<locals>.read_consistency at 0x7138db0c2f20>
+step_cm = <bound method NullReporter.allure_step of <scn.reporter.NullReporter object at 0x7138d9d2ea20>>
+on_ui_fail = <bound method ScenarioSession._attach_ui_failure_screenshot of <scn.session.ScenarioSession object at 0x7138d8c9f590>>
+
+    def drain(
+        self,
+        kind: CheckpointKind,
+        label: str | None = None,
+        on: frozenset | None = None,
+        read: Callable[[Surface], list] | None = None,
+        read_consistency: Callable[[], dict] | None = None,
+        step_cm: Callable[[str], "contextlib.AbstractContextManager"] | None = None,
+        on_ui_fail: Callable[[Surface, str, str], None] | None = None,
+    ) -> tuple[list[str], list[tuple[str, str, str, str]]]:
+        """Evaluate queued expectations at checkpoint (kind, label).
+
+        Returns (warnings, drained_records) where drained_records is a list of
+        (tag, surface_value, 'PASS'|'WARN', entry_point) for each surface retired this
+        drain (T24). entry_point is '' unless the expectation tagged one (T1/T17).
+
+        Raises AssertionError on a FAIL-severity miss.
+        Implements §4.5 steps 1–5 verbatim.
+
+        Args:
+            kind: STEP or INTEGRITY.
+            label: optional checkpoint la (for at="<label>" targeting).
+            on: explicit observable surface set for STEP; if None, computed from pending remainders.
+            read: callable Surface → list[ai]; called at most once per surface per drain.
+            read_consistency: called at INTEGRITY for needs_consistency expectations; None = skip.
+            step_cm (R6, GTaskSheet-16kh): if given, called as step_cm(f"{tag} {surface}")
+                to wrap each per-surface check in an Allure step. None = no wrapping.
+            _ui_fail (R6, GTaskSheet-16kh): if given, called as
+                on_ui_fail(surface, tag, error) immediately before raising on a
+                Surface.UI FAIL-severity miss (e.g. to attach a screenshot).
+        """
+        # Delayed import avoids circular dependency (assertions.py imports Surface from here)
+        from scn.assertions import check_present_consistent, check_absent
+
+        if read is None:
+            read = lambda s: []
+
+        warnings: list[str] = []
+        drained_records: list[tuple[str, str, str, str]] = []
+        targetable = [e for e in self._queue if _is_targetable(e, kind, label)]
+
+        # §4.4 OBS computation
+        if kind == CheckpointKind.INTEGRITY:
+            obs = _INTEGRITY_OBS                # UI excluded: live-only, STEP-drained (R1-impl G2)
+        elif on is not None:
+            obs = on
+        else:
+            obs = (
+                frozenset().union(*(e.remaining for e in targetable))
+                if targetable
+                else frozenset()
+           )
+
+        # Read each surface at most once across all expectations in this drain
+        _cache: dict[Surface, list] = {}
+
+        def get_actuals(surface: Surface) -> list:
+            if surface not in _cache:
+                _cache[surface] = read(surface)
+            return _cache[surface]
+
+        # Fire read_consistency() at most once per drain() call regardless of how
+        # many expectations in this drain carry needs_consistency=True (GTaskSheet-k1g9).
+        # Mirrors the get_actuals per-surface cache above — same drain, same cost model.
+        _consistency_cache: dict = {"fetched": False}
+
+        def get_consistency() -> None:
+            if not _consistency_cache["fetched"]:
+                if read_consistency is not None:
+                    read_consistency()
+                _consistency_cache["fetched"] = True
+
+        to_retire: list[Expectation] = []
+
+        for e in targetable:
+            # §4.5 step 2 — evaluate only surfaces observable here and still remaining
+           rvable_here = e.remaining & obs
+
+            for surface in list(observable_here):
+                cm = step_cm(f"{e.tag} {surface.value}") if step_cm else contextlib.nullcontext()
+                with cm:
+                    if e.kind == "CALLABLE":
+                        # Generic check: a zero-arg callable returning None (pass) or an
+                        # error string (fail). Reuses the standard drain/ac-emission path
+                        # for expectations that aren't ai-shaped (e.g. Team Scope state) —
+                        # see GTaskSheet-me6w.6 / sdlc-testing-principles.md T24.
+                        error = e.expected["check"]()
+                    else:
+                        check_fn = (
+                            check_present_consistent
+                            if e.kind == "PRESENT_CONSISTENT"
+                            else check_absent
+                        )
+                        # within= bounded poll: UI surface only; bypasses _cache for live DOM re-read
+                      if e.within is not None and surface == Surface.UI:
+                            error = _poll_until_pass(read, surface, check_fn, e.expected, e.tag, e.within)
+                        else:
+                            actuals = get_actuals(surface)
+                            error = check_fn(e.expected, actuals, surface, e.tag)
+
+                    if error is None:
+                        e.remaining.discard(surface)
+                        drained_records.append((e.tag, surface.value, "PASS", e.entry_point))
+                    elif e.severity == Severity.WARN:
+                        # WARN: record warning AND drop surface to prevent dangling (§4.5 step 2)
+                        warnings.append(f"WARN [{e.tag}] surface={surface.value}: {error}")
+                        e.remaining.discard(surface)
+                        drained_records.append((e.tag, surface.value, "WARN", e.entry_point))
+                    else:
+                        if surface == Surface.UI and on_ui_fail is not None:
+                           on_ui_fail(surface, e.tag, error)
+>                       raise AssertionError(error)
+E                       AssertionError: [[sidebar tracker-insert]] SHEET: created_date mismatch: expected='2026-07-25T04:50:48.764Z', actual='2026-07-24 21:50:48.764000'
+
+scn/engine.py:259: AssertionError
+
+During handling of the above exception, another exception occurred:
+
+settings = {'axiomDataset': 'nuuts', 'axiomQueryToken': 'xaat-79be4f4a-de00-4bd1-a7dc-0e99fb52d2ff', 'axiomToken': 'xaat-d5844657-0792-40a5-b923-3b43aa16f389', 'gasLogDir': '/mnt/g/My Drive/GAS-Logger/GTaskSheet', ...}
+browser_page = <Page url='https://docs.google.com/document/d/1oaglUkDIwPyCOoKA9dfOVnfGMapzmv2ecW0JlLxQ3rU/edit?tab=t.0'>
+
+    def test_tracker_insert_button(settings, browser_page):
+        """Insert tracker button inserts a tracker table; full consistency passes.
+
+        Entry point under test: insert_tracker_button() — the sidebar Insert tracker button.
+        Per-row field truth (id/action/status non-empty) veried via verify(on=TRACKER).
+        """
+        s = ScenarioSession.new_doc(settings)
+        s.ui = UiDriver(browser_page, doc_id=s.doc_id)
+        try:
+            s._post_fixture("uc_a_permutations")
+
+            s.ui.open_sidebar(timeout="45s")
+            s.ui.sidebar_sync(timeout="60s")          # anchor floating actions first
+            s.sync()  # durable convergence to ActionSheet (§16.11 #4)
+
+            s.ui.insert_tracker_button(timeout="30s")  # ENTRY POINT: Insert tracker button
+
+            ows = s.find_sheet_actions()
+            anchored = [r for r in rows if r.action_id is not None]
+            assert anchored, "Expected anchored actions after sync + tracker insert"
+
+            # Per-row field truth via SHEET (xlsx download; no docx export cache lag).
+            # TRACKER completeness (tracker==floating==matched) is verified via the live
+            # GAS verify_consistency call below — avoids the docx export cache lag that
+            # affects direct verify(on=TRACKER) reads right aft _insertTrackerIdLinks.
+            for a in anchored:
+                s.verify(a, on=SHEET, tag="[sidebar tracker-insert]")
+            s.verify_consistency(scope=DOC)   # live GAS: tracker==floating==matched, 0 issues
+            s.checkpoint(INTEGRITY)
+        finally:
+>           s.close()
+
+/mnt/c/dev/GActionSheet/tests/test_sidebar.py:142:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scn/session.py:414: in close
+    self.engine.close()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scn.engine.CheckpointEngine object at 0x7138d9d2eb40>
+
+    def close(self) -> None:
+        """Assert the queue is empty; raise DrainInvariantError if not (§4.6).
+
+        A non-empty queue means an expectation was declared but never verified — a test failure.
+        """
+        if self._queue:
+         dangling = [
+                (e.seq, {s.value for s in e.remaining}, e.tag)
+                for e in self._queue
+            ]
+>           raise DrainInvariantError(dangling)
+E           scn.engine.DrainInvariantError: Non-empty expectation queue at close(): seq=0 remaining={'SHEET'} tag=[sidebar tracker-insert]; seq=1 remaining={'SHEET'} tag=[sidebar tracker-insert]; seq=2 remaining={'SHEET'} tag=[sidebar tracker-insert]
+
+scn/engine.py:302: DrainInvariantError
+--------------------------------------------------------- UI failure diagnostics (GTaskSheet-3tkf) ---------------------------------------------------------
+Screenshot: /home/stuar/proj/GActionSheet/test-results/FAIL-tests-test-sidebar-py-test-tracker-insert-button.png
+Frames:
+  https://docs.google.com/document/d/1oaglUkDIwPyCOoKA9dfOVnfGMapzmv2ecW0JlLxQ3rU/edit?tab=t.0
+  about:blank
+  about:blank
+  https://docs.google.com/offline/iframeapi?ouid=u6140dc93d20f7c1a&sa=5#csid=COSZodWD7ZUDFYbJ0gQdsUsrnQ&cd=1
+  about:blank
+  https://clients6.google.com/static/proxy.html?usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.9vdPKhB0RUg.O%2Fd%3D1%2Frs%3DAHpOoo97anj7zZ432JcN58tqJJp_A6WeOw%2Fm%3D__features__#parent=https%3A%2F%2Fdocs.google.com&rpctoken=261428868
+  https://accounts.google.com/RotateCookiesPage?og_pid=25&rot=3&origin=https%3A%2F%2Fdocs.google.com&exp_id=0
+  https://docs.google.com/_/og/bscframe
+  https://contacts.google.com/widget/hovercard/v/2?theme=light&origin=https%3A%2F%2Fdocs.google.com&usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.9vdPKhB0RUg.O%2Fd%3D1%2Frs%3DAHpOoo97anj7zZ432JcN58tqJJp_A6WeOw%2Fm%3D__features__#id=I__HC_94253229&_gfid=I__HC_94253229&parent=https%3A%2F%2Fdocs.google.com&pfname=&rpctoken=39405110
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=true&ha=5&dtp=0&dcs=false
+Visible buttons:
+  https://docs.google.com/document/d/1oaglUkDIwPyCOoKA9dfOVnfGMapzmv2ecW0JlLxQ3rU/edit?tab=t.0: buttons=['Go to Docs home screen', 'Take out of trash']
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=true&ha=5&dtp=0&dcs=false: buttons=['', '', 'Sync', 'Import', 'Notify', 'Insert Tracker', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'User Guide']
+_______________________________________________________________ test_sidebar_shell_controls ________________________________________________________________
+
+settings = {'axiomDataset': 'nuuts', 'axiomQueryToken': 'xaat-79be4f4a-de00-4bd1-a7dc-0e99fb52d2ff', 'axiomToken': 'xaat-d5844657-0792-40a5-b923-3b43aa16f389', 'gasLogDir': '/mnt/g/My Drive/GAS-Logger/GTaskSheet', ...}
+browser_page = <Page url='https://docs.google.com/document/d/1x8aEo0nYqEvErRjOnOBlgDycprHQIqv7jPJ8txYgF8s/edit?tab=t.0'>
+
+    def test_sidebar_shell_controls(settings, browser_page):
+        """Homepage card shows the expected controls and hides navigation-only controls.
+
+        Raw Playwright frame assertions on UI shell structure only — NOT durable ai
+      state (G1 binding). Do NOT enqueue UI expectations for shell elements.
+        """
+        s = ScenarioSession.new_doc(settings)
+        s.ui = UiDriver(browser_page, doc_id=s.doc_id)
+        try:
+            s._post_fixture("uc_c_first_insert")
+            card = s.ui.open_sidebar(timeout="45s")
+
+            # Present: all 4 top-level action buttons visible
+            card.frame.get_by_role("button", name=re.compile(r"^sync$", re.I)).wait_for(
+                state="visible", timeout=30000
+            )
+>           card.frame.get_by_role("button", name=re.compile(r"^import$", re.I)).wait_for(
+                state="visible", timeout=30000
+            )
+
+/mnt/c/dev/GActionSheet/tests/test_sidebar.py:217:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/mnt/c/dev/venvs/uv1/lib/python3.12/site-packages/playwright/sync_api/_generated.py:20048: in wait_for
+    self._sync(
+/mnt/c/dev/venvs/uv1/lib/python3.12/site-packages/playwright/_impl/_locator.py:741: in wait_for
+    await self._frame.wait_for_selector(
+/mnt/c/dev/venvs/uv1/lib/python3.12/site-packages/playwright/_impl/_frame.py:372: in wait_for_selector
+    await self._channel.send(
+/mnt/c/dev/venvs/uv1/lib/python3.12/site-packages/playwright/_impl/_connection.py:69: in send
+    return await self._connection.wrap_api_call(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <playwright._impl._connection.Connection object at 0x7138d9fef950>, cb = <function Channel.send.<locals>.<lambda> at 0x7138db55c360>
+is_internal = False, title = None
+
+    async def wrap_api_call(
+        self, cb: Callable[[], Any], is_internal: bool = False, title: str = None
+    ) -> Any:
+        if self._api_zone.get():
+            return await cb()
+        task = asyncio.current_task(self._loop)
+        st: List[inspect.FrameInfo] = getattr(
+            task, "__pw_stack__", None
+        ) or inspect.stack(0)
+
+        parsed_st = _extract_stack_trace_information_from_stack(st, is_internal, title)
+        self._api_zone.set(parsed_st)
+        try:
+            return await cb()
+        except Exception as error:
+>           raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+E           playwright._impl._errors.TimeoutError: Locator.wait_for: Timeout 30000ms exceeded.
+E           Call log:
+E             - waiting for get_by_role("button", name=re.compile(r"^import$", re.IGNORECASE)) to be visible
+
+/mnt/c/dev/venvs/uv1/lib/python3.12/site-packages/playwright/_impl/_connection.py:559: TimeoutError
+--------------------------------------------------------- UI failure diagnostics (GTaskSheet-3tkf) ---------------------------------------------------------
+Screenshot: /home/stuar/proj/GActionSheet/test-results/FAIL-tests-test-sidebar-py-test-sidebar-shell-controls.png
+Frames:
+  https://docs.google.com/document/d/1x8aEo0nYqEvErRjOnOBlgDycprHQIqv7jPJ8txYgF8s/edit?tab=t.0
+  about:blank
+  about:blank
+  https://docs.google.com/offline/iframeapi?ouid=u6140dc93d20f7c1a&sa=5#csid=COiH9pKE7ZUDFfaHXQMd4qcxqg&cd=1
+  about:blank
+  https://accounts.google.com/RotateCookiesPage?og_pid=25&rot=3&origin=https%3A%2F%2Fdocs.google.com&exp_id=0
+  https://clients6.google.com/static/proxy.html?usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.9vdPKhB0RUg.O%2Fd%3D1%2Frs%3DAHpOoo97anj7zZ432JcN58tqJJp_A6WeOw%2Fm%3D__features__#parent=https%3A%2F%2Fdocs.google.com&rpctoken=395791986
+  https://docs.google.com/_/og/bscframe
+  https://contacts.google.com/widget/hovercard/v/2?theme=light&origin=https%3A%2F%2Fdocs.google.com&usegapi=1&jsh=m%3B%2F_%2Fscs%2Fabc-static%2F_%2Fjs%2Fk%3Dgapi.lb.en.9vdPKhB0RUg.O%2Fd%3D1%2Frs%3DAHpOoo97anj7zZ432JcN58tqJJp_A6WeOw%2Fm%3D__features__#id=I__HC_94253229&_gfid=I__HC_94253229&parent=https%3A%2F%2Fdocs.google.com&pfname=&rpctoken=36958077
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=true&ha=5&dtp=0&dcs=false
+Visible buttons:
+  https://docs.google.com/document/d/1x8aEo0nYqEvErRjOnOBlgDycprHQIqv7jPJ8txYgF8s/edit?tab=t.0: buttons=['Go to Docs home screen', 'Take out of trash']
+  https://addons.gsuite.google.com/u/0/client?origin=https%3A%2F%2Fdocs.google.com&hl=en&forcehl=1&uchs=true&ha=5&dtp=0&dcs=false: buttons=['', '', 'Sync', 'Import', 'Notify', 'Insert Tracker', '', '', '', '', '', '', '', '', '', '', '', '', 'User Guide']
+_______________________________________________________________ test_sync_all_op_correlation _______________________________________________________________
+
+url = 'https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec'
+payload = {'action': 'run_fixture', 'fixture': 'sync_document', 'testDocId': '18V1jyrXyTgyy3Gh80OSTzRR7yqO4yFEWAxcIsW2phb4', 'testToken': '86811032-fa33-4304-961e-4397fe398a45'}
+timeout = 360
+
+    def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
+        """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors."""
+        if not url:
+            raise RuntimeError(
+                "webappTestUrl not set in local.settings.json"
+            )
+
+        data = json.dumps(payload).encode("utf-8")
+        headers: dict = {"Content-Type": "application/json"}
+        # /dev URLs require Google auth; inject saved Playwright cookies when present.
+        if url.endswith("/dev"):
+            cookie = _load_auth_cookie_header()
+            if cookie:
+                headers["Cookie"] = cookie
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+>           with urllib.request.urlopen(req, timeout=timeout) as resp:
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scn/session.py:113:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/usr/lib/python3.12/urllib/request.py:215: in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:521: in open
+    response = meth(req, response)
+               ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:630: in http_response
+    response = self.parent.error(
+/usr/lib/python3.12/urllib/request.py:559: in error
+    return self._call_chain(*args)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/urllib/request.py:492: in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <urllib.request.HTTPDefaultErrorHandler object at 0x7138dbfb5d00>, req = <urllib.request.Request object at 0x7138d8b4b020>
+fp = <http.client.HTTPResponse object at 0x7138d8b49120>, code = 500, msg = 'Internal Server Error'
+hdrs = <http.client.HTTPMessage object at 0x7138d8b49df0>
+
+    def http_error_default(self, req, fp, code, msg, hdrs):
+>       raise HTTPError(req.full_url, code, msg, hdrs, fp)
+E       urllib.error.HTTPError: HTTP Error 500: Internal Server Error
+
+/usr/lib/python3.12/urllib/request.py:639: HTTPError
+
+The above exception was the direct cause of the following exception:
+
+settings = {'axiomDataset': 'nuuts', 'axiomQueryToken': 'xaat-79be4f4a-de00-4bd1-a7dc-0e99fb52d2ff', 'axiomToken': 'xaat-d5844657-0792-40a5-b923-3b43aa16f389', 'gasLogDir': '/mnt/g/My Drive/GAS-Logger/GTaskSheet', ...}
+gas_log_dir = '/mnt/g/My Drive/GAS-Logger/GTaskSheet', request = <FixtureRequest for <Function test_sync_all_op_correlation>>
+
+    def test_sync_all_op_correlation(settings, gas_log_dir, request):
+        """GTaskSheet-65g1: one syncAll() invocation's sub-events share one `op` id.
+
+        Two docs are synced individually first (their own ops, ignored), then a
+        single syncAll() sweep is fenced and its sync.all.start/.../sync.all.complete
+        plus both docs' sync.scanned/sync.complete must all carry the SAME op id —
+        and a second, separate sweep must produce a DIFFERENT op id, proving the
+        field is per-invocation, not a constant.
+        """
+        if not gas_log_dir:
+            pytest.skip("gas_log_dir not configured — op correlation requires GAS log access")
+
+        import time
+
+        from tests.helpers.gas_log import clear_logs, collect_logs, wait_for_log
+
+        scn_a = ScenarioSession.new_doc(settings, request=request)
+        scn_b = ScenarioSession.new_doc(sett)
+        try:
+            scn_a.append_paragraph("AI-1: 65g1 op-correlation doc A")
+            scn_a.sync()
+            scn_b.append_paragraph("AI-1: 65g1 op-correlation doc B")
+>           scn_b.sync()
+
+/mnt/c/dev/GActionSheet/tests/test_sync_all.py:403:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scn/session.py:451: in sync
+    resp = self._post_fixture("sync_document")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scn/session.py:289: in _post_fixture
+    return self._post(payload)
+           ^^^^^^^^^^^^^^^^^^^
+scn/session.py:262: in _post
+    result = _http_post(url, payload, timeout)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+url = 'https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec'
+payload = {'action': 'run_fixture', 'fixture': 'sync_document', 'testDocId': '18V1jyrXyTgyy3Gh80OSTzRR7yqO4yFEWAxcIsW2phb4', 'testToken': '86811032-fa33-4304-961e-4397fe398a45'}
+timeout = 360
+
+    def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
+        """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors."""
+        if not url:
+            raise RuntimeError(
+                "webappTestUrl not set in local.settings.json"
+            )
+
+        data = json.dumps(payload).encode("utf-8")
+        headers: dict = {"Content-Type": "application/json"}
+        # /dev URLs require Google auth; inject saved Playwright cookies when present.
+        if url.endswith("/dev"):
+            cookie = _load_auth_cookie_header()
+            if cookie:
+                headers["Cookie"] = cookie
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+                final_url = resp.geturl()
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+>           raise RuntimeError(
+                f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw!r}"
+            ) from exc
+E           RuntimeError: HTTP 500 from GAS WebApp (action='run_fixture'): '<!DOCTYPE html><html><head><script nonce="QKstoWGC8euI3VlsRghslA">window[\'ppConfig\'] = {productName: \'26981ed0d57bbad37e728ff58134270c\', deleteIsEnforced:  false , sealIsEnforced:  false , heartbeatRate:  0.5 , periodicReportingRateMillis:  60000.0 , disableAllReporting:  false };(function(){\'use strict\';function k(a){var b=0;return function(){return b<a.length?{done:!1,value:a[b++]}:{done:!0}}}function l(a){var b=typeof Symbol!="undefined"&&Symbol.iterator&&a[Symbol.iterator];if(b)return b.call(a);if(typeof a.length=="number")return{next:k(a)};throw Error(String(a)+" is not an iterable or ArrayLike");}var m=typeof Object.defineProperties=="function"?Object.defineProperty:function(a,b,c){if(a==Array.prototype||a==Object.prototype)return a;a[b]=c.value;return a};\nfunction n(a){a=["object"==typeof globalThis&&globalThis,a,"object"==typeof window&&window,"object"==typeof self&&self,"object"==typeof global&&global];for(var b=0;b<a.length;++b){var c=a[b];if(c&&c.Math==Math)return c}throw Error("Cannot find global object");}var p=n(this);function q(a,b){if(b)a:{var c=p;a=a.split(".");for(var d=0;d<a.length-1;d++){var e=a[d];if(!(e in c))break a;c=c[e]}a=a[a.length-1];d=c[a];b=b(d);b!=d&&b!=null&&m(c,a,{configurable:!0,writable:!0,value:b})}}\nq("Object.is",function(a){return a?a:function(b,c){return b===c?b!==0||1/b===1/c:b!==b&&c!==c}});q("Array.prototype.includes",function(a){return a?a:function(b,c){var d=this;d instanceof String&&(d=String(d));var e=d.length;c=c||0;for(c<0&&(c=Math.max(c+e,0));c<e;c++){var f=d[c];if(f===b||Object.is(f,b))return!0}return!1}});\nq("String.prototype.includes",function(a){return a?a:function(b,c){if(this==null)throw new TypeError("The \'this\' value for String.prototype.includes must not be null or undefined");if(b instanceof RegExp)throw new TypeError("First argument to String.prototype.includes must not be a regular expression");return this.indexOf(b,c||0)!==-1}});function r(a,b,c){a("https://csp.withgoogle.com/csp/proto/"+encodeURIComponent(b),JSON.stringify(c))}function t(){var a;if((a=window.ppConfig)==null?0:a.disableAllReporting)return function(){};var b,c,d,e;return(e=(b=window)==null?void 0:(c=b.navigator)==null?void 0:(d=c.sendBeacon)==null?void 0:d.bind(navigator))!=null?e:u}function u(a,b){var c=new XMLHttpRequest;c.open("POST",a);c.send(b)}\nfunction v(){var a=(w=Object.prototype)==null?void 0:w.__lookupGetter__("__proto__"),b=x,c=y;return function(){var d=a.call(this),e,f,g,h;r(c,b,{type:"ACCESS_GET",origin:(f=window.location.origin)!=null?f:"unknown",report:{className:(g=d==null?void 0:(e=d.constructor)==null?void 0:e.name)!=null?g:"unknown",stackTrace:(h=Error().stack)!=null?h:"unknown"}});return d}}\nfunction z(){var a=(A=Object.prototype)==null?void 0:A.__lookupSetter__("__proto__"),b=x,c=y;return function(d){d=a.call(this,d);var e,f,g,h;r(c,b,{type:"ACCESS_SET",origin:(f=window.location.origin)!=null?f:"unknown",report:{className:(g=d==null?void 0:(e=d.constructor)==null?void 0:e.name)!=null?g:"unknown",stackTrace:(h=Error().stack)!=null?h:"unknown"}});return d}}function B(a,b){C(a.productName,b);setInterval(function(){C(a.productName,b)},a.periodicReportingRateMillis)}\nvar D="constructor __defineGetter__ __defineSetter__ hasOwnProperty __lookupGetter__ __lookupSetter__ isPrototypeOf propertyIsEnumerable toString valueOf __proto__ toLocaleString x_ngfn_x".split(" "),E=D.concat,F=navigator.userAgent.match(/Firefox\\/([0-9]+)\\./),G=(!F||F.length<2?0:Number(F[1])<75)?["toSource"]:[],H;if(G instanceof Array)H=G;else{for(var I=l(G),J,K=[];!(J=I.next()).done;)K.push(J.value);H=K}var L=E.call(D,H),M=[];\nfunction C(a,b){for(var c=[],d=l(Object.getOwnPropertyNames(Object.prototype)),e=d.next();!e.done;e=d.next())e=e.value,L.includes(e)||M.includes(e)||c.push(e);e=Object.prototype;d=[];for(var f=0;f<c.length;f++){var g=c[f];d[f]={name:g,descriptor:Object.getOwnPropertyDescriptor(Object.prototype,g),type:typeof e[g]}}if(d.length!==0){c=l(d);for(e=c.next();!e.done;e=c.next())M.push(e.value.name);var h;r(b,a,{type:"SEAL",origin:(h=window.location.origin)!=null?h:"unknown",report:{blockers:d}})}};var N=Math.random(),O=t(),P=window.ppConfig;P&&(P.disableAllReporting||P.deleteIsEnforced&&P.sealIsEnforced||N<P.heartbeatRate&&r(O,P.productName,{origin:window.location.origin,type:"HEARTBEAT"}));var y=t(),Q=window.ppConfig;if(Q)if(Q.deleteIsEnforced)delete Object.prototype.__proto__;else if(!Q.disableAllReporting){var x=Q.productName;try{var w,A;Object.defineProperty(Object.prototype,"__proto__",{enumerable:!1,get:v(),set:z()})}catch(a){}}\n(function(){var a=t(),b=window.ppConfig;b&&(b.sealIsEnforced?Object.seal(Object.prototype):b.disableAllReporting||(document.readyState!=="loading"?B(b,a):document.addEventListener("DOMContentLoaded",function(){B(b,a)})))})();}).call(this);\n</script><link rel="shortcut icon" href="//ssl.gstatic.com/docs/script/images/favicon.ico"><title>Error</title><style type="text/css" nonce="oCxKDVF19oN5O5h58Mwouw">body {background-color: #fff; margin: 0; padding: 0;}.errorMessage {font-family: Arial,sans-serif; font-size: 12pt; font-weight: bold; line-height: 150%; padding-top: 25px;}</style></head><body style="margin:20px"><div><img alt="Google Apps Script" src="//ssl.gstatic.com/docs/script/images/logo.png"></div><div style="text-align:center;font-family:monospace;margin:50px auto 0;max-width:600px">We&#39;re sorry, a server error occurred while reading from storage. Error code INTERNAL.</div></body></html>'
+
+scn/session.py:118: RuntimeError
+------------------------------------- generated xml file: /home/stuar/proj/GActionSheet/test-results/junit/pytest.xml --------------------------------------
+================================================================= short test summary info ==================================================================
+FAILED tests/test_b7_write_routes.py::test_b7_write_routes - TimeoutError: The read operation timed out
+FAILED tests/test_floating_action_scanner.py::test_soft_return_continuation_in_action_text - AssertionError: action 'action text\ncontinuation line' not found in sheet after sync; rows=['action text continuation line']
+FAILED tests/test_floating_action_scanner.py::test_soft_return_bare_ai_with_continuation - AssertionError: action 'bare action\ncontinuation' not found in sheet after sync; rows=['bare action continuation']
+FAILED tests/test_floating_action_scanner.py::test_soft_return_context_and_multiline_action - AssertionError: action 'main action\nline 2\nline 3' not found in sheet after sync; rows=['main action line 2 line 3']
+FAILED tests/test_import.py::test_import_flow_forward_sync - RuntimeError: HTTP 500 from GAS WebApp (action='run_fixture'): '<!DOCTYPE html><html><head><script nonce="GNeja4YeX1-dnp6ryL7k0A">window[\'ppConfig\'] ...
+FAILED tests/test_journey.py::test_journey - RuntimeError: HTTP 500 from GAS WebApp (action='patch_action_status'): '<!DOCTYPE html><html><head><script nonce="XJ5vh3zC6B2f92GuJ7XKWA">window[\'ppCo...
+FAILED tests/test_link_preview.py::test_link_preview_card_status_change - AssertionError: card header missing 'AI-1': ''
+FAILED tests/test_sidebar.py::test_sidebar_bootstrap_sync - scn.engine.DrainInvariantError: Non-empty expectation queue at close(): seq=0 remaining={'SHEET'} tag=[sidebar sync-SHEET]; seq=1 remaining={'SHEET'} t...
+FAILED tests/test_sidebar.py::test_tracker_insert_button - scn.engine.DrainInvariantError: Non-empty expectation queue at close(): seq=0 remaining={'SHEET'} tag=[sidebar tracker-insert]; seq=1 remaining={'SHEET...
+FAILED tests/test_sidebar.py::test_sidebar_shell_controls - playwright._impl._errors.TimeoutError: Locator.wait_for: Timeout 30000ms exceeded.
+FAILED tests/test_sync_all.py::test_sync_all_op_correlation - RuntimeError: HTTP 500 from GAS WebApp (action='run_fixture'): '<!DOCTYPE html><html><head><script nonce="QKstoWGC8euI3VlsRghslA">window[\'ppConfig\'] ...
+================================================== 11 failed, 317 passed, 3 skipped in 3114.07s (0:51:54) ==================================================
+[ELIFECYCLE] Command failed with exit code 1.:

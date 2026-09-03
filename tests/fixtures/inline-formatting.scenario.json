@@ -1,0 +1,12 @@
+{
+  "name": "inline-formatting",
+  "input": "inline-formatting",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "inline-formatting-expected",
+  "serves": [
+    "gts-zocq"
+  ],
+  "batch": "apt-lanes-format"
+}

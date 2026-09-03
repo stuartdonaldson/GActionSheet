@@ -1,0 +1,18 @@
+Recommended fix order
+
+0. Housekeeping first, cheap and unblocks everything else:
+Commit the outstanding timestamp hook (tests/conftest.py) and merge fix/gts-dr8j-soft-returns to master. Nothing below should be developed on top of a diverging branch — you'd otherwise end up re-resolving the same soft-return changes in a rebase later.
+
+Session 1 — gts-cges + gts-jnsf together, same session:
+Both are pure Python-test-harness bugs, no GAS deploy required, and both live in the same two files (scn/assertions.py / scn/session.py), both in the same subsystem (the exact-match oracle comparisons verify_consistency/check_present_consistent use). Root cause is already diagnosed for both — this is edit-and-verify work, not investigation:
+- gts-cges: normalize created_date to one format before comparing (or compare as parsed datetimes).
+- gts-jnsf: stop trusting .docx core_properties.title as the doc-name oracle (Google always writes the placeholder "Word Document" there) — read the real title from Drive metadata instead.
+
+Bundling these is the cost-effective call: one pytest-only verification pass covers both, no deploy cycle, and touching the same oracle-comparison code path in one sitting means you're not re-loading that context twice.
+
+Session 2 — gts-durq + gts-4d50 together, separate session:
+Both are live-UI sidebar issues discovered in the same ~8-minute window of the same run (21:45–21:53), and both require an actual browser repro (open the sidebar, drive it live) before you can even tell if they're the same root cause or two unrelated ones. That repro is the expensive part — spinning up a live-doc session and possibly a GAS redeploy to test a fix — so it's worth doing once and checking both in the same live session rather than paying for two separate repro cycles. But: don't assume one fix. gts-durq (Import button never visible) and gts-4d50 (link-preview card body empty) may turn out to be unrelated regressions that just happened to fire close together; keep them as separate commits/beads unless the investigation actually finds a shared cause (e.g., a sidebar-shell render regression affecting both).
+
+Keep this as its own session rather than folding into Session 1 because it's a different cost profile (live browser + possible deploy vs. pure pytest) and a different subsystem (sidebar UI rendering vs. data-comparison oracles) — mixing them buys no context-sharing benefit and risks a slower, noisier single session.
+
+Why this order, not durq/4d50 first: Session 1's fixes are fast, cheap, and don't touch anything the UI session depends on — clearing them first shrinks the "known failing" list before you spend the more expensive live-browser cycles, and there's no dependency forcing the reverse order.

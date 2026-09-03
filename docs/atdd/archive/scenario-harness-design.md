@@ -1,6 +1,6 @@
 # Scenario Harness Design — Python Architecture + Checkpoint-Engine Algorithm
 
-_Bead GTaskSheet-5vwu.1 (`model:opus`, design-only). Deliverable: the written spec that lets the
+_Bead gts-5vwu.1 (`model:opus`, design-only). Deliverable: the written spec that lets the
 epic's build beads (`.3 .4 .5 .6 .7 .10 .13`) be authored from a clean context. No production
 harness code is written here; no GAS implementation was read._
 

@@ -1,4 +1,5 @@
 {
+  "_note_gasProjectJson": "scriptId/testSheetId are ALSO committed project truth in gas-project.json (GAS-Core adr/0004) — gas-deploy reads that copy. Kept here too because tests/conftest.py's script_id fixture and tests/playwright/editor_helpers.js read local.settings.json directly, not through gas-deploy's loader (GAS-Core-rgh).",
   "testSheetId": "SPREADSHEET_ID_FOR_TESTING",
   "testDocId": "DOC_ID_FOR_TESTING",
   "scriptId": "APPS_SCRIPT_SCRIPT_ID",
@@ -6,22 +7,30 @@
   "discoveryRecentDocId": "DOC_ID_MODIFIED_WITHIN_LAST_7_DAYS",
   "discoveryStaleDocId": "DOC_ID_MODIFIED_8_OR_MORE_DAYS_AGO",
   "discoverySubfolderDocId": "DOC_ID_IN_SUBFOLDER_MODIFIED_WITHIN_7_DAYS",
-
-  "_note_teamScopeFolders": "Folder hierarchy for Team Scope sync tests (GTaskSheet-me6w.6). Create via the setup_team_scope_fixture GAS fixture, which also registers TestTeamA/TestTeamAChild in TeamData.",
+  "_note_teamScopeFolders": "Folder hierarchy for Team Scope sync tests (gts-me6w.6). Create via the setup_team_scope_fixture GAS fixture, which also registers TestTeamA/TestTeamAChild in TeamData.",
   "testTeamA": "FOLDER_ID_REGISTERED_AS_TestTeamA_IN_TEAMDATA",
   "testTeamAChild": "FOLDER_ID_CHILD_OF_testTeamA_REGISTERED_AS_TestTeamAChild",
   "testTeamADeep": "FOLDER_ID_MULTI_LEVEL_DESCENDANT_OF_testTeamA_NOT_UNDER_testTeamAChild_UNREGISTERED",
-
   "webappSecret": "YOUR_WEBAPP_SECRET_SCRIPT_PROPERTY_VALUE",
-
-  "_note_axiom": "Used by scripts/query_axiom.py and src/WebApp.js's set_axiom_config route. axiomToken is the ingest token (write-only, used by GasLogger.flush() server-side); axiomQueryToken is a separate read-only API token for querying — get both from the Axiom org settings.",
+  "_note_axiom": "Used by scripts/query_axiom.py and src/WebApp.js's set_axiom_config route. axiomToken is the ingest token (write-only, used by GasLogger.flush() server-side); axiomQueryToken is a separate read-only API token for querying \u2014 get both from the Axiom org settings.",
   "axiomDataset": "YOUR_AXIOM_DATASET_NAME",
   "axiomToken": "YOUR_AXIOM_INGEST_TOKEN",
   "axiomQueryToken": "YOUR_AXIOM_QUERY_TOKEN",
-
-  "_note_testToken": "Auto-populated by pnpm run deploy:test — do not edit manually.",
-  "_note_webappTestUrl": "Auto-written by pnpm run deploy:test from the TEST-WEB-APP deployment ID — do not set manually. deploy:test always overwrites this with the current derived URL so it cannot become stale.",
+  "_note_exportRootFolderId": "gts-z6j0. Drive folder ID that getExportFolder_() (src/ExportFolderMap.js) creates per-document export subfolders under, so document-exporter output (JSON/PDF, and future image-extraction artifacts) stays out of each source document's own folder/visibility. Create the folder once by hand and paste its ID here; pushed to the GAS WebApp's EXPORT_ROOT_FOLDER_ID script property at deploy:test via set_export_config (manage-deployments.js's registerExportConfig). Optional \u2014 if unset, exports fall back to writing into the source document's own parent folder.",
+  "exportRootFolderId": "YOUR_EXPORT_ROOT_DRIVE_FOLDER_ID",
+  "_note_exportTestDocId": "Default docId scripts/export_gas.py uses when no doc_id is given on the command line. Optional \u2014 if unset, doc_id becomes a required positional argument.",
+  "exportTestDocId": "YOUR_DEFAULT_EXPORT_TEST_DOC_ID",
+  "_note_testToken": "Auto-populated by pnpm run deploy:test \u2014 do not edit manually.",
+  "_note_webappTestUrl": "Auto-written by pnpm run deploy:test from the TEST-WEB-APP deployment ID \u2014 do not set manually. deploy:test always overwrites this with the current derived URL so it cannot become stale.",
   "webappTestUrl": "",
   "testToken": "",
-  "testTokenExpiresAt": ""
+  "testTokenExpiresAt": "",
+  "_note_staticPortalRepoPath": "Sibling checkout of the Static repo (nuuc-it/Static) that GitHub Pages serves. Used by scripts/static-pages.js (GAS-Core's gas-static package, chained automatically into pnpm run deploy:test/deploy:prod) to publish the built team-action portal to pub/AS-sit/ (SIT) or pub/AS/ (PROD).",
+  "staticPortalRepoPath": "../Static",
+  "_note_playwrightAccounts": "Maps this project's test-account roles (docs/security-architecture.md \u00a75) to shared, cross-project auth-identity files under $PLAYWRIGHT_AUTH_DIR (.envrc, default ~/.playwright). Capture a file with: node tests/playwright/auth.setup.js --account=<slug>",
+  "playwrightAccounts": {
+    "primary": "YOUR_ACCOUNT_SLUG.json"
+  },
+  "_note_claspAuth": "clasp credential file used for every clasp call for this project. Without it clasp falls back to ~/.clasprc.json and can push to the wrong script project. Create with: clasp_config_auth=~/.clasprc-<name>.json clasp login",
+  "claspAuth": "~/.clasprc-<account>.json"
 }

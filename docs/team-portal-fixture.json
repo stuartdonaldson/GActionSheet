@@ -1,0 +1,596 @@
+{
+  "_source": "scripts/capture_team_actions_fixture.py via read_team_actions (test deployment) \u2014 real rows, never hand-edited",
+  "teams": {
+    "Communications": {
+      "teamId": "Communications",
+      "scope": {
+        "teamId": "Communications"
+      },
+      "states": {
+        "open": {
+          "opts": {
+            "statusFilter": "open"
+          },
+          "rows": [
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-1",
+              "action_id": "AI-1",
+              "action_text": "Update AI guide and review with Governance due 5/26",
+              "assignee_email": "sdonaldson@northlakeuu.org",
+              "assignee_name": "Stuart G. Donaldson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-2",
+              "action_id": "AI-2",
+              "action_text": "and Stuart. Contact City of Kirkland to review signage constraints and options - due 4/26",
+              "assignee_email": "ellie.i.peterson@gmail.com",
+              "assignee_name": "Ellie Peterson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-3",
+              "action_id": "AI-3",
+              "action_text": "verify/resolve Mailchimp scheduling issue if it recurs",
+              "assignee_email": "stevewil95@gmail.com",
+              "assignee_name": "Steve Wilhelm",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-4",
+              "action_id": "AI-4",
+              "action_text": "Finalize and share newsletter checklist after format stabilizes",
+              "assignee_email": "ellie.i.peterson@gmail.com",
+              "assignee_name": "Ellie Peterson",
+              "status": "In Progress",
+              "status_bucket": "InProgress",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-in-progress.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-5",
+              "action_id": "AI-5",
+              "action_text": "Verify whether calendar entries do not include oom links",
+              "assignee_email": "sdonaldson@northlakeuu.org",
+              "assignee_name": "Stuart G. Donaldson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-6",
+              "action_id": "AI-6",
+              "action_text": "Identify alternative building mounted signage options - after city feedback",
+              "assignee_email": "stuart.donaldson@gmail.com",
+              "assignee_name": "Stuart Donaldson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-7",
+              "action_id": "AI-7",
+              "action_text": "Evaluate Buffer for managing multi-platform social media posting and report back - update next meeting",
+              "assignee_email": "ellie.i.peterson@gmail.com",
+              "assignee_name": "Ellie Peterson",
+              "status": "In Progress",
+              "status_bucket": "InProgress",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-in-progress.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            }
+          ]
+        },
+        "closed": {
+          "opts": {
+            "statusFilter": "closed"
+          },
+          "rows": []
+        },
+        "all": {
+          "opts": {
+            "statusFilter": "all"
+          },
+          "rows": [
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-1",
+              "action_id": "AI-1",
+              "action_text": "Update AI guide and review with Governance due 5/26",
+              "assignee_email": "sdonaldson@northlakeuu.org",
+              "assignee_name": "Stuart G. Donaldson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-2",
+              "action_id": "AI-2",
+              "action_text": "and Stuart. Contact City of Kirkland to review signage constraints and options - due 4/26",
+              "assignee_email": "ellie.i.peterson@gmail.com",
+              "assignee_name": "Ellie Peterson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-3",
+              "action_id": "AI-3",
+              "action_text": "verify/resolve Mailchimp scheduling issue if it recurs",
+              "assignee_email": "stevewil95@gmail.com",
+              "assignee_name": "Steve Wilhelm",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-4",
+              "action_id": "AI-4",
+              "action_text": "Finalize and share newsletter checklist after format stabilizes",
+              "assignee_email": "ellie.i.peterson@gmail.com",
+              "assignee_name": "Ellie Peterson",
+              "status": "In Progress",
+              "status_bucket": "InProgress",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-in-progress.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-5",
+              "action_id": "AI-5",
+              "action_text": "Verify whether calendar entries do not include oom links",
+              "assignee_email": "sdonaldson@northlakeuu.org",
+              "assignee_name": "Stuart G. Donaldson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-6",
+              "action_id": "AI-6",
+              "action_text": "Identify alternative building mounted signage options - after city feedback",
+              "assignee_email": "stuart.donaldson@gmail.com",
+              "assignee_name": "Stuart Donaldson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-7",
+              "action_id": "AI-7",
+              "action_text": "Evaluate Buffer for managing multi-platform social media posting and report back - update next meeting",
+              "assignee_email": "ellie.i.peterson@gmail.com",
+              "assignee_name": "Ellie Peterson",
+              "status": "In Progress",
+              "status_bucket": "InProgress",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-in-progress.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            }
+          ]
+        },
+        "window_boundary": {
+          "opts": {
+            "statusFilter": "closed",
+            "windowDays": 7
+          },
+          "rows": []
+        }
+      },
+      "mine": {
+        "sdonaldson@northlakeuu.org": {
+          "opts": {
+            "statusFilter": "all",
+            "assigneeEmail": "sdonaldson@northlakeuu.org"
+          },
+          "rows": [
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-1",
+              "action_id": "AI-1",
+              "action_text": "Update AI guide and review with Governance due 5/26",
+              "assignee_email": "sdonaldson@northlakeuu.org",
+              "assignee_name": "Stuart G. Donaldson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-5",
+              "action_id": "AI-5",
+              "action_text": "Verify whether calendar entries do not include oom links",
+              "assignee_email": "sdonaldson@northlakeuu.org",
+              "assignee_name": "Stuart G. Donaldson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            }
+          ]
+        },
+        "ellie.i.peterson@gmail.com": {
+          "opts": {
+            "statusFilter": "all",
+            "assigneeEmail": "ellie.i.peterson@gmail.com"
+          },
+          "rows": [
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-2",
+              "action_id": "AI-2",
+              "action_text": "and Stuart. Contact City of Kirkland to review signage constraints and options - due 4/26",
+              "assignee_email": "ellie.i.peterson@gmail.com",
+              "assignee_name": "Ellie Peterson",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-4",
+              "action_id": "AI-4",
+              "action_text": "Finalize and share newsletter checklist after format stabilizes",
+              "assignee_email": "ellie.i.peterson@gmail.com",
+              "assignee_name": "Ellie Peterson",
+              "status": "In Progress",
+              "status_bucket": "InProgress",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-in-progress.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            },
+            {
+              "global_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/AI-7",
+              "action_id": "AI-7",
+              "action_text": "Evaluate Buffer for managing multi-platform social media posting and report back - update next meeting",
+              "assignee_email": "ellie.i.peterson@gmail.com",
+              "assignee_name": "Ellie Peterson",
+              "status": "In Progress",
+              "status_bucket": "InProgress",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-in-progress.png",
+              "doc_id": "1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240",
+              "doc_name": "2026-06-03 CC Meeting Notes",
+              "doc_url": "https://docs.google.com/document/d/1hADPOeHmw3iPoLGB1Vh-wVfNveHl89RVEGYUT3nk240/edit",
+              "created_date": "2026-07-27T02:43:02.302Z",
+              "modified_date": "2026-07-27T02:59:10.667Z"
+            }
+          ]
+        }
+      }
+    },
+    "Board": {
+      "teamId": "Board",
+      "scope": {
+        "teamId": "Board"
+      },
+      "states": {
+        "open": {
+          "opts": {
+            "statusFilter": "open"
+          },
+          "rows": [
+            {
+              "global_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/AI-1",
+              "action_id": "AI-1",
+              "action_text": "Put board meeting on calendar for next two years",
+              "assignee_email": "board-secretary@northlakeuu.org",
+              "assignee_name": "Board Secretary",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE",
+              "doc_name": "2026-06-17 Board Meeting rough notes",
+              "doc_url": "https://docs.google.com/document/d/1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/edit",
+              "created_date": "2026-07-27T05:18:10.211Z",
+              "modified_date": "2026-07-27T05:24:50.079Z"
+            },
+            {
+              "global_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/AI-3",
+              "action_id": "AI-3",
+              "action_text": "Finalize board retreat date",
+              "assignee_email": "board-secretary@northlakeuu.org",
+              "assignee_name": "Board Secretary",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE",
+              "doc_name": "2026-06-17 Board Meeting rough notes",
+              "doc_url": "https://docs.google.com/document/d/1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/edit",
+              "created_date": "2026-07-27T05:18:10.211Z",
+              "modified_date": "2026-07-27T05:42:45.541Z"
+            }
+          ]
+        },
+        "closed": {
+          "opts": {
+            "statusFilter": "closed"
+          },
+          "rows": [
+            {
+              "global_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/AI-2",
+              "action_id": "AI-2",
+              "action_text": "Confirm Wednesdays work for Peter",
+              "assignee_email": "board-secretary@northlakeuu.org",
+              "assignee_name": "Board Secretary",
+              "status": "Done",
+              "status_bucket": "Closed",
+              "status_resolved": true,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-done.png",
+              "doc_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE",
+              "doc_name": "2026-06-17 Board Meeting rough notes",
+              "doc_url": "https://docs.google.com/document/d/1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/edit",
+              "created_date": "2026-07-27T05:18:10.211Z",
+              "modified_date": "2026-07-27T05:42:12.071Z"
+            }
+          ]
+        },
+        "all": {
+          "opts": {
+            "statusFilter": "all"
+          },
+          "rows": [
+            {
+              "global_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/AI-1",
+              "action_id": "AI-1",
+              "action_text": "Put board meeting on calendar for next two years",
+              "assignee_email": "board-secretary@northlakeuu.org",
+              "assignee_name": "Board Secretary",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE",
+              "doc_name": "2026-06-17 Board Meeting rough notes",
+              "doc_url": "https://docs.google.com/document/d/1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/edit",
+              "created_date": "2026-07-27T05:18:10.211Z",
+              "modified_date": "2026-07-27T05:24:50.079Z"
+            },
+            {
+              "global_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/AI-2",
+              "action_id": "AI-2",
+              "action_text": "Confirm Wednesdays work for Peter",
+              "assignee_email": "board-secretary@northlakeuu.org",
+              "assignee_name": "Board Secretary",
+              "status": "Done",
+              "status_bucket": "Closed",
+              "status_resolved": true,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-done.png",
+              "doc_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE",
+              "doc_name": "2026-06-17 Board Meeting rough notes",
+              "doc_url": "https://docs.google.com/document/d/1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/edit",
+              "created_date": "2026-07-27T05:18:10.211Z",
+              "modified_date": "2026-07-27T05:42:12.071Z"
+            },
+            {
+              "global_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/AI-3",
+              "action_id": "AI-3",
+              "action_text": "Finalize board retreat date",
+              "assignee_email": "board-secretary@northlakeuu.org",
+              "assignee_name": "Board Secretary",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE",
+              "doc_name": "2026-06-17 Board Meeting rough notes",
+              "doc_url": "https://docs.google.com/document/d/1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/edit",
+              "created_date": "2026-07-27T05:18:10.211Z",
+              "modified_date": "2026-07-27T05:42:45.541Z"
+            }
+          ]
+        },
+        "window_boundary": {
+          "opts": {
+            "statusFilter": "closed",
+            "windowDays": 7
+          },
+          "rows": [
+            {
+              "global_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/AI-2",
+              "action_id": "AI-2",
+              "action_text": "Confirm Wednesdays work for Peter",
+              "assignee_email": "board-secretary@northlakeuu.org",
+              "assignee_name": "Board Secretary",
+              "status": "Done",
+              "status_bucket": "Closed",
+              "status_resolved": true,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-done.png",
+              "doc_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE",
+              "doc_name": "2026-06-17 Board Meeting rough notes",
+              "doc_url": "https://docs.google.com/document/d/1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/edit",
+              "created_date": "2026-07-27T05:18:10.211Z",
+              "modified_date": "2026-07-27T05:42:12.071Z"
+            }
+          ]
+        }
+      },
+      "mine": {
+        "board-secretary@northlakeuu.org": {
+          "opts": {
+            "statusFilter": "all",
+            "assigneeEmail": "board-secretary@northlakeuu.org"
+          },
+          "rows": [
+            {
+              "global_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/AI-1",
+              "action_id": "AI-1",
+              "action_text": "Put board meeting on calendar for next two years",
+              "assignee_email": "board-secretary@northlakeuu.org",
+              "assignee_name": "Board Secretary",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE",
+              "doc_name": "2026-06-17 Board Meeting rough notes",
+              "doc_url": "https://docs.google.com/document/d/1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/edit",
+              "created_date": "2026-07-27T05:18:10.211Z",
+              "modified_date": "2026-07-27T05:24:50.079Z"
+            },
+            {
+              "global_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/AI-2",
+              "action_id": "AI-2",
+              "action_text": "Confirm Wednesdays work for Peter",
+              "assignee_email": "board-secretary@northlakeuu.org",
+              "assignee_name": "Board Secretary",
+              "status": "Done",
+              "status_bucket": "Closed",
+              "status_resolved": true,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-done.png",
+              "doc_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE",
+              "doc_name": "2026-06-17 Board Meeting rough notes",
+              "doc_url": "https://docs.google.com/document/d/1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/edit",
+              "created_date": "2026-07-27T05:18:10.211Z",
+              "modified_date": "2026-07-27T05:42:12.071Z"
+            },
+            {
+              "global_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/AI-3",
+              "action_id": "AI-3",
+              "action_text": "Finalize board retreat date",
+              "assignee_email": "board-secretary@northlakeuu.org",
+              "assignee_name": "Board Secretary",
+              "status": "Open",
+              "status_bucket": "Open",
+              "status_resolved": false,
+              "status_icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+              "doc_id": "1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE",
+              "doc_name": "2026-06-17 Board Meeting rough notes",
+              "doc_url": "https://docs.google.com/document/d/1MXmPmCZHF3LUKJsPgL5T_w-zDtq9j4QLrvTu2jX05TE/edit",
+              "created_date": "2026-07-27T05:18:10.211Z",
+              "modified_date": "2026-07-27T05:42:45.541Z"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "statusOptions": [
+    {
+      "status": "Open",
+      "icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-open.png",
+      "alt": "Set Open"
+    },
+    {
+      "status": "In Progress",
+      "icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-in-progress.png",
+      "alt": "Set In Progress"
+    },
+    {
+      "status": "In Review",
+      "icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-review.png",
+      "alt": "Set In Review"
+    },
+    {
+      "status": "Done",
+      "icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-done.png",
+      "alt": "Set Done"
+    },
+    {
+      "status": "Closed",
+      "icon": "https://stuartdonaldson.github.io/GActionSheet/assets/product-details/status-closed.png",
+      "alt": "Set Closed"
+    }
+  ]
+}

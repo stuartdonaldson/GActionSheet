@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Export</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 16px;
+      padding-bottom: 28px;
+      color: #202124;
+    }
+    p.sub { color: #5f6368; margin-top: 0; }
+    button {
+      font-size: 1rem;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      background: #1a73e8;
+      color: white;
+      cursor: pointer;
+      margin-top: 10px;
+      margin-right: 8px;
+    }
+    button:disabled { background: #c7c7c7; cursor: default; }
+    button.secondary { background: #f1f3f4; color: #202124; }
+    #step-choose, #step-progress, #step-done, #step-error { display: none; }
+    .visible { display: block !important; }
+    #progressTrack {
+      background: #e8eaed;
+      border-radius: 6px;
+      height: 8px;
+      margin: 16px 0 8px;
+      overflow: hidden;
+    }
+    #progressBar {
+      background: #1a73e8;
+      height: 100%;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    #progressLabel { color: #5f6368; font-size: 0.9rem; }
+    #errorText { color: #d93025; }
+    a.file-link { display: block; margin-top: 10px; color: #1a73e8; }
+    a.file-download { display: block; margin-top: 4px; color: #1a73e8; font-size: 0.9rem; }
+    #versionFooter {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 4px 16px;
+      font-size: 0.75rem;
+      color: #9aa0a6;
+      background: #f8f9fa;
+      border-top: 1px solid #e8eaed;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <div id="step-choose" class="visible">
+    <p class="sub">Export this document's data.</p>
+    <button id="jsonBtn">Export JSON</button>
+    <button id="jsonPdfBtn" class="secondary">Export JSON + PDF Snapshot</button>
+  </div>
+
+  <div id="step-progress">
+    <p class="sub" id="progressLabel">Starting…</p>
+    <div id="progressTrack"><div id="progressBar"></div></div>
+  </div>
+
+  <div id="step-done">
+    <p>Export complete.</p>
+    <a class="file-link" id="jsonLink" target="_blank">Open JSON in Drive</a>
+    <a class="file-download" id="jsonDownload">Download JSON</a>
+    <a class="file-link" id="pdfLink" target="_blank" style="display:none;">Open PDF snapshot</a>
+    <a class="file-download" id="pdfDownload" style="display:none;">Download PDF</a>
+  </div>
+
+  <div id="step-error">
+    <p id="errorText"></p>
+  </div>
+
+  <div id="versionFooter"><?= buildVersion ?></div>
+
+  <script>
+    var docId = <?!= JSON.stringify(docId) ?>;
+
+    var stepChoose = document.getElementById('step-choose');
+    var stepProgress = document.getElementById('step-progress');
+    var stepDone = document.getElementById('step-done');
+    var stepError = document.getElementById('step-error');
+    var progressBar = document.getElementById('progressBar');
+    var progressLabel = document.getElementById('progressLabel');
+    var jsonLink = document.getElementById('jsonLink');
+    var pdfLink = document.getElementById('pdfLink');
+    var jsonDownload = document.getElementById('jsonDownload');
+    var pdfDownload = document.getElementById('pdfDownload');
+    var errorText = document.getElementById('errorText');
+    var jsonBtn = document.getElementById('jsonBtn');
+    var jsonPdfBtn = document.getElementById('jsonPdfBtn');
+
+    var pollHandle = null;
+
+    function showStep(el) {
+      [stepChoose, stepProgress, stepDone, stepError].forEach(function (s) { s.classList.remove('visible'); });
+      el.classList.add('visible');
+    }
+
+    function stopPolling() {
+      if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
+    }
+
+    function renderProgress(status) {
+      if (!status) return;
+      var pct = status.totalStages ? Math.round((status.stageIndex / status.totalStages) * 100) : 0;
+      progressBar.style.width = pct + '%';
+      progressLabel.textContent = 'Stage: ' + status.stage + ' (' + status.stageIndex + '/' + status.totalStages + ')';
+    }
+
+    // Builds a same-origin Blob/data URL for a real client-side download
+    // (gts-283i.2) alongside the existing Drive 'Open in Drive' link —
+    // doesn't replace it, since the Drive copy is the durable artifact.
+    function triggerDownload_(anchorEl, filenameBase, extension, mimeType, base64OrText, isBase64) {
+      var blob = isBase64
+        ? new Blob([Uint8Array.from(atob(base64OrText), function (c) { return c.charCodeAt(0); })], { type: mimeType })
+        : new Blob([base64OrText], { type: mimeType });
+      var url = URL.createObjectURL(blob);
+      anchorEl.href = url;
+      anchorEl.download = filenameBase + '.' + extension;
+      anchorEl.style.display = 'block';
+    }
+
+    function poll() {
+      google.script.run
+        .withSuccessHandler(function (status) {
+          if (status && status.state === 'running') renderProgress(status);
+        })
+        .withFailureHandler(function () { /* transient poll failure — next tick retries */ })
+        .getExportProgressForDialog(docId);
+    }
+
+    function startExport(exportPdf) {
+      showStep(stepProgress);
+      progressBar.style.width = '0%';
+      progressLabel.textContent = 'Starting…';
+      pollHandle = setInterval(poll, 1500);
+
+      google.script.run
+        .withSuccessHandler(function (result) {
+          stopPolling();
+          progressBar.style.width = '100%';
+          jsonLink.href = 'https://drive.google.com/file/d/' + result.jsonFileId + '/view';
+          triggerDownload_(jsonDownload, docId + '-document-export', 'json', 'application/json', result.jsonContent, false);
+          if (result.pdfFileId) {
+            pdfLink.href = 'https://drive.google.com/file/d/' + result.pdfFileId + '/view';
+            pdfLink.style.display = 'block';
+            triggerDownload_(pdfDownload, docId + '-document-export', 'pdf', 'application/pdf', result.pdfBase64, true);
+          } else {
+            pdfLink.style.display = 'none';
+            pdfDownload.style.display = 'none';
+          }
+          showStep(stepDone);
+        })
+        .withFailureHandler(function (err) {
+          stopPolling();
+          errorText.textContent = 'Export failed: ' + (err && err.message ? err.message : err);
+          showStep(stepError);
+        })
+        .runExportForDialog(docId, exportPdf);
+    }
+
+    jsonBtn.addEventListener('click', function () { startExport(false); });
+    jsonPdfBtn.addEventListener('click', function () { startExport(true); });
+  </script>
+</body>
+</html>

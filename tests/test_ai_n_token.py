@@ -4,11 +4,12 @@ test_ai_n_token.py — GTaskSheet-sjj AC1, AC2, AC5 (create entry point).
 Exercises the AI-N token scanner and bare-AI: upgrade path directly via HTTP fixture,
 without requiring the editor add-on to be installed as a test deployment.
 
-AC1: Scanner returns globalId with correct format {docId}/AI-{N} and the expected
-     action text.
+AC1: Scanner returns globalId with correct format {docId}/ACT-{N} and the expected
+     action text. ADR-0023: a bare-trigger upgrade is a NEW token write, so it is
+     always assigned the canonical ACT-N: spelling (never legacy AI-N:).
 AC2: The sheet row written by syncDocument stores the same globalId in col-1
      (globalId column), confirming the create path sets the correct value.
-AC5 (partial): syncDocument is the call-site exercised here for the AI: → AI-N:
+AC5 (partial): syncDocument is the call-site exercised here for the AI: → ACT-N:
      upgrade sub-path; sidebarSetStatus / sidebarDeleteAction are covered by
      test_uc_sidebar_mutations.py.
 """
@@ -20,7 +21,7 @@ from tests.helpers.fixture_invoke import invoke_fixture
 from tests.helpers.download import download_xlsx
 from tests.helpers.sheet_inspect import load_sheet, rows_as_dicts
 
-_GLOBAL_ID_RE = re.compile(r'^[A-Za-z0-9_-]{25,44}/AI-\d+$')
+_GLOBAL_ID_RE = re.compile(r'^[A-Za-z0-9_-]{25,44}/ACT-\d+$')
 _ACTION_TEXT   = 'ANT: verify AI-N token format and globalId assignment'
 
 
@@ -38,11 +39,11 @@ def ai_n_state(test_doc_id, test_sheet_id, settings):
 
 
 def test_ai_n_globalid_format(ai_n_state):
-    """AC1: Scanner assigns a globalId with the expected {docId}/AI-{N} format."""
+    """AC1: Scanner assigns a globalId with the expected {docId}/ACT-{N} format."""
     gid = ai_n_state["global_id"]
     assert gid, "[sjj AC1] Fixture returned empty globalId — scanner did not assign a token"
     assert _GLOBAL_ID_RE.match(gid), (
-        f"[sjj AC1] globalId format invalid: {gid!r} (expected '{{docId}}/AI-{{N}}')"
+        f"[sjj AC1] globalId format invalid: {gid!r} (expected '{{docId}}/ACT-{{N}}')"
     )
 
 
@@ -50,8 +51,8 @@ def test_ai_n_doc_id_prefix(ai_n_state):
     """AC1: The docId prefix of globalId matches the test document."""
     gid    = ai_n_state["global_id"]
     doc_id = ai_n_state["doc_id"]
-    assert gid.startswith(doc_id + "/AI-"), (
-        f"[sjj AC1] globalId {gid!r} does not start with doc_id {doc_id!r}/AI-"
+    assert gid.startswith(doc_id + "/ACT-"), (
+        f"[sjj AC1] globalId {gid!r} does not start with doc_id {doc_id!r}/ACT-"
     )
 
 

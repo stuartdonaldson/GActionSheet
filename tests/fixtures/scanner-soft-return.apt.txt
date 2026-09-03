@@ -1,0 +1,28 @@
+<!-- kind: golden -->
+<!-- name: scanner-soft-return -->
+<!-- serves: gts-cn5v -->
+<!-- generated: 2026-08-30T00:00:00.000Z -->
+
+Case T1 (gts-cn5v AC-T1, act-retire): contextual text on the first soft-return line before the token line is detected; the contextual line does not appear in action text. Authored statusless so the establishing sync must materialize the token line.
+
+contextual text here<SR>
+AI-611: d7z8 context before token
+
+Case T2 (gts-cn5v AC-T2, act-retire): soft-return continuation lines after the token are part of action text (to end of paragraph).
+
+context<SR>
+AI-612: action text<SR>
+continuation line
+
+Case T3 (gts-cn5v AC-T3, act-retire): a bare 'AI:' token followed by soft-return continuation lines produces one row with the continuation included in action text; the bare token is assigned a number by the establishing sync.
+
+context<SR>
+AI: bare action<SR>
+continuation
+
+Case T4 (gts-cn5v AC-T4, act-retire): context intro before the token is excluded; all soft-return lines after the token through end of paragraph are included in action text.
+
+context intro<SR>
+AI-613: main action<SR>
+line 2<SR>
+line 3

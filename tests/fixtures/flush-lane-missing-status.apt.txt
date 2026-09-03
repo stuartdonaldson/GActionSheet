@@ -1,0 +1,9 @@
+<!-- kind: golden -->
+<!-- name: flush-lane-missing-status -->
+<!-- serves: gts-iz9i -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Case (gts-iz9i, entry point 4): missing-explicit-status materialization flush. An explicit token with no status token gets (Open) materialized on the establishing sync; the field line must survive that rewrite.
+
+AI-104: ep4 missing-status lane base<SR>
+Target: ep4 lane value

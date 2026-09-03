@@ -1,0 +1,12 @@
+{
+  "name": "status-token-parens",
+  "input": "status-token-parens",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "status-token-parens-expected",
+  "serves": [
+    "GTaskSheet-28q"
+  ],
+  "batch": "apt-lanes-format"
+}

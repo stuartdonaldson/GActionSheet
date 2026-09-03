@@ -1,0 +1,1205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Team Action Portal — NUUC Action Sheet</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  /* Visual idiom carried over verbatim from the human-reviewed slice,
+     GActionSheet's docs/team-portal-mockup.html (gts-79dw.4.7 gate,
+     2026-07-27) — approved as one working experience there; this page wires
+     the same layout to the real identity + backend chain instead of a
+     static fixture. See docs/verified-team-portal-plan.md §12 in the
+     GActionSheet repo for the frozen contract this implements. */
+  :root{
+    --bg:#f6f8fb; --panel:#ffffff; --line:#d9e1ec; --text:#1f2937; --muted:#6b7280;
+    --blue:#2563eb; --blue2:#dbeafe; --green:#059669; --green2:#d1fae5; --red:#dc2626;
+    --amber:#d97706; --amber2:#fef3c7; --slate2:#e5e7eb;
+    --shadow:0 8px 28px rgba(15,23,42,.08);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+       background:linear-gradient(180deg,#eef2ff,#f8fafc 180px);color:var(--text)}
+  .page{max-width:980px;margin:0 auto;padding:18px 16px 40px}
+
+  .top{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+       box-shadow:var(--shadow);padding:14px 16px}
+  .title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+  .title h1{font-size:19px;margin:0}
+  .sub{color:var(--muted);font-size:13px;margin-top:3px}
+  .who{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .tag{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
+       border:1px solid var(--line);background:#f9fafb;font-size:12px;color:var(--muted)}
+  .tag.edit{background:var(--green2);border-color:#a7f3d0;color:#065f46}
+  .tag.view{background:var(--slate2);border-color:#d1d5db}
+  .email{font-size:12.5px;color:var(--muted)}
+  .linkbtn{border:0;background:none;color:var(--blue);cursor:pointer;font:inherit;padding:0}
+
+  .filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:12px;
+           padding-top:12px;border-top:1px solid var(--line)}
+  .field{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+  select,input,button{font:inherit}
+  .sel{border:1px solid var(--line);background:#fff;border-radius:9px;padding:6px 8px;color:var(--text)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff}
+  .seg button{border:0;background:#fff;padding:6px 12px;cursor:pointer;color:var(--text)}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button[aria-pressed="true"]{background:var(--blue);color:#fff}
+  .seam{opacity:.5;cursor:not-allowed}
+
+  .list{margin-top:14px;display:flex;flex-direction:column;gap:14px}
+  .docgroup{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+            box-shadow:0 1px 0 rgba(0,0,0,.02);overflow:hidden}
+  .dochead{display:flex;justify-content:space-between;align-items:center;gap:10px;
+           padding:10px 14px;background:#fbfcfe;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .docname{font-weight:600;display:flex;align-items:center;gap:8px}
+  .docname a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--line)}
+  .docgroup.collapsed .docrows{display:none}
+  .row{display:flex;gap:12px;align-items:flex-start;padding:11px 14px;border-top:1px solid #eef1f6}
+  .row:first-of-type{border-top:0}
+
+  /* All-teams mode: a team-level grouping layer above .docgroup (gts-zeti) */
+  .teamgroup{display:flex;flex-direction:column;gap:10px}
+  .teamhead{display:flex;align-items:center;gap:10px;padding:2px 2px 0}
+  .teamname{font-weight:700;flex:1}
+  .teamdocs{display:flex;flex-direction:column;gap:10px}
+  .teamgroup.collapsed .teamdocs{display:none}
+  .collapsebtn{border:1px solid var(--line);background:#fff;border-radius:6px;width:22px;height:22px;
+               padding:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+               font-size:11px;line-height:1;color:var(--muted);flex:none;transition:transform .12s}
+  .collapsebtn[aria-expanded="false"]{transform:rotate(-90deg)}
+  .rowmain{flex:1;min-width:0}
+  .action{color:#111827}
+  .rowmeta{color:var(--muted);font-size:12px;margin-top:4px;display:flex;gap:10px;flex-wrap:wrap}
+  .aiN{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:1px}
+
+  .status{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;
+          border:1px solid var(--line);background:#f9fafb;white-space:nowrap;font-size:13px}
+  .status img{width:14px;height:14px;display:block}
+  .status.bucket-open{background:var(--blue2);border-color:#bfdbfe}
+  .status.bucket-inprogress{background:var(--amber2);border-color:#fde68a}
+  .status.bucket-waiting{background:var(--amber2);border-color:#fde68a}
+  .status.bucket-closed,.status.bucket-delegated{background:var(--green2);border-color:#a7f3d0}
+  .status.mine{cursor:pointer}
+  .bucketlabel{color:var(--muted);font-size:11px}
+
+  .controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .btn{border:1px solid var(--line);background:#fff;border-radius:9px;padding:5px 10px;cursor:pointer}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .btn.small{padding:4px 8px;font-size:12px;border-radius:8px}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+
+  .empty{padding:22px 14px;text-align:center;color:var(--muted)}
+  .banner{margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid #fecaca;
+          background:#fef2f2;color:#991b1b;display:none}
+  .banner code{background:#fff;border:1px solid #fecaca;border-radius:6px;padding:1px 5px}
+  .scanstatus{margin-left:10px;font-size:12px;color:var(--muted);white-space:nowrap}
+  .scanstatus .dot{display:inline-block;width:7px;height:7px;border-radius:50%;
+    margin-right:5px;vertical-align:middle;background:var(--muted)}
+  .scanstatus .dot.run{background:#2e7d32;animation:scanpulse 1.2s ease-in-out infinite}
+  .scanstatus .dot.wait{background:#ef6c00}
+  .scanstatus .dot.err{background:#c62828}
+  @keyframes scanpulse{0%,100%{opacity:1}50%{opacity:.25}}
+  .notice{margin-top:14px;padding:16px;border-radius:12px;border:1px solid var(--line);
+          background:#fff;color:var(--muted)}
+  .caveats{margin-top:20px;color:var(--muted);font-size:12.5px;line-height:1.6}
+  .caveats h2{font-size:13px;color:var(--text);margin:0 0 6px}
+  .caveats li{margin:3px 0}
+
+  .signin{display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center;
+           padding:60px 16px}
+  .signin h1{font-size:22px;margin:0}
+  .signin p{color:var(--muted);max-width:480px;margin:0}
+
+  .menu{position:absolute;z-index:50;background:#fff;border:1px solid var(--line);border-radius:12px;
+        box-shadow:var(--shadow);padding:8px;width:230px;display:none}
+  .menu h4{margin:0 0 6px;font-size:12px;color:var(--muted)}
+  .menu .opt{display:flex;align-items:center;gap:8px;width:100%;margin:4px 0;padding:6px 8px;
+             border:1px solid var(--line);background:#fff;border-radius:9px;text-align:left;cursor:pointer}
+  .menu .opt img{width:14px;height:14px}
+  .menu .custom{width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--line);border-radius:9px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;
+         padding:9px 13px;border-radius:999px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s}
+  .toast.show{opacity:1}
+  .hidden{display:none !important}
+  .spinner{display:inline-block;width:13px;height:13px;border:2px solid #d9e1ec;
+           border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  /* Version + SIT/PROD stamp (gts-79dw.4.25) — always visible regardless of
+     signin/launch/app view, so a screenshot or human glance can identify
+     which published copy they're looking at without checking the URL. */
+  .buildbadge{position:fixed;bottom:8px;right:10px;font-size:11px;color:var(--muted);
+              background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:8px;
+              padding:3px 9px;z-index:60;pointer-events:none}
+  .buildbadge.env-sit{color:#92400e;border-color:#fde68a;background:#fffbeb}
+  /* Mismatch state of the version footer, plus the update prompt it raises. GAS-Core
+     best-practices/gas-static-frontend "The static page interface contract" req 1-4. */
+  .buildbadge.stale{color:#991b1b;border-color:#fecaca;background:#fef2f2}
+  .updatebanner{position:fixed;top:0;left:0;right:0;z-index:70;display:none;
+                background:#fffbeb;border-bottom:1px solid #fde68a;color:#92400e;
+                padding:9px 14px;font-size:13px}
+  .updatebanner.show{display:block}
+  .updatebanner .inner{max-width:980px;margin:0 auto;display:flex;gap:10px;align-items:center;
+                       justify-content:center;flex-wrap:wrap}
+  .updatebanner button{border:1px solid #fde68a;background:#fff;color:#92400e;border-radius:8px;
+                       padding:4px 10px;font:inherit;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ Signed-out view ============ -->
+  <div id="signinView" class="top signin">
+    <h1>Team actions</h1>
+    <p>Sign in with the Google account your team lead added to a NUUC team folder.
+       Your identity is verified by NUUC-Dispatch; this page keeps you signed in for up to
+       45 days by saving that verified identity token in your browser's local storage.</p>
+    <div id="g_id_onload"
+         data-client_id="657771271619-8ebgf03k3rp872vlib3ibsktl9sk4ig1.apps.googleusercontent.com"
+         data-callback="onGoogleSignIn"
+         data-auto_select="false">
+    </div>
+    <div class="g_id_signin" data-type="standard" data-shape="pill"></div>
+    <div id="signinError" class="banner" style="max-width:480px"></div>
+  </div>
+
+  <!-- ============ Transitional view: credential accepted / cached session
+       found, identity exchange still in flight (gts-79dw.4.20). Distinct
+       from both the sign-in prompt and the app shell so the click/resume
+       is visibly registered before any network call resolves. ============ -->
+  <div id="launchView" class="top signin hidden">
+    <span class="spinner" style="width:22px;height:22px;border-width:3px"></span>
+    <h1 id="launchMsg">Signing you in…</h1>
+  </div>
+
+  <!-- ============ Signed-in view ============ -->
+  <div id="appView" class="hidden">
+    <div class="top">
+      <div class="title">
+        <div>
+          <h1>Team actions <span id="titleSpinner" class="spinner hidden" style="margin-left:8px;vertical-align:middle"></span></h1>
+          <div class="sub" id="sub">—</div>
+        </div>
+        <div class="who">
+          <label class="field hidden" id="teamField">Team
+            <select class="sel" id="teamSel"></select>
+          </label>
+          <span class="email" id="whoEmail"></span>
+          <span class="tag" id="tierTag">—</span>
+          <button class="linkbtn" id="signOutBtn">Sign out</button>
+        </div>
+      </div>
+
+      <div class="filters" id="filtersRow">
+        <div class="field">Status
+          <div class="seg" id="statusSeg">
+            <button data-status="open" aria-pressed="true">Open</button>
+            <button data-status="closed" aria-pressed="false">Closed</button>
+            <button data-status="all" aria-pressed="false">All</button>
+          </div>
+        </div>
+        <div class="field">Show
+          <div class="seg" id="scopeSeg">
+            <button data-scope="all" aria-pressed="true">Everyone</button>
+            <button data-scope="mine" aria-pressed="false">Mine</button>
+            <button class="seam" disabled title="Open seam R13a — filter by a named person; not in this slice">Person…</button>
+          </div>
+        </div>
+        <!-- Names what the server actually does: the window ages out resolved
+             rows only. An open action is never hidden by it, however stale
+             (plan §12.1 invariant 1 — decided at the 2026-07-27 review gate). -->
+        <div class="field" id="windowField">Include resolved from
+          <select class="sel" id="windowSel">
+            <option value="7">the last 7 days</option>
+            <option value="30">the last 30 days</option>
+            <option value="60" selected>the last 60 days (default)</option>
+            <option value="180">the last 180 days</option>
+            <option value="36500">forever</option>
+          </select>
+        </div>
+        <div class="field hidden" id="collapseAllField" style="margin-left:auto">
+          <button class="btn small" id="expandAllBtn">Expand all</button>
+          <button class="btn small" id="collapseAllBtn">Collapse all</button>
+        </div>
+        <!-- gts-gwyg/gts-lgpx: admin-only, per-team. Never shown in All-teams
+             mode (the scan routes authorize against ONE real teamId, same
+             constraint as the write routes above) or to a non-admin caller
+             (state.isAdmin comes from list_team_actions's server-verified
+             isAdmin field — this toggle is UX only, real authorization is
+             re-checked server-side on every scan call itself).
+             The button's label and enabled-ness track the persisted scan
+             state (Start / Resume / running), so the operator can always
+             tell whether a scan is moving without reading the log. -->
+        <div class="field hidden" id="adminScanField">
+          <button class="btn small" id="adminScanBtn">Scan for untracked docs</button>
+          <span id="adminScanStatus" class="scanstatus"></span>
+        </div>
+        <div class="field" id="countLabel"></div>
+      </div>
+    </div>
+
+    <div class="banner" id="loadError"></div>
+    <div class="notice hidden" id="adminScanResults"></div>
+    <div class="notice hidden" id="noTeamsNotice">
+      You don't currently have access to any team's actions. If you believe this is wrong,
+      contact your team lead — they add members to the team's shared Drive folder.
+    </div>
+    <div id="listWrap">
+      <div class="list" id="list"></div>
+    </div>
+
+    <div class="caveats">
+      <h2>About this page</h2>
+      <ul>
+        <li>Sign-in is a real Google identity, verified server-side by NUUC-Dispatch and
+          exchanged for a signed identity assertion scoped to this portal — this page never
+          sees or stores your raw Google credential beyond the sign-in moment. The assertion
+          itself is saved in your browser's local storage for up to 45 days so you aren't
+          re-prompted on every visit; <strong>Sign out</strong> deletes it immediately.</li>
+        <li>Each row arrives already carrying the server's own status display answer
+          (bucket, resolved, icon) — this page re-derives nothing, so it cannot disagree
+          with the sheet or the add-on sidebar about what a status means.</li>
+        <li><strong>Read and write paths are wired.</strong> The <strong>sync</strong>
+          control, per-row <strong>Edit</strong>, and the assignee <strong>status-change</strong>
+          control all call the live backend and refresh the list in place — no page reload.</li>
+        <li>The window ages out <strong>resolved rows only</strong> — an open action is
+          never hidden by it, however long since it was touched, at any window setting.</li>
+        <li>If you belong to more than one team, a <strong>Team</strong> switcher appears
+          above; if you belong to exactly one, no switcher is shown.</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<div class="menu" id="statusMenu"><h4>Set status</h4></div>
+<div class="toast" id="toast"></div>
+<!-- Raised only when this published page's build differs from the version the WebApp
+     reports on a response the page already makes (interface contract req 3). -->
+<div class="updatebanner" id="updateBanner">
+  <div class="inner">
+    <span id="updateBannerMsg"></span>
+    <button type="button" id="updateReloadBtn">Reload</button>
+    <button type="button" id="updateDismissBtn">Not now</button>
+  </div>
+</div>
+<div class="buildbadge" id="buildBadge"></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Build-time stamps (gts-79dw.4.25) — stamped by scripts/build-static-portal.js
+// from src/Version.js's BUILD_INFO immediately before publish. Left null here
+// in the unbuilt source; a raw `static-portal/src/index.html` (opened
+// directly, not via dist/) has no backend to call and no version to show.
+var STATIC_BUILD_VERSION_ = null;
+var STATIC_WEBAPP_URL_ = null;
+var STATIC_ENV_LABEL_ = null;
+
+// Backend targets. NUUC_DISPATCH_URL is a separate project (NUUC-Dispatch)
+// and not part of this repo's deploy/stamp pipeline — confirm its current
+// URL directly against that project if it ever moves. GACTIONSHEET_URL is
+// this repo's own WebApp: baked at build time from STATIC_WEBAPP_URL_ (the
+// same URL manage-deployments.js's stampVersionInfo just wrote into
+// src/Version.js for this deploy target), so SIT always calls TEST-WEB-APP
+// and PROD always calls PROD-WEB-APP — no manual URL-swap step.
+const NUUC_DISPATCH_URL = 'https://script.google.com/macros/s/AKfycbwmoOPRDThQWDzMPU5H-6aVzvnprYbIL8yjbhLX3wBbi89ZY7cRLc2_yoYUK1H8LcX3/exec';
+const GACTIONSHEET_URL  = STATIC_WEBAPP_URL_;
+const ASSERTION_AUD = 'gactionsheet';
+
+// ---- version footer + stale-client prompt -------------------------------
+// GAS-Core best-practices/gas-static-frontend, "The static page interface contract"
+// (requirements 1-6); F3Go30's static-pages/src/index.html is the reference
+// implementation. This published page and the WebApp it calls deploy together --
+// gas-static's assertPublishedBuild closes the publish window -- but they can still
+// diverge afterwards: a CDN edge serving the previous page, a visitor holding a cached
+// document, a backend later rolled back. These requirements close the RUNTIME window by
+// making the page itself say which halves are actually running.
+const UPDATE_DISMISS_KEY_ = 'nuucAsUpdateDismissed';
+const $buildBadge_ = document.getElementById('buildBadge');
+const $updateBanner_ = document.getElementById('updateBanner');
+let serverVersion_ = null;
+
+// req 5: a null client build is unbuilt src/ served directly (local dev, Playwright).
+// It has no build to be behind, so that is never staleness.
+function isUpdateAvailable_(clientBuild, serverVersion){
+  return !!(clientBuild && serverVersion && clientBuild !== serverVersion);
+}
+
+// req 3: the CLIENT build is always shown first, because the version someone reads back
+// off this footer during support has to be the one their document is actually running.
+// The server's version is named alongside it only when the two differ -- never instead.
+function formatVersionFooter_(clientBuild, serverVersion){
+  const env = STATIC_ENV_LABEL_ ? STATIC_ENV_LABEL_ + ' \u00b7 ' : '';
+  if (isUpdateAvailable_(clientBuild, serverVersion)) {
+    return env + 'v' + clientBuild + ' (build) \u00b7 server v' + serverVersion;
+  }
+  if (clientBuild) return env + 'v' + clientBuild + ' (build)';
+  if (serverVersion) return env + 'v' + serverVersion + ' (server)';
+  return env + 'unbuilt source';
+}
+
+function dismissedUpdate_(){
+  try { return localStorage.getItem(UPDATE_DISMISS_KEY_); } catch (e) { return null; }
+}
+
+// Repaints the footer and raises/clears the update prompt. Called once at load with no
+// server version yet -- req 1: the footer is populated BEFORE any network call, so a page
+// that cannot reach its backend still shows what it is -- then again from postJson on
+// every backend response that carries one.
+function applyVersionState_(clientBuild, serverVersion){
+  const stale = isUpdateAvailable_(clientBuild, serverVersion);
+  $buildBadge_.textContent = formatVersionFooter_(clientBuild, serverVersion);
+  $buildBadge_.classList.toggle('env-sit', STATIC_ENV_LABEL_ === 'SIT' && !stale);
+  $buildBadge_.classList.toggle('stale', stale);
+  // req 4: dismissal is keyed to the version dismissed, not a boolean. A boolean would
+  // silence every future mismatch; a version key means the next one prompts again.
+  const show = stale && dismissedUpdate_() !== String(serverVersion);
+  if (show) {
+    document.getElementById('updateBannerMsg').textContent =
+      'This page is running v' + clientBuild + ' but the server is on v' + serverVersion +
+      '. Reload to pick up the current version.';
+  }
+  $updateBanner_.classList.toggle('show', show);
+}
+
+document.getElementById('updateReloadBtn').addEventListener('click', () => location.reload());
+document.getElementById('updateDismissBtn').addEventListener('click', () => {
+  try { localStorage.setItem(UPDATE_DISMISS_KEY_, String(serverVersion_)); }
+  catch (e) { /* not fatal -- worst case the prompt returns on the next response */ }
+  $updateBanner_.classList.remove('show');
+});
+
+// req 2: the server's version rides a response the page already makes, never a dedicated
+// call -- src/WebApp.js's _jsonResponse stamps `serverVersion` on EVERY JSON response, so
+// hooking postJson covers every route this page will ever call.
+function noteServerVersion_(res){
+  if (res && res.serverVersion && res.serverVersion !== serverVersion_) {
+    serverVersion_ = res.serverVersion;
+    applyVersionState_(STATIC_BUILD_VERSION_, serverVersion_);
+  }
+  return res;
+}
+
+applyVersionState_(STATIC_BUILD_VERSION_, null);
+
+// gts-zm8w: sentinel teamId value for the 'All teams' aggregate view —
+// mirrors TEAM_LISTING_ALL_TEAMS_ID (src/TeamListing.js). Never a real
+// TeamData teamId.
+const ALL_TEAMS_ID = 'ALL';
+
+const state = {
+  idToken: null, assertion: null, sub: '', email: '',
+  teams: [],           // [{teamId, teamName, tier}] from list_my_teams
+  teamId: null,
+  tier: 'NONE',
+  isAdmin: false,      // gts-gwyg: server-verified (list_team_actions'
+                       // isAdmin field) — gates the "Scan for untracked
+                       // docs" button; never trusted for the scan call
+                       // itself, which re-checks Config!AdminUsers server-side.
+  scanBusy: false,
+  scan: null,          // gts-lgpx: last admin_scan_status payload
+                       // {phase,status,scanned,total,queued,matched,candidates,...}
+  scanPollTimer: null,
+  scanTeamShown: null,   // teamId whose scan status is currently displayed
+  teamTiers: {},       // {teamId: tier} — populated in ALL-teams mode from res.teams,
+                        // used to gate each row/doc-group's Sync/Edit controls per its
+                        // OWN team rather than one blended state.tier (gts-zm8w)
+  status: 'open', scope: 'all', windowDays: 60,
+  rows: [], statusOptions: [],
+  busy: false,
+  editingId: null,     // global_id of the row currently showing the edit form, or null
+  // gts-zeti: collapse state for All-teams grouping, keyed 'team:<teamId>' /
+  // 'doc:<docId>'. Absent = expanded (default). Kept across render()/
+  // refreshActions() calls within a session so a filter change or poll
+  // doesn't silently re-expand a group the user collapsed.
+  collapsed: {}
+};
+
+const $ = (id) => document.getElementById(id);
+const listEl = $('list'), toastEl = $('toast'), menuEl = $('statusMenu');
+
+// ---- query-string routing (gts-79dw.4.24, extended by gts-79dw.4.23/Unit D) --
+// Two shapes already exist server-side: ?doc=<docId>&team=<teamId> (chip-link
+// CTA, src/WebApp.js's _handlePreviewNotice) and ?team=<teamId> (this page's
+// own teamPortalUrl, src/DocView.js, preselects the team on load). Read once
+// at load; routing is UX only — the server re-resolves tier itself on every
+// call regardless of these params.
+//
+// ?doc= now routes straight to View B (doc.html, gts-79dw.4.23) instead of
+// the interim docViewNotice placeholder Unit C shipped (View B didn't exist
+// yet at that point) — location.replace (not .href) so the redirect doesn't
+// leave this dead-end page in browser history. The rest of this page's init
+// (auth resume, team loading) is skipped in that case; doc.html re-derives
+// everything it needs itself.
+const QUERY_PARAMS = new URLSearchParams(location.search);
+const QUERY_TEAM = QUERY_PARAMS.get('team') || null;
+const QUERY_DOC = QUERY_PARAMS.get('doc') || null;
+if (QUERY_DOC) {
+  location.replace('doc.html' + location.search);
+}
+
+// ---- auth caching (ADR-0003, NUUC-Dispatch: 45-day assertion TTL) -----
+// The assertion is the only session artifact (no refresh token) — cache it
+// client-side and reuse it directly until it's within RENEW_SKEW_SECONDS of
+// its own exp, at which point a normal sign-in mints a fresh 45-day one.
+const AUTH_STORAGE_KEY = 'nuucAsAuth.v1';
+const AUTH_RENEW_SKEW_SECONDS = 300; // treat as expired 5min early to avoid edge-of-expiry races
+
+function _decodeJwtPayload(jwt){
+  try { return JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); }
+  catch (e) { return null; }
+}
+
+function saveCachedAuth(){
+  const payload = _decodeJwtPayload(state.assertion);
+  if (!payload || typeof payload.exp !== 'number') return;
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
+    assertion: state.assertion, exp: payload.exp, sub: state.sub, email: state.email
+  }));
+}
+
+function clearCachedAuth(){
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+}
+
+function loadCachedAuth(){
+  let cached;
+  try { cached = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || 'null'); }
+  catch (e) { return null; }
+  if (!cached || typeof cached.exp !== 'number') return null;
+  if (Math.floor(Date.now() / 1000) >= cached.exp - AUTH_RENEW_SKEW_SECONDS) return null;
+  return cached;
+}
+
+function toast(msg){ toastEl.textContent = msg; toastEl.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(()=>toastEl.classList.remove('show'), 2200); }
+
+const escape = (s) => String(s==null?'':s).replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const shortDate = (iso) => iso ? new Date(iso).toLocaleDateString([], {month:'short', day:'numeric'}) : '';
+
+// ---- transport --------------------------------------------------------
+// text/plain keeps this a CORS-simple request (no preflight OPTIONS, which
+// these GAS WebApps do not implement) — same convention as the retired spike
+// harness this page replaces. GAS's doPost/doGet parse the body as JSON
+// regardless of the declared content type.
+function postJson(url, payload){
+  // req 6: every request to OUR backend carries the client build, so a stale client
+  // surfaces in the WebApp's logs (webapp.version.mismatch) instead of only in a support
+  // call. NUUC_DISPATCH_URL is a different project's backend and is not stamped.
+  const body = (url === GACTIONSHEET_URL)
+    ? Object.assign({ clientVersion: STATIC_BUILD_VERSION_ }, payload)
+    : payload;
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(body)
+  }).then(r => r.text()).then(text => {
+    try { return noteServerVersion_(JSON.parse(text)); }
+    catch (e) {
+      throw new Error('Non-JSON response from ' + url + ' — the deployment may be mid-propagation: ' +
+        text.slice(0, 200));
+    }
+  });
+}
+
+// ---- transitional / progressive-render helpers (gts-79dw.4.20) --------
+// showLaunch: the instant-feedback state for the gap between "visitor did
+// something" (clicked the Google button / page loaded with a cached
+// session) and "we know who they are" — no identity to show yet, so it's
+// just a distinct not-the-sign-in-prompt state.
+function showLaunch(msg){
+  $('signinView').classList.add('hidden');
+  $('appView').classList.add('hidden');
+  $('launchMsg').textContent = msg;
+  $('launchView').classList.remove('hidden');
+}
+// showAppShell: identity is known (sub/email) but team/action data may
+// still be in flight — reveal the app shell immediately so the visitor
+// sees "Signed in as X" rather than waiting on list_my_teams/
+// list_team_actions to also finish. loadTeams()/refreshActions() fill in
+// the rest progressively via setBusy()'s title-line spinner.
+function showAppShell(subMsg){
+  $('launchView').classList.add('hidden');
+  $('signinView').classList.add('hidden');
+  $('appView').classList.remove('hidden');
+  $('whoEmail').textContent = state.email;
+  $('sub').textContent = subMsg || ('Signed in as ' + state.email + ' — loading your teams…');
+}
+
+// ---- sign-in -----------------------------------------------------------
+function onGoogleSignIn(credentialResponse){
+  state.idToken = credentialResponse.credential;
+  $('signinError').style.display = 'none';
+  // Problem 1: show a distinct in-progress state the instant the credential
+  // callback fires, before verify_identity/list_my_teams resolve.
+  showLaunch('Signing you in…');
+
+  postJson(NUUC_DISPATCH_URL, { action: 'verify_identity', idToken: state.idToken, aud: ASSERTION_AUD })
+    .then(res => {
+      if (!res.verified || !res.assertion) {
+        throw new Error('Google verified your sign-in, but NUUC-Dispatch could not issue an ' +
+          'identity assertion for this portal (' + (res.error || 'not verified') + ').');
+      }
+      state.assertion = res.assertion;
+      state.sub = res.sub; state.email = res.email;
+      saveCachedAuth();
+      // Problem 2: identity is known now, before list_my_teams/
+      // list_team_actions return — render it immediately.
+      showAppShell();
+      return loadTeams();
+    })
+    .catch(err => {
+      $('launchView').classList.add('hidden');
+      $('signinView').classList.remove('hidden');
+      $('signinError').style.display = 'block';
+      $('signinError').textContent = err.message || String(err);
+    });
+}
+
+function signOut(){
+  state.idToken = null; state.assertion = null; state.sub = ''; state.email = '';
+  state.teams = []; state.teamId = null; state.tier = 'NONE'; state.rows = [];
+  state.collapsed = {};
+  clearCachedAuth();
+  $('appView').classList.add('hidden');
+  $('launchView').classList.add('hidden');
+  $('signinView').classList.remove('hidden');
+  if (window.google && google.accounts && google.accounts.id) {
+    google.accounts.id.disableAutoSelect();
+  }
+}
+$('signOutBtn').addEventListener('click', signOut);
+
+// ---- resume a cached session (skip Google + verify_identity entirely) --
+// loadTeams() never rejects (transport errors are caught internally and
+// surface as a banner) — a cached assertion the server no longer accepts
+// resolves as an empty team list (R6 fail-closed), same as any other
+// teamless visitor. Nothing to distinguish here; sign-in view stays
+// available underneath if the visitor needs to re-auth.
+//
+// No Google prompt happens on this path at all, so from first paint this
+// must show something other than the raw sign-in view or a blank page
+// (gts-79dw.4.20 problem 1). Unlike onGoogleSignIn, identity (sub/email)
+// is already known synchronously from the cached record, so go straight to
+// the app shell with a "resuming" message rather than the generic
+// identity-less showLaunch() state — that's strictly more informative and
+// still satisfies "distinct state from first paint".
+(function initAuth(){
+  if (QUERY_DOC) return; // redirecting to doc.html — see QUERY_DOC handling above
+  const cached = loadCachedAuth();
+  if (!cached) return;
+  state.assertion = cached.assertion; state.sub = cached.sub; state.email = cached.email;
+  showAppShell('Resuming your session — signed in as ' + cached.email + '…');
+  loadTeams();
+})();
+
+// ---- team discovery (R21, §12.3) ---------------------------------------
+function loadTeams(){
+  // showAppShell() already ran (caller's job) so identity is visible;
+  // this call's own latency is now covered by the title-line spinner
+  // rather than a withheld view.
+  setBusy(true);
+  return postJson(GACTIONSHEET_URL, { action: 'list_my_teams', assertion: state.assertion })
+    .then(res => {
+      state.teams = res.teams || [];
+      $('launchView').classList.add('hidden');
+      $('signinView').classList.add('hidden');
+      $('appView').classList.remove('hidden');
+      $('whoEmail').textContent = state.email;
+
+      if (state.teams.length === 0) {
+        $('noTeamsNotice').classList.remove('hidden');
+        $('listWrap').classList.add('hidden');
+        $('filtersRow').classList.add('hidden');
+        $('countLabel').textContent = '';
+        setBusy(false);
+        return;
+      }
+      $('noTeamsNotice').classList.add('hidden');
+      $('listWrap').classList.remove('hidden');
+      $('filtersRow').classList.remove('hidden');
+
+      $('teamField').classList.toggle('hidden', state.teams.length <= 1);
+      // gts-zm8w: 'All teams' aggregate option, only meaningful with 2+ teams
+      // to choose among (with exactly one team it would just duplicate that
+      // team's own listing).
+      const allTeamsOption = state.teams.length > 1
+        ? `<option value="${ALL_TEAMS_ID}">All teams</option>` : '';
+      $('teamSel').innerHTML = allTeamsOption + state.teams.map(t =>
+        `<option value="${escape(t.teamId)}">${escape(t.teamName)} (${t.tier})</option>`).join('');
+      // ?team= preselects only if the caller actually has access to that
+      // team (list_my_teams already scoped this to the caller — a ?team=
+      // for a team they can't see must not be trusted client-side); falls
+      // back to the existing default otherwise (regression guard, AC3).
+      state.teamId = (QUERY_TEAM && state.teams.some(t => t.teamId === QUERY_TEAM))
+        ? QUERY_TEAM
+        : state.teams[0].teamId;
+      $('teamSel').value = state.teamId;
+
+      return refreshActions();
+    })
+    .catch(err => {
+      $('loadError').style.display = 'block';
+      $('loadError').textContent = 'Could not load your teams: ' + (err.message || err);
+      setBusy(false);
+    });
+}
+
+$('teamSel').addEventListener('change', e => {
+  state.teamId = e.target.value;
+  $('adminScanResults').classList.add('hidden');
+  refreshActions();
+});
+
+// gts-zeti: Expand/Collapse-all set every currently-known team/doc group's
+// collapse state, keyed the same way render() reads it, then re-render.
+function setAllGroupsCollapsed(collapsed){
+  state.rows.forEach(r => {
+    state.collapsed['team:' + r.team_id] = collapsed;
+    state.collapsed['doc:' + r.doc_id]   = collapsed;
+  });
+  render();
+}
+$('expandAllBtn').addEventListener('click', () => setAllGroupsCollapsed(false));
+$('collapseAllBtn').addEventListener('click', () => setAllGroupsCollapsed(true));
+
+// ---- action listing (§12.1) --------------------------------------------
+function refreshActions(){
+  if (!state.teamId) return Promise.resolve();
+  setBusy(true);
+  $('loadError').style.display = 'none';
+
+  const payload = {
+    assertion: state.assertion,
+    teamId: state.teamId,
+    statusFilter: state.status,
+    scope: state.scope
+  };
+  // The resolved-age control is hidden (and therefore meaningless) once
+  // statusFilter=open — windowDays never affects unresolved rows anyway
+  // (plan §12.1 invariant 1), but omit it in that state for clarity.
+  if (state.status !== 'open') payload.windowDays = state.windowDays;
+
+  return postJson(GACTIONSHEET_URL, { action: 'list_team_actions', ...payload })
+    .then(res => {
+      state.rows = res.actions || [];
+      state.statusOptions = res.statusOptions || [];
+      state.tier = res.tier || 'NONE';
+      state.isAdmin = !!res.isAdmin;
+      // gts-zm8w: only the ALL-teams response carries `teams` — a per-team
+      // tier map so each doc group can gate Sync/Edit by ITS OWN team's
+      // tier rather than the single blended state.tier above.
+      state.teamTiers = {};
+      (res.teams || []).forEach(t => { state.teamTiers[t.teamId] = t.tier; });
+      render();
+    })
+    .catch(err => {
+      $('loadError').style.display = 'block';
+      $('loadError').textContent = 'Could not load actions: ' + (err.message || err);
+    })
+    .finally(() => setBusy(false));
+}
+
+// ---- admin: scan for untracked docs (gts-gwyg, resumable per gts-lgpx) ---
+// The scan no longer runs inside this request. Clicking enqueues it
+// (admin_scan_start) and returns immediately; a self-rescheduling one-shot
+// trigger advances it server-side across as many executions as it needs.
+// This client just polls admin_scan_status and renders progress, so a scan
+// that outlives the browser tab keeps going and is still there on return.
+//
+// Client-side isAdmin only gates whether these controls are shown; the real
+// admin check (Config!AdminUsers) runs server-side on every call below,
+// including the read-only status poll.
+
+const SCAN_POLL_MS = 5000;
+
+function scanCall(action){
+  return postJson(GACTIONSHEET_URL, { action, assertion: state.assertion, teamId: state.teamId });
+}
+
+// Poll only while the scan is actually advancing. A done/idle/error scan
+// stops the timer so an idle tab isn't calling the backend forever.
+function scheduleScanPoll(){
+  clearTimeout(state.scanPollTimer);
+  const st = state.scan && state.scan.status;
+  if (st !== 'running' && st !== 'waiting') return;
+  state.scanPollTimer = setTimeout(refreshScanStatus, SCAN_POLL_MS);
+}
+
+function refreshScanStatus(){
+  if (!state.isAdmin || !state.teamId || state.teamId === ALL_TEAMS_ID) return Promise.resolve();
+  return scanCall('admin_scan_status')
+    .then(res => {
+      if (!res.ok) return;               // forbidden — leave the panel blank
+      state.scan = res;
+      renderScanPanel();
+      scheduleScanPoll();
+    })
+    .catch(() => { /* a dropped poll is not worth a toast; the next one retries */ });
+}
+
+// Start a fresh scan, or resume the one already persisted. The button label
+// (renderScanPanel) tells the operator which of the two the click will do.
+function runAdminScan(){
+  if (state.scanBusy || !state.teamId || state.teamId === ALL_TEAMS_ID) return;
+  const resumable = state.scan && (state.scan.status === 'waiting'
+    || state.scan.status === 'stale' || state.scan.status === 'error');
+  const action = resumable ? 'admin_scan_resume' : 'admin_scan_start';
+
+  state.scanBusy = true;
+  renderScanPanel();
+  scanCall(action)
+    .then(res => {
+      if (!res.ok) { toast('Scan denied: ' + (res.reason || 'unknown error')); return; }
+      state.scan = res;
+    })
+    .catch(err => toast('Scan failed: ' + (err.message || err)))
+    .finally(() => {
+      state.scanBusy = false;
+      renderScanPanel();
+      scheduleScanPoll();
+    });
+}
+$('adminScanBtn').addEventListener('click', runAdminScan);
+
+// One line answering all three of the operator's questions at once: what is
+// it doing, how far along, and is it moving right now or waiting on its
+// trigger. `waiting` is deliberately worded as queued-not-stalled — the
+// one-shot fires about a minute out, and without saying so the pause reads
+// as a hang (which is exactly how the old blocking scan failed).
+function scanStatusLine(sc){
+  if (!sc || sc.status === 'idle') return '';
+  const n = sc.scanned || 0;
+  if (sc.status === 'error') return `<span class="dot err"></span>Scan failed${sc.error ? ' (' + escape(sc.error) + ')' : ''} — Resume to retry`;
+  if (sc.phase === 'enumerate') {
+    const found = sc.queued || 0;
+    const where = sc.status === 'running' ? 'Finding docs' : 'Finding docs (queued)';
+    return `<span class="dot ${sc.status === 'running' ? 'run' : 'wait'}"></span>${where} — ${found} found so far`;
+  }
+  if (sc.complete) return `<span class="dot"></span>Done — scanned ${n} of ${sc.total}, ${sc.matched || 0} match(es)`;
+  const total = (typeof sc.total === 'number') ? sc.total : '?';
+  if (sc.status === 'stale') return `<span class="dot err"></span>Stalled at ${n} of ${total} — Resume to continue`;
+  const verb = sc.status === 'running' ? 'Scanning' : 'Queued — next pass within a minute;';
+  return `<span class="dot ${sc.status === 'running' ? 'run' : 'wait'}"></span>${verb} ${n} of ${total}`;
+}
+
+function renderScanPanel(){
+  const sc = state.scan;
+  const btn = $('adminScanBtn');
+  const running = !!sc && sc.status === 'running';
+  const resumable = !!sc && (sc.status === 'waiting' || sc.status === 'stale' || sc.status === 'error');
+
+  btn.textContent = running ? 'Scanning…'
+    : resumable ? 'Resume scan'
+    : 'Scan for untracked docs';
+  // Only a genuinely in-flight pass disables the button — a waiting scan
+  // stays clickable so the operator can pull the next pass forward instead
+  // of waiting out the trigger delay.
+  btn.disabled = state.scanBusy || running;
+
+  $('adminScanStatus').innerHTML = scanStatusLine(sc);
+  renderAdminScanResults(sc);
+}
+
+// Selection only makes sense once the candidate set is final (sc.complete) —
+// the panel re-renders every SCAN_POLL_MS while a scan is still running, which
+// would otherwise wipe checkbox state out from under the operator mid-click.
+function renderAdminScanResults(sc){
+  const box = $('adminScanResults');
+  const candidates = (sc && sc.candidates) || [];
+  if (!sc || sc.status === 'idle' || (!candidates.length && !sc.complete)) {
+    box.classList.add('hidden');
+    return;
+  }
+  if (!candidates.length) {
+    box.innerHTML = `<p>Scanned ${sc.scanned} doc(s) under this team's folder(s) — no untracked action-looking docs found.</p>`;
+  } else if (!sc.complete) {
+    box.innerHTML = `<p>${candidates.length} found so far (${sc.scanned} of ${sc.total} scanned) — still running:</p>` +
+      '<ul>' + candidates.map(c =>
+        `<li><a href="${escape(c.url)}" target="_blank" rel="noopener">${escape(c.docName)}</a></li>`
+      ).join('') + '</ul>';
+  } else {
+    box.innerHTML =
+      `<p>${candidates.length} untracked doc(s) look action-bearing (of ${sc.scanned} scanned):</p>` +
+      `<p><label><input type="checkbox" id="trackSelectAll" /> Select all</label></p>` +
+      '<ul class="trackable">' + candidates.map(c =>
+        `<li><label><input type="checkbox" class="trackCandidate" data-doc-id="${escape(c.docId)}" data-doc-name="${escape(c.docName)}" /> ` +
+        `<a href="${escape(c.url)}" target="_blank" rel="noopener">${escape(c.docName)}</a></label></li>`
+      ).join('') + '</ul>' +
+      `<button class="btn small" id="trackSelectedBtn">Track selected</button>`;
+    $('trackSelectAll').addEventListener('change', (e) => {
+      box.querySelectorAll('.trackCandidate').forEach(cb => { cb.checked = e.target.checked; });
+    });
+    $('trackSelectedBtn').addEventListener('click', trackSelectedDocs);
+  }
+  box.classList.remove('hidden');
+}
+
+// Track = cheap DocData registration only (admin_scan_track), not a full
+// doc sync — the next syncAll sweep (gts-qkev, DocData-walk) discovers and
+// syncs each tracked doc's Actions on its own. Per human direction
+// 2026-09-01: the list simply goes away on success; the operator re-scans
+// later if/when they want to see what remains.
+function trackSelectedDocs(){
+  const box = $('adminScanResults');
+  const checked = Array.from(box.querySelectorAll('.trackCandidate:checked'));
+  if (!checked.length) { toast('Select at least one document to track.'); return; }
+  const docs = checked.map(cb => ({ docId: cb.dataset.docId, docName: cb.dataset.docName }));
+
+  const btn = $('trackSelectedBtn');
+  btn.disabled = true;
+  btn.textContent = 'Tracking…';
+  postJson(GACTIONSHEET_URL, { action: 'admin_scan_track', assertion: state.assertion, teamId: state.teamId, docs })
+    .then(res => {
+      if (!res.ok) { toast('Track failed: ' + (res.reason || 'unknown error')); return; }
+      toast(`Tracking ${res.tracked.length} document(s) — they'll pick up actions on the next background sync.`);
+      state.scan = null;
+      renderScanPanel();
+    })
+    .catch(err => toast('Track failed: ' + (err.message || err)))
+    .finally(() => {
+      btn.disabled = false;
+      btn.textContent = 'Track selected';
+    });
+}
+
+function setBusy(b){
+  // Problem 3: the in-flight indicator lives on the title line, right of
+  // "Team actions", not centered/blocking over the filters/count row.
+  state.busy = b;
+  $('titleSpinner').classList.toggle('hidden', !b);
+}
+
+// ---- status display ------------------------------------------------------
+// Every row arrives carrying the server's own getStatusDisplay() answer —
+// status_bucket, status_resolved, status_icon. Nothing here re-derives it.
+const isCanonical = (status) => state.statusOptions.some(o => o.status === status);
+
+function statusChip(row, editable){
+  const cls = 'status bucket-' + row.status_bucket.toLowerCase() +
+              (row.status_resolved ? ' bucket-closed' : '') + (editable ? ' mine' : '');
+  const note = isCanonical(row.status) ? ''
+    : ` <span class="bucketlabel">(counts as ${row.status_resolved ? 'closed' : 'open'})</span>`;
+  return `<span class="${cls}" data-status-for="${row.global_id}"
+            title="${editable ? 'Click to change status' : 'Only the assignee can change this'}"
+          ><img src="${row.status_icon}" alt="" />${escape(row.status)}${note}${editable ? ' ▾' : ''}</span>`;
+}
+
+function isMine(row){ return state.email && row.assignee_email &&
+  row.assignee_email.toLowerCase() === state.email.toLowerCase(); }
+
+// gts-zm8w: every write route (team_edit_action/team_patch_status/
+// team_sync_document) authorizes against ONE real teamId
+// (_resolveIdentityAndAccessTier -> _authorizeDocWrite) — the ALL_TEAMS_ID
+// sentinel matches no TeamData row server-side and would make every write
+// fail closed. In ALL-teams mode, look up the row/doc's OWN team_id (carried
+// on every row of the aggregate response) instead of sending state.teamId
+// verbatim.
+function teamIdForWrite(row){
+  return state.teamId === ALL_TEAMS_ID ? (row && row.team_id) || '' : state.teamId;
+}
+function rowByGlobalId(globalId){ return state.rows.find(r => r.global_id === globalId); }
+function rowByDocId(docId){ return state.rows.find(r => r.doc_id === docId); }
+
+// ---- render ---------------------------------------------------------------
+function render(){
+  const isAllTeams = state.teamId === ALL_TEAMS_ID;
+  $('sub').textContent = (isAllTeams ? 'All teams' : state.teamId) + ' • signed in';
+  const showScan = !isAllTeams && state.isAdmin;
+  $('adminScanField').classList.toggle('hidden', !showScan);
+  // gts-lgpx: the scan lives server-side in a Script Property, so on load (and
+  // on every team switch) ask what it is doing rather than assuming idle — a
+  // scan started in a previous session may still be running right now.
+  if (showScan) {
+    if (state.scanTeamShown !== state.teamId) {
+      state.scanTeamShown = state.teamId;
+      state.scan = null;
+      $('adminScanStatus').innerHTML = '';
+      $('adminScanResults').classList.add('hidden');
+      refreshScanStatus();
+    }
+  } else {
+    state.scanTeamShown = null;
+    clearTimeout(state.scanPollTimer);
+  }
+  // gts-zm8w: ALL-teams tier varies per document (state.teamTiers), so the
+  // single title-line tag can't say EDIT/VIEW for the whole page — each doc
+  // group's own controls are gated individually below instead.
+  if (isAllTeams) {
+    $('tierTag').textContent = 'MULTIPLE — permissions vary by team';
+    $('tierTag').className = 'tag view';
+  } else {
+    $('tierTag').textContent = state.tier === 'EDIT' ? 'EDIT — can sync and edit'
+                              : state.tier === 'VIEW' ? 'VIEW — read only' : 'NONE';
+    $('tierTag').className = 'tag ' + state.tier.toLowerCase();
+  }
+  $('windowField').style.display = state.status === 'open' ? 'none' : '';
+  // gts-zeti: Expand/Collapse-all only make sense when there's a team layer
+  // to collapse — single-team mode has nothing above the doc-groups.
+  $('collapseAllField').classList.toggle('hidden', !isAllTeams);
+
+  const rows = state.rows;
+  if (!state.busy) {
+    $('countLabel').textContent = rows.length + (rows.length === 1 ? ' action' : ' actions');
+  }
+
+  listEl.innerHTML = '';
+  if (!rows.length){
+    listEl.innerHTML = `<div class="docgroup"><div class="empty">${
+      state.scope === 'mine' ? 'Nothing assigned to you in this team.'
+                              : 'No actions match these filters.'}</div></div>`;
+    return;
+  }
+
+  // Group by document: the list spans documents, which is also why the sync
+  // control is document-scoped rather than one row-level button per row.
+  const byDoc = new Map();
+  rows.forEach(r => { if(!byDoc.has(r.doc_id)) byDoc.set(r.doc_id, []); byDoc.get(r.doc_id).push(r); });
+
+  if (isAllTeams) {
+    // gts-zeti: group doc-groups under a collapsible team header, in the
+    // order teams first appear across rows (matches server aggregate order).
+    const byTeam = new Map();
+    byDoc.forEach((docRows, docId) => {
+      const teamId = docRows[0].team_id;
+      if (!byTeam.has(teamId)) byTeam.set(teamId, new Map());
+      byTeam.get(teamId).set(docId, docRows);
+    });
+    const teamName = teamId => {
+      const t = state.teams.find(t => t.teamId === teamId);
+      return t ? t.teamName : teamId;
+    };
+    byTeam.forEach((docsInTeam, teamId) => {
+      const teamKey = 'team:' + teamId;
+      const teamCollapsed = !!state.collapsed[teamKey];
+      const teamRowCount = Array.from(docsInTeam.values()).reduce((n, r) => n + r.length, 0);
+      const teamEl = document.createElement('div');
+      teamEl.className = 'teamgroup' + (teamCollapsed ? ' collapsed' : '');
+      teamEl.innerHTML = `
+        <div class="teamhead">
+          <button class="collapsebtn" data-toggle-team="${escape(teamId)}"
+            aria-expanded="${!teamCollapsed}" title="${teamCollapsed ? 'Expand' : 'Collapse'} ${escape(teamName(teamId))}"
+          >&#9662;</button>
+          <div class="teamname">${escape(teamName(teamId))}</div>
+          <span class="tag">${teamRowCount} ${teamRowCount === 1 ? 'action' : 'actions'}</span>
+        </div>
+        <div class="teamdocs">
+          ${Array.from(docsInTeam.entries()).map(([docId, docRows]) => docGroupHtml(docId, docRows, true)).join('')}
+        </div>`;
+      listEl.appendChild(teamEl);
+    });
+  } else {
+    byDoc.forEach((docRows, docId) => {
+      listEl.insertAdjacentHTML('beforeend', docGroupHtml(docId, docRows, false));
+    });
+  }
+
+  listEl.querySelectorAll('[data-toggle-team]').forEach(b => b.addEventListener('click', () => {
+    const key = 'team:' + b.dataset.toggleTeam;
+    state.collapsed[key] = !state.collapsed[key];
+    render();
+  }));
+  listEl.querySelectorAll('[data-toggle-doc]').forEach(b => b.addEventListener('click', () => {
+    const key = 'doc:' + b.dataset.toggleDoc;
+    state.collapsed[key] = !state.collapsed[key];
+    render();
+  }));
+  listEl.querySelectorAll('[data-sync]').forEach(b => b.addEventListener('click', onSyncClick));
+  listEl.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => {
+    state.editingId = b.dataset.edit;
+    render();
+  }));
+  listEl.querySelectorAll('[data-cancel-edit]').forEach(b => b.addEventListener('click', () => {
+    state.editingId = null;
+    render();
+  }));
+  listEl.querySelectorAll('[data-save-edit]').forEach(b => b.addEventListener('click', onSaveEditClick));
+  listEl.querySelectorAll('.status.mine').forEach(c => c.addEventListener('click', openStatusMenu));
+}
+
+// gts-zeti: one doc-group's markup, shared by the flat (single-team) and
+// team-grouped (All-teams) render paths. `inTeamGroup` only affects the
+// per-team badge (redundant once nested under a team header) and whether
+// this doc-group gets its own collapse toggle (only meaningful once there's
+// a team layer above it to collapse independently of).
+function docGroupHtml(docId, docRows, inTeamGroup){
+  const first = docRows[0];
+  // gts-zm8w: in ALL-teams mode each doc belongs to exactly one team
+  // (uniform team_id across a doc's rows), so gate this group's controls
+  // by THAT team's own tier rather than the blended state.tier.
+  const tier = inTeamGroup ? (state.teamTiers[first.team_id] || 'NONE') : state.tier;
+  const docKey = 'doc:' + docId;
+  const docCollapsed = inTeamGroup && !!state.collapsed[docKey];
+  const toggleBtn = inTeamGroup
+    ? `<button class="collapsebtn" data-toggle-doc="${escape(docId)}" aria-expanded="${!docCollapsed}"
+         title="${docCollapsed ? 'Expand' : 'Collapse'} this document">&#9662;</button>`
+    : '';
+  return `
+    <div class="docgroup${docCollapsed ? ' collapsed' : ''}">
+      <div class="dochead">
+        <div class="docname">${toggleBtn}<a href="${first.doc_url}" target="_blank" rel="noopener"
+          >${escape(first.doc_name || '(untitled document)')}</a></div>
+        <div class="controls">
+          <span class="tag">${docRows.length} shown</span>
+          <button class="btn small" data-sync="${docId}" ${tier === 'EDIT' ? '' : 'disabled'}
+            title="${tier === 'EDIT' ? 'Re-sync this document with the sheet'
+                                     : 'Syncing needs EDIT access to this document’s folder'}"
+          >Sync this document</button>
+        </div>
+      </div>
+      <div class="docrows">${docRows.map(r => rowHtml(r, tier)).join('')}</div>
+    </div>`;
+}
+
+function rowHtml(r, tier){
+  if (state.editingId === r.global_id) return editRowHtml(r);
+  const mine = isMine(r);
+  return `
+    <div class="row">
+      <div class="aiN">${escape(r.action_id || '')}</div>
+      <div class="rowmain">
+        <div class="action">${escape(r.action_text)}</div>
+        <div class="rowmeta">
+          <span>${escape(r.assignee_name || r.assignee_email || 'Unassigned')}${mine ? ' (you)' : ''}</span>
+          <span>updated ${shortDate(r.modified_date)}</span>
+        </div>
+      </div>
+      <div class="controls">
+        ${statusChip(r, mine)}
+        ${tier === 'EDIT'
+          ? `<button class="btn small" data-edit="${r.global_id}">Edit</button>` : ''}
+      </div>
+    </div>`;
+}
+
+// ---- edit form (gts-79dw.4.21 — LIVE, calls team_edit_action) ---------
+function editRowHtml(r){
+  return `
+    <div class="row">
+      <div class="aiN">${escape(r.action_id || '')}</div>
+      <div class="rowmain">
+        <input class="sel" style="width:100%" data-field="action_text" value="${escape(r.action_text)}" />
+        <div class="rowmeta" style="margin-top:6px">
+          <input class="sel" data-field="assignee_name" placeholder="Assignee name"
+                 value="${escape(r.assignee_name || '')}" style="flex:1;min-width:120px" />
+          <input class="sel" data-field="assignee_email" placeholder="Assignee email"
+                 value="${escape(r.assignee_email || '')}" style="flex:1;min-width:160px" />
+        </div>
+      </div>
+      <div class="controls">
+        <button class="btn small primary" data-save-edit="${r.global_id}">Save</button>
+        <button class="btn small" data-cancel-edit="${r.global_id}">Cancel</button>
+      </div>
+    </div>`;
+}
+
+function onSaveEditClick(e){
+  const btn = e.currentTarget;
+  const globalId = btn.dataset.saveEdit;
+  const rowEl = btn.closest('.row');
+  const fields = {
+    action_text:    rowEl.querySelector('[data-field="action_text"]').value,
+    assignee_name:  rowEl.querySelector('[data-field="assignee_name"]').value,
+    assignee_email: rowEl.querySelector('[data-field="assignee_email"]').value
+  };
+  btn.disabled = true;
+  postJson(GACTIONSHEET_URL, {
+    action: 'team_edit_action', assertion: state.assertion, teamId: teamIdForWrite(rowByGlobalId(globalId)),
+    global_id: globalId, fields: fields
+  })
+    .then(res => {
+      state.editingId = null;
+      if (res.ok) { toast('Saved.'); return refreshActions(); }
+      toast('Edit did not apply: ' + (res.outcome || 'unknown'));
+      render();
+    })
+    .catch(err => {
+      state.editingId = null;
+      toast('Edit failed: ' + (err.message || err));
+      render();
+    });
+}
+
+// ---- sync control: LIVE (R14/R15) ------------------------------------
+function onSyncClick(e){
+  const btn = e.currentTarget;
+  const docId = btn.dataset.sync;
+  btn.disabled = true;
+  const prevLabel = btn.textContent;
+  btn.textContent = 'Syncing…';
+
+  postJson(GACTIONSHEET_URL, {
+    action: 'team_sync_document', assertion: state.assertion, teamId: teamIdForWrite(rowByDocId(docId)), docId
+  })
+    .then(res => {
+      if (res.ok) {
+        toast('Synced.');
+        return refreshActions();
+      }
+      toast('Sync did not run: ' + (res.outcome || 'unknown'));
+    })
+    .catch(err => toast('Sync failed: ' + (err.message || err)))
+    .finally(() => {
+      const row = rowByDocId(docId);
+      const tier = state.teamId === ALL_TEAMS_ID ? (state.teamTiers[row && row.team_id] || 'NONE') : state.tier;
+      btn.disabled = (tier !== 'EDIT');
+      btn.textContent = prevLabel;
+    });
+}
+
+// ---- assignee status control (gts-79dw.4.22 — LIVE, calls team_patch_status) -
+function openStatusMenu(e){
+  const chip = e.currentTarget, box = chip.getBoundingClientRect();
+  const globalId = chip.dataset.statusFor;
+  menuEl.innerHTML = '<h4>Set status</h4>' +
+    state.statusOptions.map(o =>
+      `<button class="opt" data-set="${escape(o.status)}" title="${escape(o.alt)}"
+        ><img src="${o.icon}" alt="" />${escape(o.status)}</button>`
+    ).join('') +
+    '<input class="custom" id="customStatus" placeholder="…or type any status" />';
+  menuEl.style.left = Math.min(box.left + window.scrollX, window.innerWidth - 245) + 'px';
+  menuEl.style.top  = (box.bottom + window.scrollY + 6) + 'px';
+  menuEl.style.display = 'block';
+  menuEl.querySelectorAll('[data-set]').forEach(b => b.addEventListener('click', () => {
+    submitStatusChange(globalId, b.dataset.set); closeMenu();
+  }));
+  $('customStatus').addEventListener('keydown', ev => {
+    if (ev.key === 'Enter' && ev.target.value.trim()){
+      submitStatusChange(globalId, ev.target.value.trim()); closeMenu();
+    }
+  });
+  e.stopPropagation();
+}
+function submitStatusChange(globalId, newStatus){
+  postJson(GACTIONSHEET_URL, {
+    action: 'team_patch_status', assertion: state.assertion, teamId: teamIdForWrite(rowByGlobalId(globalId)),
+    global_id: globalId, status: newStatus
+  })
+    .then(res => {
+      if (res.ok) { toast('Status updated.'); return refreshActions(); }
+      toast('Status change did not apply: ' + (res.outcome || 'unknown'));
+    })
+    .catch(err => toast('Status change failed: ' + (err.message || err)));
+}
+function closeMenu(){ menuEl.style.display = 'none'; }
+document.addEventListener('click', e => { if (!menuEl.contains(e.target)) closeMenu(); });
+
+// ---- filter controls -----------------------------------------------------
+function bindSegment(el, key){
+  el.querySelectorAll('button[data-' + key + ']').forEach(b => b.addEventListener('click', () => {
+    state[key] = b.dataset[key];
+    el.querySelectorAll('button[data-' + key + ']').forEach(x =>
+      x.setAttribute('aria-pressed', String(x === b)));
+    refreshActions();
+  }));
+}
+bindSegment($('statusSeg'), 'status');
+bindSegment($('scopeSeg'), 'scope');
+$('windowSel').addEventListener('change', e => {
+  state.windowDays = Number(e.target.value) || 60;
+  refreshActions();
+});
+</script>
+</body>
+</html>

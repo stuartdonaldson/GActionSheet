@@ -1,0 +1,18 @@
+{
+  "ACT-101": {
+    "action_text": "Draft the Q3 budget memo\n- pull last year's actuals\n- circulate before Friday",
+    "custom_fields": {"Consult With": "\n- Stuart\n- John", "Due": "Tuesday"},
+    "container": "body"
+  },
+  "AI-102": {
+    "token": "AI-102",
+    "prefix": "AI",
+    "action_text": "legacy spelling still works"
+  },
+  "ACT-103": {
+    "container": "list-item"
+  },
+  "ACT-104": {
+    "container": "table-cell"
+  }
+}

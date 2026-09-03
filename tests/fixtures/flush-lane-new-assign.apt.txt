@@ -1,0 +1,9 @@
+<!-- kind: golden -->
+<!-- name: flush-lane-new-assign -->
+<!-- serves: gts-iz9i -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Case (gts-iz9i, entry point 2): new-assign flush. A bare AI: trigger promoted to a canonical ACT-N on the batch's establishing sync must carry its field-line continuation through.
+
+AI: ep2 new-assign lane base<SR>
+Target: ep2 lane value

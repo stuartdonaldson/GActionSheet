@@ -1,0 +1,12 @@
+{
+  "name": "hyperlink-roundtrip",
+  "input": "hyperlink-roundtrip",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "hyperlink-roundtrip-expected",
+  "serves": [
+    "gts-tz5x"
+  ],
+  "batch": "apt-corpus-batch"
+}

@@ -80,6 +80,11 @@ service's. See §5.
   (SyncManager.js:872) probes `DriveApp.getFolderById` in the *executing* identity
   and throws `TeamNotFound` / `TeamAccessDenied` rather than returning partial data.
   This is the per-team confidentiality control for filtered reads (Import/Notify).
+  The team-page access-tier resolution behind this boundary reads **cached input
+  facts** (group grants on a resource, an identity's group memberships) rather than
+  querying Drive/Directory on every call; the verdict itself is never cached and the
+  signed identity assertion is re-verified per call. This adds a bounded staleness
+  window inside Boundary 2 — see A7 / F7.
 
 ---
 
@@ -167,6 +172,7 @@ git-ignored (.gitignore); the mapping is documented in a committed `.auth/README
 | A4 | `WEBAPP_SECRET` itself | Disclosure (repo, logs, client payloads) | Script Properties only; not in source | Test value is `"1234"` (F1) |
 | A5 | OAuth scope grant (what a consenting user authorizes) | Over-broad scope → larger consent + larger compromise surface | — | Broad scope set (F5) |
 | A6 | Deployer identity continuity | Tool tied to a departing individual | — | Addressed by §4 robot account (F6) |
+| A7 | Cached access-resolution input facts (resourceId → group permissions; email → group memberships) | Stale group-membership/permission facts allow continued access after a revocation | 900s (15 min) TTL; `flush_access_cache` route (`WEBAPP_SECRET`-gated); auto-bust of the affected resource in the seed route. Verdicts are never cached — tier is recomputed and the signed assertion re-verified on every call | Up to 15 min stale-access window after revocation — **accepted risk, F7** |
 
 ### Findings
 
@@ -199,6 +205,31 @@ git-ignored (.gitignore); the mapping is documented in a committed `.auth/README
   consent surface and compromise surface.
 - **F6 — Identity continuity.** Covered by the §4 robot-account direction; tracked
   as a release prerequisite, not a code defect.
+- **F7 — Cross-request caching of access-resolution inputs.** *(Accepted risk —
+  reviewed and accepted by Stuart Donaldson, project owner, 2026-09-01; raised by
+  gts-l2h7 as the "R8-TENSION" merge-gate item. Not an open blocker.)*
+  Access-tier resolution caches its **input facts** in `CacheService` for 900s
+  (`_ACCESS_CACHE_TTL_SECONDS`, SPIKE.js): `resourceId` → the
+  `Drive.Permissions.list` group grants on that resource, and `email` → that
+  identity's group memberships from `Groups.list`/`Members.get`. The consequence
+  is that an admin who revokes a group membership or a folder grant may see the
+  revoked identity continue to resolve to its old tier for up to 15 minutes.
+  What is **not** cached is what bounds this: no resolved tier, `folderTiers`,
+  resolution method, or per-caller verdict is ever stored, and the signed identity
+  assertion is re-verified on every call before any cache is consulted — so the
+  tier is recomputed from scratch each request, from facts that may be up to one
+  TTL old. That is the same staleness class as Google's own Drive/Directory
+  propagation delay, and materially weaker than caching "email X = EDIT".
+  Mitigations already built: (a) the 15-min TTL bounds the window with no operator
+  action; (b) a `WEBAPP_SECRET`-gated `flush_access_cache` route (WebApp.js) drops
+  every cached fact on demand, so an admin who has just changed sharing or
+  membership can collapse the window to zero; (c) the access-seed route busts the
+  cache for the resource it mutates. Cache reads fail closed — a read or parse
+  failure is a miss and forces a live lookup, never a grant — and identity-side
+  keys are namespaced by the verified email. The tradeoff was accepted for the
+  team-page latency win (serial Admin Directory round-trips dominated a ~16s page
+  load); revisit if the tool is ever extended to hold data where a 15-minute
+  revocation lag is unacceptable.
 
 ---
 
@@ -212,6 +243,11 @@ git-ignored (.gitignore); the mapping is documented in a committed `.auth/README
   operational procedure; never log it, never echo it in responses, never commit it.
 - **Least privilege at every layer:** narrowest OAuth scopes, narrowest robot Drive
   grants, expiring test tokens, probes disabled in prod.
+- **Cache facts, never verdicts.** Any performance cache in the authorization path
+  may hold the *inputs* to a decision (group grants, group memberships) but never a
+  resolved tier, method, or per-caller verdict; the signed assertion is re-verified
+  and the tier recomputed on every call. Every such cache carries a bounded TTL and
+  an explicit operator flush. See A7 / F7.
 
 ---
 
@@ -228,6 +264,11 @@ git-ignored (.gitignore); the mapping is documented in a committed `.auth/README
 - [ ] F2 — Decide `ANYONE` vs `ANYONE_ANONYMOUS` for the production `/exec`
       deployment with the org admin.
 - [ ] Confirm `PROBE_ENABLED = false` in the production build.
+
+*(F7 — cross-request caching of access-resolution inputs — is not a checklist item:
+reviewed and accepted as a risk by the project owner on 2026-09-01. No pre-release
+action is pending. Note for OPERATIONS: after revoking a group membership or folder
+grant, call the `flush_access_cache` route to drop the 15-minute window immediately.)*
 
 ---
 

@@ -1,0 +1,21 @@
+<!-- kind: golden -->
+<!-- name: scanner-jxrw -->
+<!-- serves: gts-jxrw, gts-v0py -->
+<!-- generated: 2026-08-30T00:00:00.000Z -->
+
+Case 1 (gts-jxrw, act-retire): 'AI-N: ' (bare, trailing space, nothing else on that line) followed by a soft-return continuation line yields action\_text='' -- the continuation line is NOT merged in. Authored statusless so the establishing sync must materialize the token line without absorbing the next one.
+
+AI-621: <SR>
+Following line item that must NOT be absorbed
+
+Case 2 (gts-jxrw, act-retire, negative): two SEPARATE list items, each with their own token, are NOT merged by the same fix.
+
+<LI> AI-623: first separate item
+
+Case 2, part 2 (gts-jxrw, act-retire): the second of the two separate list items.
+
+<LI> AI-624: second separate item
+
+Case 3 (gts-v0py, act-retire): 'AI-N: text (Status) trailing' parses status='Status' and does not embed the literal '(Status)' token inside action\_text -- trailing text is PRESERVED (joined with the text before the token), not dropped. Already fully established (explicit token, explicit status materialized) so the establishing sync must not re-flush this record and must not double the '(Open)' token on top of the one already present.
+
+AI-630: Confirm Wednesdays work for Peter (Open) - done

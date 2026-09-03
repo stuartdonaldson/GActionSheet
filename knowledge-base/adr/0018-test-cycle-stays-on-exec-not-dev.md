@@ -5,7 +5,7 @@ Date: 2026-06-18
 
 ## Context
 
-`GTaskSheet-egl9` asked whether the automated test cycle (`npm run deploy:test` +
+`gts-egl9` asked whether the automated test cycle (`npm run deploy:test` +
 `pytest`/Playwright suite) should switch from the versioned `/exec` Web App
 deployment to the unversioned `/dev` (HEAD) URL, since `/dev` only requires
 `clasp push` — no `manage-deployments.js --deploy-test` repoint/version-bump
@@ -49,7 +49,7 @@ reopened by this decision.
 - **Execution-identity correctness, not just convenience.** Several test
   paths specifically assert deployer-privileged behavior: cross-document
   forwarding (`forward_action_rows`, UC-E), team-scoped reads gated by
-  `assertTeamAccess`, and the planned `GTaskSheet-zai6` non-deployer
+  `assertTeamAccess`, and the planned `gts-zai6` non-deployer
   Drive-sharing fixture (testing that a *non-deployer* test account does
   **not** get deployer-level Drive access). Running these against `/dev`
   would silently execute as the test account instead of the deployer,
@@ -71,7 +71,7 @@ reopened by this decision.
 ## Consequences
 
 - No change to `docs/OPERATIONS.md §Deployment` or `manage-deployments.js`.
-- `GTaskSheet-egl9` closes as "evaluated, no change" rather than as
+- `gts-egl9` closes as "evaluated, no change" rather than as
   implementation work.
 - If a future change makes deployer-identity-dependent behavior obsolete
   (e.g. `USER_DEPLOYING` is dropped from the manifest), this ADR's premise

@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Team Action Portal — View A mockup (gts-79dw.4.7)</title>
+<style>
+  /* Visual idiom deliberately inherited from docs/side-bar-mockup.html so the
+     web portal and the add-on sidebar read as one product. */
+  :root{
+    --bg:#f6f8fb; --panel:#ffffff; --line:#d9e1ec; --text:#1f2937; --muted:#6b7280;
+    --blue:#2563eb; --blue2:#dbeafe; --green:#059669; --green2:#d1fae5; --red:#dc2626;
+    --amber:#d97706; --amber2:#fef3c7; --slate2:#e5e7eb;
+    --shadow:0 8px 28px rgba(15,23,42,.08);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+       background:linear-gradient(180deg,#eef2ff,#f8fafc 180px);color:var(--text)}
+  .page{max-width:980px;margin:0 auto;padding:18px 16px 40px}
+
+  .top{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+       box-shadow:var(--shadow);padding:14px 16px}
+  .title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+  .title h1{font-size:19px;margin:0}
+  .sub{color:var(--muted);font-size:13px;margin-top:3px}
+  .who{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .tag{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
+       border:1px solid var(--line);background:#f9fafb;font-size:12px;color:var(--muted)}
+  .tag.edit{background:var(--green2);border-color:#a7f3d0;color:#065f46}
+  .tag.view{background:var(--slate2);border-color:#d1d5db}
+
+  .filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:12px;
+           padding-top:12px;border-top:1px solid var(--line)}
+  .field{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+  select,input,button{font:inherit}
+  .sel{border:1px solid var(--line);background:#fff;border-radius:9px;padding:6px 8px;color:var(--text)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff}
+  .seg button{border:0;background:#fff;padding:6px 12px;cursor:pointer;color:var(--text)}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button[aria-pressed="true"]{background:var(--blue);color:#fff}
+  .seam{opacity:.5;cursor:not-allowed}
+
+  .list{margin-top:14px;display:flex;flex-direction:column;gap:14px}
+  .docgroup{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+            box-shadow:0 1px 0 rgba(0,0,0,.02);overflow:hidden}
+  .dochead{display:flex;justify-content:space-between;align-items:center;gap:10px;
+           padding:10px 14px;background:#fbfcfe;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .docname{font-weight:600}
+  .docname a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--line)}
+  .row{display:flex;gap:12px;align-items:flex-start;padding:11px 14px;border-top:1px solid #eef1f6}
+  .row:first-of-type{border-top:0}
+  .rowmain{flex:1;min-width:0}
+  .action{color:#111827}
+  .rowmeta{color:var(--muted);font-size:12px;margin-top:4px;display:flex;gap:10px;flex-wrap:wrap}
+  .aiN{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:1px}
+
+  .status{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;
+          border:1px solid var(--line);background:#f9fafb;white-space:nowrap;font-size:13px}
+  .status img{width:14px;height:14px;display:block}
+  .status.bucket-open{background:var(--blue2);border-color:#bfdbfe}
+  .status.bucket-inprogress{background:var(--amber2);border-color:#fde68a}
+  .status.bucket-waiting{background:var(--amber2);border-color:#fde68a}
+  .status.bucket-closed,.status.bucket-delegated{background:var(--green2);border-color:#a7f3d0}
+  .status.mine{cursor:pointer}
+  .bucketlabel{color:var(--muted);font-size:11px}
+
+  .controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .btn{border:1px solid var(--line);background:#fff;border-radius:9px;padding:5px 10px;cursor:pointer}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .btn.small{padding:4px 8px;font-size:12px;border-radius:8px}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+
+  .empty{padding:22px 14px;text-align:center;color:var(--muted)}
+  .banner{margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid #fecaca;
+          background:#fef2f2;color:#991b1b;display:none}
+  .banner code{background:#fff;border:1px solid #fecaca;border-radius:6px;padding:1px 5px}
+  .caveats{margin-top:20px;color:var(--muted);font-size:12.5px;line-height:1.6}
+  .caveats h2{font-size:13px;color:var(--text);margin:0 0 6px}
+  .caveats li{margin:3px 0}
+
+  .menu{position:absolute;z-index:50;background:#fff;border:1px solid var(--line);border-radius:12px;
+        box-shadow:var(--shadow);padding:8px;width:230px;display:none}
+  .menu h4{margin:0 0 6px;font-size:12px;color:var(--muted)}
+  .menu .opt{display:flex;align-items:center;gap:8px;width:100%;margin:4px 0;padding:6px 8px;
+             border:1px solid var(--line);background:#fff;border-radius:9px;text-align:left;cursor:pointer}
+  .menu .opt img{width:14px;height:14px}
+  .menu .custom{width:100%;margin-top:6px;padding:7px 9px;border:1px solid var(--line);border-radius:9px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;
+         padding:9px 13px;border-radius:999px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <div class="title">
+      <div>
+        <h1>Team actions</h1>
+        <div class="sub" id="sub">—</div>
+      </div>
+      <div class="who">
+        <label class="field">Team
+          <select class="sel" id="teamSel"></select>
+        </label>
+        <label class="field">Signed in as
+          <select class="sel" id="whoSel"></select>
+        </label>
+        <label class="field">Access
+          <select class="sel" id="tierSel">
+            <option value="VIEW">VIEW</option>
+            <option value="EDIT">EDIT</option>
+          </select>
+        </label>
+        <span class="tag" id="tierTag">—</span>
+      </div>
+    </div>
+
+    <div class="filters">
+      <div class="field">Status
+        <div class="seg" id="statusSeg">
+          <button data-status="open" aria-pressed="true">Open</button>
+          <button data-status="closed" aria-pressed="false">Closed</button>
+          <button data-status="all" aria-pressed="false">All</button>
+        </div>
+      </div>
+      <div class="field">Show
+        <div class="seg" id="scopeSeg">
+          <button data-scope="all" aria-pressed="true">Everyone</button>
+          <button data-scope="mine" aria-pressed="false">Mine</button>
+          <button class="seam" disabled title="Open seam R13a — filter by a named person; not in this slice">Person…</button>
+        </div>
+      </div>
+      <!-- Names what the server actually does: the window ages out resolved
+           rows only. An open action is never hidden by it, however stale. -->
+      <div class="field" id="windowField">Include resolved from
+        <select class="sel" id="windowSel"></select>
+      </div>
+      <div class="field" style="margin-left:auto" id="countLabel"></div>
+    </div>
+  </div>
+
+  <div class="banner" id="banner"></div>
+  <div class="list" id="list"></div>
+
+  <div class="caveats">
+    <h2>What this mockup is (read before reviewing)</h2>
+    <ul>
+      <li>Every row is <strong>real captured data</strong> from
+        <code>docs/team-portal-fixture.json</code> — statuses, assignees and document names
+        are what the teams actually typed. Never hand-edit that file; re-capture with
+        <code>scripts/capture_team_actions_fixture.py</code>.</li>
+      <li>Each row arrives already carrying the server's <code>getStatusDisplay()</code>
+        answer for its status — bucket, resolved, icon. This page re-derives nothing, so
+        it cannot disagree with the sheet or the sidebar about what a status means.</li>
+      <li><strong>Access tier is a mode switch here</strong>, not a real resolution: choose
+        VIEW or EDIT to see how the sync and edit affordances read at each. A NONE-tier
+        caller never reaches this page.</li>
+      <li><strong>Read paths are wired; writes are inert.</strong> Sync, edit and status
+        change only report what they would call — they land in gts-79dw.4.14 against the
+        AC frozen at this review.</li>
+      <li>The window ages out <strong>resolved rows only</strong> — an open action is
+        never hidden by it, however long since it was touched. <strong>Decided at the
+        2026-07-27 review gate:</strong> that is the frozen behaviour, not an accident —
+        a stale open action never ages out at any window setting (plan §12.1).</li>
+      <li><strong>Team</strong> is a real control, decided at the same gate: one page,
+        an in-page switcher over the teams the verified caller resolves (R21, plan §12.3).
+        <strong>Signed in as</strong> and <strong>Access</strong> stay simulation-only.</li>
+      <li>Status × Mine is composed from two real server results (the status filter's rows
+        intersected with the caller's own rows); the backend applies both in one query.</li>
+      <li>Not present in the captured data: any <em>delegated</em>-bucket status
+        (forwarded / escalated / routed). The three buckets that do appear are Open,
+        In&nbsp;Progress and Closed.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="menu" id="statusMenu"><h4>Set status</h4></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const FIXTURE_URL = 'team-portal-fixture.json';
+const state = { fixture:null, team:null, status:'open', scope:'all', windowDays:null, who:'' };
+
+const $ = (id) => document.getElementById(id);
+const listEl = $('list'), toastEl = $('toast'), menuEl = $('statusMenu');
+
+function toast(msg){ toastEl.textContent = msg; toastEl.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(()=>toastEl.classList.remove('show'), 1800); }
+
+// ---- status display -------------------------------------------------------
+// Every row arrives carrying the server's own getStatusDisplay() answer —
+// status_bucket, status_resolved, status_icon. Nothing here re-derives it, so
+// this page cannot disagree with the sheet or the sidebar about what a
+// free-text status means.
+const isCanonical = (status) => state.fixture.statusOptions.some(o => o.status === status);
+
+function statusChip(row, editable){
+  const cls = 'status bucket-' + row.status_bucket.toLowerCase() +
+              (row.status_resolved ? ' bucket-closed' : '') + (editable ? ' mine' : '');
+  // Show the literal the user typed. For anything off the canonical list, also
+  // say which side of the Open/Closed filter it falls on — that is the part a
+  // reader of 'Escalated' or 'Backlog' cannot infer.
+  const note = isCanonical(row.status) ? ''
+    : ` <span class="bucketlabel">(counts as ${row.status_resolved ? 'closed' : 'open'})</span>`;
+  return `<span class="${cls}" data-status-for="${row.global_id}"
+            title="${editable ? 'Click to change status' : 'Only the assignee can change this'}"
+          ><img src="${row.status_icon}" alt="" />${escape(row.status)}${note}${editable ? ' ▾' : ''}</span>`;
+}
+
+const escape = (s) => String(s==null?'':s).replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const shortDate = (iso) => iso ? new Date(iso).toLocaleDateString([], {month:'short', day:'numeric'}) : '';
+
+// ---- row selection: server results only, composed, never fabricated -------
+function team(){ return state.fixture.teams[state.team]; }
+function visibleRows(){
+  const t = team();
+  const windowed = state.windowDays &&
+        Object.values(t.states).find(s => s.opts.statusFilter === state.status &&
+                                          s.opts.windowDays === state.windowDays);
+  const base = (windowed || t.states[state.status]).rows;
+  if (state.scope !== 'mine') return base;
+  const mine = t.mine[state.who];
+  if (!mine) return [];
+  const ids = new Set(mine.rows.map(r => r.global_id));
+  return base.filter(r => ids.has(r.global_id));
+}
+function isMine(row){ return state.who && row.assignee_email &&
+  row.assignee_email.toLowerCase() === state.who.toLowerCase(); }
+
+// ---- render ---------------------------------------------------------------
+function render(){
+  const t = team(), tier = $('tierSel').value;
+  $('sub').textContent = `${t.teamId} • ${Object.keys(state.fixture.teams).length} teams captured`;
+  $('tierTag').textContent = tier === 'EDIT' ? 'EDIT — can sync and edit' : 'VIEW — read only';
+  $('tierTag').className = 'tag ' + tier.toLowerCase();
+  $('windowField').style.display = state.status === 'open' ? 'none' : '';
+
+  const rows = visibleRows();
+  $('countLabel').textContent = rows.length + (rows.length === 1 ? ' action' : ' actions');
+
+  listEl.innerHTML = '';
+  if (!rows.length){
+    listEl.innerHTML = `<div class="docgroup"><div class="empty">${
+      state.scope === 'mine' && !team().mine[state.who]
+        ? 'Nothing assigned to you in this team.'
+        : 'No actions match these filters.'}</div></div>`;
+    return;
+  }
+
+  // Group by document: the list spans documents, which is also why the sync
+  // control is document-scoped rather than one button for the whole page.
+  const byDoc = new Map();
+  rows.forEach(r => { if(!byDoc.has(r.doc_id)) byDoc.set(r.doc_id, []); byDoc.get(r.doc_id).push(r); });
+
+  byDoc.forEach((docRows, docId) => {
+    const first = docRows[0];
+    const group = document.createElement('div');
+    group.className = 'docgroup';
+    group.innerHTML = `
+      <div class="dochead">
+        <div class="docname"><a href="${first.doc_url}" target="_blank" rel="noopener"
+          >${escape(first.doc_name || '(untitled document)')}</a></div>
+        <div class="controls">
+          <span class="tag">${docRows.length} shown</span>
+          <button class="btn small" data-sync="${docId}" ${tier === 'EDIT' ? '' : 'disabled'}
+            title="${tier === 'EDIT' ? 'Re-sync this document with the sheet'
+                                     : 'Syncing needs EDIT access to this document’s folder'}"
+          >Sync this document</button>
+        </div>
+      </div>
+      ${docRows.map(r => rowHtml(r, tier)).join('')}`;
+    listEl.appendChild(group);
+  });
+
+  listEl.querySelectorAll('[data-sync]').forEach(b => b.addEventListener('click',
+    () => toast('Would sync document ' + b.dataset.sync + ' (inert in this mockup)')));
+  listEl.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click',
+    () => toast('Would open the editor for ' + b.dataset.edit + ' (inert in this mockup)')));
+  listEl.querySelectorAll('.status.mine').forEach(c => c.addEventListener('click', openStatusMenu));
+}
+
+function rowHtml(r, tier){
+  const mine = isMine(r);
+  return `
+    <div class="row">
+      <div class="aiN">${escape(r.action_id ? ('AI-' + String(r.action_id).replace(/^AI-/,'')) : '')}</div>
+      <div class="rowmain">
+        <div class="action">${escape(r.action_text)}</div>
+        <div class="rowmeta">
+          <span>${escape(r.assignee_name || r.assignee_email || 'Unassigned')}${mine ? ' (you)' : ''}</span>
+          <span>updated ${shortDate(r.modified_date)}</span>
+        </div>
+      </div>
+      <div class="controls">
+        ${statusChip(r, mine)}
+        ${tier === 'EDIT'
+          ? `<button class="btn small" data-edit="${r.global_id}">Edit</button>` : ''}
+      </div>
+    </div>`;
+}
+
+// ---- assignee status control (inert) --------------------------------------
+function openStatusMenu(e){
+  const chip = e.currentTarget, box = chip.getBoundingClientRect();
+  menuEl.innerHTML = '<h4>Set status</h4>' +
+    state.fixture.statusOptions.map(o =>
+      `<button class="opt" data-set="${escape(o.status)}" title="${escape(o.alt)}"
+        ><img src="${o.icon}" alt="" />${escape(o.status)}</button>`
+    ).join('') +
+    '<input class="custom" id="customStatus" placeholder="…or type any status" />';
+  menuEl.style.left = Math.min(box.left + window.scrollX, window.innerWidth - 245) + 'px';
+  menuEl.style.top  = (box.bottom + window.scrollY + 6) + 'px';
+  menuEl.style.display = 'block';
+  menuEl.querySelectorAll('[data-set]').forEach(b => b.addEventListener('click', () => {
+    toast('Would set status to “' + b.dataset.set + '” (inert in this mockup)'); closeMenu();
+  }));
+  $('customStatus').addEventListener('keydown', ev => {
+    if (ev.key === 'Enter' && ev.target.value.trim()){
+      toast('Would set status to “' + ev.target.value.trim() + '” (inert in this mockup)'); closeMenu();
+    }
+  });
+  e.stopPropagation();
+}
+function closeMenu(){ menuEl.style.display = 'none'; }
+document.addEventListener('click', e => { if (!menuEl.contains(e.target)) closeMenu(); });
+
+// ---- controls -------------------------------------------------------------
+function bindSegment(el, key){
+  el.querySelectorAll('button[data-' + key + ']').forEach(b => b.addEventListener('click', () => {
+    state[key] = b.dataset[key];
+    el.querySelectorAll('button[data-' + key + ']').forEach(x =>
+      x.setAttribute('aria-pressed', String(x === b)));
+    if (key === 'status') syncWindowOptions();
+    render();
+  }));
+}
+function syncWindowOptions(){
+  // Only windows that were actually captured are offered — an arbitrary
+  // number here would be a filter the reviewer cannot trust.
+  const opts = Object.values(team().states)
+    .filter(s => s.opts.statusFilter === state.status)
+    .map(s => s.opts.windowDays || null);
+  const sel = $('windowSel');
+  sel.innerHTML = opts.map(d =>
+    `<option value="${d || ''}">the last ${d ? d + ' days' : '60 days (default)'}</option>`).join('');
+  state.windowDays = null;
+}
+function fillTeams(){
+  $('teamSel').innerHTML = Object.keys(state.fixture.teams)
+    .map(t => `<option value="${t}">${t}</option>`).join('');
+  state.team = $('teamSel').value;
+}
+function fillIdentities(){
+  const emails = Object.keys(team().mine);
+  $('whoSel').innerHTML =
+    emails.map(e => `<option value="${e}">${e}</option>`).join('') +
+    '<option value="">someone else on the team</option>';
+  state.who = $('whoSel').value;
+}
+
+$('teamSel').addEventListener('change', e => {
+  state.team = e.target.value; fillIdentities(); syncWindowOptions(); render();
+});
+$('whoSel').addEventListener('change', e => { state.who = e.target.value; render(); });
+$('tierSel').addEventListener('change', render);
+$('windowSel').addEventListener('change', e => {
+  state.windowDays = e.target.value ? Number(e.target.value) : null; render();
+});
+bindSegment($('statusSeg'), 'status');
+bindSegment($('scopeSeg'), 'scope');
+
+fetch(FIXTURE_URL)
+  .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+  .then(fixture => {
+    state.fixture = fixture;
+    fillTeams(); fillIdentities(); syncWindowOptions(); render();
+  })
+  .catch(err => {
+    $('banner').style.display = 'block';
+    $('banner').innerHTML = `Could not load <code>${FIXTURE_URL}</code> (${escape(err.message)}). ` +
+      'Serve this directory rather than opening the file directly: ' +
+      '<code>python -m http.server -d docs 8080</code>, then open ' +
+      '<code>http://localhost:8080/team-portal-mockup.html</code>.';
+  });
+</script>
+</body>
+</html>

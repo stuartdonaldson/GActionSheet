@@ -1,0 +1,199 @@
+HANDOFF — Axiom logging schema cleanup (session 2026-07-30)
+=============================================================
+Context ran long and crossed topics (test-flake root cause -> Axiom column-limit
+fix -> schema design). Resume here in a fresh session. Related bead: gts-iwa0
+(open). Closed bead with full original incident: gts-pfyx.
+
+-------------------------------------------------------------------------------
+1. WHAT STARTED THIS: the original bug (DONE, deployed, verified passing)
+-------------------------------------------------------------------------------
+tests/test_sidebar.py::test_sidebar_header_branding was flaking with a 45s
+open_sidebar() timeout. Root cause: `_TEST_FORCE_HOMEPAGE_ERROR`, a GLOBAL GAS
+script property set by the `force_homepage_error` test fixture, was left set by
+an earlier interrupted run and leaked into unrelated tests -- every doc opened
+afterwards hit the add-on's error-fallback card instead of the normal one.
+
+Fix (all deployed to TEST and verified green):
+  - src/TestFixtures.js: new `reset_test_state` fixture action. Deletes every
+    script property under the `_TEST_` prefix (a safety net for crashed runs).
+    Explicitly does NOT touch DISCOVERY_*/TEAMSCOPE_FOLDER_* -- those are
+    deliberate memoized cross-session Drive-object caches (DISCOVERY_STALE_DOC_ID
+    in particular needs its doc to age 8+ days to be useful; wiping it every
+    run would defeat the fixture). Comments in the file explain this split so
+    nobody folds the caches into the sweep later.
+  - tests/conftest.py: new `_reset_test_state` fixture, session-scoped,
+    autouse=True. Calls the above once before the first test in any pytest
+    invocation (including each `--sw` restart, since that's a fresh session).
+  - Verified: pytest tests/test_sidebar.py::test_sidebar_header_branding
+    --sw-reset -> 1 passed in 65s.
+
+STATUS: complete, deployed, verified. No further action needed here.
+
+-------------------------------------------------------------------------------
+2. WHAT IT UNCOVERED: Axiom 'nuuts' dataset at its column-count cap
+-------------------------------------------------------------------------------
+Investigating why `reset_test_state`'s own GasLogger.log call silently failed
+to appear in Axiom queries led here. The 'nuuts' dataset had hit Axiom's
+256/257-field-per-dataset schema limit (bead gts-pfyx, closed 2026-07-29,
+which only implemented the "surface failures loudly" stopgap -- the real fix,
+restructuring the row shape, was explicitly left undone).
+
+Root cause: GasLogger.js's `_postToAxiom` used to spread every GasLogger.log()
+call's second-argument object as TOP-LEVEL Axiom columns
+(`Object.assign({_time,name,side,app,version}, e.data)`). ~100+ call sites
+across the codebase, each with different field names, permanently grew the
+schema. Worse: `WebApp.js`'s `markedByDocId` object was keyed BY DOCUMENT ID
+(`markedByDocId[docId] = count`) -- every new document ever seen minted its own
+column, unbounded. This was the single biggest contributor (~89 of the
+observed columns were `markedByDocId.<docId>`).
+
+-------------------------------------------------------------------------------
+3. CODE CHANGES MADE THIS SESSION -- deployment/verification status per change
+-------------------------------------------------------------------------------
+
+(a) DEPLOYED + VERIFIED working:
+  - src/GasLogger.js `_postToAxiom`: nests the per-event payload under a
+    single `data` field instead of spreading it flat.
+      row = { _time, name, side, app, version, data: e.data }
+    Verified: after deploy, a force_homepage_error/clear_homepage_error_force
+    fixture call round-trip produced `fixture.reset_test_state` with
+    `data: {cleared: [...]}` visible via `clasp logs` (Axiom ingest of THAT
+    particular event failed only because the dataset was still full at the
+    time -- see below).
+  - src/WebApp.js `_handleMarkDocNotFound`: no longer logs `markedByDocId`
+    itself to Axiom (still returned in the HTTP response, unchanged wire
+    contract) -- logs `uniqueDocsMarked: Object.keys(markedByDocId).length`
+    instead.
+  - src/WebApp.js: fixed a duplicate-column bug -- three GasLogger.log() calls
+    (`test.edit_action_row`, `test.patch_action_status`,
+    `test.delete_action_row`) were logging the field as `global_id` (snake_case)
+    while every other call site in the codebase uses `globalId` (camelCase),
+    creating a duplicate near-identical column. Changed the LOG calls only to
+    `globalId` -- the wire contract (`payload.global_id`, JSON response
+    `global_id`, scn/session.py's `_post_route(..., {"global_id": ...})`) is
+    UNTOUCHED. Grepped every GasLogger.log() call site afterward; confirmed no
+    other snake_case field names remain anywhere in src/*.js.
+  - scripts/query_axiom.py `_print_table`: updated to unpack the new nested
+    `data` dict for display (pops it, merges its non-null keys into the
+    printed detail line) so the CLI output stays readable post-restructure.
+
+  Also DEPLOYED (not individually re-verified via clasp logs after the fact,
+  but low-risk / mechanically simple):
+  - The globalId rename above was deployed together with the GasLogger.js /
+    query_axiom.py changes in the "core restructure" deploy.
+
+(b) CODE WRITTEN, NOT YET DEPLOYED (this is the actual state to resume from):
+  - src/Version.js: added `env: "test"` to the BUILD_INFO object literal
+    (placeholder default; gets overwritten by manage-deployments.js on the
+    next deploy of any target).
+  - manage-deployments.js `stampVersionInfo(target, url)`: now also computes
+    `env` ('test'/'dev'/'production' from `target`) and writes
+    `env: "<env>"` into Version.js alongside the existing version/buildDate/
+    webappUrl stamps. Comment explains env is the source of truth going
+    forward; the "(TEST)"/"(DEV)" suffix on the human-readable `version`
+    string is a derivative of it, not the other way around.
+  - src/GasLogger.js `_postToAxiom`: two further changes on top of (a)'s
+    nesting, NOT yet deployed:
+      1. `env` is now a real top-level Axiom column, read from
+         `BUILD_INFO.env` (falls back to `'unknown'` if absent). Rationale:
+         previously the only way to filter test vs prod logs was substring-
+         matching the free-text `version` field ("... (TEST)") -- this makes
+         it a clean equality filter.
+      2. `docId` / `docIds`, when present in a log call's data object, are
+         HOISTED to real top-level columns and REMOVED from the nested `data`
+         copy (single source of truth, no drift). Rationale (user-driven):
+         "every event touching document X" is the single most common
+         cross-event query shape, and a single `docId` column with many
+         distinct VALUES is fine -- it is NOT the markedByDocId anti-pattern,
+         which minted a new COLUMN per value, not a new row-value in one
+         column. This is a deliberate, explained distinction worth
+         re-confirming out loud with the user if picking this back up, since
+         it's easy to conflate the two.
+  - scn/reporter.py: added `"env": "test"` (hardcoded, with a comment
+    explaining why -- ScenarioSession/Reporter only ever talk to
+    webappTestUrl today; promote to a real parameter if that ever changes) to
+    both Axiom row-construction paths (`emit_standalone_event` and
+    `Reporter.event`'s buffered path), for symmetry with GasLogger.js's new
+    top-level `env` column on the GAS side.
+
+  NEXT ACTION on resume: review this diff (`git diff src/GasLogger.js
+  src/Version.js manage-deployments.js scn/reporter.py`), decide whether it's
+  still wanted as-is, then `pnpm run deploy:test` and verify via
+  `clasp logs` / `scripts/query_axiom.py` the same way (a) was verified:
+  fire a fixture call, confirm env/docId appear as real top-level fields and
+  ingest succeeds (watch for column-limit 400s -- see section 4).
+
+-------------------------------------------------------------------------------
+4. AXIOM CONSOLE STATE (owner-side, not code) -- as of 2026-07-30
+-------------------------------------------------------------------------------
+Dataset: 'nuuts'. Owner account: stuart.donaldson@gmail.com (placeholder --
+"we'll change it later" per user). Neither API token in local.settings.json
+(`axiomToken`, `axiomQueryToken`) has dataset-admin permission -- both got 403
+on `PUT /v2/datasets/nuuts/mapfields` ("token does not have access to resource:
+datasets with action: update"). Dataset-admin operations are console-only for
+these tokens. Recorded in docs/OPERATIONS.md under Monitoring ->
+"Axiom (nuuts dataset)".
+
+Owner has already:
+  - Trimmed + vacuumed once: field count went 257 -> 226.
+  - Confirmed via a probe ingest (done via API using the ingest-scoped token,
+    which DOES have write/ingest permission even without admin permission)
+    that headroom exists again and new fields CAN register: a minimal
+    `{data: {probe: true}}` event ingested successfully and Axiom expanded it
+    into leaf columns `data.action`, `data.probe`, etc. -- confirming there is
+    currently NO single literal `data` field, only auto-expanded leaf paths,
+    because no map field has been declared yet.
+
+STILL OPEN (owner's side, deferred by them "for later"):
+  1. Explicitly CREATE `data` as an Axiom map field in the console (Datasets
+     -> nuuts -> create map field named "data"). Selecting an existing
+     `data.*` leaf column is NOT the same action -- confirmed the console
+     requires an explicit "create map field" step. Once done, ALL nested
+     content under `data` (including `counts`, `before`, `after`, `ms`, etc.
+     sub-objects) is absorbed as ONE field regardless of depth or event
+     variety -- no further per-key mapping needed for those.
+  2. Clean up ~89 still-registered `markedByDocId.<docId>` legacy top-level
+     columns. These survived the first trim/vacuum because those events were
+     still inside the retention window. A later trim to a window starting
+     after the 2026-07-30 ~21:15 UTC deploy (when markedByDocId stopped being
+     logged), followed by a second vacuum, should reclaim them. User said
+     they'll handle this later.
+
+Discussed and explicitly NOT recommended:
+  - Do NOT make `counts` (or `before`/`after`/`ms`) its own separate map
+    field. They're small/bounded (~4-10 fixed keys, not per-entity), and once
+    `data` itself is a map field they're already nested inside it -- covered
+    for free.
+  - Do NOT add a dedicated `entryPoint` field. Would require touching every
+    one of the ~100+ GasLogger.log() call sites for unclear added query value
+    over what `name` (event tag, already a real top-level taxonomy: sync.*,
+    webapp.*, fixture.*, etc.) + `op`/`parentOp` correlation IDs already give.
+    Revisit only if a specific recurring query need surfaces that those can't
+    answer.
+
+-------------------------------------------------------------------------------
+5. HOW TO VERIFY / USEFUL COMMANDS
+-------------------------------------------------------------------------------
+  - Deploy:            pnpm run deploy:test
+  - Tail live GAS logs: clasp logs | tail -50   (see raw ingest 400s here --
+                        Axiom ingest failures are NOT visible via
+                        scripts/query_axiom.py, only via clasp logs, since a
+                        failed ingest never lands in Axiom to be queried)
+  - Query Axiom:        python scripts/query_axiom.py --since 1h --limit 50
+                        python scripts/query_axiom.py --name <tag substring>
+                        python scripts/query_axiom.py --raw /path.json   # full JSON
+  - Fire a fixture manually: python scripts/call_webapp.py run_fixture
+                        --data '{"fixture": "<name>"}'
+  - Bead tracking:      bd show gts-iwa0   (open, tracks the Axiom-console
+                        work above)          bd show gts-pfyx   (closed,
+                        original 257-column incident)
+
+-------------------------------------------------------------------------------
+6. OPEN QUESTIONS TO CONFIRM WITH USER ON RESUME
+-------------------------------------------------------------------------------
+  - Is the (b) code (env + docId/docIds hoisting) still wanted as designed, or
+    does anything need revisiting given time has passed?
+  - Any other top-level-field candidates come to mind since this session
+    (e.g. `eu`/acting-user-email was floated as a lower-priority maybe, not
+    decided either way)?
+  - Ready to deploy (b) to TEST once reviewed?

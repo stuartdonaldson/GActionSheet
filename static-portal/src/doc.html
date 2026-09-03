@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Document actions — NUUC Action Sheet</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  /* Same visual idiom as index.html (View A) — carried over verbatim so the
+     two pages read as one product, not two. See index.html for the design
+     provenance note (docs/team-portal-mockup.html, gts-79dw.4.7). */
+  :root{
+    --bg:#f6f8fb; --panel:#ffffff; --line:#d9e1ec; --text:#1f2937; --muted:#6b7280;
+    --blue:#2563eb; --blue2:#dbeafe; --green:#059669; --green2:#d1fae5; --red:#dc2626;
+    --amber:#d97706; --amber2:#fef3c7; --slate2:#e5e7eb;
+    --shadow:0 8px 28px rgba(15,23,42,.08);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+       background:linear-gradient(180deg,#eef2ff,#f8fafc 180px);color:var(--text)}
+  .page{max-width:980px;margin:0 auto;padding:18px 16px 40px}
+
+  .top{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+       box-shadow:var(--shadow);padding:14px 16px}
+  .title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+  .title h1{font-size:19px;margin:0}
+  .sub{color:var(--muted);font-size:13px;margin-top:3px}
+  .sub a{color:inherit}
+  .who{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .tag{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
+       border:1px solid var(--line);background:#f9fafb;font-size:12px;color:var(--muted)}
+  .tag.edit{background:var(--green2);border-color:#a7f3d0;color:#065f46}
+  .tag.view{background:var(--slate2);border-color:#d1d5db}
+  .email{font-size:12.5px;color:var(--muted)}
+  .linkbtn{border:0;background:none;color:var(--blue);cursor:pointer;font:inherit;padding:0}
+
+  .backrow{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+  .backrow a{color:var(--blue);text-decoration:none}
+
+  .list{margin-top:14px;display:flex;flex-direction:column;gap:14px}
+  .docgroup{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+            box-shadow:0 1px 0 rgba(0,0,0,.02);overflow:hidden}
+  .row{display:flex;gap:12px;align-items:flex-start;padding:11px 14px;border-top:1px solid #eef1f6}
+  .row:first-of-type{border-top:0}
+  .rowmain{flex:1;min-width:0}
+  .action{color:#111827}
+  .rowmeta{color:var(--muted);font-size:12px;margin-top:4px;display:flex;gap:10px;flex-wrap:wrap}
+  .aiN{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:1px}
+
+  .status{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;
+          border:1px solid var(--line);background:#f9fafb;white-space:nowrap;font-size:13px}
+  .controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+
+  .empty{padding:22px 14px;text-align:center;color:var(--muted)}
+  .banner{margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid #fecaca;
+          background:#fef2f2;color:#991b1b;display:none}
+  .banner code{background:#fff;border:1px solid #fecaca;border-radius:6px;padding:1px 5px}
+  .notice{margin-top:14px;padding:16px;border-radius:12px;border:1px solid var(--line);
+          background:#fff;color:var(--muted)}
+  .caveats{margin-top:20px;color:var(--muted);font-size:12.5px;line-height:1.6}
+  .caveats h2{font-size:13px;color:var(--text);margin:0 0 6px}
+  .caveats li{margin:3px 0}
+
+  .signin{display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center;
+           padding:60px 16px}
+  .signin h1{font-size:22px;margin:0}
+  .signin p{color:var(--muted);max-width:480px;margin:0}
+
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;
+         padding:9px 13px;border-radius:999px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s}
+  .toast.show{opacity:1}
+  .hidden{display:none !important}
+  .spinner{display:inline-block;width:13px;height:13px;border:2px solid #d9e1ec;
+           border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .buildbadge{position:fixed;bottom:8px;right:10px;font-size:11px;color:var(--muted);
+              background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:8px;
+              padding:3px 9px;z-index:60;pointer-events:none}
+  .buildbadge.env-sit{color:#92400e;border-color:#fde68a;background:#fffbeb}
+  /* Mismatch state of the version footer, plus the update prompt it raises. GAS-Core
+     best-practices/gas-static-frontend "The static page interface contract" req 1-4. */
+  .buildbadge.stale{color:#991b1b;border-color:#fecaca;background:#fef2f2}
+  .updatebanner{position:fixed;top:0;left:0;right:0;z-index:70;display:none;
+                background:#fffbeb;border-bottom:1px solid #fde68a;color:#92400e;
+                padding:9px 14px;font-size:13px}
+  .updatebanner.show{display:block}
+  .updatebanner .inner{max-width:980px;margin:0 auto;display:flex;gap:10px;align-items:center;
+                       justify-content:center;flex-wrap:wrap}
+  .updatebanner button{border:1px solid #fde68a;background:#fff;color:#92400e;border-radius:8px;
+                       padding:4px 10px;font:inherit;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ Signed-out view ============ -->
+  <div id="signinView" class="top signin">
+    <h1>Document actions</h1>
+    <p>Sign in with the Google account your team lead added to a NUUC team folder.
+       Your identity is verified by NUUC-Dispatch; this page keeps you signed in for up to
+       45 days by saving that verified identity token in your browser's local storage.</p>
+    <div id="g_id_onload"
+         data-client_id="657771271619-8ebgf03k3rp872vlib3ibsktl9sk4ig1.apps.googleusercontent.com"
+         data-callback="onGoogleSignIn"
+         data-auto_select="false">
+    </div>
+    <div class="g_id_signin" data-type="standard" data-shape="pill"></div>
+    <div id="signinError" class="banner" style="max-width:480px"></div>
+  </div>
+
+  <!-- ============ Transitional view: same pattern as index.html (gts-79dw.4.20) ======= -->
+  <div id="launchView" class="top signin hidden">
+    <span class="spinner" style="width:22px;height:22px;border-width:3px"></span>
+    <h1 id="launchMsg">Signing you in…</h1>
+  </div>
+
+  <!-- ============ Signed-in view ============ -->
+  <div id="appView" class="hidden">
+    <div class="top">
+      <div class="title">
+        <div>
+          <h1>Document actions <span id="titleSpinner" class="spinner hidden" style="margin-left:8px;vertical-align:middle"></span></h1>
+          <div class="sub" id="sub">—</div>
+        </div>
+        <div class="who">
+          <span class="email" id="whoEmail"></span>
+          <span class="tag" id="tierTag">—</span>
+          <button class="linkbtn" id="signOutBtn">Sign out</button>
+        </div>
+      </div>
+      <div class="backrow">
+        <a id="backToTeamLink" href="#">&larr; Back to team list</a>
+      </div>
+    </div>
+
+    <div class="banner" id="loadError"></div>
+    <div class="notice hidden" id="noAccessNotice">
+      You don't currently have access to this document's team. If you believe this is wrong,
+      contact your team lead — they add members to the team's shared Drive folder.
+    </div>
+    <div id="listWrap">
+      <div class="list" id="list"></div>
+    </div>
+
+    <div class="caveats">
+      <h2>About this page</h2>
+      <ul>
+        <li>This is a read-only view of one document's actions — the same information the
+          add-on sidebar's document view presents. Editing, status changes, and syncing this
+          document are done from the team list (<strong>Back to team list</strong> above).</li>
+        <li>Sign-in is a real Google identity, verified server-side by NUUC-Dispatch and
+          exchanged for a signed identity assertion scoped to this portal — this page never
+          sees or stores your raw Google credential beyond the sign-in moment. The assertion
+          itself is saved in your browser's local storage for up to 45 days so you aren't
+          re-prompted on every visit; <strong>Sign out</strong> deletes it immediately.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ No ?doc= at all — direct visit / stripped param ============ -->
+  <div id="noDocView" class="top notice hidden">
+    This link doesn't name a document to show. Use a document's AI-N chip link, or
+    <a href="index.html">go to your team list</a> instead.
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+<!-- Raised only when this published page's build differs from the version the WebApp
+     reports on a response the page already makes (interface contract req 3). -->
+<div class="updatebanner" id="updateBanner">
+  <div class="inner">
+    <span id="updateBannerMsg"></span>
+    <button type="button" id="updateReloadBtn">Reload</button>
+    <button type="button" id="updateDismissBtn">Not now</button>
+  </div>
+</div>
+<div class="buildbadge" id="buildBadge"></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Build-time stamps (gts-79dw.4.25 pattern, extended to this page by
+// gts-79dw.4.23/Unit D) — stamped by scripts/build-static-portal.js from
+// src/Version.js's BUILD_INFO immediately before publish, identically to
+// index.html. Left null here in the unbuilt source.
+var STATIC_BUILD_VERSION_ = null;
+var STATIC_WEBAPP_URL_ = null;
+var STATIC_ENV_LABEL_ = null;
+
+const NUUC_DISPATCH_URL = 'https://script.google.com/macros/s/AKfycbwmoOPRDThQWDzMPU5H-6aVzvnprYbIL8yjbhLX3wBbi89ZY7cRLc2_yoYUK1H8LcX3/exec';
+const GACTIONSHEET_URL  = STATIC_WEBAPP_URL_;
+const ASSERTION_AUD = 'gactionsheet';
+
+// ---- version footer + stale-client prompt -------------------------------
+// GAS-Core best-practices/gas-static-frontend, "The static page interface contract"
+// (requirements 1-6); F3Go30's static-pages/src/index.html is the reference
+// implementation. This published page and the WebApp it calls deploy together --
+// gas-static's assertPublishedBuild closes the publish window -- but they can still
+// diverge afterwards: a CDN edge serving the previous page, a visitor holding a cached
+// document, a backend later rolled back. These requirements close the RUNTIME window by
+// making the page itself say which halves are actually running.
+const UPDATE_DISMISS_KEY_ = 'nuucAsUpdateDismissed';
+const $buildBadge_ = document.getElementById('buildBadge');
+const $updateBanner_ = document.getElementById('updateBanner');
+let serverVersion_ = null;
+
+// req 5: a null client build is unbuilt src/ served directly (local dev, Playwright).
+// It has no build to be behind, so that is never staleness.
+function isUpdateAvailable_(clientBuild, serverVersion){
+  return !!(clientBuild && serverVersion && clientBuild !== serverVersion);
+}
+
+// req 3: the CLIENT build is always shown first, because the version someone reads back
+// off this footer during support has to be the one their document is actually running.
+// The server's version is named alongside it only when the two differ -- never instead.
+function formatVersionFooter_(clientBuild, serverVersion){
+  const env = STATIC_ENV_LABEL_ ? STATIC_ENV_LABEL_ + ' \u00b7 ' : '';
+  if (isUpdateAvailable_(clientBuild, serverVersion)) {
+    return env + 'v' + clientBuild + ' (build) \u00b7 server v' + serverVersion;
+  }
+  if (clientBuild) return env + 'v' + clientBuild + ' (build)';
+  if (serverVersion) return env + 'v' + serverVersion + ' (server)';
+  return env + 'unbuilt source';
+}
+
+function dismissedUpdate_(){
+  try { return localStorage.getItem(UPDATE_DISMISS_KEY_); } catch (e) { return null; }
+}
+
+// Repaints the footer and raises/clears the update prompt. Called once at load with no
+// server version yet -- req 1: the footer is populated BEFORE any network call, so a page
+// that cannot reach its backend still shows what it is -- then again from postJson on
+// every backend response that carries one.
+function applyVersionState_(clientBuild, serverVersion){
+  const stale = isUpdateAvailable_(clientBuild, serverVersion);
+  $buildBadge_.textContent = formatVersionFooter_(clientBuild, serverVersion);
+  $buildBadge_.classList.toggle('env-sit', STATIC_ENV_LABEL_ === 'SIT' && !stale);
+  $buildBadge_.classList.toggle('stale', stale);
+  // req 4: dismissal is keyed to the version dismissed, not a boolean. A boolean would
+  // silence every future mismatch; a version key means the next one prompts again.
+  const show = stale && dismissedUpdate_() !== String(serverVersion);
+  if (show) {
+    document.getElementById('updateBannerMsg').textContent =
+      'This page is running v' + clientBuild + ' but the server is on v' + serverVersion +
+      '. Reload to pick up the current version.';
+  }
+  $updateBanner_.classList.toggle('show', show);
+}
+
+document.getElementById('updateReloadBtn').addEventListener('click', () => location.reload());
+document.getElementById('updateDismissBtn').addEventListener('click', () => {
+  try { localStorage.setItem(UPDATE_DISMISS_KEY_, String(serverVersion_)); }
+  catch (e) { /* not fatal -- worst case the prompt returns on the next response */ }
+  $updateBanner_.classList.remove('show');
+});
+
+// req 2: the server's version rides a response the page already makes, never a dedicated
+// call -- src/WebApp.js's _jsonResponse stamps `serverVersion` on EVERY JSON response, so
+// hooking postJson covers every route this page will ever call.
+function noteServerVersion_(res){
+  if (res && res.serverVersion && res.serverVersion !== serverVersion_) {
+    serverVersion_ = res.serverVersion;
+    applyVersionState_(STATIC_BUILD_VERSION_, serverVersion_);
+  }
+  return res;
+}
+
+applyVersionState_(STATIC_BUILD_VERSION_, null);
+
+const state = {
+  idToken: null, assertion: null, sub: '', email: '',
+  docId: null, teamId: null, tier: 'NONE',
+  docName: '', docUrl: '', teamPortalUrl: '',
+  actions: [],
+  busy: false
+};
+
+const $ = (id) => document.getElementById(id);
+const listEl = $('list'), toastEl = $('toast');
+
+// ---- query-string routing (gts-79dw.4.23, View B) ----------------------
+// ?doc=<docId>&team=<teamId> is the chip-link CTA shape (src/WebApp.js's
+// _handlePreviewNotice) and is also what index.html now redirects here for
+// any ?doc= it sees (gts-79dw.4.24 superseded its own docViewNotice
+// placeholder with this redirect once View B existed). teamId here is
+// initial-context only — the server re-resolves tier itself from docId on
+// every get_document_actions call (R8); it is never trusted client-side.
+const QUERY_PARAMS = new URLSearchParams(location.search);
+state.docId = QUERY_PARAMS.get('doc') || null;
+state.teamId = QUERY_PARAMS.get('team') || null;
+
+// ---- auth caching (identical convention to index.html — ADR-0003,
+// NUUC-Dispatch: 45-day assertion TTL) -------------------------------------
+const AUTH_STORAGE_KEY = 'nuucAsAuth.v1';
+const AUTH_RENEW_SKEW_SECONDS = 300;
+
+function _decodeJwtPayload(jwt){
+  try { return JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); }
+  catch (e) { return null; }
+}
+
+function saveCachedAuth(){
+  const payload = _decodeJwtPayload(state.assertion);
+  if (!payload || typeof payload.exp !== 'number') return;
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
+    assertion: state.assertion, exp: payload.exp, sub: state.sub, email: state.email
+  }));
+}
+
+function clearCachedAuth(){
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+}
+
+function loadCachedAuth(){
+  let cached;
+  try { cached = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || 'null'); }
+  catch (e) { return null; }
+  if (!cached || typeof cached.exp !== 'number') return null;
+  if (Math.floor(Date.now() / 1000) >= cached.exp - AUTH_RENEW_SKEW_SECONDS) return null;
+  return cached;
+}
+
+function toast(msg){ toastEl.textContent = msg; toastEl.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(()=>toastEl.classList.remove('show'), 2200); }
+
+const escape = (s) => String(s==null?'':s).replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const shortDate = (iso) => iso ? new Date(iso).toLocaleDateString([], {month:'short', day:'numeric'}) : '';
+
+// ---- transport (identical convention to index.html's postJson) --------
+function postJson(url, payload){
+  // req 6: every request to OUR backend carries the client build, so a stale client
+  // surfaces in the WebApp's logs (webapp.version.mismatch) instead of only in a support
+  // call. NUUC_DISPATCH_URL is a different project's backend and is not stamped.
+  const body = (url === GACTIONSHEET_URL)
+    ? Object.assign({ clientVersion: STATIC_BUILD_VERSION_ }, payload)
+    : payload;
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(body)
+  }).then(r => r.text()).then(text => {
+    try { return noteServerVersion_(JSON.parse(text)); }
+    catch (e) {
+      throw new Error('Non-JSON response from ' + url + ' — the deployment may be mid-propagation: ' +
+        text.slice(0, 200));
+    }
+  });
+}
+
+function showLaunch(msg){
+  $('signinView').classList.add('hidden');
+  $('appView').classList.add('hidden');
+  $('launchMsg').textContent = msg;
+  $('launchView').classList.remove('hidden');
+}
+function showAppShell(subMsg){
+  $('launchView').classList.add('hidden');
+  $('signinView').classList.add('hidden');
+  $('appView').classList.remove('hidden');
+  $('whoEmail').textContent = state.email;
+  $('sub').textContent = subMsg || ('Signed in as ' + state.email + ' — loading this document…');
+}
+
+// ---- sign-in (identical flow to index.html — reused, not reimplemented) -
+function onGoogleSignIn(credentialResponse){
+  state.idToken = credentialResponse.credential;
+  $('signinError').style.display = 'none';
+  showLaunch('Signing you in…');
+
+  postJson(NUUC_DISPATCH_URL, { action: 'verify_identity', idToken: state.idToken, aud: ASSERTION_AUD })
+    .then(res => {
+      if (!res.verified || !res.assertion) {
+        throw new Error('Google verified your sign-in, but NUUC-Dispatch could not issue an ' +
+          'identity assertion for this portal (' + (res.error || 'not verified') + ').');
+      }
+      state.assertion = res.assertion;
+      state.sub = res.sub; state.email = res.email;
+      saveCachedAuth();
+      showAppShell();
+      return loadDocument();
+    })
+    .catch(err => {
+      $('launchView').classList.add('hidden');
+      $('signinView').classList.remove('hidden');
+      $('signinError').style.display = 'block';
+      $('signinError').textContent = err.message || String(err);
+    });
+}
+
+function signOut(){
+  state.idToken = null; state.assertion = null; state.sub = ''; state.email = '';
+  state.tier = 'NONE'; state.actions = [];
+  clearCachedAuth();
+  $('appView').classList.add('hidden');
+  $('launchView').classList.add('hidden');
+  $('signinView').classList.remove('hidden');
+  if (window.google && google.accounts && google.accounts.id) {
+    google.accounts.id.disableAutoSelect();
+  }
+}
+$('signOutBtn').addEventListener('click', signOut);
+
+// ---- document load (R19/R20, gts-79dw.4.23) -----------------------------
+// Mirrors index.html's loadTeams()/refreshActions() shape: setBusy() drives
+// the title-line spinner, errors surface via #loadError, never throws.
+function loadDocument(){
+  if (!state.docId) return Promise.resolve();
+  setBusy(true);
+  $('loadError').style.display = 'none';
+
+  return postJson(GACTIONSHEET_URL, {
+    action: 'get_document_actions', assertion: state.assertion, docId: state.docId
+  })
+    .then(res => {
+      state.tier = res.tier || 'NONE';
+      state.teamId = res.teamId || state.teamId;
+      state.docName = res.docName || '';
+      state.docUrl = res.docUrl || '';
+      state.teamPortalUrl = res.teamPortalUrl || '';
+      state.actions = res.actions || [];
+      render();
+    })
+    .catch(err => {
+      $('loadError').style.display = 'block';
+      $('loadError').textContent = 'Could not load this document: ' + (err.message || err);
+    })
+    .finally(() => setBusy(false));
+}
+
+function setBusy(b){
+  state.busy = b;
+  $('titleSpinner').classList.toggle('hidden', !b);
+}
+
+// ---- render (read-only — R19: sidebar-parity fields only, no per-row
+// write controls; see gts-79dw.4.13's operation-parity reconciliation for
+// what's deliberately absent and why) --------------------------------------
+function render(){
+  $('sub').innerHTML = state.docName
+    ? ('<a href="' + escape(state.docUrl) + '" target="_blank" rel="noopener">' + escape(state.docName) + '</a> • signed in')
+    : 'signed in';
+  $('tierTag').textContent = state.tier === 'EDIT' ? 'EDIT'
+                            : state.tier === 'VIEW' ? 'VIEW — read only' : 'NONE';
+  $('tierTag').className = 'tag ' + state.tier.toLowerCase();
+
+  const backLink = state.teamPortalUrl || ('index.html' + (state.teamId ? ('?team=' + encodeURIComponent(state.teamId)) : ''));
+  $('backToTeamLink').setAttribute('href', backLink);
+
+  if (state.tier === 'NONE') {
+    $('noAccessNotice').classList.remove('hidden');
+    $('listWrap').classList.add('hidden');
+    return;
+  }
+  $('noAccessNotice').classList.add('hidden');
+  $('listWrap').classList.remove('hidden');
+
+  listEl.innerHTML = '';
+  if (!state.actions.length){
+    listEl.innerHTML = `<div class="docgroup"><div class="empty">No actions found in this document.</div></div>`;
+    return;
+  }
+
+  const group = document.createElement('div');
+  group.className = 'docgroup';
+  group.innerHTML = state.actions.map(rowHtml).join('');
+  listEl.appendChild(group);
+}
+
+// Sidebar-parity fields only — get_document_actions reuses
+// _findSheetActionsForDoc's raw SheetAction shape verbatim (global_id,
+// action_id, assignee_email, assignee_name, action_text, status, doc_id,
+// doc_name, created_date, modified_date, sync_status), NOT the
+// list_team_actions-enriched shape (status_bucket/status_icon/
+// status_resolved) — those fields are not present here, so the status is
+// rendered as plain text, no icon/bucket styling (plan-context.md, Unit D).
+function rowHtml(r){
+  return `
+    <div class="row">
+      <div class="aiN">${escape(r.action_id || '')}</div>
+      <div class="rowmain">
+        <div class="action">${escape(r.action_text)}</div>
+        <div class="rowmeta">
+          <span>${escape(r.assignee_name || r.assignee_email || 'Unassigned')}</span>
+          <span>updated ${shortDate(r.modified_date)}</span>
+          ${r.sync_status ? `<span>sync: ${escape(r.sync_status)}</span>` : ''}
+        </div>
+      </div>
+      <div class="controls">
+        <span class="status">${escape(r.status || '—')}</span>
+      </div>
+    </div>`;
+}
+
+// ---- resume a cached session (identical convention to index.html) -------
+(function initAuth(){
+  if (!state.docId) {
+    $('signinView').classList.add('hidden');
+    $('noDocView').classList.remove('hidden');
+    return;
+  }
+  const cached = loadCachedAuth();
+  if (!cached) return;
+  state.assertion = cached.assertion; state.sub = cached.sub; state.email = cached.email;
+  showAppShell('Resuming your session — signed in as ' + cached.email + '…');
+  loadDocument();
+})();
+</script>
+</body>
+</html>

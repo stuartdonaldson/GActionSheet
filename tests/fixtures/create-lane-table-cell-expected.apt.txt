@@ -1,0 +1,20 @@
+<!-- kind: golden -->
+<!-- name: create-lane-table-cell-expected -->
+<!-- serves: gts-pi1s -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Case (gts-pi1s, @create inside a body table cell): a bare AI: trigger inside a table cell -- exercises _buildFlushRequests' nested table-cell occurrence search (_collectFlushOccurrences' item.table branch), the non-append path decodeAptIntoDoc's own append-only mechanism never reaches.
+
+<TABLE rows=1 cols=2>
+
+<CELL 0,0>
+
+ACT-231: filler@example.com table filler cell (Open)
+
+<CELL 0,1>
+
+[**ACT-999: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-999)create lane table token (Open)
+
+</TABLE>
+
+<EMPTY>

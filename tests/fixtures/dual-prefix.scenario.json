@@ -1,0 +1,12 @@
+{
+  "name": "dual-prefix",
+  "input": "dual-prefix",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "dual-prefix-expected",
+  "serves": [
+    "gts-nrxn"
+  ],
+  "batch": "apt-corpus-batch"
+}

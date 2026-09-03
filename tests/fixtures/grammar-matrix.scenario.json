@@ -1,0 +1,12 @@
+{
+  "name": "grammar-matrix",
+  "input": "grammar-matrix",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "grammar-matrix-expected",
+  "serves": [
+    "gts-ucdz"
+  ],
+  "batch": "apt-corpus-batch"
+}

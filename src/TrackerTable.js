@@ -46,7 +46,8 @@ function insertTrackerTable(docId, options) {
   var onlyIfExists = options && options.onlyIfExists;
 
   try {
-    var doc             = DocumentApp.openById(docId);
+    var doc             = withGasRetry('TrackerTable.insertTrackerTable:DocumentApp.openById',
+      function () { return DocumentApp.openById(docId); });
     var floatingActions = _scanFloatingActions(doc);
 
     var ss        = _openActionSheetSpreadsheet();
@@ -102,7 +103,8 @@ function _openActionSheetSpreadsheet() {
     throw new Error('ActionSheet spreadsheet is unavailable in this context');
   }
 
-  return SpreadsheetApp.openById(spreadsheetId);
+  return withGasRetry('TrackerTable._openActionSheetSpreadsheet:SpreadsheetApp.openById',
+    function () { return SpreadsheetApp.openById(spreadsheetId); });
 }
 
 // ---------------------------------------------------------------------------
@@ -118,14 +120,42 @@ function _openActionSheetSpreadsheet() {
  * @returns {Object}
  */
 function _readTrackerSheetRows(ss, docId) {
+  // gts-5kyu Stage 1: routed through the per-execution snapshot so N calls to
+  // insertTrackerTable() inside one execution (EditorAddonCard.js's
+  // _processPendingSheetUpdates tracker-refresh loop, the AC0-measured O(N)
+  // case) pay ONE Actions-sheet read total, not one pair per doc. Falls back
+  // to the original inline read (below) if the snapshot builder ever throws
+  // -- this optimization must never be why a sync fails.
+  var snap = _actionsSnapshot(ss);
+  if (!snap) return _readTrackerSheetRowsInline(ss, docId);
+  if (snap.numRows === 0) return {};
+
+  return _extractTrackerSheetRows(snap.data, snap.formulas, docId);
+}
+
+/** Original inline read, kept as the fallback path when the snapshot errors. */
+function _readTrackerSheetRowsInline(ss, docId) {
   var sheet = ss.getSheetByName('Actions');
   if (!sheet || sheet.getLastRow() < 2) return {};
 
   var numRows  = sheet.getLastRow() - 1;
   var data     = sheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
+  _countActionsRead('getValues');
   var _TC      = CONTRACT_SCHEMA.sheetAction.columnsByField;
   var formulas = sheet.getRange(2, _TC.document_formula, numRows, 1).getFormulas();
-  var result   = {};
+  _countActionsRead('getFormulas');
+
+  return _extractTrackerSheetRows(data, formulas, docId);
+}
+
+/**
+ * Shared per-row extraction, unchanged from the pre-gts-5kyu implementation
+ * (AC3: byte-identical output) -- only WHERE data/formulas come from moved,
+ * never HOW they are turned into the result.
+ */
+function _extractTrackerSheetRows(data, formulas, docId) {
+  var _TC    = CONTRACT_SCHEMA.sheetAction.columnsByField;
+  var result = {};
 
   for (var i = 0; i < data.length; i++) {
     var formula = formulas[i][0] || '';
@@ -133,8 +163,13 @@ function _readTrackerSheetRows(ss, docId) {
     var globalId = data[i][_TC.global_id - 1];
     if (!globalId) continue;
     result[globalId] = {
-      id:     data[i][_TC.action_id - 1],
-      status: data[i][_TC.status    - 1] || 'Open'
+      id:     data[i][_TC.action_id   - 1],
+      status: data[i][_TC.status      - 1] || 'Open',
+      // Action text is read for the same reason status is (gts-m2gf): the
+      // sheet is the up-to-date side for a sheet-originated edit, and the
+      // document re-read that _buildTrackerDataRows otherwise relies on can be
+      // stale immediately after a REST flush.
+      action: data[i][_TC.action_text - 1] || ''
     };
   }
 
@@ -161,7 +196,16 @@ function _buildTrackerDataRows(floatingActions, sheetRows) {
       globalId:      fa.globalId || '',
       assigneeEmail: fa.assigneeEmail || '',
       assigneeName:  fa.assigneeName  || '',
-      action:        fa.actionText    || '',
+      // Sheet-first, document as fallback — the same precedence `status` uses
+      // on the next line, and for the same reason (gts-m2gf). Taking the text
+      // from the document scan alone made the tracker depend on a
+      // DocumentApp.openById read that is stale right after _flushActionParagraph
+      // writes via the Docs REST API: desired rows came back equal to the
+      // already-rendered rows, _trackerRowsMatch returned true, and the refresh
+      // skipped. By the time the tracker is rebuilt the sheet is current in BOTH
+      // directions — sheet-wins flushed to the doc, or doc-wins already written
+      // back to the sheet — so it is the safer authority for the text.
+      action:        sheet.action || fa.actionText || '',
       status:        sheet.status || fa.status || 'Open'
     });
   }
@@ -185,7 +229,13 @@ function _trackerRowsMatch(renderedRows, desiredRows) {
     var rendered = renderedRows[i];
     var desired  = desiredRows[i];
     if (String(rendered.id || '') !== String(desired.id || '')) return false;
-    if ((rendered.action || '') !== (desired.action || '')) return false;
+    // Compare action text through _normalizeLineEndings: action text may now
+    // carry soft-return line breaks (gts-dou2/dr8j), and the rendered cell
+    // text read back via getText() need not spell that break the same way the
+    // desired string does. Comparing raw would report a spurious mismatch and
+    // re-render the whole tracker on every single sync.
+    if (_normalizeLineEndings(rendered.action || '') !==
+        _normalizeLineEndings(desired.action || '')) return false;
     if ((rendered.status || 'Open') !== (desired.status || 'Open')) return false;
   }
   return true;
@@ -302,6 +352,17 @@ function _insertTrackerSection(doc, dataRows, insertIndex, headingKept) {
   }
 
   // Build 2D cells array: header row + one data row per action
+  // gts-zocq rendering decision (per-surface, documented not silent): the
+  // tracker table is built via body.appendTable/insertTable(cells), which
+  // only accepts plain strings — there is no per-run-formatting path through
+  // this API short of inserting each cell's paragraph content manually and
+  // re-applying updateTextStyle-equivalent DocumentApp calls per run, a much
+  // larger change than this session's scope. DECISION: inline bold/italic is
+  // DELIBERATELY FLATTENED in the tracker table; the table remains a plain-
+  // text summary view. The Actions sheet (RichTextValue) and the source doc's
+  // own floating-action paragraph (flush-preserved) remain the two surfaces
+  // where formatting is authoritative and visible. Not filed as a gap bead —
+  // no user report has asked for tracker-table formatting fidelity.
   var cells = [_TRACKER_COL_HEADERS.slice()];
   for (var i = 0; i < dataRows.length; i++) {
     cells.push([

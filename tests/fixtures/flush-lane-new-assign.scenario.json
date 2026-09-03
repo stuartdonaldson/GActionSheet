@@ -1,0 +1,12 @@
+{
+  "name": "flush-lane-new-assign",
+  "input": "flush-lane-new-assign",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "flush-lane-new-assign-expected",
+  "serves": [
+    "gts-iz9i"
+  ],
+  "batch": "apt-lanes-flush"
+}

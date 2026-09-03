@@ -47,18 +47,33 @@ def _backend() -> str:
 # Axiom backend
 # ---------------------------------------------------------------------------
 
-def _axiom_query(after: float, limit: int = 500) -> list[dict]:
+def _axiom_query(after: float, limit: int = 500, order: str = "asc") -> list[dict]:
     """Query the configured Axiom dataset for GAS-side entries since `after`
     (epoch seconds). Returns entries reshaped to {ts, tag, version, op,
     parentOp, data} -- the same shape NDJSON entries always had -- so
     match_fn predicates written against file-backend entries work unchanged.
+
+    `order` ("asc" or "desc") controls which end of a since-`after` window
+    that exceeds `limit` rows gets cut off (gts-9a1m root cause). The
+    since-`after` window itself is never re-derived here -- callers that
+    need earliest-unseen-first semantics (the fail-fast error scanner, which
+    must advance its fence one error at a time without skipping any) keep
+    the "asc" default; a busy shared TEST environment can easily log >500
+    gas-side events within a single wait's fence window (confirmed via
+    `python scripts/query_axiom.py --side gas --since 5m`: ~44 events in 5
+    quiet minutes, far more under concurrent live-suite load), so an
+    ascending scan can get permanently stuck returning the same oldest
+    `limit` rows every poll and never reach a just-logged event -- see
+    `_scan_logs_axiom`/`_wait_for_log_axiom` below, which pass "desc"
+    instead: they only need to know whether a match exists *recently*, so
+    newest-first is the correct trade-off for them.
     """
     s = _settings()
     dataset = s["axiomDataset"]
     token = s["axiomQueryToken"]
     start = datetime.fromtimestamp(after, tz=timezone.utc)
     now = datetime.now(timezone.utc)
-    apl = f"['{dataset}'] | where side == 'gas' | order by _time asc | limit {limit}"
+    apl = f"['{dataset}'] | where side == 'gas' | order by _time {order} | limit {limit}"
     body = {
         "apl": apl,
         "startTime": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -78,15 +93,34 @@ def _axiom_query(after: float, limit: int = 500) -> list[dict]:
 
     entries = []
     for m in result.get("matches", []):
-        data = dict(m.get("data", {}))
-        tag = data.pop("name", None)
+        raw = dict(m.get("data", {}))
+        tag = raw.pop("name", None)
+        version = raw.pop("version", None)
+        op = raw.pop("op", None)
+        parentOp = raw.pop("parentOp", None)
+        # GasLogger.js nests each event's payload under one 'data' field
+        # (gts-iwa0) -- Axiom returns it back out as a real nested dict here
+        # (dotted leaf columns re-nest automatically). A handful of fields
+        # (docId/docIds/eu/env) are hoisted to real top-level columns instead
+        # of living in that nested payload; merge them back in so match_fn
+        # predicates written against the pre-nesting flat shape still work.
+        # Everything else left in `raw` is dataset schema noise (side, app,
+        # and null-padded legacy/unrelated columns from other event shapes,
+        # e.g. a stale top-level 'count' from before the nesting change) --
+        # deliberately dropped rather than merged, since it would collide
+        # with and shadow same-named real fields inside the nested payload.
+        payload = dict(raw.pop("data", None) or {})
+        for k in ("docId", "docIds", "eu", "env"):
+            v = raw.get(k)
+            if v is not None:
+                payload[k] = v
         entries.append({
             "ts": m.get("_time"),
             "tag": tag,
-            "version": data.pop("version", None),
-            "op": data.pop("op", None),
-            "parentOp": data.pop("parentOp", None),
-            "data": {k: v for k, v in data.items() if k != "side"},
+            "version": version,
+            "op": op,
+            "parentOp": parentOp,
+            "data": payload,
         })
     return entries
 
@@ -108,7 +142,10 @@ def _post_axiom_probe(sentinel: str, timeout: int = 30) -> None:
 
 
 def _scan_logs_axiom(match_fn, after: float = 0.0):
-    for entry in _axiom_query(after):
+    # "desc" -- see _axiom_query's docstring (gts-9a1m): existence-of-a-
+    # recent-match scans must not get starved by older backlog under the
+    # shared limit.
+    for entry in _axiom_query(after, order="desc"):
         if match_fn(entry):
             return entry
     return None
@@ -289,6 +326,36 @@ def assert_log(log_dir: str | None, fence: float, match_fn, what: str) -> None:
     if _backend() == "file" and log_dir is None:
         return
     wait_for_log(log_dir, match_fn, timeout_s=60, after=fence)
+
+
+def matches_op(match_fn, op_id: str):
+    """Wrap match_fn to additionally require the entry's `parentOp` equals
+    op_id (gts-obry.1): scopes a batching-count assertion (e.g. "exactly ONE
+    sync.driveMetadata.fetched for this sweep") to log entries chained from
+    THIS call's own opId, instead of any entry matching the bare tag within
+    the fence's timestamp window.
+
+    Why this exists: a raw tag+timestamp fence match can't distinguish this
+    test's own syncAll() sweep from an unrelated one landing in the same
+    window -- the account's installed 30-min syncAll trigger (TriggerManager.js)
+    or a second concurrent test/session both log the identical tag. Two prior
+    incidents (gts-li3g's confirmed same-doc race; gts-moy1.2's observed
+    docCount=66 spontaneous sweep mid-test) both point at that same trigger as
+    a live source of exactly this kind of false "N events instead of 1"
+    failure. Correlating by parentOp removes the ambiguity: every GasLogger.log
+    call made during one doPost execution shares the SAME parentOp (stamped
+    from GasLogger.startOp(payload.opId), see src/GasLogger.js), so a caller
+    that passes its own opId through `_post_fixture`/`_post_route`'s `extra`
+    dict can filter collect_logs/wait_for_log down to only the entries its own
+    call produced -- concurrent unrelated activity (from the trigger or another
+    session) carries a different parentOp and is excluded.
+
+    Usage:
+        op_id = str(uuid.uuid4())
+        scn._post_fixture("sync_all", extra={"opId": op_id})
+        events = collect_logs(gas_log_dir, matches_op(lambda e: e.get("tag") == "sync.foo", op_id), after=fence)
+    """
+    return lambda e: match_fn(e) and e.get("parentOp") == op_id
 
 
 def assert_no_log(log_dir: str | None, fence: float, match_fn, what: str) -> None:

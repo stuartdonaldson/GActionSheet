@@ -166,8 +166,20 @@ _SIDEBAR_INSERT_TRACKER = (
 )
 # Sidebar homepage card — per-row Delete action button
 _SIDEBAR_DELETE = '[aria-label="Delete action"]'
-# Sidebar homepage card — BUILD_INFO.version footer (e.g. "v0.2.1 (Rev. Jun 9, 2026 22:06) (TEST)")
-_VERSION_FOOTER_RE = re.compile(r"v\d+\.\d+\.\d+\s*\(Rev\.[^)]*\)(?:\s*\([A-Za-z]+\))?")
+# Sidebar homepage card — BUILD_INFO.version footer. Three shapes are accepted because the
+# deploy pipeline moved onto GAS-Core's gas-deploy package (RECOMMENDATION.md Stage 3), then
+# dropped the leading "v" entirely with the gas-static conversion (GAS-Core-rgh — see
+# tests/test_sidebar.py::test_sidebar_shell_controls's matching comment/regex):
+#   current: "0.2.3.65"                                 — bare semver + build counter, no "v"
+#   prior:   "v0.2.2.7"                                  — semver + build counter (#6), "v"-prefixed
+#   legacy:  "v0.2.1 (Rev. Jun 9, 2026 22:06) (TEST)"   — pre-package stamp format
+# The leading "v" is optional (gts-34fb: read_version()'s locator never matched a bare-stamped
+# footer, since this regex previously required "v" — every call timed out deterministically,
+# not flakily, once the stamp format dropped it) so a session against any deployment generation
+# still reads its version.
+_VERSION_FOOTER_RE = re.compile(
+    r"v?\d+\.\d+\.\d+(?:\.\d+|\s*\(Rev\.[^)]*\)(?:\s*\([A-Za-z]+\))?)?"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +279,11 @@ class UiDriver:
         from scn.reporter import NullReporter
         self.reporter = NullReporter()
         self._session = None
+        # gts-lirp instrumentation: fence captured by show_tab() immediately
+        # before its click, consumed by read_import_list() to distinguish "no
+        # server round trip happened" from "round trip happened but the DOM
+        # read raced a stale render" the next time the Import-tab flake fires.
+        self._last_show_tab_fence: float | None = None
 
     def _post_act_check(self) -> None:
         """Run the session's fail-fast GAS-error scan after a UI entry-point act."""
@@ -349,6 +366,23 @@ class UiDriver:
         """
         self._page.reload()
         self._page.wait_for_selector(".docs-title-outer", timeout=30000)
+
+    def _wait_card_body_populated(self, card_frame: _PwFrameLocator, timeout_ms: int) -> None:
+        """Wait until the card iframe body is visible AND has rendered text.
+
+        GTaskSheet-4d50: a stale or mid-render card iframe body can satisfy
+        state="visible" before its content has actually painted (dismissed
+        card's frame lingering, or the replacement card's content not yet
+        flushed) — polling callers that treat "visible" alone as "ready"
+        return a card whose body reads as empty. Require non-empty text too.
+        """
+        body = card_frame.locator(_CARD_BODY).first
+        body.wait_for(state="visible", timeout=timeout_ms)
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        while not body.inner_text().strip():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("card body visible but empty")
+            time.sleep(0.1)
 
     # ------------------------------------------------------------------
     # locate — builds a Playwright locator (lazy, no DOM touch)
@@ -455,9 +489,7 @@ class UiDriver:
         last_err: Exception | None = None
         while time.monotonic() < deadline:
             try:
-                card_frame.locator(_CARD_BODY).first.wait_for(
-                    state="visible", timeout=1000
-                )
+                self._wait_card_body_populated(card_frame, 1000)
                 card = Card(card_frame)
                 self._current_card = card
                 return card
@@ -540,7 +572,7 @@ class UiDriver:
         _place_cursor_on_link()
         while time.monotonic() < deadline:
             try:
-                card_frame.locator(_CARD_BODY).first.wait_for(state="visible", timeout=8000)
+                self._wait_card_body_populated(card_frame, 8000)
                 card = Card(card_frame)
                 self._current_card = card
                 return card
@@ -985,6 +1017,18 @@ class UiDriver:
                 has_text=re.compile(rf"^{re.escape(label)}$")
             )
             tab_btn.wait_for(state="visible", timeout=ms)
+
+            # gts-lirp: fence the GAS-side log stream immediately before the
+            # click so read_import_list() can later confirm a fresh server
+            # round trip actually happened, instead of trusting DOM state
+            # alone. Best-effort — never let instrumentation itself break an
+            # otherwise-passing show_tab() call.
+            try:
+                from tests.helpers.gas_log import clear_logs
+                self._last_show_tab_fence = clear_logs(None)
+            except Exception:
+                self._last_show_tab_fence = None
+
             tab_btn.click()
 
             busy = self._current_card.frame.locator(_BUSY)
@@ -1009,11 +1053,48 @@ class UiDriver:
         Returns [{doc_name, doc_url, actions: [{label, global_id, n}]}] in
         render order (groups by doc_name ASC, actions by AI-N ASC — already
         sorted by the card builder). Returns [] if no group headers are
-        rendered (empty-list / error placeholder text).
+        rendered (empty-list / error placeholder text) AND the GAS-side log
+        stream confirms that's a legitimate result (gts-lirp instrumentation,
+        see _diagnose_empty_import_list) — raises instead if the log stream
+        contradicts an empty DOM read, rather than silently returning a
+        possibly-wrong [] the way this method used to.
         """
         if self._current_card is None:
             return []
         frame = self._current_card.frame
+
+        def _parse() -> tuple[list[str], dict[str, dict]]:
+            doc_order: list[str] = []
+            doc_info: dict[str, dict] = {}
+            links = frame.locator('a[href*="/document/d/"]')
+            for i in range(links.count()):
+                link = links.nth(i)
+                href = link.get_attribute("href") or ""
+                m = re.search(r"/document/d/([^/&]+)", href)
+                if not m:
+                    continue
+                doc_id = m.group(1)
+                if doc_id not in doc_info:
+                    doc_info[doc_id] = {
+                        "doc_name": (link.text_content() or "").strip(),
+                        "doc_url": f"https://docs.google.com/document/d/{doc_id}/edit",
+                        "actions": [],
+                    }
+                    doc_order.append(doc_id)
+
+            items = frame.locator('input[type="checkbox"][value*="/AI-"]')
+            for j in range(items.count()):
+                item = items.nth(j)
+                value = item.get_attribute("value") or ""
+                m = re.match(r"(.+)/AI-(\d+)$", value)
+                if not m:
+                    continue
+                doc_id, n = m.group(1), int(m.group(2))
+                if doc_id not in doc_info:
+                    continue
+                label_text = (item.get_attribute("aria-label") or "").strip()
+                doc_info[doc_id]["actions"].append({"label": label_text, "global_id": value, "n": n})
+            return doc_order, doc_info
 
         # The Import card render (onShowImport/onImportSelectAll) is a server
         # round trip; poll briefly for the rendered result (link, checklist
@@ -1030,38 +1111,73 @@ class UiDriver:
                 break
             time.sleep(0.5)
 
-        doc_order: list[str] = []
-        doc_info: dict[str, dict] = {}
-        links = frame.locator('a[href*="/document/d/"]')
-        for i in range(links.count()):
-            link = links.nth(i)
-            href = link.get_attribute("href") or ""
-            m = re.search(r"/document/d/([^/&]+)", href)
-            if not m:
-                continue
-            doc_id = m.group(1)
-            if doc_id not in doc_info:
-                doc_info[doc_id] = {
-                    "doc_name": (link.text_content() or "").strip(),
-                    "doc_url": f"https://docs.google.com/document/d/{doc_id}/edit",
-                    "actions": [],
-                }
-                doc_order.append(doc_id)
+        doc_order, doc_info = _parse()
 
-        items = frame.locator('input[type="checkbox"][value*="/AI-"]')
-        for j in range(items.count()):
-            item = items.nth(j)
-            value = item.get_attribute("value") or ""
-            m = re.match(r"(.+)/AI-(\d+)$", value)
-            if not m:
-                continue
-            doc_id, n = m.group(1), int(m.group(2))
-            if doc_id not in doc_info:
-                continue
-            label_text = (item.get_attribute("aria-label") or "").strip()
-            doc_info[doc_id]["actions"].append({"label": label_text, "global_id": value, "n": n})
+        if not doc_order and self._last_show_tab_fence is not None:
+            if self._diagnose_empty_import_list(frame):
+                doc_order, doc_info = _parse()  # self-healed (gts-lirp mode 2) -- re-parse the now-settled DOM
 
         return [doc_info[d] for d in doc_order]
+
+    def _diagnose_empty_import_list(self, frame: _PwFrameLocator) -> bool:
+        """gts-lirp instrumentation: read_import_list() found no doc groups.
+
+        Cross-references the GAS-side log stream (fence set by the preceding
+        show_tab()) to tell a genuinely empty result apart from the two flake
+        modes gts-lirp has documented:
+          - mode 1 (stale-frame click): the click never produced a server
+            round trip at all -- no importList.done/access_denied event.
+          - mode 2 (stale-parse race): the round trip returned real rows
+            (importList.done count>=1), but this process's DOM read raced the
+            render before it settled.
+
+        Never masks a genuinely empty result (importList.done count==0, or
+        access_denied) -- returns False for those, same as today's silent [].
+        For mode 2 only, takes one short evidence-gated settle retry (the log
+        already proves there's something to see, unlike a blind retry on any
+        empty result) and returns True if it self-heals so the caller
+        re-parses; otherwise raises with a diagnostic distinguishing which
+        mode fired, in place of today's opaque downstream "got []".
+
+        Best-effort: if the diagnostic machinery itself fails (e.g. Axiom
+        unreachable), returns False rather than masking the original silent
+        empty result with an unrelated tooling error.
+        """
+        fence = self._last_show_tab_fence
+        try:
+            from tests.helpers.gas_log import collect_logs
+            entries = collect_logs(
+                None,
+                lambda e: e.get("tag") in ("importList.done", "importList.access_denied"),
+                after=fence,
+            )
+        except Exception:
+            return False
+
+        if not entries:
+            diag = self.capture_failure("import-list-no-round-trip")
+            raise RuntimeError(
+                "read_import_list(): no importList.done/access_denied GAS log event "
+                f"observed after show_tab('Import') (fence={fence}) -- the click did not "
+                f"produce a server round trip (gts-lirp mode 1: stale-frame click).\n{diag}"
+            )
+
+        counts = [e.get("data", {}).get("count", 0) for e in entries if e.get("tag") == "importList.done"]
+        if counts and max(counts) >= 1:
+            time.sleep(2.0)  # evidence-gated settle retry -- see docstring
+            if (
+                frame.locator('a[href*="/document/d/"]').count() > 0
+                or frame.locator('input[type="checkbox"][value*="/AI-"]').count() > 0
+            ):
+                return True
+            diag = self.capture_failure("import-list-stale-parse")
+            raise RuntimeError(
+                f"read_import_list(): GAS confirmed importList.done count={max(counts)} "
+                f"(fence={fence}) but the DOM never rendered any doc group, even after a "
+                f"2s settle retry (gts-lirp mode 2: stale-parse race).\n{diag}"
+            )
+
+        return False  # confirmed legitimately empty (count==0, or access_denied)
 
     def select_import(self, action_ids: list[str] | str = "all", *, timeout: str = "15s") -> None:
         """Check Import-tab checklist items (AC-2, GTaskSheet-fgh4).

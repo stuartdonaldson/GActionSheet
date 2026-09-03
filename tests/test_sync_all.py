@@ -450,7 +450,11 @@ def test_sync_all_op_correlation(settings, gas_log_dir, request):
             f"({op1!r}) — correlation field is not per-invocation"
         )
     finally:
-        scn_a.close()
+        # scn_a's doc-trashing is deferred to new_doc(request=request)'s
+        # pytest finalizer (gts-hroj); scn_b has no `request` and keeps its
+        # inline trash (this test has no browser_page, so the diagnostics
+        # ordering hook is a no-op here regardless).
+        scn_a.engine.close()
         try:
             scn_b._post_route("end_journey_session", {"docId": scn_b.doc_id})
         except Exception:
@@ -470,8 +474,9 @@ def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
         pytest.skip("gas_log_dir not configured — op correlation requires GAS log access")
 
     import time
+    import uuid
 
-    from tests.helpers.gas_log import clear_logs, collect_logs, wait_for_log
+    from tests.helpers.gas_log import clear_logs, collect_logs, matches_op, wait_for_log
 
     scn_a = ScenarioSession.new_doc(settings, request=request)
     scn_b = ScenarioSession.new_doc(settings)
@@ -482,24 +487,49 @@ def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
         scn_b.sync()
         time.sleep(12)  # see test_sync_all_op_correlation's clock-skew note
 
+        # gts-7vo2.2: mint our own opId up front (kkm7/uuse convention) rather
+        # than reading it back from sync.all.start after the fact, then scope
+        # every assertion below to entries chained from THIS sweep via
+        # matches_op. Without this, a concurrent syncAll (the account's
+        # installed 30-min trigger, or another session) landing in the same
+        # fence window can contribute its own sync_action_rows webapp.request
+        # entries that coincidentally satisfy the raw count check, then fail
+        # the parentOp check with a DIFFERENT sweep's op — a live, confirmed
+        # occurrence (see TD-PLAN-20-08.md §0/§2, gts-obry.1's disambiguation).
+        sweep_op = str(uuid.uuid4())
         fence = clear_logs(gas_log_dir)
-        scn_a._post_fixture("sync_all")
-        wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=60, after=fence)
-
-        sweep_op_entries = collect_logs(
-            gas_log_dir, lambda e: e.get("tag") == "sync.all.start", after=fence,
-        )
-        assert sweep_op_entries, "[j8cn] no sync.all.start captured for sweep"
-        sweep_op = sweep_op_entries[0].get("op")
-        assert sweep_op, "[j8cn] sweep has no op id of its own — precondition for this test failed"
-
-        webapp_entries = collect_logs(
+        scn_a._post_fixture("sync_all", extra={"opId": sweep_op})
+        wait_for_log(
             gas_log_dir,
-            lambda e: e.get("tag") == "webapp.request" and (e.get("data") or {}).get("action") == "sync_action_rows",
+            matches_op(lambda e: e.get("tag") == "sync.all.complete", sweep_op),
+            timeout_s=60,
             after=fence,
         )
+
+        # gts-6pws: wait_for_log(sync.all.complete) above only proves the
+        # sweep's own top-level op is done -- it races Axiom ingestion lag on
+        # the per-doc webapp.request entries this assertion also needs, which
+        # can land slightly after sync.all.complete does. Poll collect_logs
+        # (short timeout, same shape as wait_for_log's own retry loop) until
+        # both expected entries are queryable instead of a single-shot query.
+        webapp_deadline = time.monotonic() + 15
+        webapp_entries = []
+        while time.monotonic() < webapp_deadline:
+            webapp_entries = collect_logs(
+                gas_log_dir,
+                matches_op(
+                    lambda e: e.get("tag") == "webapp.request"
+                    and (e.get("data") or {}).get("action") == "sync_action_rows",
+                    sweep_op,
+                ),
+                after=fence,
+            )
+            if len(webapp_entries) >= 2:
+                break
+            time.sleep(1.0)
         assert len(webapp_entries) >= 2, (
-            f"[j8cn] expected ≥2 sync_action_rows webapp.request entries (one per doc), got {webapp_entries!r}"
+            f"[j8cn] expected ≥2 sync_action_rows webapp.request entries for THIS sweep "
+            f"(one per doc), got {webapp_entries!r}"
         )
 
         webapp_ops = {e.get("op") for e in webapp_entries}
@@ -507,13 +537,21 @@ def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
             f"[j8cn] each doPost execution should mint its OWN op id, not share one: {webapp_ops!r}"
         )
 
+        # matches_op already filtered to parentOp == sweep_op above; this
+        # assertion is retained as an explicit, readable statement of the
+        # invariant it's proving (defense-in-depth, not a redundant check —
+        # a regression in matches_op itself would still be caught here).
         webapp_parent_ops = {e.get("parentOp") for e in webapp_entries}
         assert webapp_parent_ops == {sweep_op}, (
             f"[j8cn] all sync_action_rows calls in this sweep should carry parentOp={sweep_op!r}, "
             f"got {webapp_parent_ops!r}"
         )
     finally:
-        scn_a.close()
+        # scn_a's doc-trashing is deferred to new_doc(request=request)'s
+        # pytest finalizer (gts-hroj); scn_b has no `request` and keeps its
+        # inline trash (this test has no browser_page, so the diagnostics
+        # ordering hook is a no-op here regardless).
+        scn_a.engine.close()
         try:
             scn_b._post_route("end_journey_session", {"docId": scn_b.doc_id})
         except Exception:
@@ -531,80 +569,164 @@ def _docdata(scn, file_id: str | None = None) -> dict | None:
     return (resp.get("data") or {}).get("row")
 
 
-def test_docdata_integrity_pass(settings, gas_log_dir, request):
-    """GTaskSheet-cduk: syncAll() integrity pass reconciles stale DocData.
+def _post_fixture_patient(scn, fixture_name: str, extra: dict | None = None, timeout: int = 600) -> dict:
+    """Like scn._post_fixture, but with a longer client-side read timeout.
 
-    TST-AC1: stale action_count / resolved_count corrected for a doc skipped by main loop.
-    TST-AC2: stale doc_name corrected from the HYPERLINK formula title.
-    TST-AC3: DocData rows with no corresponding Actions rows are not modified.
-    TST-AC4: sync.integrity.complete log event emitted with updated count.
+    A few of gts-m33k/gts-sl64's new fixtures re-run the REAL syncAll() over
+    the whole production Actions/DocData backlog (not a small per-test doc),
+    which has been independently observed (gts-b6dm comments) to take
+    anywhere from ~1 to ~12+ minutes depending on how many docs need
+    reconciliation/walking in that particular sweep. ScenarioSession's
+    default 360s client timeout occasionally trips on this specific
+    variance (a client-side socket read timeout, not a GAS-side failure —
+    the execution itself completes server-side either way).
     """
-    scn = ScenarioSession.new_doc(settings, request=request)
+    payload = {
+        "action": "run_fixture",
+        "testToken": scn.settings.get("testToken") or "",
+        "fixture": fixture_name,
+        "testDocId": scn.doc_id,
+    }
+    if extra:
+        payload.update(extra)
+    return scn._post(payload, timeout=timeout)
+
+
+# ---------------------------------------------------------------------------
+# GTaskSheet-cduk (integrity pass) + gts-m33k (listing-miss negative + 24h
+# aging-window guard) — batched (gts-ir1f, 2026-08-06)
+# ---------------------------------------------------------------------------
+#
+# gts-rskf's AC has two parts: (1) Drive REST calls carry the all-drives
+# flags so a Shared-Drive-hosted doc actually appears in the bulk files.list
+# listing, and (2) even if a live, reachable doc is EVER absent from that
+# listing (Shared Drive omission being the reported cause, but a paginated
+# listing miss is not guaranteed to have only one cause), a direct per-doc
+# lookup must confirm it is really gone before syncAll marks it Doc Not
+# Found. This environment has no test Shared Drive folder id provisioned
+# (local.settings.json has no such key — see plan-context.md), so part (1)
+# cannot be exercised end-to-end live. Part (2) — the actual mechanism that
+# stops a live doc's rows from being silently archived, regardless of why it
+# was missing from the listing — is fully testable via the
+# sync_all_force_listing_miss fixture, which monkey-patches
+# _fetchDriveDocMetadata for exactly one syncAll() call to omit a specific,
+# otherwise perfectly reachable doc from the bulk map. This is the Backstop
+# case: pre-fix, syncAll marked a listing-absent doc Doc Not Found
+# unconditionally (no per-doc lookup existed at all), so this assertion
+# fails against that build and passes against the current one.
+#
+# Batching note (gts-ir1f): cduk (single sweep), m33k-listing-miss (single
+# sweep, per-doc-scoped fault) and m33k-revival (inherently 2 sweeps —
+# trash-detect then untrash-revive, a genuine sequencing dependency per
+# plan-context.md's "when NOT to batch" list, so NOT force-fit into one
+# sweep) share a SEED sweep (cduk's integrity-pass correction +
+# listing-miss's survival + revival's Sweep-1 trash-detection, all in the
+# ONE syncAll() call sync_all_force_listing_miss drives — that fixture only
+# removes its target doc from the bulk map, so cduk's and revival's docs
+# process normally in the same call) and a FINAL sweep (revival's Sweep 2
+# only — untrash then re-sweep; cduk/listing-miss need nothing further).
+# 4 sweeps across 3 original tests -> 2 shared sweeps.
+
+def test_sync_all_integrity_and_listing_miss_batch(settings, gas_log_dir, request):
+    """Batches GTaskSheet-cduk's integrity-pass AC1-AC4, gts-m33k's
+    listing-miss survival, and gts-m33k AC4's 24h-aging-window revival guard
+    behind one seed syncAll() sweep + one final syncAll() sweep."""
+    sessions = []
     try:
-        # Setup: 2 open actions → sync → DocData has actionCount=2, resolvedCount=0
-        scn.append_paragraph("AI-1: cduk integrity pass action one")
-        scn.append_paragraph("AI-2: cduk integrity pass action two")
-        scn.sync()
+        # --- cduk doc: 2 open actions -> sync -> corrupt DocData ---------------
+        cduk = ScenarioSession.new_doc(settings, request=request)
+        sessions.append(cduk)
+        cduk.append_paragraph("AI-1: cduk integrity pass action one")
+        cduk.append_paragraph("AI-2: cduk integrity pass action two")
+        cduk.sync()
 
-        initial = _docdata(scn)
-        assert initial is not None, "[cduk] DocData row not created by initial sync"
-        assert initial.get("actionCount") == 2, (
-            f"[cduk] initial actionCount: expected 2, got {initial.get('actionCount')!r}"
+        cduk_initial = _docdata(cduk)
+        assert cduk_initial is not None, "[cduk] DocData row not created by initial sync"
+        assert cduk_initial.get("actionCount") == 2, (
+            f"[cduk] initial actionCount: expected 2, got {cduk_initial.get('actionCount')!r}"
         )
-        initial_name = initial.get("docName") or ""
+        cduk_initial_name = cduk_initial.get("docName") or ""
 
-        # Corrupt DocData: wrong counts + wrong doc_name
-        scn._post_fixture("set_docdata_row", {
+        cduk._post_fixture("set_docdata_row", {
             "actionCount": 99, "resolvedCount": 7, "docName": "Stale Name cduk",
         })
-        stale = _docdata(scn)
-        assert stale is not None and stale.get("actionCount") == 99, (
+        cduk_stale = _docdata(cduk)
+        assert cduk_stale is not None and cduk_stale.get("actionCount") == 99, (
             "[cduk] set_docdata_row did not write stale actionCount=99"
         )
 
-        # AC3: seed an orphan DocData row (fake fileId, no Actions rows)
-        orphan_id = secrets.token_urlsafe(33)[:44]
-        scn._post_fixture("set_docdata_row", {
-            "fileId": orphan_id, "actionCount": 55, "resolvedCount": 3, "docName": "Orphan",
+        # AC3: seed an orphan DocData row (fake fileId, no Actions rows).
+        # gts-30cq briefly widened ArchiveManager._evictStaleDocData to evict
+        # on "no Actions row" alone, and this became an eviction assertion.
+        # gts-avvl reverted that: absence of Actions rows is not an eviction
+        # signal (ADR-0031 amendment 2026-09-01 -- a DocData row with no live
+        # Actions rows is a normal state), because the Team Portal
+        # scan-and-track flow mints exactly this shape and the widened
+        # predicate destroyed three of the operator's freshly-tracked docs.
+        # Back to a SURVIVAL assertion on this sweep; see below.
+        cduk_orphan_id = secrets.token_urlsafe(33)[:44]
+        cduk._post_fixture("set_docdata_row", {
+            "fileId": cduk_orphan_id, "actionCount": 55, "resolvedCount": 3, "docName": "Orphan",
         })
 
-        # Run syncAll — real doc is unmodified since its last sync so it should be
-        # skipped by the main loop; the integrity pass then corrects DocData for it.
+        # --- listing-miss doc: just a normal synced doc -------------------------
+        lm = ScenarioSession.new_doc(settings, request=request)
+        sessions.append(lm)
+        lm.append_paragraph("AI-1: m33k listing-miss survival action")
+        lm.sync()
+        lm_pre_rows = lm.find_sheet_actions()
+        assert lm_pre_rows, "[m33k] expected ≥1 Actions row before the forced-miss sweep"
+        lm_pre_statuses = {r.global_id: r.sync_status for r in lm_pre_rows}
+
+        # --- revival doc: sync then trash (Sweep 1 target: trash-detection) ----
+        rev = ScenarioSession.new_doc(settings, request=request)
+        sessions.append(rev)
+        rev.append_paragraph("AI-1: m33k aging-window revival action")
+        rev.sync()
+        rev._post_fixture("trash_doc")
+
+        # --- Shared SEED sweep ---------------------------------------------------
+        # ONE syncAll() call, driven via sync_all_force_listing_miss targeting
+        # `lm` only — cduk's and rev's docs process normally in the same sweep
+        # (src/TestFixtures.js ~line 2707: the fault only deletes the target
+        # doc's own entry from the bulk map).
         if gas_log_dir:
             from tests.helpers.gas_log import clear_logs
             fence = clear_logs(gas_log_dir)
         else:
             fence = 0.0
 
-        scn._post_fixture("sync_all")
+        _post_fixture_patient(lm, "sync_all_force_listing_miss", extra={"docId": lm.doc_id})
 
-        # AC1: counts corrected
-        after = _docdata(scn)
-        assert after is not None, "[cduk AC1] DocData row missing after syncAll"
-        assert after.get("actionCount") == 2, (
-            f"[cduk AC1] actionCount: expected 2, got {after.get('actionCount')!r}"
+        # --- cduk AC1/AC2/AC3/AC4: DocData corrected by the integrity pass -----
+        cduk_after = _docdata(cduk)
+        assert cduk_after is not None, "[cduk AC1] DocData row missing after syncAll"
+        assert cduk_after.get("actionCount") == 2, (
+            f"[cduk AC1] actionCount: expected 2, got {cduk_after.get('actionCount')!r}"
         )
-        assert after.get("resolvedCount") == 0, (
-            f"[cduk AC1] resolvedCount: expected 0, got {after.get('resolvedCount')!r}"
+        assert cduk_after.get("resolvedCount") == 0, (
+            f"[cduk AC1] resolvedCount: expected 0, got {cduk_after.get('resolvedCount')!r}"
         )
-
-        # AC2: doc_name corrected from HYPERLINK formula title
-        assert after.get("docName") != "Stale Name cduk", (
+        assert cduk_after.get("docName") != "Stale Name cduk", (
             "[cduk AC2] docName still shows stale value after integrity pass"
         )
-        if initial_name:
-            assert after.get("docName") == initial_name, (
-                f"[cduk AC2] docName: expected {initial_name!r}, got {after.get('docName')!r}"
+        if cduk_initial_name:
+            assert cduk_after.get("docName") == cduk_initial_name, (
+                f"[cduk AC2] docName: expected {cduk_initial_name!r}, got {cduk_after.get('docName')!r}"
             )
-
-        # AC3: orphan DocData row untouched (no Actions rows → not in perDocCounts)
-        orphan_after = _docdata(scn, file_id=orphan_id)
-        assert orphan_after is not None, "[cduk AC3] orphan DocData row was deleted"
-        assert orphan_after.get("actionCount") == 55, (
-            f"[cduk AC3] orphan actionCount modified: expected 55, got {orphan_after.get('actionCount')!r}"
+        # AC3 (gts-avvl): the orphan row has no Actions row referencing it and a
+        # blank syncStatus, so ArchiveManager.archive() must NOT evict it on
+        # this sweep. Its fake fileId is unreachable in Drive, so syncAll's own
+        # walk marks it 'Doc Not Found' during this same sweep -- but archive()
+        # runs BEFORE that marking, which is the grace period. It becomes
+        # evictable on the NEXT sweep, asserted separately in
+        # tests/test_docdata_orphan_eviction.py.
+        cduk_orphan_after = _docdata(cduk, file_id=cduk_orphan_id)
+        assert cduk_orphan_after is not None, (
+            f"[cduk AC3] orphan DocData row (blank syncStatus, no Actions rows) was "
+            f"EVICTED on the sweep that first observed it. Absence of Actions rows is "
+            f"not an eviction signal (gts-avvl / ADR-0031 amendment 2026-09-01)."
         )
-
-        # AC4: log event emitted (no-op when gas_log_dir not configured)
         if gas_log_dir:
             from tests.helpers.gas_log import wait_for_log
             wait_for_log(
@@ -613,5 +735,626 @@ def test_docdata_integrity_pass(settings, gas_log_dir, request):
                 timeout_s=60,
                 after=fence,
             )
+
+        # --- listing-miss: survives the sweep it was forced absent from --------
+        lm_post_rows = lm.find_sheet_actions()
+        assert len(lm_post_rows) == len(lm_pre_rows), (
+            f"[m33k] Actions row count changed after a forced listing-miss sweep: "
+            f"before={len(lm_pre_rows)} after={len(lm_post_rows)}"
+        )
+        for row in lm_post_rows:
+            assert row.sync_status != "Doc Not Found", (
+                f"[m33k] row {row.global_id!r} marked 'Doc Not Found' after a forced "
+                f"listing-miss sweep — per-doc lookup fallback did not save it"
+            )
+            prior = lm_pre_statuses.get(row.global_id)
+            assert row.sync_status == (prior or ""), (
+                f"[m33k] row {row.global_id!r} sync_status changed: "
+                f"{prior!r} -> {row.sync_status!r}"
+            )
+        lm_archived = _archive_rows_for(settings, lm.doc_id)
+        assert not lm_archived, (
+            f"[m33k] doc's rows appeared in Archive after a single forced "
+            f"listing-miss sweep: {lm_archived!r}"
+        )
+
+        # --- revival: Sweep 1 marked it Doc Not Found ---------------------------
+        rev_marked_rows = rev.find_sheet_actions()
+        assert rev_marked_rows, "[m33k] Actions row disappeared after trash+sync_all"
+        for row in rev_marked_rows:
+            assert row.sync_status == "Doc Not Found", (
+                f"[m33k] expected 'Doc Not Found' after Sweep 1, got {row.sync_status!r}"
+            )
+
+        # --- Shared FINAL sweep ---------------------------------------------------
+        # Untrash the revival doc, then ONE more syncAll() — needed only for
+        # revival's own sequencing (Sweep 2 must follow Sweep 1); cduk and
+        # listing-miss need nothing further from this sweep.
+        rev._post_fixture("untrash_doc")
+        _post_fixture_patient(rev, "sync_all")
+
+        rev_revived_rows = rev.find_sheet_actions()
+        assert rev_revived_rows, (
+            "[m33k] Actions row(s) missing after revival sweep — doc was archived "
+            "despite becoming reachable before the 24h aging threshold"
+        )
+        for row in rev_revived_rows:
+            assert row.sync_status != "Doc Not Found", (
+                f"[m33k] row {row.global_id!r} still 'Doc Not Found' after revival sweep"
+            )
+        rev_archived = _archive_rows_for(settings, rev.doc_id)
+        assert not rev_archived, (
+            f"[m33k] doc's rows were archived despite becoming reachable before "
+            f"the 24h aging threshold: {rev_archived!r}"
+        )
+
+        # --- Durability + entry-point tagging (T1/T17/T24), one per scenario ---
+        def _cduk_durable() -> str | None:
+            row = _docdata(cduk)
+            if row is None:
+                return "[cduk] DocData row missing"
+            if row.get("actionCount") != 2 or row.get("resolvedCount") != 0:
+                return f"[cduk] counts drifted: {row!r}"
+            return None
+
+        def _lm_durable_survival() -> str | None:
+            rows = lm.find_sheet_actions()
+            if not rows:
+                return "[m33k] Actions rows disappeared after forced listing-miss sweep"
+            for row in rows:
+                if row.sync_status == "Doc Not Found":
+                    return f"[m33k] row {row.global_id!r} marked Doc Not Found"
+            return None
+
+        def _rev_durable_revival() -> str | None:
+            rows = rev.find_sheet_actions()
+            if not rows:
+                return "[m33k] revived doc's rows missing from Actions"
+            for row in rows:
+                if row.sync_status == "Doc Not Found":
+                    return f"[m33k] row {row.global_id!r} still marked Doc Not Found post-revival"
+            return None
+
+        cduk.expect_callable(
+            _cduk_durable, on=SHEET, tag="[cduk integrity pass corrects stale DocData]", entry_point="syncAll",
+        )
+        cduk.checkpoint(STEP)
+        lm.expect_callable(
+            _lm_durable_survival, on=SHEET, tag="[m33k listing-miss survives]", entry_point="syncAll",
+        )
+        lm.checkpoint(STEP)
+        rev.expect_callable(
+            _rev_durable_revival, on=SHEET, tag="[m33k aging-window revival]", entry_point="syncAll",
+        )
+        rev.checkpoint(STEP)
     finally:
-        scn.close()
+        # Doc-trashing deferred to each session's new_doc(request=request)
+        # pytest finalizer (gts-hroj).
+        for scn in sessions:
+            scn.engine.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-pm72: bounded retry on transient Drive files.list 5xx
+# ---------------------------------------------------------------------------
+#
+# Regression run 2026-08-05: test_import_flow_forward_sync failed 4 consecutive
+# attempts, the last on 'sync.driveMetadata.error: files.list failed: HTTP 500'
+# -- a one-off Drive Advanced-Service 500 mid-execution, not a code defect, with
+# no retry to absorb it. SyncManager.js's _fetchDriveWithRetry (gts-pm72) now
+# wraps _fetchDriveDocMetadata's files.list call in a bounded retry (3 attempts,
+# short backoff, mirroring scn/session.py::_http_post's convention). The
+# 'sync_all_force_drive_5xx' fixture drives the real syncAll() entry point with
+# PropertiesService fault-injection (_TEST_FORCE_DRIVE_5XX_COUNT, consulted by
+# _driveFetchTestOverrideCode) standing in for a real transient 500, so this is
+# provable without waiting for a real Google-side outage to line up with a test
+# run. This is the Backstop case: pre-fix, ANY forced-5xx count -- even 1 --
+# throws immediately and logs sync.driveMetadata.error, so this assertion fails
+# against that build and passes against the current one.
+
+def test_sync_all_retries_transient_drive_5xx(settings, gas_log_dir, request):
+    """[gts-pm72] A single transient Drive files.list 500 (within the 3-attempt
+    retry budget) is absorbed by the bounded retry: no sync.driveMetadata.error
+    is logged, and syncAll completes with no observable disruption."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: pm72 transient-500 recovery action")
+        scn.sync()
+
+        pre_rows = scn.find_sheet_actions()
+        assert pre_rows, "[pm72] expected ≥1 Actions row before the forced-5xx sweep"
+        pre_statuses = {r.global_id: r.sync_status for r in pre_rows}
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs, assert_no_log
+            fence = clear_logs(gas_log_dir)
+        else:
+            fence = 0.0
+
+        _post_fixture_patient(scn, "sync_all_force_drive_5xx", {"fails": 1})
+
+        if gas_log_dir:
+            assert_no_log(
+                gas_log_dir, fence,
+                lambda e: e.get("tag") == "sync.driveMetadata.error",
+                "[pm72] sync.driveMetadata.error logged for a single forced 500 "
+                "-- the bounded retry did not absorb it",
+            )
+
+        post_rows = scn.find_sheet_actions()
+        assert len(post_rows) == len(pre_rows), (
+            f"[pm72] Actions row count changed after a forced-500-recovery sweep: "
+            f"before={len(pre_rows)} after={len(post_rows)}"
+        )
+        for row in post_rows:
+            assert row.sync_status != "Doc Not Found", (
+                f"[pm72] row {row.global_id!r} marked 'Doc Not Found' after a "
+                f"single transient 500 the retry should have absorbed"
+            )
+            prior = pre_statuses.get(row.global_id)
+            assert row.sync_status == (prior or ""), (
+                f"[pm72] row {row.global_id!r} sync_status changed: "
+                f"{prior!r} -> {row.sync_status!r}"
+            )
+    finally:
+        # Doc-trashing deferred to new_doc(request=request)'s pytest
+        # finalizer (gts-hroj).
+        scn.engine.close()
+
+
+def test_sync_all_exhausted_drive_5xx_retry_still_recovers_via_fallback(settings, gas_log_dir, request):
+    """[gts-pm72] A persistent Drive files.list 500 (beyond the 3-attempt retry
+    budget) still throws sync.driveMetadata.error once the bound is exhausted
+    -- proving the retry is bounded, not silently infinite or skipped -- but
+    the pre-existing per-doc fallback (gts-rskf) still keeps the sweep correct:
+    no row is misclassified 'Doc Not Found' just because the bulk listing call
+    failed outright."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: pm72 exhausted-retry fallback action")
+        scn.sync()
+
+        pre_rows = scn.find_sheet_actions()
+        assert pre_rows, "[pm72] expected ≥1 Actions row before the forced-5xx sweep"
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs, wait_for_log
+            fence = clear_logs(gas_log_dir)
+
+        _post_fixture_patient(scn, "sync_all_force_drive_5xx", {"fails": 5})
+
+        if gas_log_dir:
+            wait_for_log(
+                gas_log_dir,
+                lambda e: e.get("tag") == "sync.driveMetadata.error",
+                timeout_s=30,
+                after=fence,
+            )
+
+        post_rows = scn.find_sheet_actions()
+        assert len(post_rows) == len(pre_rows), (
+            f"[pm72] Actions row count changed after an exhausted-retry sweep: "
+            f"before={len(pre_rows)} after={len(post_rows)}"
+        )
+        for row in post_rows:
+            assert row.sync_status != "Doc Not Found", (
+                f"[pm72] row {row.global_id!r} marked 'Doc Not Found' after an "
+                f"exhausted-retry bulk-listing failure -- per-doc fallback did not save it"
+            )
+    finally:
+        # Doc-trashing deferred to new_doc(request=request)'s pytest
+        # finalizer (gts-hroj).
+        scn.engine.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-232z: bounded retry on _syncActionRows' own self-call non-200
+# ---------------------------------------------------------------------------
+#
+# gts-u947's regression-verify sweep (2026-09-01) hit
+# 'sync_action_rows failed: HTTP 302' from _syncActionRows' UrlFetchApp.fetch
+# self-call back into this same deployed WebApp -- the documented /exec ->
+# script.googleusercontent.com routing glitch every OTHER caller already
+# retries (scn/session.py::_http_post client-side, TestFixtures.js's opId-
+# dedupe comment, _fetchDriveWithRetry for Drive REST) but this one call site
+# did not. SyncManager.js's _syncActionRows now wraps its self-call fetch in
+# a bounded retry (3 attempts, 1s backoff, mirroring _fetchDriveWithRetry's
+# shape) via _webAppFetchTestOverrideCode. The
+# 'sync_all_force_webapp_non200' fixture drives the real syncAll() entry
+# point with PropertiesService fault-injection
+# (_TEST_FORCE_WEBAPP_NON200_COUNT) standing in for the real routing glitch,
+# so this is provable without waiting for a real 302 to line up with a test
+# run. Backstop: pre-fix, ANY forced-non-200 count -- even 1 -- logs
+# sync.error immediately on the first attempt with no retry, so both
+# assertions below fail against that build and pass against the current one.
+
+def test_sync_all_retries_transient_webapp_non200(settings, gas_log_dir, request):
+    """[gts-232z] A single transient non-200 (within the 3-attempt retry
+    budget) from _syncActionRows' self-call is absorbed by the bounded
+    retry: sync.actionRows.retry is logged for the forced attempt, no
+    sync.error is logged, and the row's sync_status is unaffected."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: gts-232z transient-non200 recovery action")
+        scn.sync()
+
+        pre_rows = scn.find_sheet_actions()
+        assert pre_rows, "[gts-232z] expected >=1 Actions row before the forced-non200 sweep"
+        pre_statuses = {r.global_id: r.sync_status for r in pre_rows}
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs, assert_no_log, wait_for_log
+            fence = clear_logs(gas_log_dir)
+        else:
+            fence = 0.0
+
+        _post_fixture_patient(scn, "sync_all_force_webapp_non200", {"fails": 1})
+
+        if gas_log_dir:
+            wait_for_log(
+                gas_log_dir,
+                lambda e: e.get("tag") == "sync.actionRows.retry",
+                timeout_s=30,
+                after=fence,
+            )
+            assert_no_log(
+                gas_log_dir, fence,
+                lambda e: e.get("tag") == "sync.error"
+                and "sync_action_rows failed" in (e.get("data", {}).get("msg") or ""),
+                "[gts-232z] sync.error logged for a single forced non-200 "
+                "-- the bounded retry did not absorb it",
+            )
+
+        post_rows = scn.find_sheet_actions()
+        assert len(post_rows) == len(pre_rows), (
+            f"[gts-232z] Actions row count changed after a forced-non200-recovery sweep: "
+            f"before={len(pre_rows)} after={len(post_rows)}"
+        )
+        for row in post_rows:
+            prior = pre_statuses.get(row.global_id)
+            assert row.sync_status == (prior or ""), (
+                f"[gts-232z] row {row.global_id!r} sync_status changed: "
+                f"{prior!r} -> {row.sync_status!r}"
+            )
+    finally:
+        # Doc-trashing deferred to new_doc(request=request)'s pytest
+        # finalizer (gts-hroj).
+        scn.engine.close()
+
+
+def test_sync_all_exhausted_webapp_non200_retry_still_logs_error(settings, gas_log_dir, request):
+    """[gts-232z] A persistent non-200 (beyond the 3-attempt retry budget)
+    from _syncActionRows' self-call still logs sync.error once the bound is
+    exhausted -- proving the retry is bounded, not silently infinite or
+    skipped."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: gts-232z exhausted-retry action")
+        scn.sync()
+
+        pre_rows = scn.find_sheet_actions()
+        assert pre_rows, "[gts-232z] expected >=1 Actions row before the forced-non200 sweep"
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs, wait_for_log
+            fence = clear_logs(gas_log_dir)
+
+        _post_fixture_patient(scn, "sync_all_force_webapp_non200", {"fails": 5})
+
+        if gas_log_dir:
+            wait_for_log(
+                gas_log_dir,
+                lambda e: e.get("tag") == "sync.error"
+                and "sync_action_rows failed" in (e.get("data", {}).get("msg") or ""),
+                timeout_s=30,
+                after=fence,
+            )
+
+        post_rows = scn.find_sheet_actions()
+        assert len(post_rows) == len(pre_rows), (
+            f"[gts-232z] Actions row count changed after an exhausted-retry sweep: "
+            f"before={len(pre_rows)} after={len(post_rows)}"
+        )
+    finally:
+        # Doc-trashing deferred to new_doc(request=request)'s pytest
+        # finalizer (gts-hroj).
+        scn.engine.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-aiaz: missing docState/allDocGlobalIds must never mass-delete rows
+# ---------------------------------------------------------------------------
+#
+# _handleSyncActionRows (WebApp.js) is WEBAPP_SECRET-gated, not testToken-
+# gated -- a hand-made maintenance call sending only {action, docId, secret}
+# is exactly the incident scenario in gts-aiaz's bug report (observed:
+# one such call stamped all 7 rows of a live doc 'Deleted' while the document
+# still contained all 7 actions). This posts that payload directly (no
+# docState, no allDocGlobalIds, no scanned) and asserts no row's sync_status
+# changes. Backstop: pre-fix, the orphan-detection loop was gated on `docId`
+# alone -- docState=[] read as "the document is empty", and every existing
+# row for that doc was marked Deleted unconditionally. That destructive
+# branch (WebApp.js's `if (docId) { ... mark every row missing from docState
+# Deleted ... }`, before the `scanned` gate existed) is exactly what this
+# assertion would have failed against.
+
+def test_sync_action_rows_missing_docstate_is_noop(settings, gas_log_dir, request):
+    """[gts-aiaz] A docId-only sync_action_rows payload (no docState,
+    allDocGlobalIds, or scanned flag) must not alter any row's sync_status —
+    omission is a no-op for orphan detection, never a mandate to delete."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: aiaz missing-docstate noop action")
+        scn.sync()
+
+        pre_rows = scn.find_sheet_actions()
+        assert pre_rows, "[aiaz] expected >=1 Actions row before the bare maintenance call"
+        pre_statuses = {r.global_id: r.sync_status for r in pre_rows}
+
+        secret = settings.get("webappSecret") or ""
+        assert secret, (
+            "[aiaz] local.settings.json missing webappSecret — cannot exercise the "
+            "WEBAPP_SECRET-gated sync_action_rows route directly"
+        )
+
+        fence = 0.0
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs
+            fence = clear_logs(gas_log_dir)
+
+        resp = scn._post({"action": "sync_action_rows", "secret": secret, "docId": scn.doc_id})
+        assert "error" not in resp, f"[aiaz] bare maintenance call unexpectedly errored: {resp!r}"
+
+        post_rows = scn.find_sheet_actions()
+        assert len(post_rows) == len(pre_rows), (
+            f"[aiaz] Actions row count changed after a docId-only sync_action_rows call: "
+            f"before={len(pre_rows)} after={len(post_rows)}"
+        )
+        for row in post_rows:
+            assert row.sync_status != "Deleted", (
+                f"[aiaz] row {row.global_id!r} marked 'Deleted' by a sync_action_rows payload "
+                f"that omitted docState/allDocGlobalIds/scanned — the destructive branch fired "
+                f"with no explicit scan assertion"
+            )
+            prior = pre_statuses.get(row.global_id)
+            assert row.sync_status == (prior or ""), (
+                f"[aiaz] row {row.global_id!r} sync_status changed: {prior!r} -> {row.sync_status!r}"
+            )
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import wait_for_log
+            wait_for_log(
+                gas_log_dir,
+                lambda e: e.get("tag") == "sync.orphanDetection.skipped"
+                and (e.get("data") or {}).get("docId") == scn.doc_id,
+                timeout_s=60,
+                after=fence,
+            )
+
+        def _durable_noop() -> str | None:
+            rows = scn.find_sheet_actions()
+            if len(rows) != len(pre_rows):
+                return f"[aiaz] row count drifted: expected {len(pre_rows)}, got {len(rows)}"
+            for row in rows:
+                if row.sync_status == "Deleted":
+                    return f"[aiaz] row {row.global_id!r} marked Deleted"
+            return None
+
+        scn.expect_callable(
+            _durable_noop, on=SHEET, tag="[aiaz missing-docState noop]", entry_point="sync_action_rows",
+        )
+        scn.checkpoint(STEP)
+    finally:
+        # Doc-trashing deferred to new_doc(request=request)'s pytest
+        # finalizer (gts-hroj).
+        scn.engine.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-binf / gts-6hzy: duplicate-globalId Actions rows collapse on syncAll
+# ---------------------------------------------------------------------------
+#
+# _loadExistingRowsByGlobalId (WebApp.js) resolves existingMap[globalId] to
+# the LAST-scanned physical sheet row when N>1 rows share a globalId (silent
+# last-write-wins) -- pre-fix, earlier duplicate rows for that globalId were
+# invisible to the entire sync_action_rows upsert/orphan pass: never updated,
+# never flagged, never removed. They just sat in the sheet forever, showing
+# the same action twice (the user-reported symptom). This seeds a genuine
+# second physical row sharing an already-synced action's globalId and drives
+# the regular syncDocument()/sync_action_rows sweep -- the entry point named
+# in gts-binf's own pre-code contract -- rather than a synthetic direct call.
+# No-shared-context note (plan-context.md): authored against gts-binf's
+# frozen Description/AC text, not its implementation diff.
+#
+# Backstop: pre-fix, _handleSyncActionRows had no code path that ever
+# inspected more than the last-scanned row per globalId, so
+# `len(collapsed_rows)` would still be 2 (not 1) and no `sync.dedup` event
+# would ever fire -- both assertions below fail against that build.
+
+def test_sync_all_collapses_duplicate_globalid_rows(settings, gas_log_dir, request):
+    """[gts-binf/gts-6hzy case 1+3] N>1 sheet rows sharing a globalId collapse
+    to one canonical row on the regular sync sweep; a sync.dedup log event
+    fires on collapse; a second sync afterward is idempotent (no further
+    dedup event, no row-count change)."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: binf dedup canonical action")
+        scn.sync()
+
+        canonical_rows = scn.find_sheet_actions()
+        assert len(canonical_rows) == 1, (
+            f"[binf] expected exactly 1 row after initial sync, got {len(canonical_rows)}"
+        )
+        global_id = canonical_rows[0].global_id
+        assert global_id, "[binf] canonical row has no global_id"
+
+        doc_formula = (
+            f'=HYPERLINK("https://docs.google.com/document/d/{scn.doc_id}/edit","Dup Guard")'
+        )
+        scn._post_fixture("seed_row", {
+            "globalId": global_id,
+            "actionId": "AI-1",
+            "actionText": "STALE pre-existing duplicate row (should be collapsed)",
+            "status": "Open",
+            "documentFormula": doc_formula,
+        })
+
+        duped_rows = [r for r in scn.find_sheet_actions() if r.global_id == global_id]
+        assert len(duped_rows) == 2, (
+            f"[binf] seed_row did not produce a duplicate-globalId row: expected 2 rows "
+            f"for {global_id!r}, got {len(duped_rows)}"
+        )
+
+        fence = 0.0
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs
+            fence = clear_logs(gas_log_dir)
+
+        scn.sync()  # regular sweep entry point (syncDocument -> sync_action_rows)
+
+        collapsed_rows = [r for r in scn.find_sheet_actions() if r.global_id == global_id]
+        assert len(collapsed_rows) == 1, (
+            f"[binf] duplicate-globalId rows not collapsed by the regular sync sweep: "
+            f"expected 1 row for {global_id!r} after sync, got {len(collapsed_rows)}"
+        )
+        assert collapsed_rows[0].action == "binf dedup canonical action", (
+            f"[binf] surviving row's content is not the live doc content: "
+            f"{collapsed_rows[0].action!r}"
+        )
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import wait_for_log
+            wait_for_log(
+                gas_log_dir,
+                lambda e: e.get("tag") == "sync.dedup"
+                and (e.get("data") or {}).get("globalId") == global_id,
+                timeout_s=60,
+                after=fence,
+            )
+
+        def _durable_dedup() -> str | None:
+            rows = [r for r in scn.find_sheet_actions() if r.global_id == global_id]
+            if len(rows) != 1:
+                return f"[binf] {len(rows)} rows for {global_id!r}, expected 1"
+            return None
+
+        scn.expect_callable(
+            _durable_dedup, on=SHEET, tag="[binf duplicate-globalId collapse]", entry_point="syncAll",
+        )
+        scn.checkpoint(STEP)
+
+        # [gts-6hzy case 3] Idempotency: a second sync after the collapse is a
+        # no-op -- no further dedup event, no row-count change.
+        fence2 = 0.0
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs
+            fence2 = clear_logs(gas_log_dir)
+
+        scn.sync()
+
+        idempotent_rows = [r for r in scn.find_sheet_actions() if r.global_id == global_id]
+        assert len(idempotent_rows) == 1, (
+            f"[6hzy idempotency] row count for {global_id!r} changed on a second sync "
+            f"after collapse: {len(idempotent_rows)}"
+        )
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import assert_no_log
+            assert_no_log(
+                gas_log_dir, fence2,
+                lambda e: e.get("tag") == "sync.dedup" and (e.get("data") or {}).get("globalId") == global_id,
+                what="[6hzy idempotency] unexpected repeat sync.dedup after collapse already settled",
+            )
+    finally:
+        # Doc-trashing deferred to new_doc(request=request)'s pytest
+        # finalizer (gts-hroj).
+        scn.engine.close()
+
+
+def test_sync_all_duplicate_globalid_dedup_does_not_regress_reanchor_path(
+    settings, gas_log_dir, request
+):
+    """[gts-binf/gts-6hzy case 2] Regression guard: the pre-existing re-anchor
+    duplicate-IDENTITY path (WebApp.js's docStateIdentitySet check, distinct
+    from gts-binf's SAME-globalId collapse) must still fire correctly. Seeds
+    a stale row under a DIFFERENT globalId but the SAME identity (assignee +
+    action text + status) as a still-live action -- simulating the row a
+    re-anchor (AI-N renumber / named-range reset) leaves behind. This is a
+    no-change assertion by construction (the identity-duplicate code path is
+    untouched by gts-binf's same-globalId dedup pass, which only ever
+    inspects rows sharing an exact globalId) -- it is not expected to fail
+    pre-fix; its purpose is to prove the new same-globalId collapse pass does
+    not interfere with, duplicate, or suppress this older mechanism."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: binf reanchor-guard live action")
+        scn.sync()
+
+        live_rows = scn.find_sheet_actions()
+        assert len(live_rows) == 1, (
+            f"[binf reanchor-guard] expected exactly 1 row after initial sync, got {len(live_rows)}"
+        )
+        live_row = live_rows[0]
+        live_global_id = live_row.global_id
+        assert live_global_id, "[binf reanchor-guard] live row has no global_id"
+
+        # A stale row under a DIFFERENT (fabricated) globalId for the same doc,
+        # sharing the live row's identity (assignee/action/status) -- exactly
+        # what a re-anchor leaves behind per WebApp.js's own comment ("If the
+        # current doc still has the same action state under a different
+        # globalId, this row is a stale duplicate left behind by a re-anchor").
+        stale_global_id = f"{scn.doc_id}/AI-999"
+        doc_formula = (
+            f'=HYPERLINK("https://docs.google.com/document/d/{scn.doc_id}/edit","Reanchor Guard")'
+        )
+        scn._post_fixture("seed_row", {
+            "globalId": stale_global_id,
+            "actionId": "AI-999",
+            "actionText": live_row.action,
+            "assigneeEmail": live_row.assignee or "",
+            "status": live_row.status or "Open",
+            "documentFormula": doc_formula,
+        })
+
+        pre_sync_rows = scn.find_sheet_actions()
+        assert any(r.global_id == stale_global_id for r in pre_sync_rows), (
+            "[binf reanchor-guard] seed_row did not create the stale identity-duplicate row"
+        )
+        assert len(pre_sync_rows) == 2, (
+            f"[binf reanchor-guard] expected 2 rows (live + stale identity-duplicate) "
+            f"before sync, got {len(pre_sync_rows)}"
+        )
+
+        scn.sync()  # regular sweep entry point
+
+        post_sync_rows = scn.find_sheet_actions()
+        stale_still_present = [r for r in post_sync_rows if r.global_id == stale_global_id]
+        live_still_present = [r for r in post_sync_rows if r.global_id == live_global_id]
+
+        assert not stale_still_present, (
+            f"[binf reanchor-guard] stale identity-duplicate row {stale_global_id!r} "
+            f"survived a sync sweep — the pre-existing re-anchor duplicate-identity path "
+            f"(WebApp.js docStateIdentitySet check) regressed"
+        )
+        assert len(live_still_present) == 1, (
+            f"[binf reanchor-guard] the live action's own row {live_global_id!r} was "
+            f"affected by the identity-duplicate cleanup: {live_still_present!r}"
+        )
+
+        def _durable_reanchor_guard() -> str | None:
+            rows = scn.find_sheet_actions()
+            if any(r.global_id == stale_global_id for r in rows):
+                return f"[binf reanchor-guard] stale row {stale_global_id!r} reappeared"
+            if not any(r.global_id == live_global_id for r in rows):
+                return f"[binf reanchor-guard] live row {live_global_id!r} missing"
+            return None
+
+        scn.expect_callable(
+            _durable_reanchor_guard, on=SHEET,
+            tag="[binf reanchor duplicate-identity regression guard]", entry_point="syncAll",
+        )
+        scn.checkpoint(STEP)
+    finally:
+        # Doc-trashing deferred to new_doc(request=request)'s pytest
+        # finalizer (gts-hroj).
+        scn.engine.close()

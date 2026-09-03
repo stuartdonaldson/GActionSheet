@@ -1,0 +1,12 @@
+{
+  "name": "create-lane-end",
+  "input": "create-lane-end",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "create-lane-end-expected",
+  "serves": [
+    "gts-pi1s"
+  ],
+  "batch": "apt-lanes-create"
+}

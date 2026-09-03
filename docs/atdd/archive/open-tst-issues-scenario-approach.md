@@ -17,7 +17,7 @@ Framework primers:
 
 ---
 
-## GTaskSheet-r3d — syncAll marks rows Doc Not Found
+## gts-r3d — syncAll marks rows Doc Not Found
 
 **Already covered.** `tests/test_uc_c.py:test_sync_status_doc_not_found` (line 400) exercises
 exactly this AC: the `sync_status_doc_not_found` fixture seeds rows with an inaccessible docId,
@@ -30,7 +30,7 @@ the required entry point. If it calls `syncDocument`, log the gap in the issue a
 
 ---
 
-## GTaskSheet-ckj — M2: Idempotent sync produces zero writes
+## gts-ckj — M2: Idempotent sync produces zero writes
 
 **What it tests.** After a bidirectional sync on an unmodified document, a second sync must not
 write any sheet cells. The M2 fix guarded unconditional col9 stamps and formula rewrites that
@@ -72,7 +72,7 @@ is behaviorally equivalent for the regression.
 
 ---
 
-## GTaskSheet-45k — M1: Upsert update path writes assignee email (col 3) and name (col 2)
+## gts-45k — M1: Upsert update path writes assignee email (col 3) and name (col 2)
 
 **What it tests.** When `edit_sheet` is called with a changed `assignee_email`, the GAS upsert
 update path must write col 3 (Assignee Email) and derive/write col 2 (Assignee Name). The M1 bug
@@ -117,7 +117,7 @@ sheet contains. If `ai.assignee` maps to col 3, the first assertion covers M1 di
 
 ---
 
-## GTaskSheet-dm7 — M3: Sync materializes (Open) token in doc-wins path
+## gts-dm7 — M3: Sync materializes (Open) token in doc-wins path
 
 **What it tests.** When a floating action has no status token in the document, sync must write
 `(Open)` back into the paragraph. The M3 bug was that the doc-wins path never wrote the missing
@@ -155,7 +155,7 @@ into the document text, not merely recorded in the sheet.
 
 ---
 
-## GTaskSheet-wpe1 — M4: URL format matching (open?id= and /d/)
+## gts-wpe1 — M4: URL format matching (open?id= and /d/)
 
 **What it tests.** `_loadRowsForDocUrl` and orphan detection must resolve both URL formats to the
 same docId. The M4 fix standardised all matching on the extracted docId. No test currently
@@ -193,7 +193,7 @@ and keeps all state in GAS. File a `[IMP]` paired issue if `seed_mixed_url_rows`
 
 ---
 
-## GTaskSheet-sjj — AI-N token: regression + integration coverage (4 entry points)
+## gts-sjj — AI-N token: regression + integration coverage (4 entry points)
 
 **What it tests.** Four entry points must each appear as a direct call-site in at least one
 scenario: `syncDocument` (scanner), `sidebarCreateAction` (creation), `sidebarSetStatus` (flush),
@@ -251,10 +251,10 @@ scn.checkpoint(STEP)
 
 ---
 
-## GTaskSheet-0n3 — POC edit action propagation and async sheet update
+## gts-0n3 — POC edit action propagation and async sheet update
 
 **What it tests.** Six verification points against the `_poc_*` handler family introduced by
-GTaskSheet-j8y: card navigation from `_poc_openEditCard`, pre-filled form from `_poc_buildEditCard`,
+gts-j8y: card navigation from `_poc_openEditCard`, pre-filled form from `_poc_buildEditCard`,
 doc REST update logged as `POC_EDIT_ACTION.complete`, QUEUE script property populated before drain,
 `_poc_processPendingSheetUpdates` drains QUEUE to `[]`, and the ActionSheet row reflects the
 new status after drain.
@@ -315,9 +315,9 @@ These fixture names (`poc_open_edit_card`, `poc_build_edit_card`, `poc_submit_ed
 
 ---
 
-## GTaskSheet-rwz — POC preview card AI-N display, sidebar compact format, tracker AI-N link
+## gts-rwz — POC preview card AI-N display, sidebar compact format, tracker AI-N link
 
-**What it tests.** Four visual/structural verification points from GTaskSheet-7js: the preview
+**What it tests.** Four visual/structural verification points from gts-7js: the preview
 card header shows the AI-N pattern; the card contains a button/link whose URL matches the chip
 URL pattern; the sidebar `buildHomepageCard` action rows show AI-N + status in `topLabel`;
 and after `insertTrackerTable`, the ID cell hyperlink matches the chip URL.
@@ -378,7 +378,7 @@ Confirm that `build_homepage_card` is a registered fixture or add it as part of 
 
 ---
 
-## GTaskSheet-6ov.4 — Verify createActionTrigger: @action in Docs menu, logo display, chip insertion
+## gts-6ov.4 — Verify createActionTrigger: @action in Docs menu, logo display, chip insertion
 
 **What it tests.** Visual/interaction test: the `@action` item appears in the Docs `@`-menu with
 the GActionSheet logo; inserting the chip displays the logo; the logo is legible and not visually
@@ -413,7 +413,7 @@ the pattern in `test_journey.py:133-137`.
 
 ---
 
-## GTaskSheet-6ov.6 — Verify linkPreviewTriggers: branded preview card with visual consistency
+## gts-6ov.6 — Verify linkPreviewTriggers: branded preview card with visual consistency
 
 **What it tests.** When a chip is hovered, the preview card uses the same branded identity (logo,
 colour) as the `@action` menu entry; the logo is legible at chip scale.

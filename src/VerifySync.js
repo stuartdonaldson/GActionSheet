@@ -22,16 +22,31 @@ function verifyDocumentSync(docId) {
       floating: 0,
       tracker: 0,
       sheet: 0,
-      matched: 0
+      matched: 0,
+      unparseable: 0
     }
   };
 
-  var doc = DocumentApp.openById(docId);
+  var doc = withGasRetry('VerifySync.verifyDocumentSync:DocumentApp.openById',
+    function () { return DocumentApp.openById(docId); });
   try {
     var docUrl = doc.getUrl();
-    var floatingActions = _collectFloatingActionState(doc);
+    var unparseableParagraphs = [];
+    var floatingActions = _collectFloatingActionState(doc, unparseableParagraphs);
     result.counts.floating = floatingActions.length;
     _verifyProgress(result, 'Scanned floating actions: ' + floatingActions.length);
+
+    // ADR-0027 rule 6 / gts-xvlu: a paragraph that starts a token but never
+    // completes the grammar (e.g. the gts-tis pipe-delimited spelling) is
+    // reported, not silently dropped from the scan.
+    result.counts.unparseable = unparseableParagraphs.length;
+    for (var upI = 0; upI < unparseableParagraphs.length; upI++) {
+      var up = unparseableParagraphs[upI];
+      _verifyIssue(
+        result,
+        'Paragraph looks like an action but does not parse (body index ' + up.bodyChildIndex + '): ' + up.leadingText
+      );
+    }
 
     var tracker = _readTrackerTableState(doc);
     result.counts.tracker = tracker.rows.length;
@@ -75,8 +90,8 @@ function _verifyProgress(result, message) {
   GasLogger.log('verify.progress', { msg: message });
 }
 
-function _collectFloatingActionState(doc) {
-  var floatingActions = _scanFloatingActions(doc);
+function _collectFloatingActionState(doc, unparseableOut) {
+  var floatingActions = _scanFloatingActions(doc, unparseableOut);
   var rows = [];
 
   for (var i = 0; i < floatingActions.length; i++) {
@@ -168,64 +183,22 @@ function _tableToTrackerRows(table) {
   return rows;
 }
 
+/**
+ * Calls _verifyActionRowsCore (WebApp.js) directly, in-process, rather than
+ * round-tripping through UrlFetchApp to this script's own /exec deployment.
+ * That self-call previously took 35-40+s from inside a GAS execution vs.
+ * 3-4s for the identical HTTP call issued externally, and was the actual
+ * cause of buildHomepageCard blowing its ~44s platform timeout most of the
+ * time (gts-8py3) — both callers of this function (buildHomepageCard,
+ * verifyDocumentSync) always run inside this same script project, so the
+ * HTTP hop was pure overhead, never a real cross-deployment call.
+ */
 function _fetchSheetRowsForVerification(docUrl) {
-  var response = _callVerifyWebApp({
-    action: 'verify_action_rows',
-    docUrl: docUrl
-  });
+  var response = _verifyActionRowsCore({ docUrl: docUrl });
   if (response.error) {
     throw new Error(response.error);
   }
   return response.rows || [];
-}
-
-function _callVerifyWebApp(payload) {
-  var webAppUrl = getWebAppUrl();
-  var secret = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
-
-  if (!webAppUrl) {
-    throw new Error('WEBAPP_URL not set');
-  }
-
-  var oauthToken = ScriptApp.getOAuthToken();
-  var resp = UrlFetchApp.fetch(webAppUrl, {
-    method: 'post',
-    contentType: 'application/json',
-    muteHttpExceptions: true,
-    headers: { Authorization: 'Bearer ' + oauthToken },
-    payload: JSON.stringify(_mergeVerifyPayload(payload, { secret: secret || '', clientVersion: BUILD_INFO.version }))
-  });
-
-  if (resp.getResponseCode() !== 200) {
-    throw new Error('Verify request failed: HTTP ' + resp.getResponseCode());
-  }
-
-  try {
-    var parsed = JSON.parse(resp.getContentText());
-    _logVersionMismatch(parsed, 'verify');
-    return parsed;
-  } catch (e) {
-    throw new Error('Verify request returned non-JSON response');
-  }
-}
-
-function _mergeVerifyPayload(left, right) {
-  var merged = {};
-  var key;
-
-  for (key in left) {
-    if (Object.prototype.hasOwnProperty.call(left, key)) {
-      merged[key] = left[key];
-    }
-  }
-
-  for (key in right) {
-    if (Object.prototype.hasOwnProperty.call(right, key)) {
-      merged[key] = right[key];
-    }
-  }
-
-  return merged;
 }
 
 function _compareVerificationState(result, floatingActions, tracker, sheetRows) {
@@ -302,7 +275,12 @@ function _compareVerificationState(result, floatingActions, tracker, sheetRows) 
       continue;
     }
 
-    if (floatingRow.action !== matchingSheetRow.action) {
+    // Action text is compared through _normalizeLineEndings on every surface
+    // below: it may carry soft-return line breaks (gts-dou2/dr8j), and the doc,
+    // tracker-cell, and sheet reads do not all spell that break the same way.
+    // Comparing raw would report a permanent, unfixable consistency issue.
+    if (_normalizeLineEndings(floatingRow.action) !==
+        _normalizeLineEndings(matchingSheetRow.action)) {
       _verifyIssue(
         result,
         'Action text mismatch for ID ' + matchingSheetRow.id + ': doc="' + floatingRow.action + '" sheet="' + matchingSheetRow.action + '"'
@@ -326,7 +304,8 @@ function _compareVerificationState(result, floatingActions, tracker, sheetRows) 
       if (!matchingTrackerRow) {
         _verifyIssue(result, 'Tracker table is missing action ID ' + matchingSheetRow.id);
       } else {
-        if (matchingTrackerRow.action !== matchingSheetRow.action) {
+        if (_normalizeLineEndings(matchingTrackerRow.action) !==
+            _normalizeLineEndings(matchingSheetRow.action)) {
           _verifyIssue(
             result,
             'Tracker action mismatch for ID ' + matchingSheetRow.id + ': tracker="' + matchingTrackerRow.action + '" sheet="' + matchingSheetRow.action + '"'

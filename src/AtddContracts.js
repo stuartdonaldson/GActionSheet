@@ -12,7 +12,7 @@
  * is exclusively an ATDD concern, so it lives here.
  *
  * Human-readable semantics live in docs/DESIGN.md §ATDD Journey Pre-Code Contract.
- * Pre-code contract for epic GTaskSheet-5vwu (bead .2); implemented by .8;
+ * Pre-code contract for epic gts-5vwu (bead .2); implemented by .8;
  * exported to JSON + consumed by Python in .3.
  *
  * Decisions consumed (docs/atdd/atdd-lifecycle.md §16.11):

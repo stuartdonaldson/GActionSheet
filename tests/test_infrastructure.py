@@ -68,12 +68,24 @@ class TestInitializeTriggers:
             pytest.skip("gasLogDir not configured")
 
         # First call
+        # gts-u947 (stage regression-verify): timeout widened 30s -> 90s.
+        # Observed failing once at 30s during a 61-minute full sweep with the
+        # live 30-min syncAll trigger firing concurrently -- zero telemetry
+        # was ever produced for that run (not delayed telemetry), consistent
+        # with GAS-side trigger-quota/contention under load rather than pure
+        # Axiom ingestion lag. TriggerManager.js's initializeTriggers() now
+        # logs 'triggers.initializeFailed' and rethrows on any such
+        # exception instead of silently skipping the log call, so a real
+        # failure surfaces with a diagnosable trail; this wider budget gives
+        # legitimate contention room to clear before the wait itself times
+        # out. Standalone this call completes in a few seconds either way,
+        # so the wider ceiling costs nothing on the common path.
         fence1 = clear_logs(gas_log_dir)
         gas_invoke.initialize_triggers()
         entry1 = wait_for_log(
             gas_log_dir,
             lambda e: e.get("tag") == "triggers.initialized",
-            timeout_s=30,
+            timeout_s=90,
             after=fence1,
         )
 
@@ -83,7 +95,7 @@ class TestInitializeTriggers:
         entry2 = wait_for_log(
             gas_log_dir,
             lambda e: e.get("tag") == "triggers.initialized",
-            timeout_s=30,
+            timeout_s=90,
             after=fence2,
         )
 

@@ -61,4 +61,4 @@ created until the `[INF]` bead is workable."
 ## Resolution (2026-07-01)
 Lever applied: `[INF]` design-bead authoring rule added to project CLAUDE.md Testing Strategy
 (description/acceptance/design required at creation when the deliverable blocks downstream beads).
-Dogfooded on GTaskSheet-m65t. Moved to resolved/.
+Dogfooded on gts-m65t. Moved to resolved/.

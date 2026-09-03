@@ -1,0 +1,16 @@
+<!-- kind: golden -->
+<!-- name: create-lane-end -->
+<!-- serves: gts-pi1s -->
+<!-- generated: 2026-08-28T00:00:00.000Z -->
+
+Filler context action, unrelated to the create boundary under test.
+
+ACT-221: filler@example.com create-end filler one (Open)
+
+Filler context action, unrelated to the create boundary under test.
+
+ACT-222: filler@example.com create-end filler two (Open)
+
+Case (gts-pi1s, @create at the end of existing content): a bare AI: trigger placed AFTER existing content, within this corpus's own record range (the batched runner composes other scenarios' corpora after it -- see tests/support/apt_lane_runner.py).
+
+AI: create lane end token

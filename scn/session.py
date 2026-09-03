@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import contextlib
 import copy
-import io
 import json
 import os
 import pathlib
 import re
+import sys
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -65,11 +66,50 @@ class FixtureError(RuntimeError):
 
 _AUTH_COOKIE_DOMAINS = {"script.google.com", ".google.com", "accounts.google.com"}
 
-_AUTH_FILE = pathlib.Path(__file__).parent.parent / ".auth" / "user.json"
+
+_SETTINGS_PATH = pathlib.Path(__file__).parent.parent / "local.settings.json"
+_PROJECT_ROOT = pathlib.Path(__file__).parent.parent
+
+
+def _devstandard_playwright_auth_dir() -> pathlib.Path:
+    devstandard = os.environ.get("DEVSTANDARD")
+    if not devstandard:
+        raise RuntimeError(
+            "$DEVSTANDARD is not set -- required to resolve the shared Playwright auth "
+            "resolver (see /home/stuar/.claude/CLAUDE.md §10a: export DEVSTANDARD=/mnt/c/dev/DevStandard "
+            "in your shell profile)."
+        )
+    d = pathlib.Path(devstandard) / "tools" / "playwright-auth"
+    if not d.is_dir():
+        raise RuntimeError(f"$DEVSTANDARD is set to {devstandard!r} but {d} does not exist.")
+    return d
+
+
+_devstandard_dir = _devstandard_playwright_auth_dir()
+if str(_devstandard_dir) not in sys.path:
+    sys.path.insert(0, str(_devstandard_dir))
+from playwright_auth import resolve_auth_file as _ds_resolve_auth_file  # noqa: E402
+
+
+def resolve_auth_file(role: str = "primary") -> pathlib.Path:
+    """Resolve a Playwright storageState file for a project role.
+
+    Delegates to DevStandard's canonical resolver
+    ($DEVSTANDARD/tools/playwright-auth/playwright_auth.py) so this project
+    carries no forked copy of the resolution logic to drift out of sync --
+    see docs/standards/playwright-shared-auth.md. Kept as a same-signature
+    wrapper (role-only, no project_root) so every existing call site in this
+    project (scn.session, tests/helpers/download.py, tests/helpers/auth_probe.py,
+    scripts/export_gas.py) is unaffected.
+    """
+    return _ds_resolve_auth_file(role, project_root=_PROJECT_ROOT)
+
+
+_AUTH_FILE = resolve_auth_file()
 
 
 def _load_auth_cookie_header() -> str | None:
-    """Load Playwright auth cookies from .auth/user.json and return a Cookie header string.
+    """Load Playwright auth cookies from the resolved auth file and return a Cookie header string.
 
     Only cookies whose domain matches Google's auth domains are included.
     Returns None if the auth file is absent (falls through to unauthenticated request).
@@ -88,12 +128,67 @@ def _load_auth_cookie_header() -> str | None:
     return "; ".join(parts) if parts else None
 
 
+_HTTP_POST_MAX_ATTEMPTS = 5
+_HTTP_POST_RETRY_DELAY_S = 3  # base delay; _http_post backs off exponentially from this
+
+
 def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
-    """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors."""
+    """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors.
+
+    Retries a bounded number of times on three symptoms of the same underlying
+    flakiness: (1) the response is the GAS echo page instead of JSON, (2) a
+    Drive "Page Not Found" error page arrives with HTTP 404, and (3) the read
+    side stalls until the socket timeout fires (`TimeoutError`). None of these
+    is a fixed deployment-propagation window (observed recurring 50+ minutes
+    after a deploy, and intermittently mid-run with no redeploy at all) — all
+    three are the /exec -> script.googleusercontent.com/echo routing
+    intermittently failing to resolve (replayed as GET dropping the POST body
+    for the first case, a bare 404 instead of a redirect for the second, and
+    a hung read for the third). A fresh POST attempt either lands on the real
+    handler or hits the same routing quirk again, so a bounded retry with
+    exponential backoff is the fix, not a longer flat sleep. Every other
+    failure (non-404 HTTP error, token rejection, network error) raises
+    immediately — only these three routing symptoms are retried.
+
+    gts-f3me.4 (Stage B, TD-PLAN-21-08.md): `TimeoutError` was previously
+    unretried and uncaught. `urllib.request.urlopen`'s `do_open` wraps only
+    `h.request()` in `except OSError: raise URLError(err)`;
+    `h.getresponse()` (visible in all three original tracebacks at
+    request.py:1348) propagates `TimeoutError` raw, bypassing the
+    `URLError` handler and the retry/backoff loop entirely. Note `socket.
+    timeout` is a `TimeoutError` alias as of CPython 3.10, so catching
+    `TimeoutError` covers both spellings.
+
+    gts-f3me.5: bumped from 3 attempts/flat 3s delay to 5 attempts/exponential
+    backoff (3s, 6s, 12s, 24s) after a full sweep (gas-test3.log) hit this
+    exhausted-retry path 4x in one run against zero occurrences in the two
+    prior sweeps (gas-test.log, gas-test2.log) — a step change from baseline,
+    plausibly inflated by that run's general slowdown (more wall time / HTTP
+    call volume = more exposure to the same low-probability routing glitch;
+    see gts-f3me.6, the cause-side investigation this bead deliberately does
+    not conflate with). Widening the budget is a low-risk, isolated mitigation
+    of the symptom either way.
+    """
     if not url:
         raise RuntimeError(
             "webappTestUrl not set in local.settings.json"
         )
+
+    # Correlation instrumentation (gts-obry.1): every call is stamped with a
+    # client-generated opId (a uuid4, reused across all retry attempts of the
+    # SAME logical call -- computed once, before the retry loop below) and an
+    # initiatedAt epoch-ms timestamp. doPost's existing
+    # GasLogger.startOp(opId) (src/WebApp.js, gts-j8cn) already stamps any
+    # caller-supplied opId onto every log entry it makes as `parentOp`,
+    # distinct from the fresh `op` each execution mints for itself -- this
+    # was previously always null for Python-initiated calls since nothing
+    # populated it. Two log groups sharing one parentOp but carrying
+    # different op values means the SAME client call was dispatched twice by
+    # the platform (a real duplicate-execution bug); different parentOp
+    # values means two genuinely separate calls. A caller that already set
+    # its own opId (chaining an existing op) is not overwritten.
+    payload.setdefault("opId", str(uuid.uuid4()))
+    payload.setdefault("initiatedAt", int(time.time() * 1000))
 
     data = json.dumps(payload).encode("utf-8")
     headers: dict = {"Content-Type": "application/json"}
@@ -102,50 +197,77 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
         cookie = _load_auth_cookie_header()
         if cookie:
             headers["Cookie"] = cookie
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers=headers,
-        method="POST",
-    )
 
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-            final_url = resp.geturl()
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw!r}"
-        ) from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(
-            f"Network error (action={payload.get('action')!r}): {exc.reason}"
-        ) from exc
-
-    if raw in ("test-token-unauthorized", "test-token-expired"):
-        raise FixtureTokenError(
-            f"GAS rejected test token for action={payload.get('action')!r}: {raw}. "
-            "Re-register with: python scripts/refresh_test_token.py (or npm run deploy:test)."
+    for attempt in range(1, _HTTP_POST_MAX_ATTEMPTS + 1):
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers,
+            method="POST",
         )
 
-    # GAS always redirects /exec → script.googleusercontent.com/macros/echo (normal).
-    # When the final URL differs from the request URL AND the body is non-JSON, include
-    # the redirect destination so the cause is unambiguous.
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        redir = f" (redirected to {final_url!r})" if final_url != url else ""
-        raise RuntimeError(
-            f"Non-JSON response (action={payload.get('action')!r}){redir}: {raw!r}"
-        ) from exc
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+                final_url = resp.geturl()
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 404 and attempt < _HTTP_POST_MAX_ATTEMPTS:
+                time.sleep(_HTTP_POST_RETRY_DELAY_S * (2 ** (attempt - 1)))
+                continue
+            raise RuntimeError(
+                f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw!r}"
+                + (f" (after {attempt} attempts)" if exc.code == 404 else "")
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Network error (action={payload.get('action')!r}): {exc.reason}"
+            ) from exc
+        except TimeoutError as exc:
+            # gts-f3me.4: urllib.request.urlopen's do_open wraps only
+            # h.request() in `except OSError: raise URLError(err)` -- a
+            # read-side stall inside h.getresponse() (request.py:1348)
+            # propagates TimeoutError/socket.timeout raw, past the
+            # URLError handler above, so it was previously unretried and
+            # uncaught (bare traceback out of _http_post). Route it
+            # through the same bounded-retry/backoff path as the other two
+            # routing symptoms above -- a fresh attempt either completes
+            # inside the timeout or hits the same stall again.
+            if attempt < _HTTP_POST_MAX_ATTEMPTS:
+                time.sleep(_HTTP_POST_RETRY_DELAY_S * (2 ** (attempt - 1)))
+                continue
+            raise RuntimeError(
+                f"Timed out waiting for response (action={payload.get('action')!r}, "
+                f"timeout={timeout}s) after {_HTTP_POST_MAX_ATTEMPTS} attempts"
+            ) from exc
 
-    if "error" in result:
-        raise FixtureError(
-            f"GAS returned error for action={payload.get('action')!r}: {result['error']}"
-        )
+        if raw in ("test-token-unauthorized", "test-token-expired"):
+            raise FixtureTokenError(
+                f"GAS rejected test token for action={payload.get('action')!r}: {raw}. "
+                "Re-register with: python scripts/refresh_test_token.py (or npm run deploy:test)."
+            )
 
-    return result
+        # GAS always redirects /exec → script.googleusercontent.com/macros/echo (normal).
+        # When the final URL differs from the request URL AND the body is non-JSON, include
+        # the redirect destination so the cause is unambiguous.
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            redir = f" (redirected to {final_url!r})" if final_url != url else ""
+            if attempt < _HTTP_POST_MAX_ATTEMPTS:
+                time.sleep(_HTTP_POST_RETRY_DELAY_S * (2 ** (attempt - 1)))
+                continue
+            raise RuntimeError(
+                f"Non-JSON response (action={payload.get('action')!r}){redir}: {raw!r} "
+                f"(after {_HTTP_POST_MAX_ATTEMPTS} attempts)"
+            ) from exc
+
+        if "error" in result:
+            raise FixtureError(
+                f"GAS returned error for action={payload.get('action')!r}: {result['error']}"
+            )
+
+        return result
 
 
 def _http_get(url: str, timeout: int = 60) -> str:
@@ -230,6 +352,7 @@ class ScenarioSession:
         self._gas_fence: float = clear_logs(settings.get("gasLogDir"))
         # Attach after creation: scn.ui = UiDriver(page, doc_id=scn.doc_id)
         self._ui = None
+        self._trashed = False  # guards _deferred_trash() idempotency (gts-hroj)
 
     # ``ui`` is a property so assigning the driver auto-wires the reporter + a
     # back-reference for the post-act fail-fast check — no fixture edits needed.
@@ -248,13 +371,21 @@ class ScenarioSession:
     # Private HTTP helpers
     # ------------------------------------------------------------------
 
-    def _post(self, payload: dict, *, timeout: int = 360) -> dict:
+    def _post(self, payload: dict, *, timeout: int | None = None) -> dict:
         """POST JSON payload to webappTestUrl; time it and emit an HTTP trace event.
 
         Unexpected responses (HTTP error / non-JSON / token / GAS error field) are
         raised by _http_post; we record a FAIL HTTP event first so the trace shows
         the bad response at the source (G2 fail-fast signal), then re-raise.
+
+        When `timeout` is omitted, a `payload["fixture"]` present in
+        `_CORPUS_SCALED_FIXTURE_TIMEOUTS` (e.g. "sync_all") gets that fixture's
+        scaled timeout even on a hand-rolled call that bypasses _post_fixture —
+        this used to be advisory-only in _post_fixture, which let a direct
+        caller silently under-time a corpus-scaled fixture (gts-a8yh Stage A #3).
         """
+        if timeout is None:
+            timeout = self._CORPUS_SCALED_FIXTURE_TIMEOUTS.get(payload.get("fixture"), 360)
         url = self.settings.get("webappTestUrl") or ""
         action = payload.get("fixture") or payload.get("action") or "post"
         t0 = time.monotonic()
@@ -276,7 +407,18 @@ class ScenarioSession:
             payload.update(extra)
         return self._post(payload)
 
-    def _post_fixture(self, fixture_name: str, extra: dict | None = None) -> dict:
+    # Fixtures whose GAS-side execution time scales with the shared TEST
+    # corpus's doc count rather than this call's own payload (gts-4m7l):
+    # a real syncAll() sweep over 100+ docs can legitimately run past the
+    # default 360s client-side read timeout even though the GAS side itself
+    # completes well inside it. Stopgap only — see gts-4m7l's durable fix
+    # (purge_stale_test_docs, invoked per-session in conftest.py) for the
+    # actual corpus-growth cure; this just gives the slow fixture more room
+    # while that cure keeps the corpus (and so this timeout's headroom) from
+    # eroding again.
+    _CORPUS_SCALED_FIXTURE_TIMEOUTS = {"sync_all": 600}
+
+    def _post_fixture(self, fixture_name: str, extra: dict | None = None, *, timeout: int | None = None) -> dict:
         """POST run_fixture with fixture_name and the current doc ID."""
         payload = {
             "action": "run_fixture",
@@ -286,7 +428,7 @@ class ScenarioSession:
         }
         if extra:
             payload.update(extra)
-        return self._post(payload)
+        return self._post(payload, timeout=timeout)
 
     def _gid(self, target: ai) -> str:
         """Construct the globalId from doc_id + target.action_id (§16.11 #3)."""
@@ -309,6 +451,10 @@ class ScenarioSession:
     def _check_gas_errors(self, fence: float | None = None, *, raise_on_error: bool | None = None):
         """Scan the GAS log dir for any `*.error` entry since the fence.
 
+        Scoped to `env == "test"` (missing/unknown env is treated as test) so
+        that unrelated production traffic sharing the same Axiom log stream
+        can't fail a TEST run by wall-clock coincidence.
+
         The single GAS-error scan routine: both the always-on post-Act guard and
         assert_no_addon_error() call this (no duplicated scan logic). On a hit it
         records a MONITOR FAIL trace event and advances the running fence past the
@@ -328,7 +474,8 @@ class ScenarioSession:
             fence = self._gas_fence
         entries = collect_logs(
             log_dir,
-            lambda e: str(e.get("tag", "")).endswith(".error"),
+            lambda e: str(e.get("tag", "")).endswith(".error")
+            and str(e.get("data", {}).get("env", "test")) == "test",
             after=fence,
         )
         entry = entries[0] if entries else None
@@ -401,19 +548,65 @@ class ScenarioSession:
         # docId), so emit it as a synthetic first event now instead of leaving doc
         # creation invisible (§4.2, GTaskSheet-ishz.1).
         instance._reporter.event("HTTP", "begin_journey_session", dur_s=dur_s, _t_elapsed=0.0)
+        if hasattr(request, "addfinalizer"):
+            # Deferred trash, not immediate (gts-hroj): registering this as a
+            # pytest finalizer — rather than leaving it to the caller's own
+            # `finally:` — means it runs in the teardown phase, strictly
+            # after the call-phase failure report. See _deferred_trash()'s
+            # docstring for why that ordering matters. hasattr-guarded (not
+            # `is not None`) because some non-pytest callers pass a bare
+            # sentinel object as `request` just to opt into Reporter creation
+            # (e.g. test_scn_session.py's test doubles) — those aren't real
+            # FixtureRequests and have no finalizer machinery to register with.
+            request.addfinalizer(instance._deferred_trash)
         return instance
 
     def close(self) -> None:
-        """Trash the journey doc and assert the expectation queue is empty (§4.6).
+        """Assert the expectation queue is empty, then trash the journey doc (§4.6).
 
-        Calls end_journey_session (AtddContracts.js); then engine.close() enforces
-        the drain invariant — a non-empty queue is a DrainInvariantError (test failure).
+        engine.close() runs first so a caller invoking close() directly still
+        observes the DrainInvariantError (a non-empty queue is a real test
+        failure) at this call site, rather than it surfacing later out of a
+        finalizer. Trashing itself is delegated to _deferred_trash() — see its
+        docstring for why multi-doc *tests* should prefer registering that via
+        new_doc(request=...) over calling close() from their own `finally:`.
         """
-        self._post_route("end_journey_session", {"docId": self.doc_id})
+        self.engine.close()
+        self._deferred_trash()
+
+    def _deferred_trash(self) -> None:
+        """Trash the journey doc and close the reporter (gts-hroj).
+
+        Split out of close() so new_doc() can register it as a pytest
+        fixture finalizer (request.addfinalizer) instead of a test running it
+        from its own `finally:`. Fixture finalizers run in pytest's teardown
+        phase, strictly after the call-phase failure report — and this
+        suite's universal UI-failure-diagnostics hook
+        (conftest.py::pytest_runtest_makereport, GTaskSheet-3tkf) fires
+        exactly there. A test that trashes its own doc inside `finally:`
+        (part of the call phase — see the test's own stack, not a hook) beats
+        the diagnostics hook to it every time, so the captured screenshot
+        always shows the post-trash "file is in trash" Drive chrome
+        regardless of the real failure (mis-diagnosed as a product bug twice:
+        gts-lirp 2026-08-05, gts-ir1f attempt #4 2026-08-06).
+
+        Multi-doc live tests: let this run via the new_doc(request=...)
+        finalizer. Do not call this (or close()) from a test's own
+        `finally:` — call `scn.engine.close()` there instead if the
+        drain-invariant assertion still needs to happen at that point.
+
+        Idempotent — self._trashed guards a second invocation (e.g. close()
+        called explicitly on an instance that also has the auto-registered
+        finalizer) from re-trashing or double-closing the reporter.
+        """
+        if self._trashed:
+            return
+        self._trashed = True
         try:
-            self.engine.close()
-        finally:
-            self._reporter.close()
+            self._post_route("end_journey_session", {"docId": self.doc_id})
+        except Exception:
+            pass
+        self._reporter.close()
 
     # ------------------------------------------------------------------
     # Acts — HTTP mutations (§16.9 / §3.4)
@@ -446,14 +639,27 @@ class ScenarioSession:
         calls GAS syncDocument() internally, which in turn POSTs sync_action_rows with
         WEBAPP_SECRET and drains ACTION_SHEET_QUEUE before responding (§16.11 #4).
         A following sync() is how the scenario forces an async act to convergence.
+
+        gts-lu13: every live lane (a real Reporter, not the NullReporter used by
+        harness unit tests / test doubles) also asserts sync.scanned's logged count
+        against this session's appended-action count, and that no sheet row for this
+        doc is marked Deleted — the two signals that were visible and unchecked on
+        2026-08-29.
         """
+        op_id = str(uuid.uuid4())
+        fence = time.time() - 2.0
         with self._act("sync"):
-            resp = self._post_fixture("sync_document")
+            resp = self._post_fixture("sync_document", extra={"opId": op_id})
             data = resp.get("data") or {}
             if not data.get("synced"):
                 raise RuntimeError(
                     f"sync_document fixture returned unexpected response: {resp}"
                 )
+        if not isinstance(self._reporter, NullReporter):
+            from tests.helpers.sync_coverage import assert_sync_coverage
+            assert_sync_coverage(
+                self, op_id=op_id, fence=fence, expected_min=self._appended_actions
+            )
 
     def edit_sheet(self, target: ai, **fields) -> None:
         """Edit one or more sheet fields for target (addressed by globalId, §16.11 #3).
@@ -576,16 +782,15 @@ class ScenarioSession:
                       col7 doc_name present, matches the doc's actual current title
                       (GTaskSheet-k1g9), and col10 sync_status not an error state.
                       Does NOT call any GAS route (verify_action_rows/verify_chip_integrity
-                      untouched) -- the doc-name-correctness check downloads the .docx
-                      artifact (already-sanctioned download_docx path, same as DOC/TRACKER
-                      reads) and reads its core_properties.title, which Google Docs' docx
-                      export sets to the live Drive document name.  Equivalent to an
-                      artifact-side verify(on=SHEET) check; placed here for caller
-                      ergonomics only.
+                      untouched) -- the doc-name-correctness check reads the live Drive
+                      title off the doc's edit page (fetch_doc_title, gts-jnsf) rather
+                      than the .docx export's core_properties.title, which Google Docs
+                      always writes as the literal placeholder "Word Document" and so
+                      cannot observe a rename.  Equivalent to an artifact-side
+                      verify(on=SHEET) check; placed here for caller ergonomics only.
         """
         if scope == Surface.SHEET:
-            from tests.helpers.download import download_docx, download_xlsx
-            import docx as _docx_pkg
+            from tests.helpers.download import download_xlsx, fetch_doc_title
 
             xlsx = download_xlsx(self.sheet_id)
             rows = SheetReader().read(xlsx, self.doc_id)
@@ -593,12 +798,9 @@ class ScenarioSession:
 
             current_title = None
             if rows:
-                # Only fetch the docx (extra download) if there's a row to check the
+                # Only fetch the title (extra request) if there's a row to check the
                 # name against -- no rows means nothing to compare.
-                docx_bytes = download_docx(self.doc_id)
-                current_title = _docx_pkg.Document(
-                    io.BytesIO(docx_bytes)
-                ).core_properties.title or None
+                current_title = fetch_doc_title(self.doc_id)
 
             for row in rows:
                 # M2-guarded col 7: document_formula must resolve to a doc_id and doc_name
@@ -627,7 +829,7 @@ class ScenarioSession:
         chip = self._post_route("verify_chip_integrity", {"docId": self.doc_id})
         if self._appended_actions > 0:
             assert chip.get("checked_count", 0) > 0, (
-                f"verify_chip_integrity scanned 0 AI-N: paragraphs but "
+                f"verify_chip_integrity scanned 0 AI-N:/ACT-N: paragraphs but "
                 f"{self._appended_actions} action(s) were appended this session"
             )
         violations = chip.get("violations", [])
