@@ -28,25 +28,20 @@ sites, a create-action flow, a negative "no link key" default. Those stay
 each bead's own scope and are not duplicated here; each section's docstring
 says which of its bead's numbered cases this file covers.
 """
-import pathlib
-
 import pytest
 
-from scn.session import ScenarioSession
-
-_APT_PATH = pathlib.Path(__file__).parent / "fixtures" / "action-reference.apt.txt"
+from tests.helpers.reference_corpus import materialize_reference_corpus
 
 
 @pytest.fixture(scope="module")
-def reference(settings):
-    """Decodes the checked-in reference doc into a fresh doc, syncs once, and
-    hands every test in this module (scn, rows) — rows keyed by the token
-    portion of globalId (e.g. 'ACT-1', 'AI-10')."""
-    scn = ScenarioSession.new_doc(settings)
-    apt = _APT_PATH.read_text()
-    resp = scn._post_fixture("decode_reference_document", {"apt": apt})
-    assert (resp.get("data") or {}).get("ok"), f"decode_reference_document failed: {resp}"
-    scn.sync()
+def reference(settings, request):
+    """Materialises the checked-in reference corpus into a fresh, disposable
+    doc (gts-p150 — never the shared canonical reference Doc), syncs once,
+    and hands every test in this module (scn, rows) — rows keyed by the
+    token portion of globalId (e.g. 'ACT-1', 'AI-10'). Fails loudly, before
+    any test runs, if the decode didn't land every token the golden
+    declares — see materialize_reference_corpus."""
+    scn = materialize_reference_corpus(settings, request=request)
     rows = {r.global_id.split("/")[-1]: r for r in scn.find_sheet_actions()}
     yield scn, rows
     scn.close()

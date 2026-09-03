@@ -146,6 +146,15 @@ ENTRY_POINT_REGISTRY: dict[str, str] = {
         "_buildImportCard/_buildImportTabSection) — AC-1/EPIC-D team-scoped read; retained as the established import entry point",
     "menuSyncActiveDoc": "[menu] menuSyncActiveDoc -> syncDocument(docId) (Docs 'Action Sync > Sync')",
     "menuInsertTrackerActiveDoc": "[menu] menuInsertTrackerActiveDoc -> insertTrackerTable(docId) (Docs 'Action Sync > Insert Tracker')",
+    "team_sync_document": "[route] team_sync_document (TeamSync.js, _handleTeamSyncDocument) — team-portal "
+        "write route; re-verifies identity/access tier and re-authorizes the doc-specific write (R3b) "
+        "before running the existing syncDocument() path — gts-79dw.4.5/4.11/4.12",
+    "onDocumentExportMenu": "[menu] onDocumentExportMenu (Procedure-Exporter.js, appsscript.json "
+        "addOns.common.universalActions) — Extensions-menu universal action; runs exportDocument_() "
+        "against the active document, writes a JSON export file to Drive (exportPdf=false)",
+    "onDocumentExportAndPdfMenu": "[menu] onDocumentExportAndPdfMenu (Procedure-Exporter.js, appsscript.json "
+        "addOns.common.universalActions) — same as onDocumentExportMenu with exportPdf=true, additionally "
+        "writes a PDF export file to Drive",
     # ── Test-support entry points (harness only; flagged [test-support]) ─────────────
     "importSelectedForTest": "[test-support route] import_selected_for_test testToken route — interactive "
         "test entry point (GTaskSheet-8qe5/EPIC GTaskSheet-pw5x) standing in for the Import tab "
@@ -207,6 +216,29 @@ ENTRY_POINT_DEFERRED: dict[str, str] = {
     "end_journey_session": "every ScenarioSession.close() call POSTs this; a regression here "
         "fails the engine.close() drain-invariant assertion for every test, surfacing "
         "immediately and suite-wide.",
+    # gts-79dw.4.8 review follow-up (PR #5 Copilot review) — team_sync_document has call-site
+    # coverage (tests/test_verify_access.py, tests/test_team_portal_hardening.py) but only on
+    # the rejection/negative paths, asserted against the raw JSON dict directly -- none of those
+    # calls go through scn.verify(..., entry_point=...), and the one positive-path test
+    # (test_write_succeeds_at_edit_tier) is skipped pending a configured EDIT-tier identity and,
+    # even unskipped, only resolves the caller's tier -- it does not itself call
+    # team_sync_document or assert durable post-sync state. Tagging a negative-path assertion
+    # with entry_point= here would misrepresent coverage of the success/durable-state path.
+    "team_sync_document": "no scn.verify()-based durable-state assertion yet for the success "
+        "path; existing coverage is raw-dict assertions on the rejection paths (R14/R15 tier "
+        "gate, R3b cross-folder scope) plus a skipped positive test that never calls the route -- "
+        "PR #5 review.",
+    # Extensions-menu universal actions (Procedure-Exporter.js) are CardService UI card builders
+    # with no headless/testToken call-site of their own -- test coverage instead goes through the
+    # export_document_json testability seam (exportDocument_() directly, see
+    # tests/test_document_export.py's header comment), which is a distinct call-site, not these
+    # two menu handlers. No scn.verify() assertion exists at onDocumentExportMenu/
+    # onDocumentExportAndPdfMenu's own call-site.
+    "onDocumentExportMenu": "CardService universalAction with no headless call-site; covered "
+        "indirectly via the export_document_json seam's exportDocument_() call, not at its own "
+        "entry point — PR #5 review.",
+    "onDocumentExportAndPdfMenu": "same gap as onDocumentExportMenu (exportPdf=true variant) — "
+        "PR #5 review.",
 }
 
 __all__ = [

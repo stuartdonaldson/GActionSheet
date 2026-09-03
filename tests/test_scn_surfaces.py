@@ -20,6 +20,11 @@ import openpyxl
 
 from scn.ai import ai
 from scn.surfaces import DocReader, SheetReader, TrackerReader
+from tests.helpers import docx_build
+
+# gts-aqpk: fast/local tier -- this module makes no live GAS/Google round trip
+# (verified offline with sockets blocked). See docs/OPERATIONS.md "Test tiers".
+pytestmark = pytest.mark.no_live_session
 
 
 # ---------------------------------------------------------------------------
@@ -49,39 +54,31 @@ def _add_hyperlink_run(para, display_text: str, url: str) -> None:
     para._element.append(hyperlink)
 
 
-def _add_plain_run(para, text: str) -> None:
-    run = para.add_run(text)
-
-
 def _make_docx_bytes(paragraphs: list[str | tuple]) -> bytes:
     """
-    Build an in-memory docx from a list of paragraph specs.
+    Build an in-memory docx from a list of paragraph specs, via the shared
+    tests.helpers.docx_build builder (gts-1ej4 — DocReader tests no longer
+    carry their own duplicate fixture renderer).
 
     Each spec is either:
       - str: plain text paragraph
       - tuple of (prefix_text, chip_email, chip_display, suffix_text)
         builds: <run prefix_text><hyperlink mailto:chip_email chip_display><run suffix_text>
     """
-    doc = Document()
+    blocks = []
     for spec in paragraphs:
-        para = doc.add_paragraph()
-        # Remove the auto-added run from add_paragraph (it's empty by default)
-        for run in para.runs:
-            run._element.getparent().remove(run._element)
-
         if isinstance(spec, str):
-            _add_plain_run(para, spec)
+            blocks.append(docx_build.para(docx_build.text(spec)))
         else:
             prefix, email, display, suffix = spec
+            segments = []
             if prefix:
-                _add_plain_run(para, prefix)
-            _add_hyperlink_run(para, display, f"{_MAILTO_PREFIX}{email}")
+                segments.append(docx_build.text(prefix))
+            segments.append(docx_build.chip(email, display))
             if suffix:
-                _add_plain_run(para, suffix)
-
-    buf = io.BytesIO()
-    doc.save(buf)
-    return buf.getvalue()
+                segments.append(docx_build.text(suffix))
+            blocks.append(docx_build.para(*segments))
+    return docx_build.build_docx(blocks)
 
 
 def _make_tracker_docx_bytes(rows: list[dict], section_heading: str = "=== Tracked Actions ===") -> bytes:

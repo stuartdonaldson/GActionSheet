@@ -1,0 +1,16 @@
+<!-- kind: golden -->
+<!-- name: status-token-parens-expected -->
+<!-- serves: GTaskSheet-28q -->
+<!-- generated: 2026-08-31T00:00:00.000Z -->
+
+Case 1 (GTaskSheet-28q): mid-text parens, no trailing status token -- the parenthesized phrase is literal action text, not a status. Authored statusless so the establishing sync must materialize (Open) and therefore rewrite the paragraph -- a record it never touches could not show the trailing-anchor rule holding against a mid-text distractor.
+
+[**AI-701: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=AI-701)Review the (draft) proposal (Open)
+
+Case 2 (GTaskSheet-28q): mid-text parens WITH a trailing status token -- only the trailing parenthesized phrase is parsed as status; the mid-text one is left alone.
+
+AI-702: Review the (draft) proposal (In Progress)
+
+Case 3 (GTaskSheet-28q): parens only at the end (ambiguous) -- position, not content, decides; \_parseParagraphAsFloatingAction's trailing-anchor regex always prefers the trailing parenthesized phrase as the status, however implausible its content.
+
+AI-703: Review (draft)

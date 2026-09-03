@@ -52,6 +52,38 @@ Those cases read `boardFolderId` / `viewIdToken` / `editIdToken` / `noAccessIdTo
 `teamANoAccessIdToken` (multi-folder AC, gts-79dw.4.12) from
 local.settings.json and SKIP individually when unconfigured, independent of
 the module xfail.
+
+Shared-Drive-inherited group access (gts-zm8w [FIX] / gts-s1j5 [TST], AC4 of
+gts-s1j5 requires these documented here in the module docstring). Same
+live-fixture constraint, same SKIP-when-unconfigured convention; all read from
+local.settings.json:
+
+  sharedDriveInheritedTeamId          TeamData teamId whose folder lives inside
+                                      a SHARED DRIVE, where a domain-managed
+                                      group holds its role ONLY at the drive
+                                      level (never re-granted on the folder).
+  sharedDriveInheritedEditIdToken     Live GIS ID token for a member of a group
+                                      holding Manager/Content Manager (writer)
+                                      at that drive's level. Expect tier=EDIT.
+  sharedDriveInheritedViewIdToken     Live GIS ID token for a member of a
+                                      DIFFERENT group holding only Content
+                                      Viewer (reader) at the drive level.
+                                      Expect tier=VIEW, never EDIT -- proves the
+                                      fallback reads the group's actual role
+                                      rather than blanket-granting EDIT to any
+                                      drive member.
+  sharedDriveInheritedDocId           A Google Doc living UNDER that TeamData
+                                      folder, used as the team_sync_document
+                                      write target (gts-s1j5 AC1's second half)
+                                      and the get_document_actions read target.
+
+NOTE (2026-09-02, gts-s1j5): none of these four keys is configured in this
+checkout, and no TeamData folder inside a Shared Drive exists in this
+environment at all (independently confirmed by
+tests/test_access_resolve_dedupe.py's fixture survey). Every Shared-Drive-
+inherited case below therefore SKIPs rather than running -- the fix shipped in
+76d1b98 is NOT yet provable here. Provisioning that fixture is the blocking
+precondition; see the bd bead filed for it.
 """
 import pytest
 
@@ -90,6 +122,21 @@ def _team_sync_document(settings: dict, assertion: str, team_id: str, doc_id: st
 # ---------------------------------------------------------------------------
 # Negative case — always runnable, no real Google identity required (R2, R6)
 # ---------------------------------------------------------------------------
+
+def _list_my_teams(settings: dict, assertion: str) -> dict:
+    return _http_post(settings["webappTestUrl"], {
+        "action": "list_my_teams",
+        "assertion": assertion,
+    })
+
+
+def _list_team_actions(settings: dict, assertion: str, team_id: str) -> dict:
+    return _http_post(settings["webappTestUrl"], {
+        "action": "list_team_actions",
+        "assertion": assertion,
+        "teamId": team_id,
+    })
+
 
 def test_invalid_token_fails_closed(settings):
     """[4.1 AC negative] A garbage/unparseable idToken must fail closed:
@@ -336,6 +383,116 @@ def test_shared_drive_inherited_group_view_resolves_view_tier(settings):
     assert resp.get("tier") == "VIEW", (
         f"[gts-zm8w AC1 negative] expected tier=VIEW (not EDIT) via "
         f"Shared-Drive-inherited group role, got {resp!r}"
+    )
+
+
+def _shared_drive_edit_or_skip(settings: dict) -> tuple[str, str]:
+    """Common SKIP guard for the Shared-Drive-inherited EDIT fixture."""
+    team_id = settings.get("sharedDriveInheritedTeamId")
+    id_token = settings.get("sharedDriveInheritedEditIdToken")
+    if not team_id or not id_token:
+        pytest.skip(
+            "sharedDriveInheritedTeamId/sharedDriveInheritedEditIdToken not "
+            "configured in local.settings.json -- see the module docstring for "
+            "the Shared Drive + drive-level-group fixture this needs"
+        )
+    return team_id, id_token
+
+
+def test_shared_drive_inherited_edit_can_sync_a_doc_under_that_folder(settings):
+    """[gts-s1j5 AC1, second half] An identity whose EDIT comes ONLY from a
+    Shared-Drive-level group role must be able to WRITE: team_sync_document
+    against a doc under that TeamData folder succeeds, not just the read-side
+    tier resolution. R3b re-authorizes per document at write time using the
+    same resolver, so a drive-inherited grant that resolves EDIT on the read
+    path but is dropped on the write path is exactly the regression this
+    asserts against."""
+    team_id, id_token = _shared_drive_edit_or_skip(settings)
+    doc_id = settings.get("sharedDriveInheritedDocId")
+    if not doc_id:
+        pytest.skip(
+            "sharedDriveInheritedDocId not configured in local.settings.json -- "
+            "requires a Google Doc under the Shared-Drive-hosted TeamData folder"
+        )
+    resolved = _verify_and_resolve_team(settings, id_token, team_id)
+    assert resolved.get("tier") == "EDIT", (
+        f"[gts-s1j5 AC1 precondition] expected tier=EDIT, got {resolved!r}"
+    )
+    sync_resp = _team_sync_document(settings, id_token, team_id, doc_id)
+    assert sync_resp.get("ok") is True, (
+        f"[gts-s1j5 AC1] team_sync_document must SUCCEED for a doc under a "
+        f"TeamData folder the caller holds drive-inherited EDIT on, got "
+        f"{sync_resp!r}"
+    )
+
+
+def test_shared_drive_inherited_edit_appears_in_list_my_teams(settings):
+    """[gts-s1j5 AC5, call-site: list_my_teams] The entry-point coverage
+    invariant (T17) requires list_my_teams to be its OWN call-site against the
+    Shared-Drive-inherited fixture -- all three routes share a resolver, but
+    each reaches it by a different path (list_my_teams enumerates every team
+    rather than resolving one addressed team, so a per-team code path that
+    skips the drive-level fallback would pass verify_and_resolve_access and
+    still omit the team here). Observable state: the team is PRESENT with
+    tier=EDIT; a NONE tier is omitted entirely, so absence is the regression
+    signature."""
+    team_id, id_token = _shared_drive_edit_or_skip(settings)
+    resp = _list_my_teams(settings, id_token)
+    assert resp.get("ok") is not False, (
+        f"[gts-s1j5 AC5 list_my_teams] unexpected error response: {resp!r}"
+    )
+    teams = {t.get("teamId"): t.get("tier") for t in (resp.get("teams") or [])}
+    assert team_id in teams, (
+        f"[gts-s1j5 AC5 list_my_teams] the Shared-Drive-inherited team must "
+        f"appear (NONE tiers are omitted, so absence == resolved NONE), got "
+        f"{resp!r}"
+    )
+    assert teams[team_id] == "EDIT", (
+        f"[gts-s1j5 AC5 list_my_teams] expected tier=EDIT for the "
+        f"drive-inherited team, got {teams[team_id]!r} in {resp!r}"
+    )
+
+
+def test_shared_drive_inherited_edit_reaches_list_team_actions(settings):
+    """[gts-s1j5 AC5, call-site: list_team_actions] Third call-site of the same
+    resolver. Observable state: tier=EDIT is returned and action data is NOT
+    withheld (R8 withholds data below VIEW), so a resolver that quietly drops
+    the drive-level fallback on this route surfaces as tier=NONE + actions=[]
+    rather than as an error."""
+    team_id, id_token = _shared_drive_edit_or_skip(settings)
+    resp = _list_team_actions(settings, id_token, team_id)
+    assert resp.get("ok") is not False, (
+        f"[gts-s1j5 AC5 list_team_actions] unexpected error response: {resp!r}"
+    )
+    assert resp.get("tier") == "EDIT", (
+        f"[gts-s1j5 AC5 list_team_actions] expected tier=EDIT via the "
+        f"drive-inherited group role, got {resp!r}"
+    )
+    assert "actions" in resp, (
+        f"[gts-s1j5 AC5 list_team_actions] expected an 'actions' payload for an "
+        f"EDIT-tier caller (R8 withholds only below VIEW), got {resp!r}"
+    )
+
+
+def test_shared_drive_inherited_view_is_not_widened_by_list_team_actions(settings):
+    """[gts-s1j5 AC2, second call-site] The drive-level VIEW identity must
+    resolve VIEW on list_team_actions too, not EDIT -- the negative case has to
+    hold on every call-site, otherwise a route-local widening would be invisible
+    to the verify_and_resolve_access-only assertion above."""
+    team_id = settings.get("sharedDriveInheritedTeamId")
+    id_token = settings.get("sharedDriveInheritedViewIdToken")
+    if not team_id or not id_token:
+        pytest.skip(
+            "sharedDriveInheritedTeamId/sharedDriveInheritedViewIdToken not "
+            "configured in local.settings.json -- see the module docstring"
+        )
+    resp = _list_team_actions(settings, id_token, team_id)
+    assert resp.get("ok") is not False, (
+        f"[gts-s1j5 AC2] unexpected error response: {resp!r}"
+    )
+    assert resp.get("tier") == "VIEW", (
+        f"[gts-s1j5 AC2] expected tier=VIEW (never EDIT) on list_team_actions "
+        f"for a drive-level reader group, got {resp!r}"
     )
 
 

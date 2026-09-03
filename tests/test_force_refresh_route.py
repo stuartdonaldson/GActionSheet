@@ -197,13 +197,15 @@ def test_sync_document_route_rejects_a_bad_secret(scn):
     """The route sits below the WEBAPP_SECRET gate: a wrong secret must be
     rejected before any sync runs (gts-366c AC-6).
 
-    doPost's gate answers with the plain-text body 'unauthorized', not JSON
-    (src/WebApp.js), so ScenarioSession._http_post surfaces it as a RuntimeError
-    naming the body rather than a parsed dict. Asserting on that message is the
-    honest shape of this contract — inventing a JSON envelope here would assert
-    a response the WebApp does not send.
+    doPost's gate answers with a structured JSON body {ok:false, error:'unauthorized'}
+    (src/WebApp.js, gts-pl2k), so it fails on the FIRST attempt instead of being
+    misdiagnosed as GAS deployment-propagation lag (a non-JSON/echo-page response,
+    which is what the plain-text 'unauthorized' body used to look like to every
+    sanctioned caller). ScenarioSession._post surfaces the JSON 'error' field as a
+    FixtureError, so assert on the response shape, not an exception raised while
+    parsing a non-JSON body.
     """
-    with pytest.raises(RuntimeError, match="unauthorized"):
+    with pytest.raises(FixtureError, match="unauthorized"):
         scn._post({
             "secret": "not-the-webapp-secret",
             "action": _ROUTE,

@@ -147,6 +147,16 @@ function syncDocument(docId, opts) {
     return;
   }
   var force = !!(opts && opts.force);
+  // gts-ttns / ADR-0031: rendering conformance (continuation-line indent for
+  // now; character style is gts-0wmm) is opt-in via `opts.conform`, never a
+  // property of syncDocument() unconditionally. Set true only by the ONE
+  // caller with document context -- WebApp.js's _handleSyncDocument, which is
+  // the shared seam menuSyncActiveDoc/sidebar-onSyncNow/web-UI doc sync all
+  // route through. syncAll()'s direct in-process syncDocument(docId) calls
+  // (no opts) and every other bare-opts caller (TestFixtures.js's generic
+  // 'sync_document' fixture included) stay non-conforming by construction,
+  // exactly as ADR-0031 requires for "no document context" syncs.
+  var conform = !!(opts && opts.conform);
   if (!_acquireDocSyncLock(docId)) {
     GasLogger.log('sync.locked.skip', {
       docId: docId,
@@ -197,7 +207,11 @@ function syncDocument(docId, opts) {
       GasLogger.log('sync.assigned', { docId: docId, count: assignResult.count });
     }
 
-    var floatingActions = _scanFloatingActions(doc);
+    // gts-0wmm / ADR-0031: style-conformance sampling (ai_token/action_text
+    // character style, mirrors gts-ttns's indentConforms) is only paid when
+    // this sync has document context -- see _scanFloatingActions' `conform`
+    // param doc comment.
+    var floatingActions = _scanFloatingActions(doc, undefined, conform);
 
     GasLogger.log('sync.scanned', { docId: docId, count: floatingActions.length });
 
@@ -307,6 +321,14 @@ function syncDocument(docId, opts) {
     }
 
     // Materialize missing explicit status tokens as '(Open)' in the doc.
+    //
+    // NOTE (ADR-0031): this is a RENDERING-CONFORMANCE predicate, not a
+    // doc-vs-sheet one — it flushes an action whose content already matches
+    // the sheet, purely because the doc's rendered form lacks a status token.
+    // It is the in-tree precedent for the Config-conformance predicate
+    // ADR-0031 adds (indent + ai_token/action_text style, on user-initiated
+    // single-doc syncs only). A new conformance loop belongs here, parallel
+    // to this one — not folded into _rowIdentityKey or the sheetWins diff.
     for (var gId3 in canonicalByGlobalId) {
       if (toFlush[gId3]) continue;
       var cfm = canonicalByGlobalId[gId3];
@@ -315,11 +337,67 @@ function syncDocument(docId, opts) {
       }
     }
 
+    // gts-ttns / ADR-0031: continuation-line indent conformance. Comparison
+    // is doc-rendered indent vs. CURRENTLY CONFIGURED Config value
+    // (_parseFieldContinuationBlocksTracked's indentConforms, computed
+    // unconditionally at scan time), independent of _rowIdentityKey/
+    // sheetWins -- so an action whose content already matches the sheet is
+    // still reflushed on indent-only drift (ADR-0031 principle 2). Runs only
+    // when this sync has document context (`conform`); syncAll/menuSync's
+    // no-subject sweep never reaches here with conform true (ADR-0031
+    // principle 1). Parallel to the missing-explicit-status loop just above,
+    // not folded into it -- a different predicate over the same
+    // canonicalByGlobalId map.
+    var indentDriftCount = 0;
+    if (conform) {
+      for (var gId4 in canonicalByGlobalId) {
+        if (toFlush[gId4]) continue;
+        var cfi = canonicalByGlobalId[gId4];
+        if (cfi.indentConforms === false) {
+          toFlush[gId4] = _buildFlushEntry(cfi, gId4);
+          indentDriftCount++;
+        }
+      }
+      if (indentDriftCount > 0) {
+        GasLogger.log('sync.indentDrift', { docId: docId, count: indentDriftCount });
+      }
+    }
+
+    // gts-0wmm / ADR-0031: ai_token/action_text character-style conformance.
+    // Same shape as the indentDrift loop just above -- a different predicate
+    // over the same canonicalByGlobalId map, gated on `conform` for the same
+    // reason (no document context => never restyle, ADR-0031 principle 1).
+    // styleConforms was sampled (only when conform) inside _scanFloatingActions
+    // via _actionStyleConforms; undefined/true both read as "does not need a
+    // style-drift flush" here.
+    var styleDriftCount = 0;
+    if (conform) {
+      for (var gId5 in canonicalByGlobalId) {
+        if (toFlush[gId5]) continue;
+        var cfs = canonicalByGlobalId[gId5];
+        if (cfs.styleConforms === false) {
+          toFlush[gId5] = _buildFlushEntry(cfs, gId5);
+          styleDriftCount++;
+        }
+      }
+      if (styleDriftCount > 0) {
+        GasLogger.log('sync.styleDrift', { docId: docId, count: styleDriftCount });
+      }
+    }
+
     // Force refresh (gts-t78c): re-render every canonical (non-duplicate)
     // action paragraph to current rendering style, even when sheet and doc
     // data already agree and the natural diff above found nothing to flush.
     // Reuses the same toFlush map / _flushActionParagraphs path — force only
     // changes which globalIds land in it, not how they're flushed.
+    //
+    // There is no separate "style flush": EVERY flush is a full re-render of
+    // the paragraph from canonical data through the current Config. The only
+    // question any caller decides is WHICH globalIds land in toFlush. That is
+    // why ADR-0031's rendering conformance is a new predicate above rather
+    // than a new flush mode here, and why force stays the unconditional
+    // repair path (ADR-0031 §Decision, MenuHandler.js's
+    // menuForceRefreshActiveDoc docstring).
     var forceAddedCount = 0;
     if (force) {
       for (var gIdX in canonicalByGlobalId) {
@@ -391,8 +469,36 @@ function syncDocument(docId, opts) {
  * orphan-detection pass in _handleSyncActionRows stamps those rows 'Deleted'.
  *
  * Called by:
- *   - Action Sync > Sync menu item (menuSync)
+ *   - "Spreadsheet Sync All" — the SPREADSHEET's Action Sync > Sync item
+ *     (menuSync). NOT the Docs one; see the naming warning below.
  *   - 30-minute time-based trigger
+ *
+ * NAMING — two different things are called "Sync" (ADR-0031 §Terminology):
+ *   Document Sync        = Extensions > Action Sync > Sync, inside a Doc
+ *                          -> menuSyncActiveDoc. HAS a document context.
+ *   Spreadsheet Sync All = Action Sync > Sync, in the tracker spreadsheet
+ *                          -> menuSync -> here. NO document context.
+ * Both menus are named 'Action Sync' and both items are labelled 'Sync'
+ * (MenuHandler.js:25-26 and :58-59), so never write "the Sync menu item"
+ * unqualified. They are on OPPOSITE sides of ADR-0031's decision.
+ *
+ * NEITHER caller of this function conforms rendering. syncAll converges
+ * sheet<->doc DATA only, and never brings indent or ai_token/action_text
+ * style into line with Config. The discriminator in ADR-0031 is DOCUMENT
+ * CONTEXT, not user-initiation: Spreadsheet Sync All is deliberately clicked
+ * by a human, but it sweeps every tracked doc and the operator is looking at
+ * none of them, so a restyle here would change documents out from under
+ * readers who never asked. Rendering conformance lives on the
+ * document-context path (menuSyncActiveDoc / sidebar / web UI ->
+ * sync_document).
+ *
+ * MUST STAY ZERO-ARGUMENT. TriggerManager.js registers this handler by name
+ * (ScriptApp.newTrigger('syncAll')), and a GAS time-based trigger passes an
+ * EVENT OBJECT as the first argument to its handler. Adding an options
+ * parameter would silently bind {triggerUid, ...} to it every 30 minutes —
+ * truthy, and shaped nothing like what the code would expect. If syncAll ever
+ * needs a mode, give the menu a separate named wrapper; never an optional
+ * parameter here. (ADR-0031 §Consequences.)
  */
 function syncAll() {
   // opId correlates this invocation's sub-events (per-doc sync.scanned/
@@ -408,31 +514,70 @@ function syncAll() {
       return;
     }
 
-    var lastRow = actionsSheet.getLastRow();
-    if (lastRow < 2) {
-      GasLogger.log('sync.all.complete', { docCount: 0 });
-      return;
-    }
-
     // Extract unique docIds from the document-formula column.
     // Formula shape: =HYPERLINK("https://docs.google.com/document/d/DOCID/edit", "Title")
-    var numRows      = lastRow - 1;
-    var formulasCol7 = actionsSheet.getRange(2, _SCOL.document_formula, numRows, 1).getFormulas();
-    var docIdSet     = {};
+    //
+    // gts-5kyu Stage 1: both reads below routed through the per-execution
+    // snapshot (same two Sheets round trips this function always made, now
+    // shared with every other reader in this execution instead of possibly
+    // re-paid by them). Falls back to the sheet's own direct reads if the
+    // snapshot builder throws.
+    //
+    // gts-qkev: no early return when Actions has zero data rows. A DocData
+    // row can exist with no Actions rows at all (e.g. just registered by the
+    // Team Portal scan-and-track flow, ADR-0031 amendment 2026-09-01) and
+    // still needs to be swept -- returning here before DocData is even read
+    // would make such a doc permanently invisible to the background sync.
+    var lastRow  = actionsSheet.getLastRow();
+    var numRows  = lastRow >= 2 ? lastRow - 1 : 0;
+    var formulasCol7 = [], actionData = [];
+    if (numRows > 0) {
+      var _syncAllSnap = _actionsSnapshot(ss);
+      if (_syncAllSnap && _syncAllSnap.numRows > 0) {
+        formulasCol7 = _syncAllSnap.formulas;
+        actionData   = _syncAllSnap.data;
+      } else {
+        formulasCol7 = actionsSheet.getRange(2, _SCOL.document_formula, numRows, 1).getFormulas();
+        _countActionsRead('getFormulas');
+        actionData   = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
+        _countActionsRead('getValues');
+      }
+    }
+    var docIdSet = {};
     for (var i = 0; i < formulasCol7.length; i++) {
       var formula = formulasCol7[i][0] || '';
       var m = formula.match(/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]+)/);
       if (m) docIdSet[m[1]] = true;
     }
 
-    var docIds = Object.keys(docIdSet);
-    GasLogger.log('sync.all.start', { docCount: docIds.length });
+    // gts-qkev AC1: DocData, not the Actions sheet, is the primary source of
+    // docIds to sweep -- it's already the canonical per-doc registry (FileId,
+    // teamId, action_count, resolved_count). Union rather than replace
+    // (AC2): a docId can still reach here via a live Actions row with no
+    // DocData row yet (the existing gts-6ipb isNewRow backstop below repairs
+    // that case), so dropping the Actions-derived set would regress it.
+    // integrityOrphaned counts docs that are ONLY in DocData -- registered
+    // (e.g. via admin_scan_track) but with no Actions rows of their own yet,
+    // AC3's "swept without error, not fabricated" case, surfaced per AC5
+    // instead of passing silently.
+    var docDataRows       = _readDocDataRows(ss);
+    var docIdsFromDocData = {};
+    var integrityOrphaned = 0;
+    for (var dd = 0; dd < docDataRows.length; dd++) {
+      var ddId = docDataRows[dd].fileId;
+      if (!ddId) continue;
+      docIdsFromDocData[ddId] = true;
+      if (!docIdSet[ddId]) integrityOrphaned++;
+    }
+    var docIdUnion = {};
+    for (var aId in docIdSet) { if (docIdSet.hasOwnProperty(aId)) docIdUnion[aId] = true; }
+    for (var dId in docIdsFromDocData) { if (docIdsFromDocData.hasOwnProperty(dId)) docIdUnion[dId] = true; }
+
+    var docIds = Object.keys(docIdUnion);
+    GasLogger.log('sync.all.start', { docCount: docIds.length, integrityOrphaned: integrityOrphaned });
 
     var syncStateSheet = _getOrCreateSyncStateSheet(ss);
     var syncState      = _loadSyncState(syncStateSheet);
-
-    // Read globalId + sync_status once for dirty-row detection across all docs.
-    var actionData = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
 
     // Pre-build dirty-doc set in one pass — avoids O(docs × rows) scan per doc.
     var dirtyDocIds = {};
@@ -536,6 +681,26 @@ function syncAll() {
       // harness out). Only a live document is worth the round trip.
       if (alreadyDocNotFound[docId]) {
         var revivedMeta = driveMetadata ? driveMetadata[docId] : null;
+        // gts-<TBD>: a doc absent from the scoped batch listing is NOT proof
+        // it's gone (same rationale as the main not-found path below) — fall
+        // back to the authoritative per-doc probe already computed for every
+        // doc missing from driveMetadata (fallbackProbes, built above) before
+        // accepting the stale mark. Without this, a doc that simply doesn't
+        // appear in this sweep's scoped listing (pagination, a folder outside
+        // scopedFolderIds, timing) can never self-heal even though the same
+        // per-doc lookup used for every other doc would confirm it's live.
+        if (!revivedMeta) {
+          var revivalProbe = fallbackProbes[docId] || _fetchSingleDocMetadata(docId);
+          if (revivalProbe.status === 'found') {
+            revivedMeta = revivalProbe.meta;
+          } else if (revivalProbe.status === 'unknown') {
+            // Inconclusive — leave the stale mark exactly as-is, retry next sweep.
+            skipped++;
+            continue;
+          }
+          // status === 'gone' falls through with revivedMeta still null/undefined,
+          // which the check below correctly treats as "stays not-found".
+        }
         if (!revivedMeta || revivedMeta.trashed) {
           skipped++;
           continue;
@@ -624,7 +789,10 @@ function syncAll() {
       _markDocNotFound(notFoundDocIds);
     }
 
-    GasLogger.log('sync.all.complete', { docCount: docIds.length, synced: synced, skipped: skipped, notFound: notFoundDocIds.length });
+    GasLogger.log('sync.all.complete', {
+      docCount: docIds.length, synced: synced, skipped: skipped, notFound: notFoundDocIds.length,
+      integrityOrphaned: integrityOrphaned
+    });
 
     // ── DocData integrity pass (gts-6ipb) ──────────────────────────
     // Docs skipped above by the lastModified<=lastSynced optimization never
@@ -658,6 +826,17 @@ function syncAll() {
       if (!integrityCounts[iDocId]) integrityCounts[iDocId] = { actionCount: 0, resolvedCount: 0 };
       integrityCounts[iDocId].actionCount++;
       if (isResolved(actionData[ii][_SCOL.status - 1])) integrityCounts[iDocId].resolvedCount++;
+    }
+    // gts-qkev: also cover docs known only through DocData (no Actions rows
+    // yet) so the team/folder reconciliation pass below reaches them too --
+    // a doc registered via admin_scan_track and later moved to a different
+    // team's folder must still self-correct even before it has any Actions
+    // rows of its own. computed defaults to {actionCount:0, resolvedCount:0}
+    // for these (integrityCounts has no entry), which is correct: they have
+    // no active rows to count.
+    for (var unionDocId in docIdUnion) {
+      if (!docIdUnion.hasOwnProperty(unionDocId)) continue;
+      if (!docIdsWithAnyRows[unionDocId]) docIdsWithAnyRows[unionDocId] = true;
     }
 
     // Team reconciliation (gts-b6dm): teamScope resolution is otherwise sticky
@@ -736,7 +915,14 @@ function syncAll() {
           syncStatus: '', teamId: '', actionCount: 0, resolvedCount: 0
         };
       }
-      var computedName = docTitleByDocId[docIdKey] || existingRow.docName;
+      // gts-pz8o: the Actions formula's title can be empty (e.g. a row seeded
+      // with no Document column), which must not make a blank docName
+      // permanent. Fall back to Drive's actual file name -- already fetched
+      // into driveMetadata above -- before falling back to the sticky
+      // existing value, so a blank name self-repairs on the next sync that
+      // sees this docId's real title.
+      var driveMeta     = driveMetadata ? driveMetadata[docIdKey] : null;
+      var computedName = docTitleByDocId[docIdKey] || (driveMeta && driveMeta.name) || existingRow.docName;
 
       // 'UpdateDoc' is a pending manual override — it, not the folder walk,
       // must win (mirrors _syncTeamScope's own precedence). 'Doc Not Found'/
@@ -814,10 +1000,20 @@ function syncAll() {
       integrityUpdated++;
     }
     GasLogger.log('sync.integrity.complete', {
-      updated: integrityUpdated, created: integrityCreated, teamReconciled: teamReconciled
+      updated: integrityUpdated, created: integrityCreated, teamReconciled: teamReconciled,
+      orphaned: integrityOrphaned
     });
+    // gts-qkev AC5: additive return value -- trigger callers (TriggerManager.js's
+    // syncAll registration) already ignore return values, so this is not a
+    // breaking change for the zero-argument contract (AC4).
+    return {
+      docCount: docIds.length, synced: synced, skipped: skipped,
+      notFoundCount: notFoundDocIds.length,
+      integrityCreated: integrityCreated, integrityOrphaned: integrityOrphaned
+    };
   } catch (e) {
     GasLogger.log('sync.all.error', { msg: e.message });
+    return null;
   } finally {
     GasLogger.flush();
     GasLogger.endOp();
@@ -857,7 +1053,14 @@ function onActionSheetEdit(e) {
     }
   });
 
-  _syncSheetRowToDoc(sheet, row);
+  // Flush EVERY row in the edited range, not just the first — a multi-row
+  // paste stamps all of them 'Dirty' above, but until this fix only `row`
+  // (range.getRow(), i.e. the first row) was ever flushed to the doc here.
+  // The rest sat 'Dirty' with no immediate propagation, silently deferred to
+  // the next syncAll sweep (up to 30 minutes) instead of being processed now.
+  for (var fr = 0; fr < numRows; fr++) {
+    _syncSheetRowToDoc(sheet, row + fr);
+  }
 }
 
 /**
@@ -963,7 +1166,16 @@ function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
   // comparisons would spuriously differ (gts-dou2).
   var rawParaText  = para.getText();
   var normTracked  = _normalizeLineEndingsTracked(rawParaText);
-  var fullText     = normTracked.text.replace(/\n$/, '');
+  // gts-py21: para.getText() carries no structural trailing '\n' of its own
+  // (Apps Script paragraph boundaries are not literal newline characters in
+  // getText() output) -- the trailing-\n strip formerly here assumed one
+  // existed and stripped it unconditionally, which silently ate a genuine
+  // trailing BLANK continuation line (a soft return typed as the very last
+  // character of the paragraph, which normalizes to a real trailing '\n'
+  // same as any other soft return) every time one was present. Confirmed via
+  // a live doc: "Field: v<SR>\n<blank>" round-tripped through a sync lost its
+  // trailing blank line before this fix, matched exactly.
+  var fullText     = normTracked.text;
   var fullOffsets  = normTracked.offsets.slice(0, fullText.length);
   // gts-jxrw: only consume space/tab after the colon here, NOT \n — a bare
   // "\s*" would silently swallow the paragraph's first line break, making a
@@ -1024,8 +1236,12 @@ function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
   for (var ai = assigneeSearchStart; ai < numChildren; ai++) {
     var ac = para.getChild(ai);
     if (ac.getType() === DocumentApp.ElementType.PERSON) {
+      // gts-py21: see _personChipAtParaOffset's matching comment — a chip's
+      // getName() legitimately returns '' for a non-directory email, so fall
+      // back to _nameFromEmail (same as the plain-text assignee path below)
+      // rather than reporting a blank display name.
       assigneeEmail = ac.asPerson().getEmail() || '';
-      assigneeName  = ac.asPerson().getName()  || '';
+      assigneeName  = ac.asPerson().getName()  || _nameFromEmail(assigneeEmail);
       break;
     }
     if (ac.getType() === DocumentApp.ElementType.TEXT) {
@@ -1070,7 +1286,8 @@ function _parseParagraphAsFloatingAction(para, bodyIdx, docId, seenN) {
     hasExplicitStatus: hasExplicitStatus,
     isDuplicate:       seenN[N] === true,
     runs:              runs,
-    customFields:      customFields
+    customFields:      customFields,
+    indentConforms:    header.indentConforms // gts-ttns / ADR-0031
   };
   seenN[N] = true;
   return action;
@@ -1137,6 +1354,19 @@ function _trimTracked(text, offsets) {
   var start = 0, end = text.length;
   while (start < end && /\s/.test(text[start])) start++;
   while (end > start && /\s/.test(text[end - 1])) end--;
+  return { text: text.slice(start, end), offsets: offsets.slice(start, end) };
+}
+
+/**
+ * gts-py21: _trimTracked with the trailing pass narrowed to spaces/tabs, so
+ * a trailing '\n' (a genuine, user-typed BLANK continuation line at the very
+ * end of a paragraph) survives the trim instead of being silently absorbed
+ * as "whitespace". Leading behaviour is unchanged.
+ */
+function _trimTrackedKeepingLineBreaks(text, offsets) {
+  var start = 0, end = text.length;
+  while (start < end && /\s/.test(text[start])) start++;
+  while (end > start && /[ \t]/.test(text[end - 1])) end--;
   return { text: text.slice(start, end), offsets: offsets.slice(start, end) };
 }
 
@@ -1459,7 +1689,7 @@ var _FIELD_NAME_MAX_LENGTH = 32;
  */
 function _parseFieldContinuationBlocksTracked(restText, restOffsets) {
   if (!restText) {
-    return { actionTextExtra: '', actionTextExtraOffsets: [], customFieldBlocks: [] };
+    return { actionTextExtra: '', actionTextExtraOffsets: [], customFieldBlocks: [], indentConforms: true };
   }
 
   function joinTrackedLines(lines, offsetsList) {
@@ -1482,14 +1712,56 @@ function _parseFieldContinuationBlocksTracked(restText, restOffsets) {
   var fieldsByName = {};
   var fieldOrder = [];
 
+  // gts-ttns / ADR-0031: compare each continuation line's ACTUAL leading-
+  // space count against the CURRENTLY CONFIGURED 'SR Indent'/'Field SR
+  // Indent'/'Field SR SR Indent' as we go — this is the one place every
+  // continuation line is already being walked line-by-line for the rule-5
+  // strip below, so no second pass is needed. Three-way classification
+  // (gts-x8wy — was two-way pre-'Field SR SR Indent'): a field's own LABEL
+  // line (isFieldMatch) compares against fieldIndent; a continuation line
+  // WITHIN an already-open field's value (fieldOpened && !isFieldMatch)
+  // compares against fieldContinuationIndent; everything before any field
+  // opens compares against actionIndent — this mirrors _renderCustomFieldLines'
+  // write-side labelPad vs continuationPad split exactly. This is
+  // unconditional (no config-mode gate): the strip already computes stripLen
+  // for free, so recording the comparison costs nothing extra, unlike the
+  // ai_token/action_text style sampling ADR-0031 gates behind `conform`
+  // (§Consequences: "The scan needs a mode ... The indent half needs no such
+  // gate"). Whether this drives a reflush is decided later, by the caller,
+  // gated on document context (syncDocument()'s `conform` option) —
+  // computing it here does not itself cause anything to flush.
+  var indentCfg       = _getContinuationIndentConfig();
+  var indentConforms  = true;
+  var fieldOpened      = false;
+
   for (var i = 0; i < allLines.length; i++) {
     var line = allLines[i];
-    var m = _FIELD_LINE_REGEX.exec(line.text);
-    if (m && m[1].length <= _FIELD_NAME_MAX_LENGTH) {
+    // ADR-0027 rule 5: leading whitespace on a continuation line is never
+    // stored (rule 8 reapplies it uniformly on the next flush) — stripped
+    // before testing the fieldLine shape and before absorbing a line as
+    // prose, so an indent written by SR Indent/Field SR Indent (gts-9a4j)
+    // reads back identically to a flush-left line, and a hand-indented
+    // author line is tolerated the same way.
+    var stripLen = line.text.length - line.text.replace(/^[ \t]+/, '').length;
+    var lineText    = stripLen ? line.text.slice(stripLen) : line.text;
+    var lineOffsets = stripLen ? line.offsets.slice(stripLen) : line.offsets;
+    var m = _FIELD_LINE_REGEX.exec(lineText);
+    var isFieldMatch = !!(m && m[1].length <= _FIELD_NAME_MAX_LENGTH);
+    var expectedIndent = isFieldMatch ? indentCfg.fieldIndent
+      : fieldOpened ? indentCfg.fieldContinuationIndent
+      : indentCfg.actionIndent;
+    // gts-x8wy: expectedIndent is the resolved pad STRING (N spaces or a
+    // literal \t/\s template), not a count -- stripLen already counts
+    // through the regex's `[ \t]+`, which covers both characters, so
+    // comparing lengths is the direct generalization of the old numeric
+    // equality check.
+    if (stripLen !== expectedIndent.length) indentConforms = false;
+    if (isFieldMatch) {
+      fieldOpened = true;
       var name  = m[1];
       var value = m[2] || '';
-      var valueStart   = line.text.length - value.length;
-      var valueOffsets = line.offsets.slice(valueStart);
+      var valueStart   = lineText.length - value.length;
+      var valueOffsets = lineOffsets.slice(valueStart);
       var block = fieldsByName[name];
       if (!block) {
         block = { lines: [], offsetsList: [] };
@@ -1500,8 +1772,8 @@ function _parseFieldContinuationBlocksTracked(restText, restOffsets) {
       block.offsetsList.push(valueOffsets);
       current = block;
     } else {
-      current.lines.push(line.text);
-      current.offsetsList.push(line.offsets);
+      current.lines.push(lineText);
+      current.offsetsList.push(lineOffsets);
     }
   }
 
@@ -1515,7 +1787,8 @@ function _parseFieldContinuationBlocksTracked(restText, restOffsets) {
   return {
     actionTextExtra:        actionExtra.text,
     actionTextExtraOffsets: actionExtra.offsets,
-    customFieldBlocks:      customFieldBlocks
+    customFieldBlocks:      customFieldBlocks,
+    indentConforms:         indentConforms
   };
 }
 
@@ -1575,7 +1848,8 @@ function _buildCustomFieldsFromBlocks(textEl, blocks) {
  * @param {string} text
  * @param {Array<number>} offsets  same length as text
  * @returns {{assigneeEmail: string, assigneeName: string, actionText: string,
- *            offsets: Array<number>, status: string, hasExplicitStatus: boolean}}
+ *            offsets: Array<number>, status: string, hasExplicitStatus: boolean,
+ *            indentConforms: boolean}}
  */
 function _parseActionHeaderLineTracked(text, offsets) {
   var assigneeEmail = '';
@@ -1616,7 +1890,8 @@ function _parseActionHeaderLineTracked(text, offsets) {
     offsets:            actionOffsets,
     status:             tracked.status,
     hasExplicitStatus:  tracked.hasExplicitStatus,
-    customFieldBlocks:  continuation.customFieldBlocks
+    customFieldBlocks:  continuation.customFieldBlocks,
+    indentConforms:     continuation.indentConforms // gts-ttns / ADR-0031
   };
 }
 
@@ -1696,7 +1971,16 @@ function _personChipAtParaOffset(para, rawOffset) {
           var nc = para.getChild(ni);
           var nt = nc.getType();
           if (nt === DocumentApp.ElementType.PERSON) {
-            return { email: nc.asPerson().getEmail() || '', name: nc.asPerson().getName() || '' };
+            // gts-py21: a freshly-inserted PERSON chip for a non-directory
+            // email (insertPerson accepts email only, never a name — see
+            // docs-api-insertperson-email-only) has no Google-resolved
+            // display name; getName() legitimately returns '' rather than
+            // ever falling back on its own. Derive one the same way the
+            // text-assignee path already does (_nameFromEmail) so a chip
+            // never reports a blanker identity than plain "user@domain" text
+            // would.
+            var pEmail = nc.asPerson().getEmail() || '';
+            return { email: pEmail, name: nc.asPerson().getName() || _nameFromEmail(pEmail) };
           }
           if (nt === DocumentApp.ElementType.TEXT) break; // next line's text starts here first — no chip at this boundary
         }
@@ -1741,7 +2025,11 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
   // length — a defensive fallback, not expected in normal operation since
   // both derive from the same _normalizeLineEndings semantics.
   var paraTracked        = _normalizeLineEndingsTracked(para.getText());
-  var normalizedFullText = paraTracked.text.replace(/\n$/, '');
+  // gts-py21: no trailing-\n strip here either -- see the matching comment in
+  // _parseParagraphAsFloatingAction. Kept symmetric with `fullText` (the
+  // caller-supplied, equally unstripped param above) so the length-parity
+  // check below (trackedLineList.length === lines.length) still holds.
+  var normalizedFullText = paraTracked.text;
   var fullOffsetsForLines = paraTracked.offsets.slice(0, normalizedFullText.length);
   var trackedLineList     = _splitTrackedLines(normalizedFullText, fullOffsetsForLines);
   var trackedLineOffsets  = (trackedLineList.length === lines.length)
@@ -1753,7 +2041,16 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
     var rawText = curLines.join('\n');
     var rawOffsets = curOffsets.length ? curOffsets[0] : [];
     for (var oi = 1; oi < curOffsets.length; oi++) rawOffsets = rawOffsets.concat([-1], curOffsets[oi]);
-    var trimmed = _trimTracked(rawText, rawOffsets);
+    // gts-py21: trim, but never across a line break. _trimTracked's trailing
+    // pass tests /\s/, which eats a genuine trailing BLANK continuation line
+    // (a soft return typed as the paragraph's very last character, which
+    // normalizes to a real trailing '\n') along with any stray spaces —
+    // exactly the content the trailing-\n strips removed from the three
+    // scanners above were also eating. The single-token fast path does not
+    // trim at all here, so this keeps the two parsers in agreement on what a
+    // trailing blank line means. Leading whitespace and trailing spaces/tabs
+    // are still trimmed, unchanged.
+    var trimmed = _trimTrackedKeepingLineBreaks(rawText, rawOffsets);
     rawText = trimmed.text;
     var offsets = trimmed.offsets;
 
@@ -1787,7 +2084,8 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
       hasExplicitStatus: hasExplicitStatus,
       isDuplicate:       seenN[N] === true,
       runs:              runs,
-      customFields:      customFields
+      customFields:      customFields,
+      indentConforms:    header.indentConforms // gts-ttns / ADR-0031
     });
     seenN[N] = true;
   }
@@ -1804,15 +2102,31 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
       curLines = [line.slice(consumed)];
       curOffsets = [lineOffsets.slice(consumed)];
       // gts-ogev: locate a PERSON chip sitting right after the token, the
-      // same position the fast path reads it from. rawOffset is the raw
-      // para.getText() index of the first character following the
-      // token+whitespace on this line — or, when the token consumed the
-      // entire line (no trailing text before the paragraph's own line
-      // break), one past the line's last raw character.
-      var chipRawOffset = consumed < lineOffsets.length
-        ? lineOffsets[consumed]
-        : (lineOffsets.length > 0 ? lineOffsets[lineOffsets.length - 1] + 1 : null);
-      curChip = _personChipAtParaOffset(para, chipRawOffset);
+      // same position the fast path reads it from.
+      //
+      // gts-py21: probe EVERY boundary in the token's trailing-whitespace
+      // span, not just the one past its end. A PERSON contributes zero
+      // characters to getText(), so "ACT-N: " + chip + " text" reads back as
+      // "ACT-N:  text" — two spaces with the chip sitting BETWEEN them, at
+      // the boundary after the first. `consumed` above swallows the whole
+      // `\s*` run, so the single offset it yields lands one character PAST
+      // the chip's boundary and _personChipAtParaOffset finds nothing —
+      // silently dropping the assignee on every soft-return-path record
+      // (a token preceded by an intro line in the same paragraph), while
+      // the fast path, which walks children instead of offsets, kept it.
+      // Confirmed live: the reference doc's four "numbered entry, then an
+      // ACT: on the next line" list items came back from a sync with their
+      // chips gone. Walking the span also covers the no-space-at-all
+      // spelling ("ACT-N:" + chip), whose boundary is at the token's own
+      // end. The span is bounded by the token's trailing whitespace, so it
+      // can never reach a chip belonging to any other part of the line.
+      curChip = null;
+      for (var wi = m.match.length; wi <= consumed && curChip === null; wi++) {
+        var chipRawOffset = wi < lineOffsets.length
+          ? lineOffsets[wi]
+          : (lineOffsets.length > 0 ? lineOffsets[lineOffsets.length - 1] + 1 : null);
+        curChip = _personChipAtParaOffset(para, chipRawOffset);
+      }
     } else if (curN !== null) {
       curLines.push(line); // continuation line
       curOffsets.push(lineOffsets);
@@ -1841,7 +2155,10 @@ function _parseSoftReturnParagraphActions(para, bodyIdx, docId, seenN, fullText)
  */
 function _collectActionsFromParagraph(para, bodyIdx, docId, seenN, actions, unparseableOut) {
   var raw  = para.getText();
-  var text = _normalizeLineEndings(raw).replace(/\n$/, '');
+  // gts-py21: no trailing-\n strip -- see _parseParagraphAsFloatingAction's
+  // matching comment; stripping it here silently dropped a genuine trailing
+  // blank continuation line before it ever reached the soft-return parser.
+  var text = _normalizeLineEndings(raw);
   var tokenCount = (text.match(new RegExp('(?:^|\\n)(?:' + _ACTION_TOKEN_READ_PREFIXES.join('|') + ')-\\d+:', 'g')) || []).length;
   if (tokenCount === 0) {
     if (unparseableOut && _ACTION_TOKEN_LOOKS_LIKE_REGEX_ANCHORED.test(text)) {
@@ -1875,9 +2192,19 @@ function _collectActionsFromParagraph(para, bodyIdx, docId, seenN, actions, unpa
  * @param {Array} [unparseableOut]  ADR-0027 rule 6 / gts-xvlu — optional
  *   out-array; see _collectActionsFromParagraph. Top-level body paragraphs/
  *   list items only, not table cells — out of scope for the frozen AC.
- * @returns {Array<{bodyChildIndex, paragraph, globalId, N, assigneeEmail, assigneeName, actionText, status, hasExplicitStatus, isDuplicate}>}
+ * @param {boolean} [conform]  gts-0wmm / ADR-0031 — when true, samples each
+ *   canonical (non-duplicate) action's rendered ai_token/action_text
+ *   character style and compares it against the current Config, setting
+ *   `styleConforms` on the returned action. "The scan needs a mode"
+ *   (ADR-0031 §Consequences): this sampling is new per-paragraph
+ *   character-attribute reading the scan does not otherwise do, so it is
+ *   paid only on the document-context callers that pass conform=true
+ *   (syncDocument's sole `conform` caller — WebApp.js's _handleSyncDocument).
+ *   Duplicate occurrences are never sampled — the toFlush conformance loop
+ *   in syncDocument only reads canonicalByGlobalId (isDuplicate===false).
+ * @returns {Array<{bodyChildIndex, paragraph, globalId, N, assigneeEmail, assigneeName, actionText, status, hasExplicitStatus, isDuplicate, styleConforms}>}
  */
-function _scanFloatingActions(doc, unparseableOut) {
+function _scanFloatingActions(doc, unparseableOut, conform) {
   var body    = doc.getBody();
   var docId   = doc.getId();
   var n       = body.getNumChildren();
@@ -1913,6 +2240,21 @@ function _scanFloatingActions(doc, unparseableOut) {
     var para = isPara ? child.asParagraph() : child.asListItem();
     _collectActionsFromParagraph(para, i, docId, seenN, actions, unparseableOut);
   }
+
+  // gts-0wmm / ADR-0031: style-conformance sampling, gated on `conform` (see
+  // this function's doc comment). A post-pass over the already-built actions[]
+  // rather than threaded through each parser (_parseParagraphAsFloatingAction/
+  // _parseSoftReturnParagraphActions/_collectTableCellActions) — every action,
+  // regardless of which parser produced it, already carries the (N, paragraph)
+  // pair _sampleActionItemStyle needs, so one pass here covers all of them
+  // without duplicating the sampling call at each parser call site.
+  if (conform) {
+    for (var acti = 0; acti < actions.length; acti++) {
+      if (actions[acti].isDuplicate) continue; // never read by the toFlush conformance loop
+      actions[acti].styleConforms = _actionStyleConforms(actions[acti]);
+    }
+  }
+
   return actions;
 }
 
@@ -2054,6 +2396,40 @@ function _nameFromEmail(email) {
 // ActionSheet proxy — bidirectional sync
 // ---------------------------------------------------------------------------
 
+/** Bounded-retry convention for _syncActionRows' self-call to the deployed
+ *  WebApp, mirroring _fetchDriveWithRetry's shape (gts-pm72) and
+ *  scn/session.py's own client-side retry over the same /exec ->
+ *  script.googleusercontent.com routing glitch (gts-232z). Unlike
+ *  _fetchDriveWithRetry (5xx-only -- a Drive REST 4xx is a real answer), ANY
+ *  non-200 here is retried: the documented failure mode is a redirect/routing
+ *  artifact (observed live as HTTP 302; scn/session.py's client-side twin
+ *  observes it as HTTP 404), not a REST error-code family, so no narrower
+ *  classification is safe to assume for this self-call. */
+var _WEBAPP_FETCH_MAX_ATTEMPTS   = 3;
+var _WEBAPP_FETCH_RETRY_DELAY_MS = 1000;
+
+/**
+ * Test-only fault injection hook for _syncActionRows' self-call retry
+ * (gts-232z Backstop proof), mirroring _driveFetchTestOverrideCode's
+ * Script-Properties-counter shape -- never trips outside the test harness.
+ * TestFixtures.js's 'sync_all_force_webapp_non200' fixture sets the counter;
+ * the real self-call still happens underneath (a real GAS execution answers
+ * it), only the response code the retry loop sees is overridden, so this
+ * never touches production WebApp behaviour.
+ *
+ * @param {number} realCode
+ * @return {number}
+ */
+function _webAppFetchTestOverrideCode(realCode) {
+  var props = PropertiesService.getScriptProperties();
+  var raw   = props.getProperty('_TEST_FORCE_WEBAPP_NON200_COUNT');
+  if (!raw) return realCode;
+  var remaining = parseInt(raw, 10);
+  if (!remaining || remaining <= 0) return realCode;
+  props.setProperty('_TEST_FORCE_WEBAPP_NON200_COUNT', String(remaining - 1));
+  return 302;
+}
+
 /**
  * POSTs the doc state to the Web App for conflict resolution and sheet writes.
  * Returns { upserted, updated, sheetWins: [{ globalId, action, status, assigneeEmail }] }.
@@ -2099,31 +2475,37 @@ function _syncActionRows(anchorResults, docUrl, docTitle, docId, allDocGlobalIds
   // deployment type (/dev always enforces this; /exec with access:ANYONE also requires it).
   // The token satisfies GAS's auth gate only — doPost uses WEBAPP_SECRET for app-level auth.
   var oauthToken = ScriptApp.getOAuthToken();
-  var resp = UrlFetchApp.fetch(webAppUrl, {
-    method:             'post',
-    contentType:        'application/json',
-    muteHttpExceptions: true,
-    headers:            { 'Authorization': 'Bearer ' + oauthToken },
-    payload:            JSON.stringify({
-      secret:             secret || '',
-      action:             'sync_action_rows',
-      clientVersion:      BUILD_INFO.version,
-      caller:             _getIdentity(),
-      opId:               (GasLogger.getParentOp() || GasLogger.getCurrentOp()),
-      docUrl:             docUrl,
-      docTitle:           docTitle,
-      docId:              docId || '',
-      docState:           docState,
-      allDocGlobalIds: allDocGlobalIds || [],
-      // Explicit "the document was actually scanned" assertion (gts-aiaz).
-      // Distinguishes a legitimate empty-document sync (docState=[],
-      // allDocGlobalIds=[], scanned=true) from a payload that simply omits
-      // both fields — which must NOT be read as "delete everything".
-      scanned:            true
-    })
-  });
+  var resp, code;
+  for (var attempt = 1; attempt <= _WEBAPP_FETCH_MAX_ATTEMPTS; attempt++) {
+    resp = UrlFetchApp.fetch(webAppUrl, {
+      method:             'post',
+      contentType:        'application/json',
+      muteHttpExceptions: true,
+      headers:            { 'Authorization': 'Bearer ' + oauthToken },
+      payload:            JSON.stringify({
+        secret:             secret || '',
+        action:             'sync_action_rows',
+        clientVersion:      BUILD_INFO.version,
+        caller:             _getIdentity(),
+        opId:               (GasLogger.getParentOp() || GasLogger.getCurrentOp()),
+        docUrl:             docUrl,
+        docTitle:           docTitle,
+        docId:              docId || '',
+        docState:           docState,
+        allDocGlobalIds: allDocGlobalIds || [],
+        // Explicit "the document was actually scanned" assertion (gts-aiaz).
+        // Distinguishes a legitimate empty-document sync (docState=[],
+        // allDocGlobalIds=[], scanned=true) from a payload that simply omits
+        // both fields — which must NOT be read as "delete everything".
+        scanned:            true
+      })
+    });
+    code = _webAppFetchTestOverrideCode(resp.getResponseCode());
+    if (code === 200 || attempt === _WEBAPP_FETCH_MAX_ATTEMPTS) break;
+    GasLogger.log('sync.actionRows.retry', { attempt: attempt, status: code });
+    Utilities.sleep(_WEBAPP_FETCH_RETRY_DELAY_MS);
+  }
 
-  var code = resp.getResponseCode();
   if (code !== 200) {
     GasLogger.log('sync.error', {
       msg:  'sync_action_rows failed: HTTP ' + code,
@@ -3052,8 +3434,17 @@ function _remarkRowDirty(globalId) {
     var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
     for (var i = 0; i < ids.length; i++) {
       if (ids[i][0] === globalId) {
-        sheet.getRange(i + 2, _SCOL.sync_status).setValue('Dirty');
-        GasLogger.log('flush.remarked-dirty', { globalId: globalId, row: i + 2 });
+        var matchedRow = i + 2;
+        // gts-5kyu (Stage 1, AC9): this write bypassed WriteGuard.wrap entirely
+        // -- the choke point every other Actions-sheet writer already routes
+        // through to invalidate ActionSnapshot.js's per-execution memo. Left
+        // unwrapped, a syncDocument() flush-failure re-mark (syncDocument ->
+        // this fn, same execution) left a stale snapshot in memory: a
+        // same-execution read after this write returned the pre-Dirty value.
+        WriteGuard.wrap(function () {
+          sheet.getRange(matchedRow, _SCOL.sync_status).setValue('Dirty');
+        });
+        GasLogger.log('flush.remarked-dirty', { globalId: globalId, row: matchedRow });
         return;
       }
     }
@@ -3180,6 +3571,199 @@ function _readActionFormatConfig(ss) {
     else result.actionText = entry;
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Continuation-line indent — Config sheet 'SR Indent' / 'Field SR Indent' /
+// 'Field SR SR Indent' (gts-9a4j, gts-x8wy, ADR-0027 rule 8)
+// ---------------------------------------------------------------------------
+
+var _continuationIndentConfigCache = null;
+
+/**
+ * Reads the Config sheet's 'SR Indent' / 'Field SR Indent' / 'Field SR SR
+ * Indent' rows once per GAS execution (same module-level-cache convention as
+ * _getActionFormatConfig). All default to '' (flush-left, gts-po8t) when the
+ * Config sheet or the row is absent — except 'Field SR SR Indent', whose
+ * absence defaults instead to 'Field SR Indent' + 'SR Indent' concatenated
+ * (gts-x8wy, human decision 2026-09-02), not to '' — see
+ * _readContinuationIndentConfig.
+ *
+ * Each resolves through _resolveIndentValue (gts-x8wy): a value that parses
+ * as a finite number is still N literal spaces, same as always; anything
+ * else is a literal \t/\s template. Either way the result stored here is
+ * already the fully-resolved pad STRING, not a count — every call site
+ * pads/shifts by this string (or its .length) directly.
+ *
+ * 'Field SR Indent' controls a field's own LABEL line only (the '\v'
+ * immediately before 'Name:'); 'Field SR SR Indent' controls a continuation
+ * line WITHIN that field's own multi-line value (a second/third/... line of
+ * the same field) — see _renderCustomFieldLines.
+ *
+ * @returns {{actionIndent: string, fieldIndent: string, fieldContinuationIndent: string}}
+ */
+function _getContinuationIndentConfig() {
+  if (_continuationIndentConfigCache) return _continuationIndentConfigCache;
+  _continuationIndentConfigCache = _readContinuationIndentConfig(_openActionSheetSpreadsheet());
+  return _continuationIndentConfigCache;
+}
+
+/**
+ * gts-x8wy: resolves one raw Config cell value to a literal indent string.
+ * A value that parses as a finite number (Number(), floored, clamped >= 0 —
+ * a missing, blank, negative, or non-numeric value all fall back to 0/'')
+ * becomes that many literal spaces, exactly reproducing the pre-gts-x8wy
+ * behavior. Any other string is treated as a human-authored escape
+ * template: every '\t' becomes a real tab character and every '\s' a real
+ * space character, left to right, with every other character passed through
+ * verbatim — e.g. '\t\t\s' -> tab+tab+space. No further validation: a human
+ * typing something other than \t/\s combinations gets confusing results by
+ * their own choice, not a thrown error, since a Config sheet typo must not
+ * break every flush in the document.
+ *
+ * @param {*} raw  a Config sheet cell value
+ * @returns {string}
+ */
+function _resolveIndentValue(raw) {
+  var n = Number(raw);
+  if (isFinite(n) && String(raw).trim() !== '') {
+    if (n < 0) n = 0;
+    n = Math.floor(n);
+    return new Array(n + 1).join(' ');
+  }
+  return String(raw || '').replace(/\\t/g, '\t').replace(/\\s/g, ' ');
+}
+
+function _readContinuationIndentConfig(ss) {
+  var result = { actionIndent: '', fieldIndent: '', fieldContinuationIndent: null };
+  var sheet = ss.getSheetByName('Config');
+  if (sheet) {
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      var cols   = CONTRACT_SCHEMA.sheetConfig.columnsByField;
+      var values = sheet.getRange(2, 1, lastRow - 1, CONTRACT_SCHEMA.sheetConfig.headers.length).getValues();
+      for (var i = 0; i < values.length; i++) {
+        var row = values[i];
+        var key = row[cols.key - 1];
+        if (key !== 'SR Indent' && key !== 'Field SR Indent' && key !== 'Field SR SR Indent') continue;
+        var pad = _resolveIndentValue(row[cols.value - 1]);
+        if (key === 'SR Indent') result.actionIndent = pad;
+        else if (key === 'Field SR Indent') result.fieldIndent = pad;
+        else result.fieldContinuationIndent = pad;
+      }
+    }
+  }
+  // gts-x8wy: 'Field SR SR Indent' not set at all -> Field SR Indent + SR
+  // Indent concatenated, not '' — evaluated after the full pass above so it
+  // sees both other keys regardless of Config sheet row order.
+  if (result.fieldContinuationIndent === null) {
+    result.fieldContinuationIndent = result.fieldIndent + result.actionIndent;
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Status icon size — Config sheet 'Status Icon Size' (gts-bxrt)
+// ---------------------------------------------------------------------------
+
+var _statusIconSizeConfigCache; // undefined = not yet read this execution
+
+/**
+ * Reads the Config sheet's 'Status Icon Size' row once per GAS execution
+ * (same module-level-cache convention as _getContinuationIndentConfig).
+ * This is a human-authored plain number (PT), not the JSON-encoded style
+ * rows 'ai_token'/'action_text' use. Absent, blank, non-numeric, or
+ * non-positive values all resolve to `null` ("not configured") rather than
+ * throwing or falling back to a fixed number here -- the fallback chain
+ * lives in _resolveStatusIconSize(), which also needs to know "unconfigured"
+ * to fall through to ai_token's own fontSize.
+ *
+ * @returns {?number}
+ */
+function _getStatusIconSizeConfig() {
+  if (_statusIconSizeConfigCache === undefined) {
+    _statusIconSizeConfigCache = _readStatusIconSizeConfig(_openActionSheetSpreadsheet());
+  }
+  return _statusIconSizeConfigCache;
+}
+
+function _readStatusIconSizeConfig(ss) {
+  var result = null;
+  var sheet = ss.getSheetByName('Config');
+  if (!sheet) return result;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return result;
+  var cols   = CONTRACT_SCHEMA.sheetConfig.columnsByField;
+  var values = sheet.getRange(2, 1, lastRow - 1, CONTRACT_SCHEMA.sheetConfig.headers.length).getValues();
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (row[cols.key - 1] !== 'Status Icon Size') continue;
+    var n = Number(row[cols.value - 1]);
+    if (isFinite(n) && n > 0) result = n;
+  }
+  return result;
+}
+
+/**
+ * Resolves the PT size used for both height and width of every flush-
+ * inserted/newly-inserted status inline image (gts-bxrt). Fallback chain,
+ * human decision 2026-09-02: Config 'Status Icon Size' -> ai_token's own
+ * configured fontSize -> 11 (Docs' own default; same constant already used
+ * as the doc-inherited-style fallback at _sampleActionItemStyle, see
+ * `fontSize || 11` a few hundred lines below). The previous hardcoded 16 is
+ * deliberately NOT part of this chain -- it was never a considered default,
+ * just the unexamined literal this config replaces.
+ *
+ * @returns {number}
+ */
+function _resolveStatusIconSize() {
+  var configured = _getStatusIconSizeConfig();
+  if (configured !== null) return configured;
+  var aiTokenFontSize = _getActionFormatConfig().aiToken.fontSize;
+  return aiTokenFontSize || 11;
+}
+
+/**
+ * ADR-0027 rule 8, write side: inserts `pad` (the already-resolved indent
+ * string from _getContinuationIndentConfig / _resolveIndentValue — gts-x8wy)
+ * after every soft return (U+000B) in `text` — i.e. before every
+ * continuation line except the header line, which precedes the first soft
+ * return and is never indented. An empty `pad` is a no-op (gts-po8t's
+ * flush-left default).
+ *
+ * @param {string} text  soft-return spelling (post _toSoftReturnText)
+ * @param {string} pad
+ * @returns {string}
+ */
+function _indentSoftReturnLines(text, pad) {
+  if (!pad || !text) return text;
+  return text.split('\v').join('\v' + pad);
+}
+
+/**
+ * Maps an offset measured against the UNINDENTED text (before
+ * _indentSoftReturnLines ran) to the corresponding offset in the indented
+ * text: every soft return strictly before `offset` shifts everything after
+ * it right by `pad`'s length (gts-x8wy — `pad` may be a literal \t/\s
+ * template, not just N spaces, so its own length is what matters, not a
+ * numeric count). Used to carry item.runs' bold/italic/link offsets
+ * (sampled against the raw, unindented action text) across the indent this
+ * bug introduces.
+ *
+ * @param {string} unindentedText
+ * @param {number} offset
+ * @param {string} pad
+ * @returns {number}
+ */
+function _shiftOffsetForIndent(unindentedText, offset, pad) {
+  if (!pad) return offset;
+  var shift = 0;
+  var idx = unindentedText.indexOf('\v');
+  while (idx !== -1 && idx < offset) {
+    shift += pad.length;
+    idx = unindentedText.indexOf('\v', idx + 1);
+  }
+  return offset + shift;
 }
 
 /**
@@ -3422,6 +4006,77 @@ function _sampleActionItemStyle(action) {
   return { aiToken: sampleAt(tokenSampleOffset), actionText: sampleAt(actionSampleOffset) };
 }
 
+// ---------------------------------------------------------------------------
+// gts-0wmm / ADR-0031 — ai_token/action_text style-conformance comparison
+// ---------------------------------------------------------------------------
+
+// Which sampled-style dimensions each range compares, per ADR-0031 §"What
+// 'conforms rendering to Config' compares" — the load-bearing asymmetry:
+// ai_token is machine-rendered (never author-typed) so Config owns all six;
+// action_text's bold/italic are EXCLUDED because ADR-0022 gives those
+// exclusively to author-typed inline runs (_actionTextStyleRequest's own
+// flush-time mask already omits them for the identical reason — comparing
+// them here would reflush and re-flatten per-word author formatting on every
+// Document Sync, reintroducing the defect ADR-0022 exists to prevent).
+var _AI_TOKEN_STYLE_KEYS    = ['fontFamily', 'fontSize', 'color', 'bold', 'italic', 'underline'];
+var _ACTION_TEXT_STYLE_KEYS = ['fontFamily', 'fontSize', 'color', 'underline'];
+
+/**
+ * Compares one _sampleActionItemStyle() range against the corresponding
+ * Config entry over `keys` only. `cfg.fontSize === null` means "no size
+ * override configured, inherit whatever the doc already has" (same
+ * convention _actionTextStyleRequest/_chipBadgeStyleRequest use when
+ * building fields) so that dimension is skipped rather than compared.
+ * Color is compared case-insensitively — DocumentApp's
+ * Text.getForegroundColor() and the hex strings this project's config UI/
+ * defaults use are not guaranteed to agree on case.
+ *
+ * @param {Object} sampled  one range from _sampleActionItemStyle()'s return
+ * @param {Object} cfg      the matching _getActionFormatConfig() entry
+ * @param {Array<string>} keys
+ * @returns {boolean}
+ */
+function _sampledStyleMatchesConfig(sampled, cfg, keys) {
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (k === 'fontSize' && (cfg.fontSize === null || cfg.fontSize === undefined)) continue;
+    var sv = sampled[k], cv = cfg[k];
+    if (k === 'color') { sv = String(sv || '').toLowerCase(); cv = String(cv || '').toLowerCase(); }
+    if (sv !== cv) return false;
+  }
+  return true;
+}
+
+/**
+ * ADR-0031's style-conformance predicate for one canonical action: does its
+ * CURRENTLY RENDERED ai_token/action_text style match the CURRENTLY
+ * CONFIGURED Config values? Comparison is doc-rendered vs. Config only, never
+ * doc vs. sheet — no sheet column carries style (ADR-0031 §Decision), so this
+ * is structurally independent of _rowIdentityKey/sheetWins exactly like the
+ * indentConforms predicate it sits beside.
+ *
+ * A missing 'action_text' Config row (`cfg.actionText === null`, meaning "no
+ * override, inherit whatever the doc already has" — _getActionFormatConfig's
+ * own doc comment) makes that half of the comparison vacuously true; only
+ * ai_token, which always has a default, is unconditional.
+ *
+ * Fails open (returns true / "conforms") when the token text can't be
+ * located in its own paragraph — _sampleActionItemStyle returned null —
+ * matching every other "couldn't determine, don't force a flush" path in
+ * this file rather than treating an unlocatable sample as drift.
+ *
+ * @param {{N:number, paragraph:GoogleAppsScript.Document.Paragraph}} action
+ * @returns {boolean}
+ */
+function _actionStyleConforms(action) {
+  var sample = _sampleActionItemStyle(action);
+  if (!sample) return true;
+  var cfg = _getActionFormatConfig();
+  if (!_sampledStyleMatchesConfig(sample.aiToken, cfg.aiToken, _AI_TOKEN_STYLE_KEYS)) return false;
+  if (cfg.actionText && !_sampledStyleMatchesConfig(sample.actionText, cfg.actionText, _ACTION_TEXT_STYLE_KEYS)) return false;
+  return true;
+}
+
 /**
  * Upserts the 'ai_token' and 'action_text' rows in the Config sheet (creating
  * the sheet with its header row if absent).
@@ -3530,6 +4185,33 @@ function _collectFlushOccurrences(items, N) {
           }
         }
       }
+      // gts-mt39: when a SECOND (different N) token line follows this one in
+      // the SAME paragraph, this occurrence's own record ends at that
+      // token's own line boundary, not the whole paragraph's endIndex —
+      // otherwise _buildFlushRequests' delete+reinsert for N would delete
+      // the following N2's content too (and, once both N and N2 in the same
+      // paragraph are flushed in one batchUpdate, offsets computed against
+      // this same GET would go stale the moment the first token's edit
+      // lands, since both would target overlapping ranges within the same
+      // paragraph — the exact `deleteContentRange` HTTP 400 confirmed live
+      // via test_mt39_soft_return_multi_token_person_chip_parity before this
+      // fix). Search for the NEXT '(\n|\r|\v)(ACT|AI)-\d+:' line boundary
+      // strictly after this token's own match; absent one (the common case
+      // — one token per paragraph, or this is the LAST token in the
+      // paragraph), pEnd stays the whole paragraph's own endIndex, unchanged
+      // from before this fix.
+      var nextTokenBoundaryTextIdx = -1;
+      if (tokenTextIdx >= 0) {
+        var searchFrom = tokenTextIdx + (prefixAt(fullText, tokenTextIdx) || '').length;
+        for (var nsi = searchFrom; nsi < fullText.length; nsi++) {
+          var nch = fullText[nsi];
+          if ((nch === '\n' || nch === '\r' || nch === '\v') &&
+              _ACTION_TOKEN_REGEX_ANCHORED.test(fullText.slice(nsi + 1))) {
+            nextTokenBoundaryTextIdx = nsi;
+            break;
+          }
+        }
+      }
       if (tokenTextIdx >= 0) {
         // Map tokenTextIdx to its absolute document index, and also compute
         // lineDocIdx — the document index of the character right after the
@@ -3544,6 +4226,11 @@ function _collectFlushOccurrences(items, N) {
         // the image), skipping the image and leaving stale images in place.
         var tokenDocIdx = -1;
         var lineDocIdx  = tokenTextIdx === 0 ? item.startIndex : -1;
+        // gts-mt39: doc index of the separator char just before the NEXT
+        // token's own line, when one was found above; bounds this
+        // occurrence's pEnd to its own record instead of the whole
+        // paragraph.
+        var nextBoundaryDocIdx = -1;
         for (var ri = 0; ri < runMap.length; ri++) {
           var run    = runMap[ri];
           var runEnd = run.startTextIdx + run.len;
@@ -3558,11 +4245,19 @@ function _collectFlushOccurrences(items, N) {
               lineDocIdx = run.startDocIdx + (afterNlTextIdx - run.startTextIdx);
             }
           }
-          if (tokenDocIdx >= 0 && lineDocIdx >= 0) break;
+          if (nextTokenBoundaryTextIdx >= 0 && nextBoundaryDocIdx < 0 &&
+              nextTokenBoundaryTextIdx >= run.startTextIdx && nextTokenBoundaryTextIdx < runEnd) {
+            nextBoundaryDocIdx = run.startDocIdx + (nextTokenBoundaryTextIdx - run.startTextIdx);
+          }
+          if (tokenDocIdx >= 0 && lineDocIdx >= 0 &&
+              (nextTokenBoundaryTextIdx < 0 || nextBoundaryDocIdx >= 0)) break;
         }
         if (tokenDocIdx >= 0) {
           if (lineDocIdx < 0) lineDocIdx = item.startIndex;
-          found.push({ pStart: item.startIndex, pEnd: item.endIndex,
+          var occPEnd = (nextTokenBoundaryTextIdx >= 0 && nextBoundaryDocIdx >= 0)
+            ? nextBoundaryDocIdx + 1
+            : item.endIndex;
+          found.push({ pStart: item.startIndex, pEnd: occPEnd,
                        tokenDocIdx: tokenDocIdx, lineDocIdx: lineDocIdx });
         }
       }
@@ -3649,42 +4344,112 @@ function _renderActionBodyWithStatus(text, status) {
  * scan, so it silently degraded into fused actionText prose one flush cycle
  * later (confirmed live: seed a field line -> sync -> sync again -> the
  * field vanishes from custom_fields and reappears merged into action_text).
- * Field lines are now written flush-left, matching the grammar exactly, so a
- * written field line parses as the same field again on the next scan. The
- * field name is bolded; the colon is followed by a literal tab (U+0009, not
- * a space) before the value -- this exactly reproduces _FIELD_LINE_REGEX's
- * own `[ \t]inlineValue?` production. A value spanning multiple original
- * lines is written back with no added indentation on its continuation
- * lines either, so a multi-line value round-trips byte-for-byte (any
- * indentation was never part of the stored value to begin with).
+ * Field lines were made to default to flush-left, matching the grammar
+ * exactly, so a written field line parses as the same field again on the
+ * next scan regardless of indent -- gts-9a4j's leading-whitespace strip on
+ * the read side (_parseFieldContinuationBlocksTracked) is what actually
+ * carries that guarantee now that indent is configurable; flush-left (0) is
+ * simply the case where there is nothing to strip. The field name is
+ * bolded; the colon is followed by a literal tab (U+0009, not a space)
+ * before the value -- this exactly reproduces _FIELD_LINE_REGEX's own
+ * `[ \t]inlineValue?` production. A multi-line value round-trips
+ * byte-for-byte regardless of `labelPad`/`continuationPad`, since the indent is never part
+ * of the stored value (rule 5) -- only reapplied uniformly on flush (rule 8).
  *
- * @param {Object<string,{text:string}>} customFields  Object.keys() order
- *   is first-appearance order -- see _buildCustomFieldsFromBlocks.
- * @returns {{text: string, boldRanges: Array<[number,number]>}}
+ * gts-9a4j: `labelPad` (Config sheet 'Field SR Indent', default '') is
+ * inserted before the field's own label line (ADR-0027 rule 8: "every
+ * continuation line ... whether the block is actionText or a field'). ''
+ * reproduces gts-po8t's flush-left byte-for-byte.
+ *
+ * gts-x8wy: `continuationPad` (Config sheet 'Field SR SR Indent', default
+ * `labelPad` + the action-body 'SR Indent') is inserted before every
+ * SUBSEQUENT wrapped line of the SAME field's own value -- independently of
+ * `labelPad`, so a field's label and its own value-continuations can be
+ * indented to different depths (e.g. one extra nesting level to read as
+ * "under" the field it continues).
+ *
+ * @param {Object<string,{text:string, runs:Array}>} customFields  Object.keys()
+ *   order is first-appearance order -- see _buildCustomFieldsFromBlocks.
+ * @param {string} [labelPad]  the already-resolved Config 'Field SR Indent'
+ *   string (gts-x8wy — N spaces or a literal \t/\s template); ''/omitted =
+ *   flush-left.
+ * @param {string} [continuationPad]  the already-resolved Config 'Field SR SR
+ *   Indent' string; ''/omitted = flush-left (NOT the same as "inherit
+ *   labelPad" -- callers wanting that default must resolve it themselves,
+ *   which _getContinuationIndentConfig already does).
+ * @returns {{text: string, boldRanges: Array<[number,number]>, valueRuns: Array}}
  *   text: soft-return continuation to append after the action body (starts
  *   with '\v'; '' when there are no fields).
  *   boldRanges: [start,end) offsets into `text` covering each field name +
  *   its trailing ':', for the caller to bold via updateTextStyle.
+ *   valueRuns: gts-py21 -- {start,end,bold,italic,link} offsets into `text`
+ *   for each formatted run WITHIN a field's own VALUE (as opposed to its
+ *   label), sourced from customFields[name].runs (rule 15; sampled by
+ *   _extractInlineRuns on the scan side, same shape item.runs already
+ *   carries for actionText below). Before this, a flush rebuilt every field
+ *   line from `.text` alone and silently dropped any bold/italic/link a
+ *   value carried -- caught live by a real re-sync of a field value with an
+ *   embedded hyperlink (gts-py21): the link survived a bare scan-then-read
+ *   but vanished the moment the SAME paragraph was flushed again. A run
+ *   spanning an embedded newline in the value is split at that line's own
+ *   boundary in `text` (mirrors this function's own '\v'-per-line layout
+ *   below), so no request's range ever crosses the delimiter it was
+ *   sampled across.
  */
-function _renderCustomFieldLines(customFields) {
+function _renderCustomFieldLines(customFields, labelPad, continuationPad) {
   var names = customFields ? Object.keys(customFields) : [];
-  if (!names.length) return { text: '', boldRanges: [] };
+  if (!names.length) return { text: '', boldRanges: [], valueRuns: [] };
+  labelPad = labelPad || '';
+  continuationPad = continuationPad || '';
   var text = '';
   var boldRanges = [];
+  var valueRuns = [];
   for (var i = 0; i < names.length; i++) {
     var name  = names[i];
-    var raw   = (customFields[name] && customFields[name].text) || '';
+    var field = customFields[name];
+    var raw   = (field && field.text) || '';
     var lines = _normalizeLineEndings(raw).split('\n');
-    text += '\v';
+    // Per-line start offsets INTO raw (0-based), so a run's [start,end)
+    // (also offsets into raw) can be located to the line it falls in.
+    var rawLineStarts = [];
+    var rawAcc = 0;
+    for (var li0 = 0; li0 < lines.length; li0++) {
+      rawLineStarts.push(rawAcc);
+      rawAcc += lines[li0].length + 1; // +1 for the '\n' this line was joined with
+    }
+
+    text += '\v' + labelPad;
     var labelStart = text.length;
     text += name + ':';
     boldRanges.push([labelStart, text.length]);
-    text += '\t' + lines[0];
+    text += '\t';
+    var lineTextStarts = [text.length]; // where each raw line's own text begins in `text`
+    text += lines[0];
     for (var li = 1; li < lines.length; li++) {
-      text += '\v' + lines[li];
+      text += '\v' + continuationPad;
+      lineTextStarts.push(text.length);
+      text += lines[li];
+    }
+
+    var runs = (field && field.runs) || [];
+    for (var ri = 0; ri < runs.length; ri++) {
+      var run = runs[ri];
+      if (!run.bold && !run.italic && !run.link) continue;
+      for (var li2 = 0; li2 < lines.length; li2++) {
+        var lineRawStart = rawLineStarts[li2];
+        var lineRawEnd   = lineRawStart + lines[li2].length;
+        var segStart = Math.max(run.start, lineRawStart);
+        var segEnd   = Math.min(run.end, lineRawEnd);
+        if (segEnd <= segStart) continue;
+        valueRuns.push({
+          start:  lineTextStarts[li2] + (segStart - lineRawStart),
+          end:    lineTextStarts[li2] + (segEnd - lineRawStart),
+          bold:   run.bold, italic: run.italic, link: run.link
+        });
+      }
     }
   }
-  return { text: text, boldRanges: boldRanges };
+  return { text: text, boldRanges: boldRanges, valueRuns: valueRuns };
 }
 
 function _buildFlushRequests(occurrence, item) {
@@ -3711,7 +4476,14 @@ function _buildFlushRequests(occurrence, item) {
   // stripped outright (gts-dr8j, superseding the space-collapse of
   // gts-kkm7.5). This is the one place every flush call site funnels through,
   // so no caller has to know which spelling it holds.
-  var actionText = _toSoftReturnText(item.actionText);
+  var plainActionText = _toSoftReturnText(item.actionText);
+  // gts-9a4j / ADR-0027 rule 8: indent every continuation line by the Config
+  // sheet's 'SR Indent' (default 0, gts-po8t's flush-left). Indent is
+  // inserted immediately AFTER each '\v', so the position of the FIRST '\v'
+  // (the header/continuation boundary _renderActionBodyWithStatus below
+  // locates) is unchanged by this step — status placement is unaffected.
+  var indentCfg  = _getContinuationIndentConfig();
+  var actionText = _indentSoftReturnLines(plainActionText, indentCfg.actionIndent);
   // gts-q23h / ADR-0027 rule 4: the status token goes at the end of the HEADER
   // LINE, not after the last continuation line — see
   // _renderActionBodyWithStatus for why placement and extraction must agree.
@@ -3721,7 +4493,7 @@ function _buildFlushRequests(occurrence, item) {
   // deleting them (see _renderCustomFieldLines). Appended strictly after
   // rendered.text, so the run-offset math below (which is relative to
   // rendered.text's own length) is unaffected.
-  var fieldLines = _renderCustomFieldLines(item.customFields);
+  var fieldLines = _renderCustomFieldLines(item.customFields, indentCfg.fieldIndent, indentCfg.fieldContinuationIndent);
   var bodyText   = rendered.text + fieldLines.text;
   // insertAt: for simple paragraphs this equals pStart; for soft-return
   // paragraphs it is the document index right after the preceding \n, which
@@ -3742,9 +4514,10 @@ function _buildFlushRequests(occurrence, item) {
     requests.push({ insertText: { text: bodyText, location: { index: insertAt } } });
   }
   requests.push({ insertText: { text: tokenText, location: { index: insertAt } } });
+  var iconSize = _resolveStatusIconSize();
   requests.push({ insertInlineImage: {
     uri: imgUrl, location: { index: insertAt },
-    objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
+    objectSize: { height: { magnitude: iconSize, unit: 'PT' }, width: { magnitude: iconSize, unit: 'PT' } }
   }});
   requests.push({ updateTextStyle: {
     range: { startIndex: insertAt, endIndex: insertAt + 1 + tokenLen },
@@ -3758,22 +4531,48 @@ function _buildFlushRequests(occurrence, item) {
   // default formatting untouched. Uniform style no longer covers bold/italic
   // (ADR-0022/gts-zocq) — those are applied per-run immediately below.
   var trailingText  = (validEmail ? ' ' : '') + bodyText;
-  // actionTextStart lands exactly at the first character of actionText itself
-  // (past the image, token, and optional leading assignee-chip space) — the
-  // same anchor gts-zocq's per-run requests below need.
+  // actionTextStart anchors trailingText's *style* range, which deliberately
+  // INCLUDES the leading assignee-chip space when validEmail (trailingText
+  // itself is ' ' + bodyText) — it is the doc index of that leading space,
+  // one past [image][token][person chip].
   var actionTextStart = insertAt + 1 + tokenLen + (validEmail ? 1 : 0);
   var actionTextStyleReq = _actionTextStyleRequest(actionTextStart, actionTextStart + trailingText.length);
   if (actionTextStyleReq) requests.push(actionTextStyleReq);
 
+  // gts-1ibp fix: bodyStart is the first character of actionText/bodyText
+  // ITSELF — one past the leading space actionTextStart above intentionally
+  // includes when validEmail. item.runs offsets and the field-line bold
+  // ranges below are relative to actionText/bodyText alone (no leading
+  // space), so they must anchor here, not on actionTextStart. Reusing
+  // actionTextStart directly for those (the pre-fix code) put every
+  // bold/italic/link run and every field-name bold range one character too
+  // far left whenever the action had an assignee — the person chip AND the
+  // space each occupy their own doc-index slot, and only the chip was
+  // previously accounted for before this anchor. A no-assignee action never
+  // hit the discrepancy, so the drift only appeared with an assignee.
+  var bodyStart = actionTextStart + (validEmail ? 1 : 0);
+
   // gts-t6xs fix: bold each field name (+ its colon) in the field lines just
   // appended to bodyText. fieldLineBase is the doc index of the first
   // character of fieldLines.text, i.e. right after rendered.text.
-  var fieldLineBase = actionTextStart + rendered.text.length;
+  var fieldLineBase = bodyStart + rendered.text.length;
   for (var fbi = 0; fbi < fieldLines.boldRanges.length; fbi++) {
     var fbr = fieldLines.boldRanges[fbi];
     requests.push({ updateTextStyle: {
       range: { startIndex: fieldLineBase + fbr[0], endIndex: fieldLineBase + fbr[1] },
       textStyle: { bold: true }, fields: 'bold'
+    }});
+  }
+
+  // gts-py21: reapply each field VALUE's own bold/italic/link runs (as
+  // opposed to the field-name label bolding just above) -- see
+  // _renderCustomFieldLines' valueRuns doc comment for why this is needed.
+  for (var fvi = 0; fvi < fieldLines.valueRuns.length; fvi++) {
+    var fvr = fieldLines.valueRuns[fvi];
+    requests.push({ updateTextStyle: {
+      range: { startIndex: fieldLineBase + fvr.start, endIndex: fieldLineBase + fvr.end },
+      textStyle: { bold: !!fvr.bold, italic: !!fvr.italic, link: fvr.link ? { url: fvr.link } : null },
+      fields: 'bold,italic,link'
     }});
   }
 
@@ -3784,23 +4583,32 @@ function _buildFlushRequests(occurrence, item) {
   // item.actionText BEFORE _toSoftReturnText's own line-ending-normalize +
   // trim (that trim can shift indices — see _extractInlineRuns' offsets
   // contract); compute the same leading-whitespace shift _toSoftReturnText's
-  // trim() applies and adjust run offsets by it, then clip to the final
-  // actionText's bounds. Ranges stay within [actionTextStart, actionTextStart
-  // + finalLen) — never widened past actionText, so a run link can never
-  // overwrite the chip link on the token (ADR-0028 rule 5).
+  // trim() applies and adjust run offsets by it, then clip to the
+  // unindented actionText's bounds (plainLen) before shifting each offset
+  // into the indented text's coordinate space (gts-9a4j,
+  // _shiftOffsetForIndent). Ranges stay within [bodyStart, bodyStart +
+  // actionText.length) — never widened past actionText, so a run link can
+  // never overwrite the chip link on the token (ADR-0028 rule 5).
   if (item.runs && item.runs.length) {
     var rawActionText   = item.actionText || '';
     var normalizedRuns  = _normalizeLineEndings(rawActionText);
     var leadingWsLen    = (normalizedRuns.match(/^\s*/) || [''])[0].length;
-    var finalLen        = actionText.length;
+    var plainLen        = plainActionText.length;
     var splitIdx        = rendered.splitIdx;
     var suffixLen       = rendered.suffixLen;
     for (var rui = 0; rui < item.runs.length; rui++) {
       var run = item.runs[rui];
       if (!run.bold && !run.italic && !run.link) continue;
+      // rStart/rEnd here are relative to plainActionText (unindented) — the
+      // same space run.start/run.end were sampled in. gts-9a4j: shifted to
+      // the indented actionText's coordinate space below, before combining
+      // with splitIdx/suffixLen (which already are in that space, since
+      // indenting cannot move the first '\v').
       var rStart = Math.max(0, run.start - leadingWsLen);
-      var rEnd   = Math.min(finalLen, run.end - leadingWsLen);
+      var rEnd   = Math.min(plainLen, run.end - leadingWsLen);
       if (rEnd <= rStart) continue;
+      rStart = _shiftOffsetForIndent(plainActionText, rStart, indentCfg.actionIndent);
+      rEnd   = _shiftOffsetForIndent(plainActionText, rEnd, indentCfg.actionIndent);
       // gts-q23h: run offsets index the body WITHOUT the status suffix, which
       // is now inserted mid-string at rendered.splitIdx. Map each run across
       // that insertion; a run straddling the split emits two ranges so the
@@ -3812,7 +4620,7 @@ function _buildFlushRequests(occurrence, item) {
       for (var segi = 0; segi < segments.length; segi++) {
         if (segments[segi][1] <= segments[segi][0]) continue;
         requests.push({ updateTextStyle: {
-          range: { startIndex: actionTextStart + segments[segi][0], endIndex: actionTextStart + segments[segi][1] },
+          range: { startIndex: bodyStart + segments[segi][0], endIndex: bodyStart + segments[segi][1] },
           textStyle: style,
           fields: 'bold,italic,link'
         }});
@@ -3883,7 +4691,17 @@ function _flushActionParagraphs(docId, token, items) {
 
   if (pending.length === 0) return results;
 
-  pending.sort(function (a, b) { return b.occurrence.pStart - a.occurrence.pStart; });
+  // gts-mt39: primary sort descending by pStart (paragraph order) as before;
+  // tie-break descending by lineDocIdx so that when TWO tokens share one
+  // paragraph (same pStart), the LATER one in the paragraph (higher offset)
+  // is still built into the request array first — required for the same
+  // "always edit from the end of the document backward" invariant this
+  // function's own comment documents, now that pEnd/lineDocIdx can differ
+  // within one paragraph (see _collectFlushOccurrences).
+  pending.sort(function (a, b) {
+    return (b.occurrence.pStart - a.occurrence.pStart) ||
+           (b.occurrence.lineDocIdx - a.occurrence.lineDocIdx);
+  });
 
   var requests = [];
   for (var pi = 0; pi < pending.length; pi++) {

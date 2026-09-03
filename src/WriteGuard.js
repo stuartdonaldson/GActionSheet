@@ -49,13 +49,36 @@ var WriteGuard = (function () {
       // return false;
     },
 
-    /** In-process guard. Use for all programmatic sheet writes. */
+    /**
+     * In-process guard. Use for all programmatic sheet writes.
+     *
+     * gts-5kyu (Stage 1 Actions-sheet snapshot, AC4/AC9): every writer that
+     * mutates the Actions sheet already routes through here, so this is the
+     * single choke point that invalidates ActionSnapshot.js's per-execution
+     * memo -- a writer never has to remember to do it itself, and a future
+     * writer gets it for free. Nulling on EVERY wrap() (not only
+     * Actions-sheet writes) is deliberate: over-invalidation just costs one
+     * extra rebuild on next read, never a wrong answer, and this function has
+     * no way to know which sheet fn() touched.
+     *
+     * CAVEAT (gts-tz3j static review, AC4-2/AC5-2, since no live red/green
+     * proof was possible against the shared TEST target -- see gts-hztp):
+     * invalidation fires ONCE, in finally, after fn() returns -- NOT after
+     * each individual write inside fn(). A memo-backed read issued from
+     * INSIDE a wrap()/wrapPersistent() body, after a write earlier in that
+     * same body, sees stale data. No call site does this today (verified by
+     * exhaustive enumeration of Actions-sheet write sites), but nothing
+     * prevents a future writer from adding one. If you add a memo-backed
+     * read inside a wrap body after a write, invalidate manually first via
+     * _invalidateActionsSnapshot(), don't rely on this finally.
+     */
     wrap: function (fn) {
       WriteGuard.activate();
       try {
         fn();
       } finally {
         WriteGuard.deactivate();
+        _invalidateActionsSnapshot();
       }
     },
 

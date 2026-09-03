@@ -1,6 +1,6 @@
 var BUILD_INFO = {
-  "version": "0.2.3.38",
-  "buildDate": "2026-08-29T07:42:32.259Z",
+  "version": "0.2.5.1",
+  "buildDate": "2026-09-03T00:07:10.487Z",
   "target": "TEST",
   "webappUrl": "https://script.google.com/macros/s/AKfycbzVloY3corgO5F9AV7XvAbkL1oaTaehcE1kXwmFdJsXZPBBCm3xJ4ONJsZADHH9Hm4/exec",
   "env": "test"

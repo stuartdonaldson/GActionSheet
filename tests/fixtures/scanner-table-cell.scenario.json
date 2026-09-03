@@ -1,0 +1,10 @@
+{
+  "name": "scanner-table-cell",
+  "input": "scanner-table-cell",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "scanner-table-cell-expected",
+  "serves": ["gts-dq6t"],
+  "batch": "apt-lanes-scanner"
+}

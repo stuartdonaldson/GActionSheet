@@ -102,8 +102,11 @@ Rules:
 - **Inline formatting.** Bold, italic and hyperlinks are author-owned and survive round-trip as
   per-character runs (ADR-0022, ADR-0027 rules 10–15). Config's uniform `action_text` style owns
   font family, size, colour and underline only.
-- **Continuation rendering.** On flush, every continuation line is indented 5 spaces; a field's
-  `Name:` label is additionally bold with a tab (not a space) before the value. Both are
+- **Continuation rendering.** On flush, every continuation line is indented by a configurable
+  number of leading spaces — the Config sheet's `SR Indent` key for `actionText` continuation
+  lines and `Field SR Indent` independently for field continuation lines, each defaulting to `0`
+  (flush-left) when the Config sheet carries no row for that key. A field's `Name:` label is
+  additionally bold with a tab (not a space) before the value. Both indent and label emphasis are
   system-applied presentation, stripped back off on read and never stored as part of the value's
   text or its `runs` (ADR-0027 rule 8).
 - **Unparseable input is reported.** A paragraph beginning `(ACT|AI)-\d+` that does not complete
@@ -113,8 +116,8 @@ Rules:
   they are written using the sheet's locale-formatted date.
 
 Example with continuation fields (as typed by an author; on flush each continuation line below is
-re-rendered with a 5-space indent, and each `Name:` label bold with a tab after it — ADR-0027
-rule 8):
+re-rendered with the configured `SR Indent`/`Field SR Indent` indent — none at the default of 0 —
+and each `Name:` label bold with a tab after it — ADR-0027 rule 8):
 
 ```
 [img] ACT-7: [Jane Smith] draft the Q4 board deck and circulate (In Progress)
@@ -186,6 +189,7 @@ The tracker table is located by a sentinel heading paragraph so refresh can repl
 - Detect actions in the **active doc** (the doc the sidebar is attached to) as checklist items beginning with a PERSON chip
 - Identify each action with an in-text `ACT-N:` token (or legacy `AI-N:` — ADR-0023); the `globalId` is the stable identity recorded in the ActionSheet
 - Maintain a trailing `(Status)` token on each action paragraph; default `(Open)`, recognize `(Closed)` for archiving, preserve any other value as a free-form custom status
+- Administrator-configurable continuation-line indent on flush — the ActionSheet `Config` sheet's `SR Indent` (action-text continuation lines) and `Field SR Indent` (custom-field continuation lines) keys each set a leading-space count applied when an action paragraph is re-rendered; the two are independent and both default to `0` (flush-left) when unset. The indent is presentation only: the parser strips it on read, so changing either key never changes stored action text or field values (ADR-0027 rule 8)
 - Refresh the homepage card without mutating data — **Scan card** re-reads the current doc, tracker, and sheet-derived summary state so the visible card catches up to edits or a recent sync
 - Sync the active doc to the ActionSheet on demand from the homepage card — a single **Sync now** action that scans the doc and reconciles ActionSheet rows in one round (push/pull resolved by `Last Modified`)
 - Verify the active doc from the homepage card without mutating data — scans floating actions, the in-doc tracker table when present, and ActionSheet rows for the same doc; reports progress and mismatches in the verification card
@@ -367,6 +371,7 @@ Errors are surfaced in the sidebar (for add-on operations) or logged to the auto
 | Team Scope (`teamScope`) | The Drive file `appProperty` holding a document's assigned `Team Id`. Set once via folder-walk auto-assignment (sticky thereafter) or overridden via `DocData.SyncStatus = UpdateDoc`. |
 | TeamData | Admin-managed sheet tab mapping `Team Id` -> `Folder Id` (+ `Contact`), used for folder-walk auto-assignment and the `assertTeamAccess` security gate. |
 | DocData | Per-document sync-state sheet tab (`FileId`, `Doc Name`, `Last Sync Time`, `Doc Updated`, `SyncStatus`, `Team Id`, `Action Count`, `Resolved Count`) used for DocWins reconciliation and Team Scope sync. |
+| `SR Indent` / `Field SR Indent` | ActionSheet `Config` sheet keys (plain non-negative integers) giving the number of leading spaces flush applies to `actionText` continuation lines and to custom-field continuation lines respectively. Independent of each other; both default to `0` (flush-left) when absent, blank, negative or non-numeric. Presentational only — stripped on read, never stored in a value's text or `runs` (ADR-0027 rule 8). |
 | Tracker table | The in-doc summary table written by **Insert / refresh tracker**, preceded by an instructional paragraph summarizing the sync rules. |
 | Proxy-write | The pattern where the add-on calls the Web App to perform writes under the deployer identity, bridging the add-on's active-user identity to the deployer's sheet-write authority. |
 | BUILD_INFO | Version/timestamp object stamped into `src/Version.js` by `update-revision.js` before each deployment. |

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """apt.py — push | pull | bless | diff over Action Portable Text (APT) corpora
-(gts-4bop, staged plan knowledge-base/staging/apt-testing.md stage `apt-cli`).
+(gts-4bop, designed at stage `apt-cli` of the staged plan that built this
+tooling — deleted on close, per Pattern D; its numbered "decision N" design
+calls cited below are reconstructed at
+docs/interfaces/action-portable-text.md §Tooling design decisions).
 
 One entry point over `apt_lib`'s differ/header code (stage `apt-differ`,
 gts-snub/gts-x9un) and the `encode_reference_document`/`decode_reference_document`

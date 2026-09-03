@@ -27,6 +27,10 @@ import pytest
 import scn.session as _session
 from tests.helpers.fixture_invoke import FixtureError, FixtureTokenError, invoke_fixture
 
+# gts-aqpk: fast/local tier -- this module makes no live GAS/Google round trip
+# (verified offline with sockets blocked). See docs/OPERATIONS.md "Test tiers".
+pytestmark = pytest.mark.no_live_session
+
 SETTINGS = {"webappTestUrl": "https://example.com/exec", "testToken": "tok-123"}
 
 

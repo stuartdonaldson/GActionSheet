@@ -7,5 +7,6 @@
   "expected": "list-and-table-containers-expected",
   "serves": [
     "gts-83s5"
-  ]
+  ],
+  "batch": "apt-corpus-batch"
 }

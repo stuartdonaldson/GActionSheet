@@ -53,6 +53,8 @@ its drift checkpoints are AC lines on the beads, not notes in a document.
 
 | # | Stage | Bead | Status | Title |
 |---|---|---|---|---|
+| 1 | `plugin-contract` | `gts-cw8t` | ○ | [INF] `human` — sidebarSetStatus doc-scan/flush proxy shape (ADR-0030); gates `gts-8v8w`'s route table if the answer is a generalized route |
+| 1 | `plugin-contract` | `gts-gekv` | ○ | [INF] `human` — should the module model (`gts-ddhb`) be picked before the six stages that assume one? Blocks `gts-qeis` |
 | 1 | `plugin-contract` | `gts-an8x` | ○ | [INF] Sub-app plugin contract for the Northlake UU Tool Suite |
 | 1 | `plugin-contract` | `gts-3gw1` | ○ | [INF] ADR-0030: sub-apps compose into one script project via source composition and a registry |
 | 2 | `deploy-compose` | `gts-qeis` | ○ | [INF] build/ source composer as a gas-deploy prePush hook |

@@ -6,6 +6,8 @@
   },
   "expected": "unparseable-reporting",
   "serves": [
-    "gts-thwh"
-  ]
+    "gts-thwh",
+    "gts-xvlu"
+  ],
+  "batch": "apt-corpus-batch"
 }

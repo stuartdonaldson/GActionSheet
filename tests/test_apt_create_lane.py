@@ -76,6 +76,6 @@ def test_create_boundary_lane_batch(settings, request):
     finally:
         scn.close()
 
-    failed = [r for r in results if not r.diff.clean]
+    failed = [r for r in results if not r.clean]  # gts-5ktl: golden diff AND idempotency diff
     if failed:
         pytest.fail(apt_lane_runner.format_failures(results))

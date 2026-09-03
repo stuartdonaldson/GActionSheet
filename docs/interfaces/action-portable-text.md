@@ -59,8 +59,8 @@ One `<!-- key: value -->` comment line per field, parsed (but never required) by
 |-------|---------|
 | `kind` | `golden` (a reviewed, checked-in corpus) or `capture` (a raw encode of a live Doc). Only `bless` (`scripts/apt.py`, stage `apt-cli`) may promote a `capture` to a `golden` — a lint asserts no `kind: capture` file ever lands under `tests/fixtures/`. |
 | `name` | the corpus's name, e.g. `action-reference`. |
-| `doc` | source Doc ID. Optional (decision 7) — a scenario corpus checked into `tests/fixtures/` typically carries none, since it materialises into a fresh `ScenarioSession.new_doc()` rather than naming a shared mutable Doc. |
-| `serves` | comma-separated bead IDs this corpus's records exercise (decision 9's per-record prose annotations name the *specific* case within the corpus; `serves` names the corpus's beads as a whole). |
+| `doc` | source Doc ID. Optional (§Tooling design decisions, decision 7) — a scenario corpus checked into `tests/fixtures/` typically carries none, since it materialises into a fresh `ScenarioSession.new_doc()` rather than naming a shared mutable Doc. |
+| `serves` | comma-separated bead IDs this corpus's records exercise (§Tooling design decisions, decision 9's per-record prose annotations name the *specific* case within the corpus; `serves` names the corpus's beads as a whole). |
 | `generated` | ISO-8601 timestamp, written by `encodeDocToApt`. |
 
 `encodeDocToApt(doc, opts)` writes `kind: capture` by default (a raw encode of a live Doc is a
@@ -257,7 +257,7 @@ literal soft-return character, and `DocumentApp` has no API to insert a PERSON c
 `hyperlink-roundtrip.apt.txt` → gts-tz5x, `field-continuation.apt.txt` → gts-82s2,
 `dual-prefix.apt.txt` → gts-nrxn) — records copied verbatim from the canonical reference (N
 tokens are literal text, never renumbered on decode, so moving a record between files does not
-change its token). Each is **doc-less** (decision 7: a scenario corpus materialises into a fresh
+change its token). Each is **doc-less** (§Tooling design decisions, decision 7: a scenario corpus materialises into a fresh
 `ScenarioSession.new_doc()` rather than naming a shared mutable Doc) and its own
 `<!-- serves: ... -->` names exactly the one bead it exercises.
 
@@ -328,7 +328,10 @@ resolution `scripts/apt.py` uses), not paths. An optional `"batch"` field (e.g.
 `tests/test_apt_corpus_check.py` skips it rather than re-running it under the one-doc-per-scenario
 shape that runner exists to avoid (that lane measured 7 scenarios at 5.1 min — decision-load-bearing
 enough that a batched scenario is never silently re-executed there). `scripts/apt_lib.py::load_scenario`
-is the one shared parser (decision 8); `tests/test_apt_corpus_check.py` executes every
+is the one shared parser (§Tooling design decisions, decision 8). An optional `"idempotent": false`
+(with a sibling `"idempotentReason"` string) excludes a scenario from the batched runner's
+second-capture idempotency diff (§Batched lanes); it defaults to `true` and a non-boolean value is
+a load error. `tests/test_apt_corpus_check.py` executes every
 un-batched `"sync"` scenario against its own live Doc and asserts
 `apt_lib.diff_apt(expected, captured).clean` — "apt check" as a pytest lane, sharing the same
 differ a human's `apt.py diff` invokes.
@@ -344,9 +347,24 @@ chunks (`apt_lib.slice_records`) to diff each against its own expected corpus. A
 a body-level `<TABLE...>` must be LAST among the scenarios passed to one `run_lane` call (the v2
 table-position restriction, scoped to the whole composed Doc, not per scenario).
 
+**Idempotency (gts-5ktl, stage `lane-idempotency`).** Every lane run then issues ONE further sync
+with nothing mutated since the capture above, captures the Doc a second time, and diffs each
+scenario's slice of that second capture against its slice of the first. A converged Doc re-synced
+must reproduce itself; a difference is a flush that never settles (ADR-0031's promise that a
+Document Sync leaves the document idempotently correct against Config) and is reported naming the
+SCENARIO, not the lane. Record-count drift is checked once at the lane level before slicing — a
+record appended past the last scenario's range falls outside every slice and would otherwise be
+invisible. The cost is one sync per LANE, not per scenario. Default is ON; a scenario whose
+mutation is inherently multi-sweep, or whose expected corpus deliberately encodes a
+still-converging state, opts out with `"idempotent": false` plus an `idempotentReason` in its
+`scenario.json` — an opt-out is a decision on record, not a silent skip
+(`tests/test_apt_lane_idempotency.py` fails an opt-out with no stated reason). This is the home for
+the idempotency assertions stages `apt-scanner-migration`/`apt-format-migration` could not migrate
+while the runner produced a single capture per run.
+
 Because every scenario shares ONE Doc, a chip-badge preview link a fresh flush produces
 (`[**ACT-N: **](...docId=<doc>&ain=ACT-N)`) carries THAT run's own randomly-generated `doc_id`
-(decision 7: batched-lane corpora are doc-less) — unpredictable at golden-authoring time.
+(§Tooling design decisions, decision 7: batched-lane corpora are doc-less) — unpredictable at golden-authoring time.
 `run_lane` normalises this one substitution before diffing: the captured text's literal `doc_id`
 is replaced with the placeholder `DOC_ID`, and a golden whose scenario forces a re-flush spells its
 own chip URL with `docId=DOC_ID` rather than a real id. `tests/test_apt_corpus_check.py` applies
@@ -375,6 +393,115 @@ a freshly-assigned token wherever it lands in document order — the path `decod
 (append-only against an empty body) never reaches, since every corpus it decodes ends up
 flush-appended in file order regardless of which "boundary" a scenario's own record occupies
 relative to its siblings.
+
+### Batch scale limits (gts-i8we)
+
+Two constraints on how large/varied a `run_lane` batch can grow, decided before the migration
+stages (`apt-corpus-batching`/`apt-scanner-migration`/`apt-format-migration`,
+`knowledge-base/staging/docdata-litter-apt-speed.md` stage `apt-batch-limits`) start authoring
+batches at scale rather than the 4–5 scenarios `apt-lanes-flush`/`apt-lanes-create` already prove
+out.
+
+**1. Table position caps a batch at one table-bearing scenario, ordered last.** Already enforced
+by code, not just convention: `apt_lib.compose_corpora` raises if a corpus containing a
+body-level `<TABLE...>` is not last in the list passed to it — which also means two
+table-bearing scenarios in one batch can never both satisfy "last" and the call always raises.
+Ordering is the caller's job: `_lane_scenario_files` globs `*.scenario.json` alphabetically, which
+only put `create-lane-table-cell` last in `apt-lanes-create` by naming coincidence
+(`test_apt_create_lane.py` re-sorts explicitly rather than depend on that). **Decision:** every
+batch invocation must sort its scenario list explicitly before calling `run_lane` (never rely on
+glob/alphabetical order), and a batch may include at most one table-bearing scenario. A future
+batch needing to cover more than one table shape does so across separate `run_lane` calls
+(separate docs), not by relaxing this.
+
+**2. Explicit N-token allocation is scoped per batch, not per project.** `sheetEdit`/`trigger`
+mutations address an already-established record by its literal `ACT-`/`AI-` token via
+`ScenarioSession.edit_sheet`/the `edit_cell_via_trigger` fixture, both of which resolve through
+`global_id = docId + '/' + token` (`scn/session.py`'s `_gid`) — since every scenario in one
+`run_lane` batch shares ONE doc (`apt_lib.compose_corpora`), two scenarios in the *same* batch
+picking the same literal token would collide (whichever `edit_sheet`/`trigger` call fires second
+would address an ambiguous or wrong row); the same token reused across two *different* batches
+(different docs, different `ScenarioSession`) never collides, since `global_id` is doc-scoped.
+Bare `AI:` triggers need no coordination at all — `SyncManager.js`'s new-token assignment picks
+`maxN + 1` over the whole doc at sync time, and decision 5 (§Tooling design decisions) already
+normalises N positionally in the diff, so the literal number a bare trigger resolves to is never
+asserted.
+
+**Decision:** explicit tokens are hand-picked per batch using a `<block><index>` convention keyed
+to what the token stands for, not sequential from 1 — the existing batches already do this
+without it having been written down: `apt-lanes-flush` numbers `AI-10<entry-point>` (101/103/104/107,
+matching entry points 1/3/4/7 — entry point 2 is deliberately a bare `AI:` since that scenario
+*is* the new-assign case, and 5/6 stay off the sheet-edit path entirely, §"Batched lanes"), and
+`apt-lanes-create` numbers `ACT-2<scenario><filler>` (20x/21x/22x/23x, one ten-block per scenario).
+A new batch picks its own unused hundred-block and documents the scheme in its own scenario-triple
+prose annotation (§"Annotated corpora" above) the same way — there is no shared registry, and none
+is needed while a batch's own scenario files are reviewed together in one PR; a collision would
+surface immediately as either a wrong-row `edit_sheet`/`trigger` assertion failure or (for two
+identical prose-annotated filler tokens) an obvious duplicate-token flag at review time, not
+silently.
+
+## Tooling design decisions
+
+`scripts/apt.py` and `scripts/apt_lib.py` cite these by number (`decision N`) in their own
+comments. The numbering comes from `knowledge-base/staging/apt-testing.md`, the staged plan that
+designed this tooling (stages `apt-differ`/`apt-cli`/`apt-scenarios`/`apt-lanes`) and was deleted,
+per Pattern D, once its last stage closed — it was never committed to git, so once deleted it left
+no recoverable copy there. This section is the durable home its own header promised the content
+would graduate to; reconstructed 2026-08-29 (`gts-c9dd`) from the plan's own text preserved in this
+project's session transcripts, not re-derived or guessed. Decisions 1, 3, 4, 5, 7 and 8 are the
+plan's original numbering; decision 9 was added mid-plan (before stage `apt-lanes` closed) and its
+own citation sites already point here.
+
+1. **`bless` is the only writer of a golden.** `pull` writes a capture to a gitignored scratch
+   store (`.apt-captures/`), never to `tests/fixtures/`. A second, ungated Doc→file path would be
+   the one people reach for at 11pm.
+2. **`bless` promotes the reviewed capture, not a fresh re-capture** — so the artifact a human
+   approved is the artifact that lands. A staleness guard (re-capture, abort if the Doc moved since
+   review) belongs behind a flag, not as the default. *(Not currently cited by name in code —
+   `cmd_bless` in `scripts/apt.py` implements the behavior directly.)*
+3. **The differ is pure file × file — no network in the comparison.** This is what makes it
+   offline-unit-testable and gives `apt.py diff a b` for free, and it is the single most
+   correctness-critical component: it decides whether a dropped link reads as *preservation* or is
+   waved through as *presentational*.
+4. **Four difference classes, each with its own blessing tier:** *positional* (N renumbering —
+   normalised away, never shown, never raises the exit code) · *presentational* (indent, label
+   bold, tab-vs-space, token spelling, field render order — bulk-blessable) · *structural*
+   (record/field added or removed, prose ↔ field reclassification — itemised, no reason required)
+   · *preservation* (link dropped, run lost, value shortened, line count reduced — itemised, reason
+   required and persisted). Ambiguous differences classify to the **strictest** applicable tier,
+   never the loosest.
+5. **N is normalised positionally in the diff** — records are paired by position, not by their
+   `ACT-`/`AI-` label — everywhere N appears (the leading token *and* a flushed chip badge's own
+   `ain=` query parameter). N-assignment invariants (document order, the shared namespace across
+   `ACT-`/`AI-` spellings, no rewrite on read) are real defect history and keep their own explicit
+   assertions outside the diff lane rather than being folded into it.
+6. **Keep `.apt.txt`; do not rename to `.apt.md`.** A CommonMark renderer swallows all `<SR>`
+   markers as unknown inline HTML, collapses the physical-line structure that *is* the soft-return
+   structure, and consumes the backslash escapes — showing a reader a grammatically different
+   document from the one the decoder sees. GitHub renders `.md` by default, so the misleading view
+   would be the default review surface. If visual review is wanted later, it is a `--render` mode
+   on the tool, not a file extension. *(Not currently cited by name in code; recorded here since it
+   is a live constraint on this format's file naming.)*
+7. **The corpus `doc` header field is optional.** A checked-in Doc id names a shared mutable
+   resource that `push` overwrites, and concurrent sessions would clobber each other. The canonical
+   corpus carries one (`referenceDocId`); a scenario corpus carries none and materialises into a
+   fresh `ScenarioSession.new_doc()` instead of naming a shared Doc — batched-lane corpora
+   (`compose_corpora`) are doc-less for the same reason.
+8. **One shared implementation, not three.** `scripts/apt_lib.py` is the single differ/lint/header
+   implementation; `scripts/apt.py` (the CLI) and the pytest lanes both import it rather than each
+   reimplementing the comparison. `apt.py`'s own `.apt-captures/` retention default
+   (`DEFAULT_KEEP_LAST_N`) is a sane bound stated near this decision in the code but is not itself
+   part of the numbered list.
+9. **Every corpus record added for test purposes carries a prose annotation naming what it
+   demonstrates.** No new syntax: `encodeDocToApt` already encodes every paragraph/list-item, so a
+   plain prose paragraph — or leading prose before the `<SR>` that launches a soft-return-launched
+   action — is ordinary content the differ already preserves. Convention, not mechanism: an author
+   (human or agent) adding a case to a corpus states, in-doc, next to the record, which bead/rule/
+   boundary it exercises, so a reader of the raw Doc or the `.apt.txt` file gets the intent without
+   cross-referencing a bead. This doubles as free preservation-tier coverage — a bug that drops or
+   mis-scopes the annotation surfaces as a diff, not a silent gap. `apt_lib.unannotated_records()`
+   lints it heuristically: an action-token record whose immediately preceding record does not read
+   as plain prose is flagged.
 
 ## Non-goals
 

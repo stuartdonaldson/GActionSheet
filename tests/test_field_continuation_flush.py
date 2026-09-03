@@ -25,25 +25,23 @@ pre-fix 2-tab layout and no longer applies — flush-left IS the corrected
 contract; these tests assert flush-left, not indentation.
 
 Entry-point audit (this file's AC #1/#2/#3, gts-po8t description):
-  1. Batch syncAll sheetWin flush           -> test_ep1_sheetwin_flush
-  2. Batch syncAll new-assign flush         -> test_ep2_new_assign_flush
-  3. Batch syncAll duplicate-reconciliation -> test_ep3_duplicate_reconciliation_flush
-  4. Batch syncAll missing-status flush     -> test_ep4_missing_status_flush
+  1. Batch syncAll sheetWin flush           -> retired, see below
+  2. Batch syncAll new-assign flush         -> retired, see below
+  3. Batch syncAll duplicate-reconciliation -> retired, see below
+  4. Batch syncAll missing-status flush     -> retired, see below
   5. Interactive status-tap (preview card)  -> test_ep5_preview_card_status_flush
   6. Interactive status-tap (sidebar)       -> test_ep6_sidebar_status_flush
-  7. _syncSheetRowToDoc (onEdit trigger)    -> test_ep7_onedit_flush_known_gap (KNOWN GAP, not fixed)
+  7. _syncSheetRowToDoc (onEdit trigger)    -> retired, see below (KNOWN GAP, not fixed)
 
-Formatting contract (bold field name, tab after colon) and the pure
-write->read round trip (AC #4) are asserted once, in detail, on entry point 1
-(test_ep1_sheetwin_flush) — _buildFlushRequests/_renderCustomFieldLines is
-the SAME shared function at every call site, so re-proving its formatting
-output at all seven sites would test the call site's own plumbing (which
-already needs its own assertion) redundantly against a function that has
-only one implementation. Entry points 2-6 assert field-survival (present,
-value correct, still recognized as a field on rescan) — the property that
-actually varies per call site (each builds `item.customFields` from a
-different source: fresh doc scan, sheet reconciliation, or canonical-copy
-data — see SyncManager.js's toFlush-building block, lines ~256-325).
+Entry points 1-4 and 7 retired gts-crae (staged plan
+docdata-litter-apt-speed.md, stage `flush-lane-retire`) — each is now run
+through tests/test_apt_flush_lane.py's batched lane (one composed doc
+instead of five) via tests/fixtures/flush-lane-*.apt.txt. Formatting
+contract (bold field name, tab after colon) and the write->read round trip
+are re-proven implicitly by the golden `diff_apt` comparison: a field line
+that stopped being recognized on rescan would re-encode as prose and the
+diff would go red. Entry points 5 and 6 stay here — they exercise call
+sites (preview-card tap, sidebar tap) run_lane has no mutation kind for.
 
 Backstop (Backstop rule, project CLAUDE.md): every test in this file was
 run against the pre-fix 2-tab-indent build before the flush-left fix landed
@@ -56,7 +54,6 @@ from scn.session import ScenarioSession
 
 from tests.helpers.doc_inspect import (
     load_doc,
-    paragraph_bold_text,
     paragraph_texts_with_breaks,
 )
 from tests.helpers.download import download_docx
@@ -75,16 +72,6 @@ def _scan_custom_fields(scn, n: int = 1) -> dict:
     return data.get("scanCustomFields") or {}
 
 
-def _find_by_global_id(scn, global_id):
-    rows = scn.find_sheet_actions()
-    row = next((r for r in rows if r.global_id == global_id), None)
-    assert row is not None, (
-        f"global_id {global_id!r} not found after sync; "
-        f"rows={[(r.global_id, r.action) for r in rows]!r}"
-    )
-    return row
-
-
 def _paras_containing(scn, needle):
     return [
         p for p in paragraph_texts_with_breaks(load_doc(download_docx(scn.doc_id)))
@@ -93,168 +80,19 @@ def _paras_containing(scn, needle):
 
 
 # ---------------------------------------------------------------------------
-# Entry point 1 — batch syncAll sheetWin flush + formatting contract + AC #4
-# round trip (asserted here in detail; see module docstring)
+# Entry points 1, 2, 3, 4 — batch syncAll sheetWin / new-assign /
+# duplicate-reconciliation / missing-status flush
+#
+# Retired gts-crae/flush-lane-retire (staged plan docdata-litter-apt-
+# speed.md, stage `flush-lane-retire`) WITHOUT a new corpus — each was
+# already covered by tests/fixtures/flush-lane-sheetwin.apt.txt (EP1),
+# flush-lane-new-assign.apt.txt (EP2), flush-lane-duplicate.apt.txt (EP3)
+# and flush-lane-missing-status.apt.txt (EP4), run via
+# tests/test_apt_flush_lane.py's batched lane (batch "apt-lanes-flush"),
+# one composed doc instead of four separate ones. Formatting contract
+# (bold field name, tab-after-colon) and the write->read round trip are
+# reproven implicitly by that lane's golden diff_apt comparison.
 # ---------------------------------------------------------------------------
-
-def test_ep1_sheetwin_flush(settings, request):
-    """A sheetWin flush (sheet edited -> doc rewritten) preserves the field
-    line the doc scan just found for this globalId (SyncManager.js's toFlush
-    'sheetWins' block: customFields sourced from `cf`, the fresh doc scan,
-    not the sheet -- the sheet does not persist custom_fields yet). Explicit
-    '(Open)' status on seed avoids the missing-status branch (entry point 4)
-    winning this same first sync instead."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        scn._post_fixture(
-            "append_doc_soft_paragraph",
-            {"text": "AI-1: ep1 sheetwin base (Open)\nTarget: ep1 value"},
-        )
-        scn.sync()  # establishes the row; doc untouched (no flush needed yet)
-
-        row = _find_by_global_id(scn, f"{scn.doc_id}/AI-1")
-        assert row.status == "Open"
-
-        # Force a sheetWin on the NEXT sync: stamp Dirty via a sheet-side edit.
-        from scn.ai import ai
-        target = ai(action="ep1 sheetwin base", action_id="AI-1", status="Open")
-        scn.edit_sheet(target, status="In Progress")
-
-        scn.sync()  # Dirty -> sheetWin -> flush; doc rewritten from cf (fresh doc scan)
-
-        row2 = _find_by_global_id(scn, f"{scn.doc_id}/AI-1")
-        assert row2.status == "In Progress", (
-            f"sheetWin did not apply: expected status In Progress, got {row2.status!r}"
-        )
-
-        # --- field line present + formatted correctly in the doc content ---
-        hits = _paras_containing(scn, "ep1 sheetwin base")
-        assert len(hits) == 1, f"expected one paragraph, got {hits!r}"
-        assert hits[0] == "AI-1: ep1 sheetwin base (In Progress)\nTarget:\tep1 value", (
-            f"field line not formatted flush-left with tab-after-colon: {hits[0]!r}"
-        )
-
-        bold_hits = [
-            b for b in paragraph_bold_text(load_doc(download_docx(scn.doc_id)))
-            if "Target:" in b
-        ]
-        assert bold_hits, "field name 'Target:' was not written as a bold run"
-        assert bold_hits[0] == "Target:", (
-            f"bold run should cover exactly the field name + colon, got {bold_hits[0]!r}"
-        )
-
-        # --- AC #4: write path -> read path round trip ---
-        # debug_action_runs does a FRESH scan of the doc as it now stands
-        # (post-flush) -- this IS the "feed the rendered text back through
-        # the read-side parser" the AC asks for, using the product's own
-        # scanner rather than calling _parseFieldContinuationBlocksTracked
-        # in isolation (no offline/node harness convention exists in this
-        # repo for GAS-side pure functions -- confirmed: grep found none).
-        fields = _scan_custom_fields(scn, n=1)
-        assert fields.get("Target", {}).get("text") == "ep1 value", (
-            f"field did not round-trip as a recognized field on next scan: {fields!r}"
-        )
-    finally:
-        scn.close()
-
-
-# ---------------------------------------------------------------------------
-# Entry point 2 — batch syncAll new-assign flush (AI: -> AI-N: creation)
-# ---------------------------------------------------------------------------
-
-def test_ep2_new_assign_flush(settings, request):
-    """A bare 'AI:' token promoted to a canonical ACT-N on its first sync
-    (SyncManager.js's toFlush 'newly assigned' block) still carries its
-    field-line continuation through into the newly-chip-linked paragraph."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        scn._post_fixture(
-            "append_doc_soft_paragraph",
-            {"text": "AI: ep2 new-assign base\nTarget: ep2 value"},
-        )
-        scn.sync()  # bare token -> ACT-N assignment; flush attaches chip + fields
-
-        rows = scn.find_sheet_actions()
-        row = next((r for r in rows if r.action == "ep2 new-assign base"), None)
-        assert row is not None, f"new-assign row not found; rows={rows!r}"
-        n = int(row.global_id.rsplit("-", 1)[-1])
-
-        hits = _paras_containing(scn, "ep2 new-assign base")
-        assert len(hits) == 1
-        assert "Target:\tep2 value" in hits[0], (
-            f"field line missing/misformatted after new-assign flush: {hits[0]!r}"
-        )
-
-        fields = _scan_custom_fields(scn, n=n)
-        assert fields.get("Target", {}).get("text") == "ep2 value"
-    finally:
-        scn.close()
-
-
-# ---------------------------------------------------------------------------
-# Entry point 3 — batch syncAll duplicate-reconciliation flush
-# ---------------------------------------------------------------------------
-
-def test_ep3_duplicate_reconciliation_flush(settings, request):
-    """Two paragraphs carrying the SAME explicit token: the first (canonical)
-    keeps its field line; the second (duplicate copy, no field line of its
-    own) is reconciled to match canonical content, per SyncManager.js's
-    'hasDuplicateN' toFlush block (customFields sourced from
-    canonicalByGlobalId, the first/non-duplicate occurrence)."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        scn._post_fixture(
-            "append_doc_soft_paragraph",
-            {"text": "AI-3: ep3 dup base (Open)\nTarget: ep3 value"},
-        )
-        scn._post_fixture(
-            "append_doc_soft_paragraph",
-            {"text": "AI-3: ep3 dup base (Open)"},  # plain duplicate copy, no field line
-        )
-        scn.sync()  # canonical has no missing-status gap; duplicate reconciliation flushes it
-
-        hits = _paras_containing(scn, "ep3 dup base")
-        assert len(hits) == 2, f"expected canonical + duplicate paragraph, got {hits!r}"
-        for h in hits:
-            assert "Target:\tep3 value" in h, (
-                f"duplicate reconciliation did not propagate the field line: {h!r}"
-            )
-
-        fields = _scan_custom_fields(scn, n=3)
-        assert fields.get("Target", {}).get("text") == "ep3 value"
-    finally:
-        scn.close()
-
-
-# ---------------------------------------------------------------------------
-# Entry point 4 — batch syncAll missing-explicit-status materialization flush
-# ---------------------------------------------------------------------------
-
-def test_ep4_missing_status_flush(settings, request):
-    """An action with an explicit token but NO status token materializes
-    '(Open)' on its first sync (SyncManager.js's 'missing explicit status
-    tokens' toFlush block) -- the field line must survive that rewrite too."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        scn._post_fixture(
-            "append_doc_soft_paragraph",
-            {"text": "AI-4: ep4 missing-status base\nTarget: ep4 value"},  # no (Status) token
-        )
-        scn.sync()
-
-        row = _find_by_global_id(scn, f"{scn.doc_id}/AI-4")
-        assert row.status == "Open"
-
-        hits = _paras_containing(scn, "ep4 missing-status base")
-        assert len(hits) == 1
-        assert hits[0] == "AI-4: ep4 missing-status base (Open)\nTarget:\tep4 value", (
-            f"field line lost/misformatted on status materialization flush: {hits[0]!r}"
-        )
-
-        fields = _scan_custom_fields(scn, n=4)
-        assert fields.get("Target", {}).get("text") == "ep4 value"
-    finally:
-        scn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -337,46 +175,15 @@ def test_ep6_sidebar_status_flush(settings, request):
 
 # ---------------------------------------------------------------------------
 # Entry point 7 — _syncSheetRowToDoc (onEdit trigger, single-row sheet-to-doc)
-# KNOWN GAP: not fixed this pass (SyncManager.js's own comment: "this
-# onEdit-trigger flush has no customFields source ... customFields is
-# omitted here, so a field-line continuation still gets dropped on THIS
-# specific trigger"). This test documents the CURRENT (still-broken)
-# behavior as a known-gap regression marker, per this bead's AC #3 -- it is
-# NOT silently omitted, and it is expected to start FAILING (in a good way)
-# the day entry point 7 gains its own customFields source, at which point
-# this test should be rewritten to assert survival like entry points 1-6.
+#
+# Retired gts-crae/flush-lane-retire (staged plan docdata-litter-apt-
+# speed.md, stage `flush-lane-retire`) WITHOUT a new corpus — already
+# covered by tests/fixtures/flush-lane-onedit-trigger.apt.txt, run via
+# tests/test_apt_flush_lane.py's batched lane (batch "apt-lanes-flush").
+# That golden encodes the SAME known gap this test used to mark directly
+# (SyncManager.js's own comment: the onEdit-trigger flush has no
+# customFields source, so the field line is dropped, not preserved) — the
+# expected doc has no `Target:` line. The lane's golden will start
+# failing, in a good way, the day entry point 7 gains its own customFields
+# source, at which point the corpus (not this file) should be rewritten.
 # ---------------------------------------------------------------------------
-
-def test_ep7_onedit_flush_known_gap(settings, request):
-    """edit_cell_via_trigger drives the SAME entry point a user's spreadsheet
-    edit fires (onActionSheetEdit -> _syncSheetRowToDoc), distinct from the
-    batch syncAll paths above. Known gap: the field line is dropped from the
-    doc by this specific flush (no customFields source on this path)."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        scn._post_fixture(
-            "append_doc_soft_paragraph",
-            {"text": "AI-7: ep7 onedit base (Open)\nTarget: ep7 value"},
-        )
-        scn.sync()  # establishes the row; doc untouched
-
-        global_id = f"{scn.doc_id}/AI-7"
-        resp = scn._post_fixture(
-            "edit_cell_via_trigger",
-            {"globalId": global_id, "field": "status", "value": "Done"},
-        )
-        data = resp.get("data") or {}
-        assert data.get("applied"), f"edit_cell_via_trigger did not apply: {resp!r}"
-
-        row = _find_by_global_id(scn, global_id)
-        assert row.status == "Done", "onEdit trigger did not flush the status change at all"
-
-        hits = _paras_containing(scn, "ep7 onedit base")
-        assert len(hits) == 1
-        # KNOWN GAP: field line is dropped (not preserved) on this path.
-        assert "Target" not in hits[0], (
-            "entry point 7 now preserves the field line -- this known-gap "
-            f"marker is stale and should be rewritten to assert survival: {hits[0]!r}"
-        )
-    finally:
-        scn.close()

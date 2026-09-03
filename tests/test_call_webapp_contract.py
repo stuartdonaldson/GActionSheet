@@ -32,6 +32,10 @@ import pytest
 
 from scripts import call_webapp
 
+# gts-aqpk: fast/local tier -- this module makes no live GAS/Google round trip
+# (verified offline with sockets blocked). See docs/OPERATIONS.md "Test tiers".
+pytestmark = pytest.mark.no_live_session
+
 _REPO = pathlib.Path(__file__).resolve().parent.parent
 _NODE_WEBAPP = _REPO / "node_modules" / "gas-deploy" / "lib" / "webapp.js"
 _NODE_CLI = _REPO / "node_modules" / "gas-deploy" / "bin" / "call-webapp.js"

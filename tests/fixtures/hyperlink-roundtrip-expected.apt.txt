@@ -5,12 +5,12 @@
 
 Case 1/3 (gts-tz5x, ADR-0027 rules 10-15): a link mid action text survives a FLUSH, including encodable URL query characters. Authored statusless so the establishing sync must materialize (Open) and therefore rewrite the paragraph -- the flush is the path Appendix C says used to destroy the link, so a corpus that never flushes cannot show rules 10-15 holding.
 
-[**ACT-19: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-19){{chip:jane@example.com}} Please see the [Q3 deck](https://example.com/docs?x=1&y=2) for context (Open)
+[**ACT-419: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-419){{chip:jane@example.com}} Please see the [Q3 deck](https://example.com/docs?x=1&y=2) for context (Open)
 
 Case 2 (gts-tz5x, ADR-0027 rule 12): a link-only action (the entire action text is the link) survives a flush without spuriously gaining bold/italic from the hasFormatting gate. Also authored statusless, for the same reason as case 1.
 
-[**ACT-20: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-20){{chip:jane@example.com}} [Q3 deck](https://example.com/docs?x=1&y=2) (Open)
+[**ACT-420: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-420){{chip:jane@example.com}} [Q3 deck](https://example.com/docs?x=1&y=2) (Open)
 
 Case 4 (gts-tz5x): a plain (non-link) action's token gets a chip-badge link on sync -- spot-checked against a record carrying no other link, so the badge cannot be confused with a surviving author link.
 
-[**ACT-3: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-3){{chip:jane@example.com}} finish the report (Open)
+[**ACT-403: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-403){{chip:jane@example.com}} finish the report (Open)

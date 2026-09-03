@@ -54,14 +54,15 @@ audit) and its *Deliverable* line corrected below.
 | 4 | `apt-lane-guards` | `gts-omoy` | ✓ | [INF] Deployed-build guard for live lanes |
 | 5 | `apt-corpora-rebuild` | `gts-ru4c` | ✓ | [TST] Re-author every scenario's expected corpus as the post-sync state |
 | 5 | `apt-corpora-rebuild` | `gts-5st5` | ✓ | [TST] Lint: input == expected is an error for a non-degenerate mutation |
-| 6 | `apt-presentation` | `gts-dxgo` | ○ | [TST] Doc-side presentation assertions: person chip, ACT-N link run, status icon |
-| 6 | `apt-presentation` | `gts-gkcy` | ○ | [TST] Sparse expected-parse annotation on hard records |
+| 6 | `apt-presentation` | `gts-dxgo` | ✓ | [TST] Doc-side presentation assertions: person chip, ACT-N link run, status icon |
+| 6 | `apt-presentation` | `gts-gkcy` | ✓ | [TST] Sparse expected-parse annotation on hard records |
 | 7 | `doc-truth` | `gts-blia` | ✓ | [INF] CONTEXT.md: correct the user-facing surface model |
 | 7 | `doc-truth` | `gts-c9dd` | ○ | [INF] Resolve dangling decision-number citations *(blocked on `gts-ru4c`)* |
 | 8 | `plan-retention` | `gts-flu4` | ○ | [INF] Staged-plan retirement must preserve the plan |
 | — | *(filed at stage 2)* | `gts-c7fp` | ○ | [FIX] doPost's terminal else-branch writes junk rows for any unrecognised secret-gated action |
 | — | *(filed at stage 2)* | `gts-pl2k` | ○ | [INF] doPost's unauthorized response is plain text, so every harness caller reports it as deployment lag |
 | — | *(filed at stage 1)* | `gts-1ej4` | ○ | [TST] Converge scn/surfaces.py DocReader onto the doc_inspect grammar oracle |
+| — | *(filed at stage 6)* | `gts-3koi` | ○ | [FIX] decodeAptToRequests never inserts the flush status icon, contradicting action-portable-text.md |
 | — | *(filed at stage 7)* | `gts-wxz1` | ○ | [INF] security-architecture.md predates ADR-0021, doesn't document the verified-portal identity boundary |
 
 **Verify:** `bdls --stages` · `bdls --check` · `bdls --goals --stage <name>`
@@ -148,8 +149,11 @@ annotation on the records that are hard to reason about.
 ### 7 — doc-truth
 **Deliverable:** a CONTEXT.md whose stated surface model matches the system, and no citations
 pointing at a deleted document.
-*(Corrected at close: the CONTEXT.md half delivered — `gts-blia`. The citation half does not —
-`gts-c9dd` is open and blocked on stage `apt-corpora-rebuild`'s `gts-ru4c`. See the handoff.)*
+*(Corrected at close: both halves delivered. `gts-blia` corrected CONTEXT.md. `gts-c9dd` — initially
+blocked on stage `apt-corpora-rebuild`'s `gts-ru4c`, unblocked when that stage closed — reconstructed
+every dangling "decision N" citation into a new durable section,
+`docs/interfaces/action-portable-text.md` §Tooling design decisions, recovered verbatim from session
+transcripts of the plan the citations pointed at. See both handoffs below.)*
 **Why paired:** both are corrections to documents that are currently wrong, not new work.
 **Model:** opus — the surface model touches the security boundary.
 **Work-log:** per-stage.
@@ -839,11 +843,101 @@ exit=0
 - Wiring `apt.py lint` into `pull`/`bless` as a pre-flight. Those verbs operate on a single corpus, not a scenario triple; a directory-wide lint would surprise their caller, and AC1 is already satisfied.
 - Full `pytest -x`. Both beads carry `regression=pending`.
 
+### 6 — apt-presentation
+
+**Closed 2026-08-29.** Beads `gts-dxgo` ✓ and `gts-gkcy` ✓, both `regression=pending`.
+
+**Done**
+
+`gts-dxgo`: `tests/test_doc_presentation.py` (5 tests, all green) asserts, per established
+action, the three presentation elements rule 8's text grammar cannot express: the assignee's
+PERSON chip, the `ACT-N:` header's own chip-badge link, and the flush-rendered status icon.
+`tests/helpers/doc_inspect.py` gained `ParsedAction.has_status_icon` (presence-only detection
+of a `w:drawing`/`w:pict` element in the paragraph) and `tests/helpers/docx_build.py` gained an
+`image()` segment so the "proven to fail" cases (AC3) can be built offline. All three checks
+read independently via the stage-1 parser, never GAS scan output. Real output:
+
+```
+tests/test_doc_presentation.py::test_every_established_action_carries_its_presentation_elements PASSED
+tests/test_doc_presentation.py::test_act9_is_the_documented_no_chip_exception PASSED
+tests/test_doc_presentation.py::test_proven_to_fail_on_an_unlinked_header PASSED
+tests/test_doc_presentation.py::test_proven_to_fail_on_a_missing_person_chip PASSED
+tests/test_doc_presentation.py::test_proven_to_fail_on_a_missing_status_icon PASSED
+5 passed in 82.82s
+```
+
+The three "proven to fail" tests reuse the exact same `missing_presentation_elements()` helper
+the main assertion calls, each reproducing one specific missing-element shape via `docx_build`
+(the unlinked-header case is the literal 2026-08-29 shape) — so AC3 demonstrates the real check's
+red path, not a parallel one.
+
+`gts-gkcy`: `tests/helpers/expect_parse.py` (`load_expect_parse`/`diff_expect_parse`) plus a
+sidecar `tests/fixtures/hard-records-expect-parse.json` naming the expected parse for four
+genuinely hard cases (continuation-line field block, legacy `AI-N` dual-prefix, list-item
+container, table-cell container). `tests/test_expect_parse_annotation.py` (5 tests, all green,
+`no_live_session`, no network) proves all four ACs against a dedicated synthetic `docx_build`
+fixture doc: sparse (only named fields compared), a handful only (≤6 entries), a violated entry
+shows expected-vs-actual text, and an absent key or missing sidecar file is never an error.
+
+**Found**
+
+- **The canonical reference Doc has zero status icons on all 21 established actions.**
+  `has_status_icon` reports `False` everywhere when read from the shared `referenceDocId`. Live
+  differential proof, not a detector bug: a disposable copy of the same corpus
+  (`materialize_reference_corpus`), force-flushed once via stage 2's `sync_document` route, gets
+  `has_status_icon=True` on all 21 — the identical parser, a different doc. Root cause:
+  `src/PortableText.js`'s `decodeAptToRequests` contains no `insertInlineImage` call and no
+  reference to `getStatusIconUrl` at all (grep confirms zero hits), even though
+  `docs/interfaces/action-portable-text.md`'s own "Status icon" section claims "Decode
+  reconstructs it from the status token the same way `_buildFlushRequests` does." The canonical
+  Doc was repaired via `apt.py push --force` (decode-only, stage 3) and never re-flushed since —
+  which is exactly why it shows the gap and the disposable copy doesn't. **Bead `gts-3koi`**
+  (not fixed here: an `[IMP]`/spec-correction, out of this `[TST]` stage's scope). This is why
+  `gts-dxgo`'s live fixture asserts against a force-flushed disposable copy rather than the
+  shared `referenceDocId` directly — asserting against the canonical Doc as-is would either
+  freeze the gap as accepted (blessing exactly the failure mode this whole plan exists to stop)
+  or block this stage on `gts-3koi`, which is out of scope to fix here.
+- `ParsedAction.assignee_email` is set for BOTH a chip and a plain-text/@-sigil assignee (rule
+  1) — a "missing PERSON chip" check must key off `assignee_source == 'chip'`, not
+  `assignee_email` truthiness, or it cannot distinguish the two forms. **Fixed now** (caught by
+  this stage's own offline proof test failing against itself before the fix).
+- `custom_fields` as ADR-0027 rule 15's `{text, runs}` (flagged by stage 1 and stage 3 as this
+  stage's scope) is **not delivered**. `gts-dxgo`'s frozen ACs only name chip/link-run/status-icon
+  presence, not field run extraction, and implementing it precisely (per-piece bold/italic/link
+  spans sliced across the header/continuation offset arithmetic) is a materially larger parser
+  rewrite than this bead's scope. **Deliberately dropped** — no new bead filed, since nothing in
+  this plan's remaining stages currently needs it; a future consumer should file one against
+  `tests/helpers/doc_inspect.py` rather than assume it's tracked.
+- The "hard records" AC2 names (continuation lines, table-cell containers, dual-prefix) are not
+  all present in the canonical `action-reference.apt.txt` corpus itself — no `<LI>`/`<TABLE>`
+  records, and its lone `AI-N` (`AI-10`) isn't a hard case for anyone. **Fixed now** by scoping
+  `gts-gkcy`'s demonstration to its own dedicated synthetic fixture doc rather than forcing an
+  artificial live tie-in to the reference corpus.
+
+**Next stages must know**
+
+- **The canonical `referenceDocId` still has no status icons.** Read-only doc-side work is
+  unaffected; anything that visually inspects the Doc (a human, a screenshot) will not see the
+  icon until `gts-3koi` lands and the Doc is re-flushed once more.
+- `has_status_icon` and the `image()` docx_build segment are reusable — any future check needing
+  "was this paragraph actually flushed, not just decoded" can use the same signal.
+- `tests/helpers/expect_parse.py` is generic over any `ParsedAction`-shaped object and any sidecar
+  path; a later stage wanting the same troubleshooting aid on a different corpus can point it at
+  a new JSON file without touching the helper.
+
+**Deliberately not done**
+
+- Fixing `gts-3koi` (decode-path status icon gap) — filed, out of this stage's scope.
+- `custom_fields` rule-15 `{text, runs}` extraction — no bead filed; see Found above.
+- Wiring the expect-parse sidecar onto the live reference-doc lanes — its hard cases aren't
+  present there; see Found above.
+- Full `pytest -x`. Both beads carry `regression=pending`.
+
 ### 7 — doc-truth
 
-**Partially closed 2026-08-29.** Bead `gts-blia` ✓ (`regression=pending`); `gts-c9dd` remains
-**open and blocked** — it depends on `gts-ru4c` (stage `apt-corpora-rebuild`), still open. The
-stage does not close.
+**Closed 2026-08-29.** Beads `gts-blia` ✓ and `gts-c9dd` ✓, both `regression=pending` (the latter
+not applicable — comments/docs only, no code behavior changed). This continues the partial-close
+block below — read that first — then the `gts-c9dd` close that follows.
 
 **Done**
 
@@ -908,3 +1002,68 @@ Full note (the same text) is on `gts-blia`.
   `plan-retention`.
 - Full `pytest -x` — not applicable; this stage's change is documentation-only.
   `gts-blia` carries `regression=pending`.
+
+**`gts-c9dd` close (later session, 2026-08-29):**
+
+**Done**
+
+`scripts/apt.py`, `scripts/apt_lib.py` and `docs/interfaces/action-portable-text.md` cited
+`decision 1`..`decision 9` of `knowledge-base/staging/apt-testing.md` — the staged plan that
+designed this tooling (stages `apt-differ`/`apt-cli`/`apt-scenarios`/`apt-lanes`), deleted per
+Pattern D once its last stage closed, and never committed to git (so the deletion left no
+recoverable copy there). All 9 citations were resolvable: the plan's own text survives, verbatim,
+in this project's session transcripts — `dc52f713-210e-4636-ad14-13e9ef259369.jsonl` (the
+`cat > knowledge-base/staging/apt-testing.md <<'EOF' ... EOF` heredoc that originally authored
+decisions 1–8) and `d90f05eb-f8bb-421e-a61e-f5c235f5b439.jsonl` (an `Edit` tool call adding
+decision 9 — "the authoring convention" — before stage `apt-lanes` closed). Grepping every
+`*.jsonl` under `~/.claude/projects/-home-stuar-proj-GActionSheet/` for `decision N` found both.
+
+Reconstructed all 9, unabridged, into a new `## Tooling design decisions` section in
+`docs/interfaces/action-portable-text.md` (the durable home the deleted plan's own header already
+promised: "the durable content has graduated to `docs/interfaces/action-portable-text.md`..."),
+each decision's numbering and substance matching the recovered original text. Every citation site
+that named a document (the two inside `action-portable-text.md` itself, and one in
+`docs/atdd/ID-map.md` that said "decision 4 in that now-deleted doc") now points at the new section
+by name. The two module docstrings (`scripts/apt.py`, `scripts/apt_lib.py`) — which cite bare
+`decision N` more than twenty times each, inline in code comments — each gained one pointer at the
+top of the file to the new section instead of rewriting every individual site (tried inline
+rewriting first; twenty-plus repetitions of the full section name per file made the comments
+unreadable, reverted). Both files' own stale self-reference to the deleted
+`knowledge-base/staging/apt-testing.md` filename (in their module docstrings) was corrected at the
+same time, to name the stage instead of a path that no longer resolves.
+
+AC2 verification: `grep -rn "decision [0-9]" scripts/ docs/` — every remaining hit is either inside
+the new section itself, or in a file whose top-of-docstring pointer (or inline text) now resolves
+it. Two prose mentions of the `apt-testing.md` filename remain, in `docs/atdd/ID-map.md` and
+`docs/lessons-learned/2026-08-29-round-trip-oracle-passes-without-the-system-doing-anything.md` —
+both are historical statements that the file was deleted, not citations depending on its content,
+so left as-is.
+
+**Found**
+
+- Nothing new about the tooling itself — this bead was a documentation-recovery exercise, not a
+  code investigation.
+- The staged-plan retirement failure mode `plan-retention` (stage 8, `gts-flu4`) exists to prevent
+  is not hypothetical: this bead is a direct instance of it, and its own fix (durable content lives
+  in `docs/interfaces/action-portable-text.md` now, not the tracker's memory or a deleted file) is
+  exactly the pattern stage 8 is meant to make automatic. No new bead filed — stage 8 already owns
+  the general fix; this was the one-off cleanup.
+
+**Next stages must know**
+
+- `docs/interfaces/action-portable-text.md` §Tooling design decisions is now the single citation
+  target for every `decision N` reference in `scripts/apt.py` and `scripts/apt_lib.py`. A future
+  edit to the tooling that needs a new numbered decision should add it there, not invent a new
+  untracked staging-doc citation — that is the exact mechanism that produced this bead.
+- The recovery method (grep every session transcript `.jsonl` for the deleted file's distinctive
+  content, then read the `Edit`/heredoc `tool_use` payloads around the hit) worked because this
+  project's session transcripts are retained locally and were never pruned. It is not a general
+  guarantee — stage `plan-retention` (`gts-flu4`) is what should make this kind of recovery
+  unnecessary going forward.
+
+**Deliberately not done**
+
+- Nothing from this bead's AC. All three ACs were satisfied — no decision needed stripping.
+- Full `pytest -x`. Not applicable: no code behavior changed, comments and docs only.
+  `gts-c9dd` carries `regression=pending` per the close-reason note (comment-only change,
+  targeted verification was the grep above, not a test run).

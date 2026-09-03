@@ -30,6 +30,15 @@ Frozen contract (gts-tz5x DESIGN):
 Uses the seed_link_action / debug_action_runs TestFixtures.js entry
 points — same class of test-support fixture as test_inline_formatting.py's
 seed_formatted_action / debug_action_runs.
+
+Cases 1 and 2 retired gts-dxz9/act-retire (staged plan
+docdata-litter-apt-speed.md, stage `apt-format-migration`) — see the
+retirement note inline below. Case 3/5's idempotency assertion is now also
+covered generically by the batched runner — gts-5ktl (stage
+`lane-idempotency`) made `run_lane` take a second, no-op-sync capture and
+diff it against the first, per scenario — so `hyperlink-roundtrip.apt.txt`
+asserts idempotency as well as the round trip. This file's own live
+assertion stays as the link-specific instance.
 """
 import pytest
 
@@ -41,88 +50,20 @@ def _debug_runs(scn, n: int = 1) -> dict:
     return resp.get("data") or {}
 
 
-def _expected_runs_for_link(text: str, link_word: str, url: str) -> list[dict]:
-    """Computes the exact expected run list for `text` with `url` applied
-    to the single occurrence of `link_word`, mirroring _extractInlineRuns'
-    coalescing (adjacent same-styled characters merge into one run; a
-    plain prefix/suffix is only present if non-empty) — this is the
-    specifiable oracle, derived from the seed's own reported text/word,
-    not a hand-counted offset guess."""
-    start = text.index(link_word)
-    end = start + len(link_word)
-    runs = []
-    if start > 0:
-        runs.append({"start": 0, "end": start, "bold": False, "italic": False, "link": None})
-    runs.append({"start": start, "end": end, "bold": False, "italic": False, "link": url})
-    if end < len(text):
-        runs.append({"start": end, "end": len(text), "bold": False, "italic": False, "link": url if False else None})
-    return runs
-
-
-def test_link_survives_scan_store_flush_rescan(settings, request):
-    """[gts-tz5x case 1] A hyperlink over one phrase in the action text
-    survives: doc scan -> Actions sheet (RichTextValue) -> flush back to
-    the doc (materializing the missing status token) -> a fresh rescan.
-    Both views (post-flush doc rescan and the sheet cell) must show the
-    identical URL over the identical range — not dropped, not shifted."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        seed = scn._post_fixture("seed_link_action", {"n": 1})
-        seed_data = seed.get("data") or {}
-        assert seed_data.get("ok"), f"seed_link_action failed: {seed}"
-        text = seed_data["text"]
-        link_word = seed_data["linkWord"]
-        url = seed_data["url"]
-        expected = _expected_runs_for_link(text, link_word, url)
-
-        scn.sync()
-
-        result = _debug_runs(scn, 1)
-        assert result.get("ok"), f"debug_action_runs failed: {result}"
-        assert result.get("scanActionText") == text
-        assert result.get("sheetActionText") == text
-        assert result.get("scanRuns") == expected, (
-            "post-flush doc rescan runs did not match the seeded link span "
-            "— the hyperlink was dropped, shifted, or merged incorrectly "
-            "by the flush's delete+reinsert"
-        )
-        assert result.get("sheetRuns") == expected, (
-            "Actions sheet RichTextValue runs did not match the seeded "
-            "link span — the STORE step did not preserve the scanned link"
-        )
-    finally:
-        scn.close()
-
-
-def test_link_only_action_survives_hasformatting_gate(settings, request):
-    """[gts-tz5x case 2 / ADR-0027 rule 12] An action whose ONLY formatting
-    is a hyperlink (no bold, no italic anywhere) must not be treated as
-    unformatted: _extractInlineRuns' hasFormatting test has to fire on
-    `link` alone, or the run list collapses to [] and the link is lost —
-    the exact bug rules 10-15 exist to fix."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        seed = scn._post_fixture("seed_link_action", {"n": 1})
-        seed_data = seed.get("data") or {}
-        assert seed_data.get("ok"), f"seed_link_action failed: {seed}"
-
-        scn.sync()
-
-        result = _debug_runs(scn, 1)
-        assert result.get("scanRuns"), (
-            "a link-only action reported empty scanRuns — the "
-            "hasFormatting gate did not fire on link alone (rule 12)"
-        )
-        assert any(r.get("link") for r in result["scanRuns"]), (
-            "scanRuns is non-empty but no run actually carries the link URL"
-        )
-        assert not any(r.get("bold") or r.get("italic") for r in result["scanRuns"]), (
-            "precondition violated: this fixture must not also apply "
-            "bold/italic, or it no longer isolates the hasFormatting-on-"
-            "link-alone case"
-        )
-    finally:
-        scn.close()
+# ---------------------------------------------------------------------------
+# test_link_survives_scan_store_flush_rescan (case 1: link mid action text
+# survives scan->sheet->flush->rescan) and
+# test_link_only_action_survives_hasformatting_gate (case 2: a link-only
+# action must not be treated as unformatted, ADR-0027 rule 12) retired
+# gts-dxz9/act-retire (staged plan docdata-litter-apt-speed.md, stage
+# `apt-format-migration`) WITHOUT a new corpus — both were already covered
+# by tests/fixtures/hyperlink-roundtrip.apt.txt Case 1 (link mid action text)
+# and Case 2 (link-only action) respectively, checked in a stage earlier
+# (`apt-corpus-batching`, gts-ph35) for gts-tz5x's own twin-ticket coverage,
+# before this stage existed. Run via tests/test_apt_corpus_batch.py's batched
+# lane (batch "apt-corpus-batch"), not this stage's own
+# tests/test_apt_format_lane.py.
+# ---------------------------------------------------------------------------
 
 
 def test_encodable_url_round_trips_and_is_idempotent(settings, request):
@@ -151,6 +92,18 @@ def test_encodable_url_round_trips_and_is_idempotent(settings, request):
         first_link_runs = [r for r in first_runs if r.get("link")]
         assert first_link_runs, (
             f"no run carries a link after the first sync: {first_runs}"
+        )
+        # gts-mtw0: previously unasserted at this point in the test -- the
+        # mismatch (seed's 'text' carried the 'AI-N: ' token prefix,
+        # scanActionText never does, since the scanner strips it) was latent
+        # until the SECOND sync's equivalent assertion below. Assert it here
+        # too, against the FIRST sync, so the fixture-shape contract is
+        # checked as soon as it's available rather than only on the no-op
+        # idempotency pass.
+        assert first.get("scanActionText") == text, (
+            f"seed_link_action's 'text' ({text!r}) should already match the "
+            f"scanner's prefix-free actionText ({first.get('scanActionText')!r}) "
+            f"after the very first sync"
         )
         stable_url = first_link_runs[0]["link"]
 

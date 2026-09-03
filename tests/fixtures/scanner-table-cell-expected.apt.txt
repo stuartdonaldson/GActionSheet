@@ -1,0 +1,22 @@
+<!-- kind: golden -->
+<!-- name: scanner-table-cell-expected -->
+<!-- serves: gts-dq6t -->
+<!-- generated: 2026-08-30T00:00:00.000Z -->
+
+Case 1 (dq6t AC-4 suffix, act-retire): a bare 'AI:' trigger in a table cell parses; actionText='task suffix'. Authored as a bare trigger so the establishing sync must assign it a token and materialize status, exercising \_buildFlushRequests' table-cell occurrence path.
+
+<TABLE rows=1 cols=2>
+
+<CELL 0,0>
+
+[**ACT-644: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-644)task suffix (Open)
+
+<CELL 0,1>
+
+Case 2 (dq6t AC-4 prefix, act-retire, negative): a token not anchored at the start of its paragraph ('prefix AI: task') is never recognized as a floating action -- not body-level, not in a table cell.
+
+prefix AI: task
+
+</TABLE>
+
+<EMPTY>

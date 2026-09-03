@@ -118,6 +118,23 @@ Set via Apps Script editor → Project Settings → Script Properties, or progra
 | `SYNC_IN_PROGRESS` | Internal | Sync / Sweep | Guard flag during programmatic sheet writes — do not set manually |
 | `GAS_LOGGER_FOLDER_ID` | Test only | Manual | Drive folder for GasLogger output during test cycles |
 
+### Config Sheet Keys (rendering)
+
+The ActionSheet's `Config` tab is a `Key`/`Value` sheet read by Sync. The rendering keys below are
+optional — every one of them has a working default and the sheet itself may be absent:
+
+| Key | Value | Default | Effect |
+|-----|-------|---------|--------|
+| `ai_token` | JSON style object (`fontFamily`, `fontSize`, `color`, `bold`, `italic`, `underline`) | built-in token style | Uniform character style applied to the `ACT-N:` token on flush |
+| `action_text` | JSON style object (same shape) | none (author formatting untouched) | Uniform font family/size/colour/underline for action text (ADR-0022) |
+| `SR Indent` | Non-negative integer | `0` | Leading spaces applied to each action-text continuation line on flush (ADR-0027 rule 8) |
+| `Field SR Indent` | Non-negative integer | `0` | Leading spaces applied to each custom-field continuation line on flush; independent of `SR Indent` |
+
+A blank, negative or non-numeric indent value falls back to `0` rather than failing the flush. Both
+indent keys are presentational: the parser strips leading whitespace on read, so changing them never
+alters stored action text or field values. Values are cached per GAS execution — an edit takes
+effect on the next sync run, not mid-run.
+
 ### Initialize Triggers
 After the first push, run `initializeTriggers` once to install the time-based sweep trigger and the `onEdit` timestamp stamper:
 
@@ -348,14 +365,161 @@ Exit codes mirror `apt_lib.AptDiffResult.exit_code()`: 0 clean, 1 presentational
 into a fresh `ScenarioSession.new_doc()`) — `push`/`pull`/`bless` against one without `--doc` or a
 golden `doc:` header errors naming that.
 
+### Test tiers
+
+Every collected test belongs to exactly one tier, decided by one **opt-in** marker and its
+**auto-derived** complement (`gts-aqpk`):
+
+| Tier | Selector | Marker source | Size / cost |
+|---|---|---|---|
+| **fast** | `pnpm run test:fast` (`-m "no_live_session and not slow"`) | opt-in | 626 tests, ~25 s, zero network |
+| **local** | `pnpm run test:local` (`-m no_live_session`, `-n 4 --dist worksteal`) | opt-in | 716 tests, ~36 s parallel (~65 s serial), zero network |
+| **live** | `pnpm run test:live` (`-m live`) | auto-derived | 421 tests, hours — real GAS/Drive round trips. **Serial by decision — see Parallelism below** |
+| **everything** | `pnpm run test:full` | — | all 1137 + the Playwright specs (merge-gate) |
+
+**`no_live_session` is the only marker anyone applies by hand**, once per module as
+`pytestmark = pytest.mark.no_live_session`, and only for a module proven to make no live
+GAS/Google round trip. It does two jobs at once: it selects the tier, *and* it is what
+`tests/conftest.py::_session_is_no_live_session` reads to skip the four session-scoped
+autouse pre-flights (`_check_deployed_build`, `_check_auth_session_alive`,
+`_reset_test_state`, `_purge_stale_test_docs`). Those pre-flights skip only when **every**
+collected item is marked — which `-m no_live_session` guarantees by deselecting everything
+else, and which a mixed run deliberately does not. So the fast tier needs no conftest of its
+own: the existing gate already does the work a separate conftest would have done.
+
+**`live` is never written in a test file.** `tests/conftest.py::pytest_collection_modifyitems`
+stamps it on every collected item that does not carry `no_live_session`. Two consequences worth
+knowing: classification is total by construction (fast+local and live partition the suite
+exactly — 716 + 421 = 1137), and **a new test file with no marker at all lands in `live`**,
+which is the safe default: it pays the pre-flight and round-trip cost it may or may not need,
+rather than silently joining a tier that skips the pre-flights it depends on. Nothing needs
+updating when a test file is added.
+
+**`slow` is a cost attribute, not a tier.** `tests/test_document_export_harness.py` is
+genuinely network-free but takes ~52 s on its own (it spawns a fresh `python scripts/...`
+subprocess per test), which is most of the local tier's wall time. It carries
+`[pytest.mark.no_live_session, pytest.mark.slow]`; `test:fast` excludes it to hold a sub-30 s
+budget, `test:local` includes it.
+
+**The fast and local tiers need no `local.settings.json` and no captured Google session.**
+Move the file aside and `pnpm run test:fast` still passes (verified: 626 passed, ~28 s). That
+holds because the two live pre-flight fixtures load settings *inside* their bodies rather than
+requesting the `settings` fixture as a parameter — pytest resolves a fixture's arguments before
+running its body, so taking `settings` there made the file's existence a hard precondition of
+every test in the suite, `no_live_session` or not. Keep it that way: any new session-scoped
+autouse fixture must do its `_session_is_no_live_session(request.session)` early-return before
+anything live is resolved, not after.
+
+**To move a module into the fast tier**, prove it network-free rather than asserting it: run it
+with sockets blocked (`socket.socket.connect` patched to raise) via a `-p` plugin and confirm it
+passes with no test skipped for a network reason. Passing while *skipping* is not proof —
+`tests/test_apt_corpus_check.py` passes offline today only because every current scenario is
+owned by a batched runner and skips; it drives a real `ScenarioSession` and stays in `live`.
+
+### Parallelism (`gts-xvgl`)
+
+**Only the local tier runs in parallel, and only it ever will without refactoring.** The split is
+not a default, it is a measured decision; the numbers and the reasoning are here so no future
+session re-derives them.
+
+| Selector | serial | `-n 4 --dist worksteal` | verdict |
+|---|---|---|---|
+| local (`-m no_live_session`, 716) | 64.8 s (72 s wall) | **36.4 s (44 s wall)** | **parallel — 1.8x** |
+| `tests/test_document_export_harness.py` alone (90) | 47.7 s (55 s wall) | **23.8 s @ `-n 6`** | the whole of the win |
+| fast (`-m "no_live_session and not slow"`, 626) | 23.7 s | 23.2 s | **serial — no gain** |
+| live (`-m live`, 421) | — | — | **serial — unsafe, see below** |
+
+Three things the sweep (`-n` 2/3/4/6/8/12, both `--dist load` and `--dist worksteal`) settled:
+
+* **`-n 4` is the knee, not `-n auto`.** On a 12-core box `-n 12` is *slower than `-n 4`*
+  (47–53 s vs 36 s): each worker independently imports and collects the full 1137-test suite, so
+  past ~4 workers the fixed per-worker startup grows faster than the shared work shrinks. Do not
+  "improve" this to `-n auto`.
+* **`--dist worksteal`, not the default `--dist load`.** The local tier's cost is nine tests of
+  3–8 s (each spawns a `python scripts/...` subprocess) inside a long tail of sub-10 ms tests.
+  `load` pre-assigns in chunks and strands a heavy test behind a full worker; `worksteal`
+  rebalances. On the export harness alone: 30.8 s (`load`) vs 23.8 s (`worksteal`).
+* **The fast tier stays serial.** 23.2 s vs 23.7 s is a wash — its cost is per-worker startup, not
+  test execution — and running it serially keeps the `[n/total]` duration instrumentation at full
+  fidelity in the tier developers actually run on every edit.
+
+**No cross-test contamination.** Eight parallel runs (n = 2, 3, 4, 6, 8, 12 across both dist modes)
+were diffed against the serial baseline by JUnit XML nodeid → outcome: 716 nodeids in every run,
+zero missing, zero extra, zero outcome differences. The only two failures are the pre-existing
+`test_document_export_harness` `schema_version` 3.1-vs-3.0 pair (tracked by `gts-e34d`),
+identical in serial and in all eight parallel runs.
+
+**Duration instrumentation is worker-gated, not disabled.** Under `-n`, *both* the worker and the
+controller run `pytest_runtest_logstart`/`logreport` for the same test, so ungated the
+instrumentation double-counts (measured: 132 JSONL records for 66 tests, every nodeid twice) and
+N+1 processes read-modify-write the single `tests/.pytest_duration_baseline.json` through one
+fixed `.tmp` name — last writer wins, other workers' samples silently discarded.
+`tests/conftest.py::_duration_enabled` gates the hooks off in **workers only** (`workerinput`
+exists only there). The controller is one process that sees every test exactly once, so the
+counter, the JSONL trend log and the baseline update all keep working under `-n`; the only loss is
+that `[n/total]` counts completions rather than starts.
+
+**Adding a local-tier test: the one rule.** Write durable state under `tmp_path`, never under a
+shared repo directory. One existing test deliberately breaks this —
+`test_apt_fixtures_lint.py::test_a_capture_kind_file_fails_the_same_assertion` creates and deletes
+`tests/fixtures/not-a-golden.apt-lint-backstop.apt.txt` in the real fixtures dir, because the check
+it backstops calls `path.relative_to(REPO_ROOT)`. That is safe today only because every other
+consumer of that glob (`test_apt_scenario_format.py`) parametrizes at **collection** time, and
+xdist completes and cross-checks collection in all workers before any test executes. A new
+*runtime* glob of `tests/fixtures/*.apt.txt` that asserts per-file properties would turn this into
+a real flake. Prefer `tmp_path`.
+
+#### Why the live tier is serial — decision, not an omission
+
+`gts-xvgl` design questions Q1–Q4, answered against the live tier. Parallelising it is **not**
+blocked on a `-n` flag; it is blocked on four shared identities that no worker count can
+disambiguate. Revisit only if someone first removes these.
+
+1. **The `_TEST_*` toggles are global to the GAS deployment, not to a doc.**
+   `tests/conftest.py::_reset_test_state` clears them once per *pytest session*. Under `-n` each
+   worker is its own session, so worker B's start-up reset would clear a toggle worker A set
+   mid-test. `src/TestFixtures.js::reset_test_state` documents the same scoping. This alone is
+   disqualifying.
+2. **One session-scoped clone, one shared master.** `test_doc_id` clones the master template once
+   per session and, at teardown, calls `end_test_session` to **restore the master**. N workers = N
+   concurrent restores of the same Google Doc, interleaved with other workers' still-running tests.
+3. **Fixed team identities are shared across files, so file-affinity does not help.**
+   `TestTeamScopeA` / `TestTeamA` / `TestTeamScopeAChild` appear in 19 test files
+   (`test_team_scope`, `test_import`, `test_team_folder_reconciliation`, `test_team_write_*`,
+   `test_admin_doc_scan`, …), several of which mutate that team's folder and membership, backed by
+   `DISCOVERY_*` / `TEAMSCOPE_FOLDER_*` script-property caches deliberately persisted *across*
+   sessions. `--dist loadfile` pins a file to a worker but the identity is shared between files, so
+   it buys nothing. Likewise the single shared TEST spreadsheet (`testSheetId`) — one Actions and
+   one DocData sheet per deployment — is the durable state most live tests assert on, and
+   `_purge_stale_test_docs` runs a global archive sweep over it at session start.
+4. **The GAS side would serialise it anyway, at a worse price.** The hot write paths take
+   `LockService.getScriptLock()` — a *script*-global lock (`src/SyncManager.js`,
+   `src/ArchiveManager.js`, `src/WebApp.js`, `src/EditorAddonCard.js`), several with
+   `waitLock(5000)`. Concurrent workers hitting one TEST deployment do not execute in parallel;
+   they queue, and the ones that exceed the wait fail. Parallelism there converts wall-clock into
+   lock-timeout flakes. The safe `-n` for the live tier (Q4) is therefore **1**.
+
+The live tier's wall-clock problem is real, but the lever is fewer/cheaper live round trips and
+better batching — not workers. Do not add `-n` to `test:live` or `test:full`.
+
 ### Running the Tests
 
 ```bash
-# Always use -x (fail-fast): stop after the first test that fails.
-/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/ -x -v
+# Fast tier — no GAS, no network, no browser. The first thing to run after any edit.
+pnpm run test:fast
 
-# Parser unit tests only (fast, no GAS/network):
-/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_floating_action_parser.py -x -v
+# Local tier — fast tier plus the slow-but-offline document-export harness.
+# Runs on 4 xdist workers (`-n 4 --dist worksteal`); see "Parallelism" above for why 4 and
+# not `auto`. Drop the -n to get per-test [n/total] duration lines back at full fidelity:
+#   /mnt/c/dev/venvs/uv1/bin/python3 -m pytest -m no_live_session -q
+pnpm run test:local
+
+# Live tier — real GAS round trips; requires `pnpm run deploy:test` first.
+pnpm run test:live
+
+# Always use -x (fail-fast) on a scoped or known-green run: stop after the first failure.
+# (For triaging a fresh full sweep, drop -x and let it run to completion — see CLAUDE.md.)
+/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/ -x -v
 
 # §16.10 canonical ATDD journey — Acts 1–3 (requires live GAS — pnpm run deploy:test first):
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey_acts_1_3.py -x -v

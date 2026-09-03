@@ -967,10 +967,11 @@ function _applyActionFragment(docId, token, index, fields, precedeWithNewline) {
   requests.push({ insertText: { text: _actionTokenText(N), location: { index: fragIndex } } });
 
   // 3. Status image (listed last → ends up at fragIndex)
+  var iconSize = _resolveStatusIconSize();
   requests.push({
     insertInlineImage: {
       uri: imgUrl, location: { index: fragIndex },
-      objectSize: { height: { magnitude: 16, unit: 'PT' }, width: { magnitude: 16, unit: 'PT' } }
+      objectSize: { height: { magnitude: iconSize, unit: 'PT' }, width: { magnitude: iconSize, unit: 'PT' } }
     }
   });
 

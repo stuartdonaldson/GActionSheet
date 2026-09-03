@@ -51,6 +51,12 @@ def chip(email: str, display: str) -> tuple:
     return ("chip", email, display)
 
 
+def image() -> tuple:
+    """A status icon: a flush-inserted inline image (``w:drawing``), with no
+    real image data -- doc_inspect's detector is presence-only (gts-dxgo)."""
+    return ("image",)
+
+
 def para(*segments, list_item: bool = False) -> dict:
     return {"segments": list(segments), "list_item": list_item}
 
@@ -132,6 +138,10 @@ def _render_para(paragraph, spec: dict) -> None:
             _add_hyperlink(paragraph, seg[1], seg[2])
         elif kind == "chip":
             _add_hyperlink(paragraph, seg[2], f"mailto:{seg[1]}")
+        elif kind == "image":
+            run = OxmlElement("w:r")
+            run.append(OxmlElement("w:drawing"))
+            paragraph._element.append(run)
         else:  # pragma: no cover - programming error in a test spec
             raise ValueError(f"unknown segment kind: {kind!r}")
 

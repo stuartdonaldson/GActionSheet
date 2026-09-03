@@ -4144,3 +4144,51 @@ Open: `gts-c7fp` — `doPost`'s terminal `else` branch appends a row to the boun
 
 ### Key Learnings:
 An action name that is not on the deployed build does not fail — it writes. `doPost`'s legacy-POC fallthrough sits below the secret gate, so a red-phase test against an undeployed route mutates the spreadsheet once per HTTP attempt (five, given `_http_post`'s non-JSON retry). Relatedly, the secret gate's `unauthorized` is plain text rather than JSON, which every sanctioned caller reads as GAS deployment-propagation lag — an auth failure costs ~90s of backoff and then misdiagnoses itself.
+
+## 2026-09-02 17:45:00
+_session unknown · v3 · 08-29→09-02 (session-miner backfill across multiple sessions, not a single transcript)_
+
+### Objective 1: Make the automated test suite actually prove floating-action sync works, instead of passing vacuously
+Rationale (inferred): Manual review of the canonical reference document turned up floating actions the scanner silently missed, even though the existing automated suite reported green — the suite's own oracle compared the system's output to itself, so a sync that did nothing still passed.
+Rejected: Continuing to patch the existing suite in place; the oracle itself (identity comparison) had to be replaced, not just individual test cases.
+Outcome [user-facing]: Silent sync failures (actions typed into a document but never tracked) are now caught by an independent parser of the document grammar, checked against the tracking sheet, rather than by a test that can be satisfied by doing nothing.
+Outcome [developer-facing]: New doc-vs-sheet agreement checker, lane guards (short scan counts, stale deployed build, "Deleted" rows), and genuine before/after test corpora; ~40 tests migrated onto a shared-document batching pattern, cutting a 5-minute test run to under 2 minutes; pytest split into fast/local/live tiers.
+Outcome [internal]: The gap traced back to a 2026-06-02 lesson that had been captured too narrowly (named specific functions instead of the general failure class); a staged planning document was also lost on retirement before being committed, and had to be reconstructed from session history — prompting a broader look at when planning docs need to be preserved.
+
+### Objective 2: Keep continuation-line indent and character styling configurable and correct on sync, without unwanted reformatting
+Rationale (inferred): Continuation lines under an action needed a configurable indent, and the visual style in the document needed to reliably match configuration — but only when a user actually asked for a re-sync of that document, not silently in the background.
+Rejected: none — resolved directly by design discussion which sync entry points are allowed to restyle a document a user may be actively viewing.
+Outcome [user-facing]: New config options for continuation-line indent; typing a plain action token directly into a document now picks up correct chip/link/bold styling on the next explicit "Document Sync," matching what "Force Refresh Style" already guaranteed. Background syncs and the sheet-side "Sync All" no longer restyle documents out from under someone viewing them.
+Outcome [internal]: A one-character offset bug in the re-flush formatting logic was corrupting bold/italic/link formatting in the live document on every re-flush of an assigned action — found only because the user manually reviewed the document and flagged it sharply ("0 stars"), which is what triggered the test-oracle rebuild in Objective 1.
+
+### Objective 3: Keep the Team Actions tracking sheet free of stale/orphaned rows without deleting documents that are legitimately untouched
+Rationale (inferred): The tracking sheet accumulated broken-link and blank-name rows over time, degrading usability and test cost, so the cleanup sweep needed widening — but widening it too far risked treating "no actions yet" as "abandoned."
+Rejected: A widened eviction rule that treated any tracked document with zero action rows as litter — this deleted documents within about a second of the user registering and syncing them, discovered live during hands-on testing, not by any test.
+Outcome [user-facing]: Hyperlinked document names in the tracking sheet are preserved instead of being flattened to plain text; a one-time cleanup removed ~86 leaked test documents and thousands of stale rows. A newly-registered document with no actions yet is no longer at risk of being auto-deleted.
+Outcome [internal]: Eviction is now scoped to documents explicitly marked "Doc Not Found," not inferred from an empty action list.
+
+### Objective 4: Let a team admin scan their Drive folder for action documents that were never registered for tracking
+Rationale (inferred): Some documents contain action items but were never added to tracking, and there was no way to find them short of manual review.
+Rejected: A single-shot scan that fit within Google Apps Script's ~4.5-minute request budget — this couldn't finish scanning a large folder (261 documents) and restarted from zero every time it was re-run.
+Outcome [user-facing]: Admins now see a "Scan for untracked docs" option on their team's portal view; it resumes across multiple runs instead of restarting, with visible progress. The scan recognizes both current and legacy action-token formats, so older historical documents are found too.
+Outcome [internal]: An intermediate, faster document-read approach leaked real document content (meeting notes, names) into logs for about 3 minutes (~86 events) during manual testing of this feature — fixed by reverting to the codebase's existing safe read pattern and hardening the logger against ever emitting raw exception text. A same-day retrospective (requested by the user, who noted the feature "seemed to take an inordinate amount of time and context") found the overrun came from idle polling of background work, repeated attempts to avoid a proven existing pattern for an unvalidated performance guess, and scope quietly growing from a single fix into a cross-repo feature without being re-scoped.
+
+### Objective 5: Let a user see actions across every team they have access to, not just one team at a time, and make the portal load faster
+Rationale (inferred): Users with access to multiple teams had no combined view, and the portal was reported as slow to load.
+Outcome [user-facing]: New "All teams" option on the team switcher, grouped by team and by document with independent expand/collapse; per-team sync/edit permissions are now correctly scoped instead of one blanket permission for the whole page. A permissions bug was also fixed where access inherited from a Shared Drive (rather than granted directly on a team folder) wasn't recognized, so some users saw view-only when they actually had edit access.
+Outcome [internal]: Page load was doing the same team-access check twice per load and re-opening the spreadsheet twice per request; fixed via per-request memoization and de-duplication.
+
+### Objective 6: Make sure add-on menu actions always run the current deployed code, never a stale cached version
+Rationale (inferred): A Force Sync from the document's menu ran a two-day-old build even though the web app was already serving current code, traced to a version pin in the add-on's own installation that the normal deploy process never touched.
+Outcome [user-facing]: Sync, Force Refresh, and Insert Tracker Table menu/sidebar actions now always run whatever is currently live on the verified web deployment, closing the stale-build gap permanently rather than requiring an extra manual step after every future deploy.
+
+### Objective 7: Warn users when their portal page is running an outdated build
+Rationale (inferred): Following an established pattern from another project, the portal needed to tell users when the client they're looking at doesn't match the currently deployed server.
+Outcome [user-facing]: A build-version footer and a dismissible "reload" banner appear when the loaded page and the server version disagree.
+
+### Objective 8: Reduce how often the app re-reads the Actions sheet during normal use
+Rationale (inferred): The Actions sheet read is the app's most frequent operation; reducing repeated reads was part of the broader page-load and test-cost reduction effort alongside Objective 5.
+Outcome [internal]: A per-request snapshot now serves repeated reads from memory instead of re-reading the sheet each time, cutting an O(number-of-documents) read pattern down to a small constant number of reads. A longer-lived, cross-request cache was designed but deliberately deferred until the in-memory version's benefit is actually measured.
+
+### Key Learnings:
+A test oracle that compares a system's own output to itself (encode(sync(decode(x))) == x) can pass on a sync that does nothing — this class of vacuous-assertion risk needs to be checked wherever a test's expected value is derived from the same system under test, not treated as a one-off fix scoped to the functions where it was first found.

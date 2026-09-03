@@ -26,6 +26,10 @@ from scn.engine import (
 )
 from scn.assertions import check_absent, check_present_consistent
 
+# gts-aqpk: fast/local tier -- this module makes no live GAS/Google round trip
+# (verified offline with sockets blocked). See docs/OPERATIONS.md "Test tiers".
+pytestmark = pytest.mark.no_live_session
+
 
 # ---------------------------------------------------------------------------
 # Helpers — build Expectations and mock readers

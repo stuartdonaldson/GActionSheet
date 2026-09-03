@@ -133,6 +133,145 @@ class TestPositional:
 
 
 # ---------------------------------------------------------------------------
+# Bare-trigger -> assigned-token first flush (gts-py21).
+#
+# A hand-authored doc writes a bare `ACT: ` trigger with no markup, no N and
+# no status. Its FIRST sync mints all three at once (ADR-0027 rule 4) and
+# rewrites the record's continuation fields into their canonical
+# `**Label:**\t` spelling. Diffing that doc's own pre-sync APT against a
+# synced copy of it (tests/test_floating_action_copy_fidelity.py) must read
+# that one transition as the system doing its job -- while still catching
+# anything else the same flush changed.
+# ---------------------------------------------------------------------------
+
+
+def _bare(body):
+    return _doc(f"ACT: {body}")
+
+
+def _assigned(body, n=7, status=" (Open)"):
+    return _doc(
+        f"[**ACT-{n}: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=D&ain=ACT-{n})"
+        f"{body}{status}"
+    )
+
+
+class TestBareTriggerFirstFlush:
+    def test_bare_trigger_to_assigned_token_is_clean(self):
+        # The whole transition at once: bare -> bold preview-linked token,
+        # N minted, ` (Open)` minted. Proven to fail first (Backstop rules):
+        # before this normalisation the pair classified `structural`
+        # ("content changed"), then -- after the N and status halves alone
+        # were normalised -- `presentational`, which still left
+        # AptDiffResult.clean False.
+        golden = _bare("{{chip:jane@example.com}} finish the report")
+        capture = _assigned("{{chip:jane@example.com}} finish the report")
+        assert apt_lib.diff_apt(golden, capture).clean
+
+    def test_continuation_fields_canonicalised_on_the_same_flush_are_clean(self):
+        # ADR-0027 rule 5/5a: a hand-typed `Field-1: v` line comes back from
+        # its first flush as `**Field-1:**\tv` (_renderCustomFieldLines).
+        golden = _bare("finish the report<SR>\nField-1: first value<SR>\nField-2: second")
+        capture = _assigned(
+            "finish the report", status=" (Open)"
+        ).replace(
+            "finish the report (Open)",
+            "finish the report (Open)<SR>\n**Field-1:**\tfirst value<SR>\n**Field-2:**\tsecond",
+        )
+        assert apt_lib.diff_apt(golden, capture).clean
+
+    def test_li_prefixed_bare_trigger_transition_is_clean(self):
+        golden = _doc("<LI> ACT: {{chip:jane@example.com}} finish the report")
+        capture = _doc(
+            "<LI> [**ACT-4: **](https://x/y?docId=D&ain=ACT-4)"
+            "{{chip:jane@example.com}} finish the report (Open)"
+        )
+        assert apt_lib.diff_apt(golden, capture).clean
+
+    def test_token_on_a_continuation_line_transitions_too(self):
+        # The live shape this bead's GAS fixes were about: a list item whose
+        # own intro text comes first and whose ACT: trigger sits on a soft-
+        # return continuation line. src/SyncManager.js scans every line of a
+        # paragraph for a token, so the differ must normalise N (and this
+        # transition) on every line too -- not only a record's first.
+        # Proven to fail first: with the record-first-line-only anchoring,
+        # these pairs classified `structural` ("content changed") because the
+        # token's own digits were never normalised at all.
+        golden = _doc(
+            "<LI> This is a numbered entry and an act starts next:<SR>\n"
+            "ACT: {{chip:jane@example.com}} finish the report"
+        )
+        capture = _doc(
+            "<LI> This is a numbered entry and an act starts next:<SR>\n"
+            "[**ACT-13: **](https://x/y?docId=D&ain=ACT-13)"
+            "{{chip:jane@example.com}} finish the report (Open)"
+        )
+        assert apt_lib.diff_apt(golden, capture).clean
+
+    def test_continuation_line_token_still_reports_a_dropped_chip(self):
+        golden = _doc(
+            "<LI> This is a numbered entry and an act starts next:<SR>\n"
+            "ACT: {{chip:jane@example.com}} finish the report"
+        )
+        capture = _doc(
+            "<LI> This is a numbered entry and an act starts next:<SR>\n"
+            "[**ACT-13: **](https://x/y?docId=D&ain=ACT-13)finish the report (Open)"
+        )
+        assert not apt_lib.diff_apt(golden, capture).clean
+
+    # --- negative proofs: the normalisation must not swallow a real change ---
+
+    def test_person_chip_dropped_on_the_same_flush_is_still_reported(self):
+        # The live defect this bead fixed on the GAS side (list-item records
+        # whose token follows an intro line lost their PERSON chip on flush).
+        # If the transition normalisation hid this, the copy-fidelity oracle
+        # would have gone green over a real data loss.
+        golden = _bare("{{chip:jane@example.com}} finish the report")
+        capture = _assigned("finish the report")
+        assert not apt_lib.diff_apt(golden, capture).clean
+
+    def test_trailing_blank_line_dropped_on_the_same_flush_is_still_reported(self):
+        golden = _bare("finish the report<SR>\n+ a plus bullet<SR>\n<BLANK>")
+        capture = _assigned("finish the report").replace(
+            "finish the report (Open)", "finish the report (Open)<SR>\n+ a plus bullet"
+        )
+        result = apt_lib.diff_apt(golden, capture)
+        # Class is left unpinned on purpose: _strip_markup() drops the
+        # <SR>/<BLANK> sentinels, so a record whose ONLY loss is a trailing
+        # blank line reaches the plain-text-equality shortcut before the
+        # line-count check and lands `presentational` rather than
+        # `preservation`. Pre-existing differ ordering, unrelated to this
+        # normalisation; what matters here is that the transition rule does
+        # not make it clean.
+        assert not result.clean
+
+    def test_prose_edited_on_the_same_flush_is_still_reported(self):
+        golden = _bare("finish the report")
+        capture = _assigned("finish the OTHER report")
+        assert not apt_lib.diff_apt(golden, capture).clean
+
+    def test_hand_authored_status_is_not_normalised_away(self):
+        # A status the original already carried is an INPUT to the flush, not
+        # something the flush minted -- so a status that changes across the
+        # transition must still diff.
+        golden = _bare("finish the report (Done)")
+        capture = _assigned("finish the report", status=" (Open)")
+        assert not apt_lib.diff_apt(golden, capture).clean
+
+    def test_hand_authored_status_preserved_across_the_transition_is_clean(self):
+        golden = _bare("finish the report (Done)")
+        capture = _assigned("finish the report", status=" (Done)")
+        assert apt_lib.diff_apt(golden, capture).clean
+
+    def test_normalisation_does_not_apply_to_an_already_assigned_record(self):
+        # No bare trigger on the golden side => not a first flush => the
+        # status suffix and field canonicalisation stay fully visible.
+        golden = _doc("ACT-7: finish the report (Open)")
+        capture = _doc("ACT-7: finish the report (Done)")
+        assert not apt_lib.diff_apt(golden, capture).clean
+
+
+# ---------------------------------------------------------------------------
 # List-item container (gts-83s5, APT v2) — N normalisation and the
 # decision-9 annotation lint must see through the `<LI> ` marker exactly as
 # they do a plain paragraph's absence of any marker.

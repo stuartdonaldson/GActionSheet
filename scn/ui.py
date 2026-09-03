@@ -166,13 +166,19 @@ _SIDEBAR_INSERT_TRACKER = (
 )
 # Sidebar homepage card — per-row Delete action button
 _SIDEBAR_DELETE = '[aria-label="Delete action"]'
-# Sidebar homepage card — BUILD_INFO.version footer. Two shapes are accepted because the deploy
-# pipeline moved onto GAS-Core's gas-deploy package (RECOMMENDATION.md Stage 3):
-#   current: "v0.2.2.7"                                 — semver + build counter (#6)
+# Sidebar homepage card — BUILD_INFO.version footer. Three shapes are accepted because the
+# deploy pipeline moved onto GAS-Core's gas-deploy package (RECOMMENDATION.md Stage 3), then
+# dropped the leading "v" entirely with the gas-static conversion (GAS-Core-rgh — see
+# tests/test_sidebar.py::test_sidebar_shell_controls's matching comment/regex):
+#   current: "0.2.3.65"                                 — bare semver + build counter, no "v"
+#   prior:   "v0.2.2.7"                                  — semver + build counter (#6), "v"-prefixed
 #   legacy:  "v0.2.1 (Rev. Jun 9, 2026 22:06) (TEST)"   — pre-package stamp format
-# Both are matched so a session against an older deployment still reads its version.
+# The leading "v" is optional (gts-34fb: read_version()'s locator never matched a bare-stamped
+# footer, since this regex previously required "v" — every call timed out deterministically,
+# not flakily, once the stamp format dropped it) so a session against any deployment generation
+# still reads its version.
 _VERSION_FOOTER_RE = re.compile(
-    r"v\d+\.\d+\.\d+(?:\.\d+|\s*\(Rev\.[^)]*\)(?:\s*\([A-Za-z]+\))?)?"
+    r"v?\d+\.\d+\.\d+(?:\.\d+|\s*\(Rev\.[^)]*\)(?:\s*\([A-Za-z]+\))?)?"
 )
 
 

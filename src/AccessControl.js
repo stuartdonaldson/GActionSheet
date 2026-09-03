@@ -91,6 +91,15 @@ function _handleVerifyAndResolveAccess(payload) {
  * paying a second SpreadsheetApp.openById + full TeamData sheet read for the
  * same request. Absent, behavior is unchanged (opens/reads here).
  *
+ * gts-49u1: also the sole access.resolve.done emission for this call chain
+ * (covers verify_and_resolve_access, team_sync_document,
+ * get_document_actions, team_edit_action, team_patch_status, and
+ * list_team_actions's non-'ALL' branch) -- emitted once per call, after
+ * whatever team resolution ran (or didn't, if teamId is empty), with the
+ * true deduped Drive.Permissions.list / AdminDirectory round-trip counts
+ * for this request. Skipped entirely when the assertion doesn't verify:
+ * no access resolution was attempted, so there's nothing to report.
+ *
  * @param {string} assertion
  * @param {string} teamId
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} [ss]
@@ -105,12 +114,39 @@ function _resolveIdentityAndAccessTier(assertion, teamId, ss, teamDataRows) {
     return { verified: false, sub: '', email: '', tier: 'NONE', method: 'getAccess', folderTiers: {} };
   }
 
+  var resourceScanMemo = {};
+  var stats = { permissionsListCalls: 0, directoryCalls: 0, cacheHits: 0, cacheMisses: 0 };
+
+  // gts-dige Part A/B: identity's group membership is resolved ONCE per
+  // request here (not per folder/team) -- AC-3. `cache` is threaded down to
+  // every folder/resource scan so cross-request cache hits (Part B) apply
+  // uniformly. Skipped when teamId is empty: no folders will be scanned, so
+  // there is nothing to resolve groups against.
+  var cache = CacheService.getScriptCache();
+  var confirmedGroupsAccumulator = [];
+  var identityGroups = teamId
+    ? _spikeResolveIdentityGroupSet(identity.email, cache, stats)
+    : { path: 'inverted', groupSet: null, fromCache: true };
+
   var teamResolved = { tier: 'NONE', method: 'getAccess', folderTiers: {} };
   if (teamId) {
     ss           = ss || _openActionSheetSpreadsheet();
     teamDataRows = teamDataRows || _readTeamDataRows(ss);
-    teamResolved = _resolveTeamTierForVerifiedIdentity(identity.email, teamId, teamDataRows);
+    teamResolved = _resolveTeamTierForVerifiedIdentity(identity.email, teamId, teamDataRows, undefined, resourceScanMemo, stats, cache, identityGroups, confirmedGroupsAccumulator);
+    _spikeFinalizeIdentityGroupCache(identity.email, cache, identityGroups, confirmedGroupsAccumulator);
   }
+
+  GasLogger.log('access.resolve.done', {
+    email:                identity.email,
+    resourceCount:        Object.keys(resourceScanMemo).length,
+    groupCount:           _spikeDistinctGroupCount(resourceScanMemo),
+    permissionsListCalls: stats.permissionsListCalls,
+    directoryCalls:       stats.directoryCalls,
+    cacheHits:            stats.cacheHits,
+    cacheMisses:          stats.cacheMisses,
+    path:                 identityGroups.path
+  });
+  GasLogger.flush();
 
   return {
     verified:    true,
@@ -147,10 +183,23 @@ function _resolveIdentityAndAccessTier(assertion, teamId, ss, teamDataRows) {
  *   only once instead of once per team that references it. Safe only
  *   because it's a fresh object scoped to one request for one already-
  *   verified email -- never a cross-request or cross-user cache (R8).
+ * @param {Object<string, {level: string, groupsChecked: Array<string>}>} [resourceScanMemo]
+ *   gts-49u1: optional per-request memo, keyed by resourceId (folder id OR
+ *   Shared Drive id -- same axis, no folderId special case), threaded down
+ *   into src/SPIKE.js's _spikeAdminSdkFolderAccess. Distinct from
+ *   folderAccessMemo above (which caches a folder's fully-resolved TIER):
+ *   this one caches the Admin-SDK group-permission SCAN for one resourceId
+ *   so that N folders sharing the same containing Shared Drive scan that
+ *   drive's group permissions at most once per request instead of once per
+ *   folder (AC-2/AC-2b). Same per-request-per-verified-email safety
+ *   invariant as folderAccessMemo (R8, AC-R8).
+ * @param {{permissionsListCalls: number, directoryCalls: number}} [stats]
+ *   gts-49u1: optional per-request counters, threaded the same way, for the
+ *   access.resolve.done log record emitted by this function's callers.
  * @returns {{tier: 'NONE'|'VIEW'|'EDIT', method: string,
  *   folderTiers: Object<string, 'NONE'|'VIEW'|'EDIT'>}}
  */
-function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows, folderAccessMemo) {
+function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows, folderAccessMemo, resourceScanMemo, stats, cache, identityGroups, confirmedGroupsAccumulator) {
   folderAccessMemo = folderAccessMemo || {};
   var tier        = 'NONE';
   var method      = 'getAccess';
@@ -176,6 +225,28 @@ function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows, folder
       continue;
     }
 
+    // gts-pulj: a TeamData row can carry a placeholder folderId (observed:
+    // '-NA-') instead of a real Drive resource id. Every such row was
+    // previously walked into two guaranteed-to-fail Drive round-trips
+    // (Drive.Files.get + Drive.Permissions.list inside the Admin SDK
+    // fallback, src/SPIKE.js), each logged as webapp.spike.access.error --
+    // the tag scn/session.py::_check_gas_errors fail-fast-scans, so this was
+    // permanent cross-suite noise. _isPlausibleDriveId (src/SyncManager.js,
+    // gts-moy1.2) already encodes the same cheap length+charset filter for
+    // exactly this "TeamData placeholder vs real id" distinction, reused
+    // here rather than re-derived. Fails closed (R6): a skipped folder
+    // contributes NONE to this team's tier, never an exception, never a
+    // widened tier.
+    if (!_isPlausibleDriveId(folderId)) {
+      GasLogger.log('webapp.team.access.folderIdSkipped', {
+        folderId: folderId,
+        msg: 'TeamData folderId is not a plausible Drive resource id; skipped without a Drive round-trip'
+      });
+      folderAccessMemo[folderId] = { tier: 'NONE', method: 'skipped-invalid-id' };
+      folderTiers[folderId] = 'NONE';
+      continue;
+    }
+
     var folderTier   = 'NONE';
     var folderMethod = 'getAccess';
 
@@ -196,7 +267,7 @@ function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows, folder
     // confers EDIT -- skipping the fallback at VIEW would silently cap that
     // caller below their real access.
     if (folderTier !== 'EDIT') {
-      var fallback = _spikeAdminSdkFolderAccess(folderId, email);
+      var fallback = _spikeAdminSdkFolderAccess(folderId, email, resourceScanMemo, stats, cache, identityGroups, confirmedGroupsAccumulator);
       var fallbackTier = _accessLevelToTier(fallback.level);
       if (_tierRank(fallbackTier) > _tierRank(folderTier)) {
         folderTier   = fallbackTier;
@@ -223,12 +294,30 @@ function _resolveTeamTierForVerifiedIdentity(email, teamId, teamDataRows, folder
  * (list_team_actions, teamId:'ALL', src/TeamListing.js) can reuse the exact
  * same visible-teams resolution instead of a second copy of this loop (I12).
  *
+ * gts-49u1: also owns the sole access.resolve.done emission for this call
+ * chain (covers list_my_teams and list_team_actions's teamId:'ALL'
+ * aggregate branch) -- resourceScanMemo/stats are shared across every team
+ * in the loop below, same as folderAccessMemo, so a Shared Drive backing
+ * several of the caller's teams is scanned at most once for this whole
+ * request (AC-2/AC-2b), and the log record reflects the true, deduped
+ * round-trip counts for the WHOLE request, not per team.
+ *
  * @param {string} email verified caller email
  * @param {Array<{teamId: string, folderId: string}>} teamDataRows
  * @returns {Array<{teamId: string, tier: 'VIEW'|'EDIT'}>}
  */
 function _resolveAllVisibleTeams(email, teamDataRows) {
   var folderAccessMemo = {};
+  var resourceScanMemo = {};
+  var stats = { permissionsListCalls: 0, directoryCalls: 0, cacheHits: 0, cacheMisses: 0 };
+
+  // gts-dige Part A/B: identity's group membership resolved ONCE for this
+  // whole all-teams sweep, shared across every team in the loop below --
+  // same one-call-per-identity-per-request invariant (AC-3) as
+  // _resolveIdentityAndAccessTier.
+  var cache = CacheService.getScriptCache();
+  var confirmedGroupsAccumulator = [];
+  var identityGroups = _spikeResolveIdentityGroupSet(email, cache, stats);
 
   var teamIds = [];
   var seen    = {};
@@ -242,11 +331,25 @@ function _resolveAllVisibleTeams(email, teamDataRows) {
 
   var visible = [];
   for (var t = 0; t < teamIds.length; t++) {
-    var resolved = _resolveTeamTierForVerifiedIdentity(email, teamIds[t], teamDataRows, folderAccessMemo);
+    var resolved = _resolveTeamTierForVerifiedIdentity(email, teamIds[t], teamDataRows, folderAccessMemo, resourceScanMemo, stats, cache, identityGroups, confirmedGroupsAccumulator);
     if (resolved.tier !== 'NONE') {
       visible.push({ teamId: teamIds[t], tier: resolved.tier });
     }
   }
+
+  _spikeFinalizeIdentityGroupCache(email, cache, identityGroups, confirmedGroupsAccumulator);
+
+  GasLogger.log('access.resolve.done', {
+    email:                email,
+    resourceCount:        Object.keys(resourceScanMemo).length,
+    groupCount:           _spikeDistinctGroupCount(resourceScanMemo),
+    permissionsListCalls: stats.permissionsListCalls,
+    directoryCalls:       stats.directoryCalls,
+    cacheHits:            stats.cacheHits,
+    cacheMisses:          stats.cacheMisses,
+    path:                 identityGroups.path
+  });
+  GasLogger.flush();
 
   return visible;
 }

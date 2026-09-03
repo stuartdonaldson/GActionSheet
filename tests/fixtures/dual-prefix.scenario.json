@@ -7,5 +7,6 @@
   "expected": "dual-prefix-expected",
   "serves": [
     "gts-nrxn"
-  ]
+  ],
+  "batch": "apt-corpus-batch"
 }

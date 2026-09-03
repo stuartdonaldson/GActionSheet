@@ -52,10 +52,22 @@
             box-shadow:0 1px 0 rgba(0,0,0,.02);overflow:hidden}
   .dochead{display:flex;justify-content:space-between;align-items:center;gap:10px;
            padding:10px 14px;background:#fbfcfe;border-bottom:1px solid var(--line);flex-wrap:wrap}
-  .docname{font-weight:600}
+  .docname{font-weight:600;display:flex;align-items:center;gap:8px}
   .docname a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--line)}
+  .docgroup.collapsed .docrows{display:none}
   .row{display:flex;gap:12px;align-items:flex-start;padding:11px 14px;border-top:1px solid #eef1f6}
   .row:first-of-type{border-top:0}
+
+  /* All-teams mode: a team-level grouping layer above .docgroup (gts-zeti) */
+  .teamgroup{display:flex;flex-direction:column;gap:10px}
+  .teamhead{display:flex;align-items:center;gap:10px;padding:2px 2px 0}
+  .teamname{font-weight:700;flex:1}
+  .teamdocs{display:flex;flex-direction:column;gap:10px}
+  .teamgroup.collapsed .teamdocs{display:none}
+  .collapsebtn{border:1px solid var(--line);background:#fff;border-radius:6px;width:22px;height:22px;
+               padding:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+               font-size:11px;line-height:1;color:var(--muted);flex:none;transition:transform .12s}
+  .collapsebtn[aria-expanded="false"]{transform:rotate(-90deg)}
   .rowmain{flex:1;min-width:0}
   .action{color:#111827}
   .rowmeta{color:var(--muted);font-size:12px;margin-top:4px;display:flex;gap:10px;flex-wrap:wrap}
@@ -81,6 +93,13 @@
   .banner{margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid #fecaca;
           background:#fef2f2;color:#991b1b;display:none}
   .banner code{background:#fff;border:1px solid #fecaca;border-radius:6px;padding:1px 5px}
+  .scanstatus{margin-left:10px;font-size:12px;color:var(--muted);white-space:nowrap}
+  .scanstatus .dot{display:inline-block;width:7px;height:7px;border-radius:50%;
+    margin-right:5px;vertical-align:middle;background:var(--muted)}
+  .scanstatus .dot.run{background:#2e7d32;animation:scanpulse 1.2s ease-in-out infinite}
+  .scanstatus .dot.wait{background:#ef6c00}
+  .scanstatus .dot.err{background:#c62828}
+  @keyframes scanpulse{0%,100%{opacity:1}50%{opacity:.25}}
   .notice{margin-top:14px;padding:16px;border-radius:12px;border:1px solid var(--line);
           background:#fff;color:var(--muted)}
   .caveats{margin-top:20px;color:var(--muted);font-size:12.5px;line-height:1.6}
@@ -113,6 +132,17 @@
               background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:8px;
               padding:3px 9px;z-index:60;pointer-events:none}
   .buildbadge.env-sit{color:#92400e;border-color:#fde68a;background:#fffbeb}
+  /* Mismatch state of the version footer, plus the update prompt it raises. GAS-Core
+     best-practices/gas-static-frontend "The static page interface contract" req 1-4. */
+  .buildbadge.stale{color:#991b1b;border-color:#fecaca;background:#fef2f2}
+  .updatebanner{position:fixed;top:0;left:0;right:0;z-index:70;display:none;
+                background:#fffbeb;border-bottom:1px solid #fde68a;color:#92400e;
+                padding:9px 14px;font-size:13px}
+  .updatebanner.show{display:block}
+  .updatebanner .inner{max-width:980px;margin:0 auto;display:flex;gap:10px;align-items:center;
+                       justify-content:center;flex-wrap:wrap}
+  .updatebanner button{border:1px solid #fde68a;background:#fff;color:#92400e;border-radius:8px;
+                       padding:4px 10px;font:inherit;cursor:pointer}
 </style>
 </head>
 <body>
@@ -187,11 +217,29 @@
             <option value="36500">forever</option>
           </select>
         </div>
-        <div class="field" style="margin-left:auto" id="countLabel"></div>
+        <div class="field hidden" id="collapseAllField" style="margin-left:auto">
+          <button class="btn small" id="expandAllBtn">Expand all</button>
+          <button class="btn small" id="collapseAllBtn">Collapse all</button>
+        </div>
+        <!-- gts-gwyg/gts-lgpx: admin-only, per-team. Never shown in All-teams
+             mode (the scan routes authorize against ONE real teamId, same
+             constraint as the write routes above) or to a non-admin caller
+             (state.isAdmin comes from list_team_actions's server-verified
+             isAdmin field — this toggle is UX only, real authorization is
+             re-checked server-side on every scan call itself).
+             The button's label and enabled-ness track the persisted scan
+             state (Start / Resume / running), so the operator can always
+             tell whether a scan is moving without reading the log. -->
+        <div class="field hidden" id="adminScanField">
+          <button class="btn small" id="adminScanBtn">Scan for untracked docs</button>
+          <span id="adminScanStatus" class="scanstatus"></span>
+        </div>
+        <div class="field" id="countLabel"></div>
       </div>
     </div>
 
     <div class="banner" id="loadError"></div>
+    <div class="notice hidden" id="adminScanResults"></div>
     <div class="notice hidden" id="noTeamsNotice">
       You don't currently have access to any team's actions. If you believe this is wrong,
       contact your team lead — they add members to the team's shared Drive folder.
@@ -226,6 +274,15 @@
 
 <div class="menu" id="statusMenu"><h4>Set status</h4></div>
 <div class="toast" id="toast"></div>
+<!-- Raised only when this published page's build differs from the version the WebApp
+     reports on a response the page already makes (interface contract req 3). -->
+<div class="updatebanner" id="updateBanner">
+  <div class="inner">
+    <span id="updateBannerMsg"></span>
+    <button type="button" id="updateReloadBtn">Reload</button>
+    <button type="button" id="updateDismissBtn">Not now</button>
+  </div>
+</div>
 <div class="buildbadge" id="buildBadge"></div>
 
 <script>
@@ -249,13 +306,81 @@ const NUUC_DISPATCH_URL = 'https://script.google.com/macros/s/AKfycbwmoOPRDThQWD
 const GACTIONSHEET_URL  = STATIC_WEBAPP_URL_;
 const ASSERTION_AUD = 'gactionsheet';
 
+// ---- version footer + stale-client prompt -------------------------------
+// GAS-Core best-practices/gas-static-frontend, "The static page interface contract"
+// (requirements 1-6); F3Go30's static-pages/src/index.html is the reference
+// implementation. This published page and the WebApp it calls deploy together --
+// gas-static's assertPublishedBuild closes the publish window -- but they can still
+// diverge afterwards: a CDN edge serving the previous page, a visitor holding a cached
+// document, a backend later rolled back. These requirements close the RUNTIME window by
+// making the page itself say which halves are actually running.
+const UPDATE_DISMISS_KEY_ = 'nuucAsUpdateDismissed';
 const $buildBadge_ = document.getElementById('buildBadge');
-if (STATIC_BUILD_VERSION_ || STATIC_ENV_LABEL_) {
-  $buildBadge_.textContent = [STATIC_ENV_LABEL_, STATIC_BUILD_VERSION_].filter(Boolean).join(' · ');
-  if (STATIC_ENV_LABEL_ === 'SIT') $buildBadge_.classList.add('env-sit');
-} else {
-  $buildBadge_.textContent = 'unbuilt source';
+const $updateBanner_ = document.getElementById('updateBanner');
+let serverVersion_ = null;
+
+// req 5: a null client build is unbuilt src/ served directly (local dev, Playwright).
+// It has no build to be behind, so that is never staleness.
+function isUpdateAvailable_(clientBuild, serverVersion){
+  return !!(clientBuild && serverVersion && clientBuild !== serverVersion);
 }
+
+// req 3: the CLIENT build is always shown first, because the version someone reads back
+// off this footer during support has to be the one their document is actually running.
+// The server's version is named alongside it only when the two differ -- never instead.
+function formatVersionFooter_(clientBuild, serverVersion){
+  const env = STATIC_ENV_LABEL_ ? STATIC_ENV_LABEL_ + ' \u00b7 ' : '';
+  if (isUpdateAvailable_(clientBuild, serverVersion)) {
+    return env + 'v' + clientBuild + ' (build) \u00b7 server v' + serverVersion;
+  }
+  if (clientBuild) return env + 'v' + clientBuild + ' (build)';
+  if (serverVersion) return env + 'v' + serverVersion + ' (server)';
+  return env + 'unbuilt source';
+}
+
+function dismissedUpdate_(){
+  try { return localStorage.getItem(UPDATE_DISMISS_KEY_); } catch (e) { return null; }
+}
+
+// Repaints the footer and raises/clears the update prompt. Called once at load with no
+// server version yet -- req 1: the footer is populated BEFORE any network call, so a page
+// that cannot reach its backend still shows what it is -- then again from postJson on
+// every backend response that carries one.
+function applyVersionState_(clientBuild, serverVersion){
+  const stale = isUpdateAvailable_(clientBuild, serverVersion);
+  $buildBadge_.textContent = formatVersionFooter_(clientBuild, serverVersion);
+  $buildBadge_.classList.toggle('env-sit', STATIC_ENV_LABEL_ === 'SIT' && !stale);
+  $buildBadge_.classList.toggle('stale', stale);
+  // req 4: dismissal is keyed to the version dismissed, not a boolean. A boolean would
+  // silence every future mismatch; a version key means the next one prompts again.
+  const show = stale && dismissedUpdate_() !== String(serverVersion);
+  if (show) {
+    document.getElementById('updateBannerMsg').textContent =
+      'This page is running v' + clientBuild + ' but the server is on v' + serverVersion +
+      '. Reload to pick up the current version.';
+  }
+  $updateBanner_.classList.toggle('show', show);
+}
+
+document.getElementById('updateReloadBtn').addEventListener('click', () => location.reload());
+document.getElementById('updateDismissBtn').addEventListener('click', () => {
+  try { localStorage.setItem(UPDATE_DISMISS_KEY_, String(serverVersion_)); }
+  catch (e) { /* not fatal -- worst case the prompt returns on the next response */ }
+  $updateBanner_.classList.remove('show');
+});
+
+// req 2: the server's version rides a response the page already makes, never a dedicated
+// call -- src/WebApp.js's _jsonResponse stamps `serverVersion` on EVERY JSON response, so
+// hooking postJson covers every route this page will ever call.
+function noteServerVersion_(res){
+  if (res && res.serverVersion && res.serverVersion !== serverVersion_) {
+    serverVersion_ = res.serverVersion;
+    applyVersionState_(STATIC_BUILD_VERSION_, serverVersion_);
+  }
+  return res;
+}
+
+applyVersionState_(STATIC_BUILD_VERSION_, null);
 
 // gts-zm8w: sentinel teamId value for the 'All teams' aggregate view —
 // mirrors TEAM_LISTING_ALL_TEAMS_ID (src/TeamListing.js). Never a real
@@ -267,13 +392,27 @@ const state = {
   teams: [],           // [{teamId, teamName, tier}] from list_my_teams
   teamId: null,
   tier: 'NONE',
+  isAdmin: false,      // gts-gwyg: server-verified (list_team_actions'
+                       // isAdmin field) — gates the "Scan for untracked
+                       // docs" button; never trusted for the scan call
+                       // itself, which re-checks Config!AdminUsers server-side.
+  scanBusy: false,
+  scan: null,          // gts-lgpx: last admin_scan_status payload
+                       // {phase,status,scanned,total,queued,matched,candidates,...}
+  scanPollTimer: null,
+  scanTeamShown: null,   // teamId whose scan status is currently displayed
   teamTiers: {},       // {teamId: tier} — populated in ALL-teams mode from res.teams,
                         // used to gate each row/doc-group's Sync/Edit controls per its
                         // OWN team rather than one blended state.tier (gts-zm8w)
   status: 'open', scope: 'all', windowDays: 60,
   rows: [], statusOptions: [],
   busy: false,
-  editingId: null      // global_id of the row currently showing the edit form, or null
+  editingId: null,     // global_id of the row currently showing the edit form, or null
+  // gts-zeti: collapse state for All-teams grouping, keyed 'team:<teamId>' /
+  // 'doc:<docId>'. Absent = expanded (default). Kept across render()/
+  // refreshActions() calls within a session so a filter change or poll
+  // doesn't silently re-expand a group the user collapsed.
+  collapsed: {}
 };
 
 const $ = (id) => document.getElementById(id);
@@ -345,12 +484,18 @@ const shortDate = (iso) => iso ? new Date(iso).toLocaleDateString([], {month:'sh
 // harness this page replaces. GAS's doPost/doGet parse the body as JSON
 // regardless of the declared content type.
 function postJson(url, payload){
+  // req 6: every request to OUR backend carries the client build, so a stale client
+  // surfaces in the WebApp's logs (webapp.version.mismatch) instead of only in a support
+  // call. NUUC_DISPATCH_URL is a different project's backend and is not stamped.
+  const body = (url === GACTIONSHEET_URL)
+    ? Object.assign({ clientVersion: STATIC_BUILD_VERSION_ }, payload)
+    : payload;
   return fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(body)
   }).then(r => r.text()).then(text => {
-    try { return JSON.parse(text); }
+    try { return noteServerVersion_(JSON.parse(text)); }
     catch (e) {
       throw new Error('Non-JSON response from ' + url + ' — the deployment may be mid-propagation: ' +
         text.slice(0, 200));
@@ -415,6 +560,7 @@ function onGoogleSignIn(credentialResponse){
 function signOut(){
   state.idToken = null; state.assertion = null; state.sub = ''; state.email = '';
   state.teams = []; state.teamId = null; state.tier = 'NONE'; state.rows = [];
+  state.collapsed = {};
   clearCachedAuth();
   $('appView').classList.add('hidden');
   $('launchView').classList.add('hidden');
@@ -502,8 +648,21 @@ function loadTeams(){
 
 $('teamSel').addEventListener('change', e => {
   state.teamId = e.target.value;
+  $('adminScanResults').classList.add('hidden');
   refreshActions();
 });
+
+// gts-zeti: Expand/Collapse-all set every currently-known team/doc group's
+// collapse state, keyed the same way render() reads it, then re-render.
+function setAllGroupsCollapsed(collapsed){
+  state.rows.forEach(r => {
+    state.collapsed['team:' + r.team_id] = collapsed;
+    state.collapsed['doc:' + r.doc_id]   = collapsed;
+  });
+  render();
+}
+$('expandAllBtn').addEventListener('click', () => setAllGroupsCollapsed(false));
+$('collapseAllBtn').addEventListener('click', () => setAllGroupsCollapsed(true));
 
 // ---- action listing (§12.1) --------------------------------------------
 function refreshActions(){
@@ -527,6 +686,7 @@ function refreshActions(){
       state.rows = res.actions || [];
       state.statusOptions = res.statusOptions || [];
       state.tier = res.tier || 'NONE';
+      state.isAdmin = !!res.isAdmin;
       // gts-zm8w: only the ALL-teams response carries `teams` — a per-team
       // tier map so each doc group can gate Sync/Edit by ITS OWN team's
       // tier rather than the single blended state.tier above.
@@ -539,6 +699,169 @@ function refreshActions(){
       $('loadError').textContent = 'Could not load actions: ' + (err.message || err);
     })
     .finally(() => setBusy(false));
+}
+
+// ---- admin: scan for untracked docs (gts-gwyg, resumable per gts-lgpx) ---
+// The scan no longer runs inside this request. Clicking enqueues it
+// (admin_scan_start) and returns immediately; a self-rescheduling one-shot
+// trigger advances it server-side across as many executions as it needs.
+// This client just polls admin_scan_status and renders progress, so a scan
+// that outlives the browser tab keeps going and is still there on return.
+//
+// Client-side isAdmin only gates whether these controls are shown; the real
+// admin check (Config!AdminUsers) runs server-side on every call below,
+// including the read-only status poll.
+
+const SCAN_POLL_MS = 5000;
+
+function scanCall(action){
+  return postJson(GACTIONSHEET_URL, { action, assertion: state.assertion, teamId: state.teamId });
+}
+
+// Poll only while the scan is actually advancing. A done/idle/error scan
+// stops the timer so an idle tab isn't calling the backend forever.
+function scheduleScanPoll(){
+  clearTimeout(state.scanPollTimer);
+  const st = state.scan && state.scan.status;
+  if (st !== 'running' && st !== 'waiting') return;
+  state.scanPollTimer = setTimeout(refreshScanStatus, SCAN_POLL_MS);
+}
+
+function refreshScanStatus(){
+  if (!state.isAdmin || !state.teamId || state.teamId === ALL_TEAMS_ID) return Promise.resolve();
+  return scanCall('admin_scan_status')
+    .then(res => {
+      if (!res.ok) return;               // forbidden — leave the panel blank
+      state.scan = res;
+      renderScanPanel();
+      scheduleScanPoll();
+    })
+    .catch(() => { /* a dropped poll is not worth a toast; the next one retries */ });
+}
+
+// Start a fresh scan, or resume the one already persisted. The button label
+// (renderScanPanel) tells the operator which of the two the click will do.
+function runAdminScan(){
+  if (state.scanBusy || !state.teamId || state.teamId === ALL_TEAMS_ID) return;
+  const resumable = state.scan && (state.scan.status === 'waiting'
+    || state.scan.status === 'stale' || state.scan.status === 'error');
+  const action = resumable ? 'admin_scan_resume' : 'admin_scan_start';
+
+  state.scanBusy = true;
+  renderScanPanel();
+  scanCall(action)
+    .then(res => {
+      if (!res.ok) { toast('Scan denied: ' + (res.reason || 'unknown error')); return; }
+      state.scan = res;
+    })
+    .catch(err => toast('Scan failed: ' + (err.message || err)))
+    .finally(() => {
+      state.scanBusy = false;
+      renderScanPanel();
+      scheduleScanPoll();
+    });
+}
+$('adminScanBtn').addEventListener('click', runAdminScan);
+
+// One line answering all three of the operator's questions at once: what is
+// it doing, how far along, and is it moving right now or waiting on its
+// trigger. `waiting` is deliberately worded as queued-not-stalled — the
+// one-shot fires about a minute out, and without saying so the pause reads
+// as a hang (which is exactly how the old blocking scan failed).
+function scanStatusLine(sc){
+  if (!sc || sc.status === 'idle') return '';
+  const n = sc.scanned || 0;
+  if (sc.status === 'error') return `<span class="dot err"></span>Scan failed${sc.error ? ' (' + escape(sc.error) + ')' : ''} — Resume to retry`;
+  if (sc.phase === 'enumerate') {
+    const found = sc.queued || 0;
+    const where = sc.status === 'running' ? 'Finding docs' : 'Finding docs (queued)';
+    return `<span class="dot ${sc.status === 'running' ? 'run' : 'wait'}"></span>${where} — ${found} found so far`;
+  }
+  if (sc.complete) return `<span class="dot"></span>Done — scanned ${n} of ${sc.total}, ${sc.matched || 0} match(es)`;
+  const total = (typeof sc.total === 'number') ? sc.total : '?';
+  if (sc.status === 'stale') return `<span class="dot err"></span>Stalled at ${n} of ${total} — Resume to continue`;
+  const verb = sc.status === 'running' ? 'Scanning' : 'Queued — next pass within a minute;';
+  return `<span class="dot ${sc.status === 'running' ? 'run' : 'wait'}"></span>${verb} ${n} of ${total}`;
+}
+
+function renderScanPanel(){
+  const sc = state.scan;
+  const btn = $('adminScanBtn');
+  const running = !!sc && sc.status === 'running';
+  const resumable = !!sc && (sc.status === 'waiting' || sc.status === 'stale' || sc.status === 'error');
+
+  btn.textContent = running ? 'Scanning…'
+    : resumable ? 'Resume scan'
+    : 'Scan for untracked docs';
+  // Only a genuinely in-flight pass disables the button — a waiting scan
+  // stays clickable so the operator can pull the next pass forward instead
+  // of waiting out the trigger delay.
+  btn.disabled = state.scanBusy || running;
+
+  $('adminScanStatus').innerHTML = scanStatusLine(sc);
+  renderAdminScanResults(sc);
+}
+
+// Selection only makes sense once the candidate set is final (sc.complete) —
+// the panel re-renders every SCAN_POLL_MS while a scan is still running, which
+// would otherwise wipe checkbox state out from under the operator mid-click.
+function renderAdminScanResults(sc){
+  const box = $('adminScanResults');
+  const candidates = (sc && sc.candidates) || [];
+  if (!sc || sc.status === 'idle' || (!candidates.length && !sc.complete)) {
+    box.classList.add('hidden');
+    return;
+  }
+  if (!candidates.length) {
+    box.innerHTML = `<p>Scanned ${sc.scanned} doc(s) under this team's folder(s) — no untracked action-looking docs found.</p>`;
+  } else if (!sc.complete) {
+    box.innerHTML = `<p>${candidates.length} found so far (${sc.scanned} of ${sc.total} scanned) — still running:</p>` +
+      '<ul>' + candidates.map(c =>
+        `<li><a href="${escape(c.url)}" target="_blank" rel="noopener">${escape(c.docName)}</a></li>`
+      ).join('') + '</ul>';
+  } else {
+    box.innerHTML =
+      `<p>${candidates.length} untracked doc(s) look action-bearing (of ${sc.scanned} scanned):</p>` +
+      `<p><label><input type="checkbox" id="trackSelectAll" /> Select all</label></p>` +
+      '<ul class="trackable">' + candidates.map(c =>
+        `<li><label><input type="checkbox" class="trackCandidate" data-doc-id="${escape(c.docId)}" data-doc-name="${escape(c.docName)}" /> ` +
+        `<a href="${escape(c.url)}" target="_blank" rel="noopener">${escape(c.docName)}</a></label></li>`
+      ).join('') + '</ul>' +
+      `<button class="btn small" id="trackSelectedBtn">Track selected</button>`;
+    $('trackSelectAll').addEventListener('change', (e) => {
+      box.querySelectorAll('.trackCandidate').forEach(cb => { cb.checked = e.target.checked; });
+    });
+    $('trackSelectedBtn').addEventListener('click', trackSelectedDocs);
+  }
+  box.classList.remove('hidden');
+}
+
+// Track = cheap DocData registration only (admin_scan_track), not a full
+// doc sync — the next syncAll sweep (gts-qkev, DocData-walk) discovers and
+// syncs each tracked doc's Actions on its own. Per human direction
+// 2026-09-01: the list simply goes away on success; the operator re-scans
+// later if/when they want to see what remains.
+function trackSelectedDocs(){
+  const box = $('adminScanResults');
+  const checked = Array.from(box.querySelectorAll('.trackCandidate:checked'));
+  if (!checked.length) { toast('Select at least one document to track.'); return; }
+  const docs = checked.map(cb => ({ docId: cb.dataset.docId, docName: cb.dataset.docName }));
+
+  const btn = $('trackSelectedBtn');
+  btn.disabled = true;
+  btn.textContent = 'Tracking…';
+  postJson(GACTIONSHEET_URL, { action: 'admin_scan_track', assertion: state.assertion, teamId: state.teamId, docs })
+    .then(res => {
+      if (!res.ok) { toast('Track failed: ' + (res.reason || 'unknown error')); return; }
+      toast(`Tracking ${res.tracked.length} document(s) — they'll pick up actions on the next background sync.`);
+      state.scan = null;
+      renderScanPanel();
+    })
+    .catch(err => toast('Track failed: ' + (err.message || err)))
+    .finally(() => {
+      btn.disabled = false;
+      btn.textContent = 'Track selected';
+    });
 }
 
 function setBusy(b){
@@ -583,6 +906,23 @@ function rowByDocId(docId){ return state.rows.find(r => r.doc_id === docId); }
 function render(){
   const isAllTeams = state.teamId === ALL_TEAMS_ID;
   $('sub').textContent = (isAllTeams ? 'All teams' : state.teamId) + ' • signed in';
+  const showScan = !isAllTeams && state.isAdmin;
+  $('adminScanField').classList.toggle('hidden', !showScan);
+  // gts-lgpx: the scan lives server-side in a Script Property, so on load (and
+  // on every team switch) ask what it is doing rather than assuming idle — a
+  // scan started in a previous session may still be running right now.
+  if (showScan) {
+    if (state.scanTeamShown !== state.teamId) {
+      state.scanTeamShown = state.teamId;
+      state.scan = null;
+      $('adminScanStatus').innerHTML = '';
+      $('adminScanResults').classList.add('hidden');
+      refreshScanStatus();
+    }
+  } else {
+    state.scanTeamShown = null;
+    clearTimeout(state.scanPollTimer);
+  }
   // gts-zm8w: ALL-teams tier varies per document (state.teamTiers), so the
   // single title-line tag can't say EDIT/VIEW for the whole page — each doc
   // group's own controls are gated individually below instead.
@@ -595,6 +935,9 @@ function render(){
     $('tierTag').className = 'tag ' + state.tier.toLowerCase();
   }
   $('windowField').style.display = state.status === 'open' ? 'none' : '';
+  // gts-zeti: Expand/Collapse-all only make sense when there's a team layer
+  // to collapse — single-team mode has nothing above the doc-groups.
+  $('collapseAllField').classList.toggle('hidden', !isAllTeams);
 
   const rows = state.rows;
   if (!state.busy) {
@@ -614,31 +957,54 @@ function render(){
   const byDoc = new Map();
   rows.forEach(r => { if(!byDoc.has(r.doc_id)) byDoc.set(r.doc_id, []); byDoc.get(r.doc_id).push(r); });
 
-  byDoc.forEach((docRows, docId) => {
-    const first = docRows[0];
-    // gts-zm8w: in ALL-teams mode each doc belongs to exactly one team
-    // (uniform team_id across a doc's rows), so gate this group's controls
-    // by THAT team's own tier rather than the blended state.tier.
-    const tier = isAllTeams ? (state.teamTiers[first.team_id] || 'NONE') : state.tier;
-    const teamBadge = isAllTeams ? `<span class="tag">${escape(first.team_id)}</span>` : '';
-    const group = document.createElement('div');
-    group.className = 'docgroup';
-    group.innerHTML = `
-      <div class="dochead">
-        <div class="docname">${teamBadge}<a href="${first.doc_url}" target="_blank" rel="noopener"
-          >${escape(first.doc_name || '(untitled document)')}</a></div>
-        <div class="controls">
-          <span class="tag">${docRows.length} shown</span>
-          <button class="btn small" data-sync="${docId}" ${tier === 'EDIT' ? '' : 'disabled'}
-            title="${tier === 'EDIT' ? 'Re-sync this document with the sheet'
-                                     : 'Syncing needs EDIT access to this document’s folder'}"
-          >Sync this document</button>
+  if (isAllTeams) {
+    // gts-zeti: group doc-groups under a collapsible team header, in the
+    // order teams first appear across rows (matches server aggregate order).
+    const byTeam = new Map();
+    byDoc.forEach((docRows, docId) => {
+      const teamId = docRows[0].team_id;
+      if (!byTeam.has(teamId)) byTeam.set(teamId, new Map());
+      byTeam.get(teamId).set(docId, docRows);
+    });
+    const teamName = teamId => {
+      const t = state.teams.find(t => t.teamId === teamId);
+      return t ? t.teamName : teamId;
+    };
+    byTeam.forEach((docsInTeam, teamId) => {
+      const teamKey = 'team:' + teamId;
+      const teamCollapsed = !!state.collapsed[teamKey];
+      const teamRowCount = Array.from(docsInTeam.values()).reduce((n, r) => n + r.length, 0);
+      const teamEl = document.createElement('div');
+      teamEl.className = 'teamgroup' + (teamCollapsed ? ' collapsed' : '');
+      teamEl.innerHTML = `
+        <div class="teamhead">
+          <button class="collapsebtn" data-toggle-team="${escape(teamId)}"
+            aria-expanded="${!teamCollapsed}" title="${teamCollapsed ? 'Expand' : 'Collapse'} ${escape(teamName(teamId))}"
+          >&#9662;</button>
+          <div class="teamname">${escape(teamName(teamId))}</div>
+          <span class="tag">${teamRowCount} ${teamRowCount === 1 ? 'action' : 'actions'}</span>
         </div>
-      </div>
-      ${docRows.map(r => rowHtml(r, tier)).join('')}`;
-    listEl.appendChild(group);
-  });
+        <div class="teamdocs">
+          ${Array.from(docsInTeam.entries()).map(([docId, docRows]) => docGroupHtml(docId, docRows, true)).join('')}
+        </div>`;
+      listEl.appendChild(teamEl);
+    });
+  } else {
+    byDoc.forEach((docRows, docId) => {
+      listEl.insertAdjacentHTML('beforeend', docGroupHtml(docId, docRows, false));
+    });
+  }
 
+  listEl.querySelectorAll('[data-toggle-team]').forEach(b => b.addEventListener('click', () => {
+    const key = 'team:' + b.dataset.toggleTeam;
+    state.collapsed[key] = !state.collapsed[key];
+    render();
+  }));
+  listEl.querySelectorAll('[data-toggle-doc]').forEach(b => b.addEventListener('click', () => {
+    const key = 'doc:' + b.dataset.toggleDoc;
+    state.collapsed[key] = !state.collapsed[key];
+    render();
+  }));
   listEl.querySelectorAll('[data-sync]').forEach(b => b.addEventListener('click', onSyncClick));
   listEl.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => {
     state.editingId = b.dataset.edit;
@@ -650,6 +1016,40 @@ function render(){
   }));
   listEl.querySelectorAll('[data-save-edit]').forEach(b => b.addEventListener('click', onSaveEditClick));
   listEl.querySelectorAll('.status.mine').forEach(c => c.addEventListener('click', openStatusMenu));
+}
+
+// gts-zeti: one doc-group's markup, shared by the flat (single-team) and
+// team-grouped (All-teams) render paths. `inTeamGroup` only affects the
+// per-team badge (redundant once nested under a team header) and whether
+// this doc-group gets its own collapse toggle (only meaningful once there's
+// a team layer above it to collapse independently of).
+function docGroupHtml(docId, docRows, inTeamGroup){
+  const first = docRows[0];
+  // gts-zm8w: in ALL-teams mode each doc belongs to exactly one team
+  // (uniform team_id across a doc's rows), so gate this group's controls
+  // by THAT team's own tier rather than the blended state.tier.
+  const tier = inTeamGroup ? (state.teamTiers[first.team_id] || 'NONE') : state.tier;
+  const docKey = 'doc:' + docId;
+  const docCollapsed = inTeamGroup && !!state.collapsed[docKey];
+  const toggleBtn = inTeamGroup
+    ? `<button class="collapsebtn" data-toggle-doc="${escape(docId)}" aria-expanded="${!docCollapsed}"
+         title="${docCollapsed ? 'Expand' : 'Collapse'} this document">&#9662;</button>`
+    : '';
+  return `
+    <div class="docgroup${docCollapsed ? ' collapsed' : ''}">
+      <div class="dochead">
+        <div class="docname">${toggleBtn}<a href="${first.doc_url}" target="_blank" rel="noopener"
+          >${escape(first.doc_name || '(untitled document)')}</a></div>
+        <div class="controls">
+          <span class="tag">${docRows.length} shown</span>
+          <button class="btn small" data-sync="${docId}" ${tier === 'EDIT' ? '' : 'disabled'}
+            title="${tier === 'EDIT' ? 'Re-sync this document with the sheet'
+                                     : 'Syncing needs EDIT access to this document’s folder'}"
+          >Sync this document</button>
+        </div>
+      </div>
+      <div class="docrows">${docRows.map(r => rowHtml(r, tier)).join('')}</div>
+    </div>`;
 }
 
 function rowHtml(r, tier){

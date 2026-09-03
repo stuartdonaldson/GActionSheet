@@ -1,0 +1,10 @@
+{
+  "name": "scanner-jxrw",
+  "input": "scanner-jxrw",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "scanner-jxrw-expected",
+  "serves": ["gts-jxrw", "gts-v0py"],
+  "batch": "apt-lanes-scanner"
+}

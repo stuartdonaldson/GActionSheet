@@ -130,7 +130,27 @@ function _handleRunFixture(payload) {
     var result = setupTestFixtures(fixtureName, fixtureData);
     var response = result || { tag: 'fixture.' + fixtureName, data: {} };
     if (rfCache) {
-      rfCache.put(rfCacheKey, JSON.stringify(response), 21600);
+      // gts-u947 (stage regression-verify): CacheService.put() has a hard
+      // ~100KB per-value cap in Apps Script. A whole-sheet-audit fixture
+      // (e.g. dump_all_action_rows) can legitimately exceed that once the
+      // live corpus grows large enough during a long sweep, throwing
+      // "Argument too large: value" -- previously unguarded, so this whole
+      // request 500'd to an HTML Apps Script error page instead of
+      // returning the (perfectly good) JSON response computed above. The
+      // opId dedupe cache is a best-effort optimization (guards against a
+      // retried request re-running a fixture from scratch, gts-f3me.2) --
+      // losing it for one oversized response just means a same-opId retry
+      // re-executes the fixture instead of hitting the cache, which is
+      // harmless for a read-only audit dump and only a minor cost even for
+      // a mutating one. Skip-and-log beats failing the whole call.
+      try {
+        rfCache.put(rfCacheKey, JSON.stringify(response), 21600);
+      } catch (cacheErr) {
+        GasLogger.log('fixture.cachePutSkipped', {
+          fixture: fixtureName,
+          message: String(cacheErr && cacheErr.message || cacheErr)
+        });
+      }
     }
     return _jsonResponse(response);
   } finally {

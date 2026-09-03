@@ -266,6 +266,24 @@ test structure is not required; the entry point may be exercised as part of any 
   fails when the condition it checks is violated, not only that it passes on the current suite.
   A new assertion that only shows green is unverified.
 
+**Proven-to-fail vs. no-shared-context collision (gts-tz3j, decided 2026-09-02):** on this
+live-backend, no-local-mock project, an `[IMP]` bead's close-time deploy to the single shared TEST
+target can make the pre-change/unguarded state unreachable before the twin `[TST]` bead gets to it
+— constructing a genuinely broken build to prove PROVEN-TO-FAIL would then require either reading
+the implementation (violating no-shared-context) or a destructive revert/redeploy of shared TEST
+(racing other in-flight beads' uncommitted work). Decided resolution: **a structural/static code
+review, with a written rationale, discharges PROVEN-TO-FAIL when a live red run is genuinely
+unavailable for this reason.** The review must trace the actual guard code the assertion protects,
+reason through the counterfactual of removing the specific guard clause, and state a verdict per
+AC (HOLDS / HOLDS WITH CAVEAT / DOES NOT HOLD) — a review that only confirms "looks fine" without
+that counterfactual trace does not count. Any unenforced invariant the review surfaces (e.g. an
+ordering dependency, a scope hazard) gets an inline code comment at its exact site, not just a note
+on the bead. See gts-hztp's closing comment for a worked example. This does not relax the
+Backstop rule generally — a live red run is still required whenever the pre-change build is
+actually reachable (e.g. via `manage-deployments.js --deploy-dev` against an isolated DEV target,
+still untried for this purpose); it only names what discharges the obligation in the specific
+collision above.
+
 ## GAS Deployment
 
 Use the pnpm scripts in `package.json` — never invoke `clasp` directly.

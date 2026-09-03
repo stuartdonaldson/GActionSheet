@@ -121,8 +121,9 @@ homes. File these as `[TST]` beads tagged with the principle they discharge:
 Staged plan `knowledge-base/staging/apt-testing.md` (all 7 stages complete, doc retired) moved the
 ADR-0027 floating-action grammar's regression surface from six near-duplicate paragraph builders
 in `src/TestFixtures.js` into data (`.apt.txt` corpora, `docs/interfaces/action-portable-text.md`)
-plus one comparator (`scripts/apt_lib.py::diff_apt`, four-class classification — decision 4 in that
-now-deleted doc). It does not introduce a new `T`/`I` principle; it is a `T15`
+plus one comparator (`scripts/apt_lib.py::diff_apt`, four-class classification — decision 4,
+reconstructed at `docs/interfaces/action-portable-text.md` §Tooling design decisions after the
+staging doc's own deletion). It does not introduce a new `T`/`I` principle; it is a `T15`
 (Act/Expect/Checkpoint) realization specialized to one domain (a Doc's portable-text body) with its
 own Expect: `apt_lib.diff_apt(expected, captured).clean` in place of a per-field assertion list.
 

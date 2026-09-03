@@ -124,6 +124,8 @@
       "set_export_config",
       "upsert_action_rows",
       "sync_action_rows",
+      "sync_document",
+      "insert_tracker_table",
       "verify_action_rows",
       "mark_doc_not_found",
       "delete_action_row",
@@ -156,6 +158,34 @@
           "queueDrained"
         ],
         "completionSignal": "synchronous response after ACTION_SHEET_QUEUE drains (§16.11 #4)"
+      },
+      "sync_document": {
+        "request": [
+          "action",
+          "secret",
+          "docId",
+          "force"
+        ],
+        "response": [
+          "ok",
+          "docId",
+          "forced",
+          "result"
+        ],
+        "completionSignal": "synchronous response; GasLogger 'sync.complete' with forced=<force>"
+      },
+      "insert_tracker_table": {
+        "request": [
+          "action",
+          "secret",
+          "docId"
+        ],
+        "response": [
+          "ok",
+          "docId",
+          "result"
+        ],
+        "completionSignal": "synchronous response; GasLogger 'tracker.insert.complete' or 'tracker.skip'"
       },
       "edit_action_row": {
         "request": [

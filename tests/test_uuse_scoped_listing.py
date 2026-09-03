@@ -104,8 +104,25 @@ def test_syncall_batches_multi_doc_listing_miss_fallback(settings, gas_log_dir, 
             f"[uuse] expected exactly ONE batched fallback call for 2 simultaneously-missing "
             f"docs, got {len(batch_events)}: {batch_events!r}"
         )
-        assert (batch_events[0].get("data") or {}).get("count") == 2, (
-            f"[uuse] batched fallback call should report count=2, got {batch_events[0]!r}"
+        # gts-1aqj: missingDocIds (SyncManager.js's _fetchDriveDocMetadata scoping
+        # loop, ~line 512) is computed over the WHOLE tracked backlog, not just
+        # this test's own 2 forced-miss docs -- so 'count' also picks up any other
+        # tracked doc that is genuinely absent from the scoped listing at the
+        # moment this sweep runs (e.g. a still-open journey doc from another
+        # concurrent test, created in the test sheet's own folder rather than
+        # under any TeamData team folder -- see begin_journey_session,
+        # TestFixtures.js -- and therefore never scope-listed regardless of this
+        # fixture's monkeypatch). Confirmed via Axiom: sync.driveMetadata.
+        # batchFallback.fetched's count on this shared TEST account has ranged
+        # 2-258 across routine sweeps in the same 24h window, entirely apart from
+        # this test. The batched-vs-sequential AC this test exists for (gts-uuse
+        # point 3) is "exactly one call", asserted above; count==2 is not
+        # reproducible against a live, churning backlog, so assert only that our
+        # 2 injected docs are included in whatever the sweep's true miss set was
+        # (both rows' survival is verified explicitly below regardless of count).
+        assert (batch_events[0].get("data") or {}).get("count", 0) >= 2, (
+            f"[uuse] batched fallback call should report count>=2 (at least our 2 "
+            f"forced-miss docs), got {batch_events[0]!r}"
         )
 
         error_events = collect_logs(

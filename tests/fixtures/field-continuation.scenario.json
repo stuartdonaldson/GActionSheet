@@ -7,5 +7,6 @@
   "expected": "field-continuation-expected",
   "serves": [
     "gts-82s2"
-  ]
+  ],
+  "batch": "apt-corpus-batch"
 }

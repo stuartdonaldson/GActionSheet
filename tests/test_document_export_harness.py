@@ -27,7 +27,13 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.no_live_session
+# gts-aqpk: local tier, but the only module in it that is not fast --
+# ~52s, because most cases spawn a fresh `python scripts/...` subprocess
+# per test. `slow` is a cost attribute, not a tier: this module is still
+# fully in the no_live_session tier, and `pnpm run test:local` runs it.
+# `pnpm run test:fast` (-m "no_live_session and not slow") skips it to hold
+# its sub-30s budget. See docs/OPERATIONS.md "Test tiers".
+pytestmark = [pytest.mark.no_live_session, pytest.mark.slow]
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "document_export" / "fixtures"
@@ -73,7 +79,7 @@ class TestCliEndToEndOffline:
         assert len(json_files) == 1, f"expected exactly one *-docx.json, got {json_files}"
         artifact = json.loads(json_files[0].read_text(encoding="utf-8"))
 
-        assert artifact["schema_version"] == "3.0"
+        assert artifact["schema_version"] == "3.1"
         assert artifact["producer"] == "python-document-export"
         assert artifact["document"]["title"] == "golden"
 
@@ -115,7 +121,7 @@ class TestBuildExportPure:
 
     def test_artifact_shape(self):
         artifact = build_export(GOLDEN.read_bytes(), doc_id="abc123", title="Golden Doc")
-        assert artifact["schema_version"] == "3.0"
+        assert artifact["schema_version"] == "3.1"
         assert artifact["document"]["id"] == "abc123"
         assert artifact["document"]["title"] == "Golden Doc"
         assert artifact["document"]["source_url"] == "https://docs.google.com/document/d/abc123/edit"

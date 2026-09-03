@@ -8,6 +8,9 @@ dependencies = [
     "openpyxl>=3.1",
     "python-docx>=1.1",
     "allure-pytest>=2.13",
+    # gts-xvgl: parallel execution for the local (network-free) tier only.
+    # The live tier stays serial by decision — see docs/OPERATIONS.md "Test tiers".
+    "pytest-xdist>=3.5",
 ]
 
 [project.optional-dependencies]
@@ -21,5 +24,7 @@ addopts = "--alluredir=test-results/allure-results --junitxml=test-results/junit
 markers = [
     "smoke: fast (<1 min) high-risk UI-surface scenario (GTaskSheet-80mo.17)",
     "hroj_backstop: gts-hroj diagnostics-ordering backstop tool (always fails by design; skipped by default, see tests/test_hroj_diagnostics_backstop.py)",
-    "no_live_session: network-free test needing no live GAS/Google session (gts-2moy) — the whole collected run must be marked for the session-scoped live-auth autouse fixtures to skip; mixed with any unmarked test, they still run.",
+    "no_live_session: fast/local tier (gts-2moy, gts-aqpk) — network-free test needing no live GAS/Google session. Applied per module as `pytestmark`. Select the whole tier with `pytest -m no_live_session` (or `pnpm run test:fast`); the session-scoped live-auth autouse fixtures skip themselves only when the whole collected run is marked, so mixed with any unmarked test they still run.",
+    "slow: cost attribute, not a tier (gts-aqpk) — a module that is otherwise fast-tier-eligible but takes tens of seconds (currently only tests/test_document_export_harness.py, which spawns a CLI subprocess per test). `pnpm run test:fast` excludes it; `pnpm run test:local` includes it.",
+    "live: live tier (gts-aqpk) — drives a real GAS/Google round trip. NOT hand-applied: tests/conftest.py stamps it on every collected item that does not carry no_live_session, so classification is total by construction and an unmarked new test file defaults to live. Select with `pytest -m live`.",
 ]

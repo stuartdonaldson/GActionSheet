@@ -260,3 +260,55 @@ def test_short_count_when_actions_are_removed():
     parsed = _parse(truncated)
     assert len(parsed) == 1
     assert [a.token for a in parsed] == ["ACT-1"]
+
+
+# ---------------------------------------------------------------------------
+# gts-lu5k — a token that follows an intro line (or a second token later in
+# the same paragraph) was silently absent from floating_actions(), with no
+# parse error recorded: _parse_paragraph matched the token only at the
+# paragraph's own start. src/SyncManager.js's scanner has always counted
+# this shape as a real action (_parseSoftReturnParagraphActions). Confirmed
+# live during gts-py21: a synced reference doc reported 16 actions from the
+# GAS scanner but only 12 from floating_actions() — the four intro-line list
+# items were the gap.
+# ---------------------------------------------------------------------------
+
+def test_token_after_an_intro_line_is_not_silently_dropped():
+    """gts-lu5k AC — a paragraph shaped 'intro text<SR>ACT-N: ...' yields one
+    record for the token, matching what the GAS scanner reports for the same
+    paragraph, instead of vanishing with no parse error."""
+    (a,) = _parse([para(text("context intro\nACT-13: jane@example.com file the report (Open)"))])
+    assert a.token == "ACT-13"
+    assert a.error is None
+    assert a.assignee_email == "jane@example.com"
+    assert a.status == "Open"
+    assert a.action_text == "file the report"
+
+
+def test_multiple_tokens_in_one_paragraph_each_yield_their_own_record():
+    """gts-lu5k AC — a second token line in the same soft-return paragraph is
+    its own record too, not merged into or dropped by the first."""
+    parsed = _parse([para(text(
+        "AI-20: jane@example.com first item\nACT-21: john@example.com second item"
+    ))])
+    assert [a.token for a in parsed] == ["AI-20", "ACT-21"]
+    first, second = parsed
+    assert first.assignee_email == "jane@example.com"
+    assert first.action_text == "first item"
+    assert second.assignee_email == "john@example.com"
+    assert second.action_text == "second item"
+
+
+def test_token_after_intro_line_with_chip_assignee_resolves_the_chip():
+    """gts-lu5k, same soft-return family as gts-ogev/gts-i0gk/gts-mt39: a
+    PERSON chip immediately after a token that itself follows an intro line
+    still resolves as a chip assignee, not a dropped record."""
+    (a,) = _parse([para(
+        text("context intro\nACT-14: "), chip("jane@example.com", "Jane Doe"),
+        text(" file the report"),
+    )])
+    assert a.token == "ACT-14"
+    assert a.assignee_source == "chip"
+    assert a.assignee_email == "jane@example.com"
+    assert a.assignee_name == "Jane Doe"
+    assert a.action_text == "file the report"

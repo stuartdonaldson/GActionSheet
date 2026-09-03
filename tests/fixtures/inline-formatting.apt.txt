@@ -1,0 +1,12 @@
+<!-- kind: golden -->
+<!-- name: inline-formatting -->
+<!-- serves: gts-zocq -->
+<!-- generated: 2026-08-31T00:00:00.000Z -->
+
+Case 1 (gts-zocq AC1/AC2): a bold span and a separate italic span inside one action's text survive scan -\> Actions sheet (RichTextValue) -\> flush -\> rescan. Authored statusless so the establishing sync must materialize (Open) and therefore rewrite the paragraph -- the flush is the path gts-zocq's own root cause (delete+reinsert flattening formatting) lived on, so a corpus that never flushes cannot show the fix holding.
+
+ACT-601: Please **bold this** and _italic that_ today
+
+Case 2 (gts-1ibp/gts-jxnw): the same bold+italic action, but with a PERSON chip assignee -- exercises \_buildFlushRequests' validEmail/insertPerson branch, the exact branch where gts-1ibp's cumulative one-character-left run-offset shift lived (a case with no assignee never reaches it). Also authored statusless for the same reason as case 1.
+
+ACT-602: {{chip:jane@example.com}} Please **bold this** and _italic that_ today

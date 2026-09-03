@@ -77,6 +77,17 @@
               background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:8px;
               padding:3px 9px;z-index:60;pointer-events:none}
   .buildbadge.env-sit{color:#92400e;border-color:#fde68a;background:#fffbeb}
+  /* Mismatch state of the version footer, plus the update prompt it raises. GAS-Core
+     best-practices/gas-static-frontend "The static page interface contract" req 1-4. */
+  .buildbadge.stale{color:#991b1b;border-color:#fecaca;background:#fef2f2}
+  .updatebanner{position:fixed;top:0;left:0;right:0;z-index:70;display:none;
+                background:#fffbeb;border-bottom:1px solid #fde68a;color:#92400e;
+                padding:9px 14px;font-size:13px}
+  .updatebanner.show{display:block}
+  .updatebanner .inner{max-width:980px;margin:0 auto;display:flex;gap:10px;align-items:center;
+                       justify-content:center;flex-wrap:wrap}
+  .updatebanner button{border:1px solid #fde68a;background:#fff;color:#92400e;border-radius:8px;
+                       padding:4px 10px;font:inherit;cursor:pointer}
 </style>
 </head>
 <body>
@@ -155,6 +166,15 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<!-- Raised only when this published page's build differs from the version the WebApp
+     reports on a response the page already makes (interface contract req 3). -->
+<div class="updatebanner" id="updateBanner">
+  <div class="inner">
+    <span id="updateBannerMsg"></span>
+    <button type="button" id="updateReloadBtn">Reload</button>
+    <button type="button" id="updateDismissBtn">Not now</button>
+  </div>
+</div>
 <div class="buildbadge" id="buildBadge"></div>
 
 <script>
@@ -171,13 +191,81 @@ const NUUC_DISPATCH_URL = 'https://script.google.com/macros/s/AKfycbwmoOPRDThQWD
 const GACTIONSHEET_URL  = STATIC_WEBAPP_URL_;
 const ASSERTION_AUD = 'gactionsheet';
 
+// ---- version footer + stale-client prompt -------------------------------
+// GAS-Core best-practices/gas-static-frontend, "The static page interface contract"
+// (requirements 1-6); F3Go30's static-pages/src/index.html is the reference
+// implementation. This published page and the WebApp it calls deploy together --
+// gas-static's assertPublishedBuild closes the publish window -- but they can still
+// diverge afterwards: a CDN edge serving the previous page, a visitor holding a cached
+// document, a backend later rolled back. These requirements close the RUNTIME window by
+// making the page itself say which halves are actually running.
+const UPDATE_DISMISS_KEY_ = 'nuucAsUpdateDismissed';
 const $buildBadge_ = document.getElementById('buildBadge');
-if (STATIC_BUILD_VERSION_ || STATIC_ENV_LABEL_) {
-  $buildBadge_.textContent = [STATIC_ENV_LABEL_, STATIC_BUILD_VERSION_].filter(Boolean).join(' · ');
-  if (STATIC_ENV_LABEL_ === 'SIT') $buildBadge_.classList.add('env-sit');
-} else {
-  $buildBadge_.textContent = 'unbuilt source';
+const $updateBanner_ = document.getElementById('updateBanner');
+let serverVersion_ = null;
+
+// req 5: a null client build is unbuilt src/ served directly (local dev, Playwright).
+// It has no build to be behind, so that is never staleness.
+function isUpdateAvailable_(clientBuild, serverVersion){
+  return !!(clientBuild && serverVersion && clientBuild !== serverVersion);
 }
+
+// req 3: the CLIENT build is always shown first, because the version someone reads back
+// off this footer during support has to be the one their document is actually running.
+// The server's version is named alongside it only when the two differ -- never instead.
+function formatVersionFooter_(clientBuild, serverVersion){
+  const env = STATIC_ENV_LABEL_ ? STATIC_ENV_LABEL_ + ' \u00b7 ' : '';
+  if (isUpdateAvailable_(clientBuild, serverVersion)) {
+    return env + 'v' + clientBuild + ' (build) \u00b7 server v' + serverVersion;
+  }
+  if (clientBuild) return env + 'v' + clientBuild + ' (build)';
+  if (serverVersion) return env + 'v' + serverVersion + ' (server)';
+  return env + 'unbuilt source';
+}
+
+function dismissedUpdate_(){
+  try { return localStorage.getItem(UPDATE_DISMISS_KEY_); } catch (e) { return null; }
+}
+
+// Repaints the footer and raises/clears the update prompt. Called once at load with no
+// server version yet -- req 1: the footer is populated BEFORE any network call, so a page
+// that cannot reach its backend still shows what it is -- then again from postJson on
+// every backend response that carries one.
+function applyVersionState_(clientBuild, serverVersion){
+  const stale = isUpdateAvailable_(clientBuild, serverVersion);
+  $buildBadge_.textContent = formatVersionFooter_(clientBuild, serverVersion);
+  $buildBadge_.classList.toggle('env-sit', STATIC_ENV_LABEL_ === 'SIT' && !stale);
+  $buildBadge_.classList.toggle('stale', stale);
+  // req 4: dismissal is keyed to the version dismissed, not a boolean. A boolean would
+  // silence every future mismatch; a version key means the next one prompts again.
+  const show = stale && dismissedUpdate_() !== String(serverVersion);
+  if (show) {
+    document.getElementById('updateBannerMsg').textContent =
+      'This page is running v' + clientBuild + ' but the server is on v' + serverVersion +
+      '. Reload to pick up the current version.';
+  }
+  $updateBanner_.classList.toggle('show', show);
+}
+
+document.getElementById('updateReloadBtn').addEventListener('click', () => location.reload());
+document.getElementById('updateDismissBtn').addEventListener('click', () => {
+  try { localStorage.setItem(UPDATE_DISMISS_KEY_, String(serverVersion_)); }
+  catch (e) { /* not fatal -- worst case the prompt returns on the next response */ }
+  $updateBanner_.classList.remove('show');
+});
+
+// req 2: the server's version rides a response the page already makes, never a dedicated
+// call -- src/WebApp.js's _jsonResponse stamps `serverVersion` on EVERY JSON response, so
+// hooking postJson covers every route this page will ever call.
+function noteServerVersion_(res){
+  if (res && res.serverVersion && res.serverVersion !== serverVersion_) {
+    serverVersion_ = res.serverVersion;
+    applyVersionState_(STATIC_BUILD_VERSION_, serverVersion_);
+  }
+  return res;
+}
+
+applyVersionState_(STATIC_BUILD_VERSION_, null);
 
 const state = {
   idToken: null, assertion: null, sub: '', email: '',
@@ -241,12 +329,18 @@ const shortDate = (iso) => iso ? new Date(iso).toLocaleDateString([], {month:'sh
 
 // ---- transport (identical convention to index.html's postJson) --------
 function postJson(url, payload){
+  // req 6: every request to OUR backend carries the client build, so a stale client
+  // surfaces in the WebApp's logs (webapp.version.mismatch) instead of only in a support
+  // call. NUUC_DISPATCH_URL is a different project's backend and is not stamped.
+  const body = (url === GACTIONSHEET_URL)
+    ? Object.assign({ clientVersion: STATIC_BUILD_VERSION_ }, payload)
+    : payload;
   return fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(body)
   }).then(r => r.text()).then(text => {
-    try { return JSON.parse(text); }
+    try { return noteServerVersion_(JSON.parse(text)); }
     catch (e) {
       throw new Error('Non-JSON response from ' + url + ' — the deployment may be mid-propagation: ' +
         text.slice(0, 200));

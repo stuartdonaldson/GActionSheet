@@ -21,6 +21,28 @@ var _ACTION_TOKEN_REGEX_ANCHORED = new RegExp('^(?:' + _ACTION_TOKEN_READ_PREFIX
 var _ACTION_TOKEN_REGEX_ANCHORED_CAPTURED = new RegExp('^(' + _ACTION_TOKEN_READ_PREFIXES.join('|') + ')-(\\d+):');
 
 /**
+ * gts-vsjv — "does this document contain any action markup at all" check,
+ * for the admin untracked-doc scan (src/AdminDocScan.js). Deliberately the
+ * LOOSEST form in this file: either read prefix, number OPTIONAL, colon
+ * required, matched anywhere in the text rather than anchored.
+ *
+ * The optional number is load-bearing, so this cannot just reuse
+ * _ACTION_TOKEN_REGEX. An untracked document is exactly the population that
+ * has never been through a sync, so its actions may still be written in the
+ * bare unnumbered form ('ACT: do the thing') that
+ * _normalizeUnnumberedActions (SyncManager.js) only rewrites to ACT-N: once
+ * the doc IS tracked. Requiring -N here would skip every doc whose actions
+ * have not been numbered yet — i.e. much of what the scan exists to find.
+ *
+ * The leading \\b keeps 'REACT:' from matching as 'ACT:' — a false
+ * positive the previous hand-rolled /ACT(-\\d+)?:/ in AdminDocScan.js had.
+ *
+ * Not for parsing: a hit means "worth showing to an admin as a candidate",
+ * never "this is a parsed action".
+ */
+var _ACTION_TOKEN_SCAN_REGEX = new RegExp('\\b(?:' + _ACTION_TOKEN_READ_PREFIXES.join('|') + ')(?:-\\d+)?:');
+
+/**
  * ADR-0027 rule 6 / gts-xvlu — "looks like an action" check: the same prefix
  * and number as _ACTION_TOKEN_REGEX_ANCHORED, WITHOUT requiring the trailing
  * colon. Used only to detect a paragraph that started the token grammar and

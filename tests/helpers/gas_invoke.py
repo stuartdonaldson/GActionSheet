@@ -38,7 +38,14 @@ def setup_fixture(scenario: str) -> None:
 
 
 def sync_document(doc_id: str) -> None:
-    _invoke("Test: Sync Document", doc_id)
+    # "Sync Document" lives under the "Test" submenu (src/MenuHandler.js) --
+    # the accessible name Playwright locates is the bare item label, not a
+    # "Test: " breadcrumb prefix, so parent must be passed explicitly (as
+    # bootstrap()/ensure_sheet_structure()/initialize_triggers() above
+    # already do for their own "Setup" submenu items). Confirmed live: the
+    # unqualified call ("Test: Sync Document", no parent) raised
+    # `locator.waitFor: Timeout 5000ms exceeded` -- no such menuitem exists.
+    _invoke("Sync Document", doc_id, parent="Test")
 
 
 def sync_all() -> None:

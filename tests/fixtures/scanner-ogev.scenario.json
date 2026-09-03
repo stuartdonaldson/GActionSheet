@@ -1,0 +1,10 @@
+{
+  "name": "scanner-ogev",
+  "input": "scanner-ogev",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "scanner-ogev-expected",
+  "serves": ["gts-ogev"],
+  "batch": "apt-lanes-scanner"
+}

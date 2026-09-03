@@ -365,6 +365,13 @@ function _resolveActiveDocForRead(doc) {
 }
 
 
+/**
+ * ADR-0030: dispatches through the Web App proxy (_callWebAppProxy) instead of
+ * calling insertTrackerTable(docId) in-process under the add-on binding, so
+ * this card action's behavior always matches the deployed
+ * TEST-WEB-APP/PROD-WEB-APP revision regardless of the Marketplace SDK's
+ * pinned deployment version.
+ */
 function onInsertTrackerTable() {
   var doc = DocumentApp.getActiveDocument();
   if (!doc) {
@@ -373,21 +380,26 @@ function onInsertTrackerTable() {
       .build();
   }
 
-  try {
-    insertTrackerTable(doc.getId());
+  var resp = _callWebAppProxy('insert_tracker_table', { docId: doc.getId() }, 'addon.tracker.error');
+  if (!resp || resp.ok !== true) {
     return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Tracker refreshed'))
-      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ includeDocScan: true })))
-      .build();
-  } catch (e) {
-    GasLogger.log('addon.tracker.error', { msg: e.message });
-    GasLogger.flush();
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Tracker refresh failed: ' + e.message))
+      .setNotification(CardService.newNotification().setText(
+        'Tracker refresh failed' + (resp && resp.error ? ': ' + resp.error : '')))
       .build();
   }
+  return CardService.newActionResponseBuilder()
+    .setNotification(CardService.newNotification().setText('Tracker refreshed'))
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ includeDocScan: true })))
+    .build();
 }
 
+/**
+ * ADR-0030: dispatches through the Web App proxy instead of calling
+ * syncDocument()/insertTrackerTable() in-process under the add-on binding — see
+ * onInsertTrackerTable. trackerPresent is read locally (read-only, no
+ * staleness risk per ADR-0030's "out of scope" list) before the proxied sync,
+ * to decide whether the tracker also needs a proxied refresh afterward.
+ */
 function onSyncNow() {
   var doc = DocumentApp.getActiveDocument();
   if (!doc) {
@@ -395,23 +407,32 @@ function onSyncNow() {
       .setNotification(CardService.newNotification().setText('No active document'))
       .build();
   }
-  try {
-    var trackerPresent = _readTrackerTableState(doc).found;
-    syncDocument(doc.getId());
-    if (trackerPresent) {
-      insertTrackerTable(doc.getId());
-    }
+  var trackerPresent = _readTrackerTableState(doc).found;
+  var docId = doc.getId();
+
+  var syncResp = _callWebAppProxy('sync_document', { docId: docId }, 'addon.sync.error');
+  if (!syncResp || syncResp.ok !== true) {
     return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Sync complete'))
-      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ includeDocScan: true })))
-      .build();
-  } catch (e) {
-    GasLogger.log('addon.sync.error', { msg: e.message });
-    GasLogger.flush();
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('Sync failed: ' + e.message))
+      .setNotification(CardService.newNotification().setText(
+        'Sync failed' + (syncResp && syncResp.error ? ': ' + syncResp.error : '')))
       .build();
   }
+
+  if (trackerPresent) {
+    var trackerResp = _callWebAppProxy('insert_tracker_table', { docId: docId }, 'addon.tracker.error');
+    if (!trackerResp || trackerResp.ok !== true) {
+      return CardService.newActionResponseBuilder()
+        .setNotification(CardService.newNotification().setText(
+          'Sync complete, but tracker refresh failed' + (trackerResp && trackerResp.error ? ': ' + trackerResp.error : '')))
+        .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ includeDocScan: true })))
+        .build();
+    }
+  }
+
+  return CardService.newActionResponseBuilder()
+    .setNotification(CardService.newNotification().setText('Sync complete'))
+    .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard({ includeDocScan: true })))
+    .build();
 }
 
 
@@ -869,7 +890,9 @@ function sidebarSetStatus(globalId, newStatus, docId) {
     _patchActionStatus(globalId, newStatus);
     var t4 = Date.now();
 
-    if (hasTracker) insertTrackerTable(docId);
+    // ADR-0030: proxy through the Web App instead of calling insertTrackerTable()
+    // in-process under the add-on binding, matching _patchActionStatus above.
+    if (hasTracker) _callWebAppProxy('insert_tracker_table', { docId: docId }, 'sidebar.tracker.error');
     var t5 = Date.now();
 
     GasLogger.log('sidebar.status-set.complete', {
@@ -930,72 +953,88 @@ function sidebarDeleteAction(globalId, docId) {
 }
 
 /**
+ * Calls a WEBAPP_SECRET-gated Web App route from the add-on binding (ADR-0012's
+ * two-layer auth: OAuth Bearer for GAS's own HTTP gate, WEBAPP_SECRET in the
+ * payload for application auth), so a state-mutating add-on entry point's actual
+ * behavior always matches the currently deployed TEST-WEB-APP/PROD-WEB-APP
+ * revision, never the (possibly stale) Marketplace-pinned binding executing this
+ * call (ADR-0030, knowledge-base/adr/0030-addon-entry-points-proxy-through-webapp.md).
+ *
+ * Returns the parsed JSON response body, or null on any failure (missing
+ * WEBAPP_URL, thrown UrlFetchApp exception, non-200, or a non-JSON body) — the
+ * caller decides how to surface that (toast/alert); this helper only logs it
+ * under errorTag so it isn't silently swallowed.
+ *
+ * @param {string} action    Web App `action` field (e.g. 'patch_action_status').
+ * @param {Object} payload   Action-specific fields merged into the request body.
+ * @param {string} errorTag  GasLogger tag for a failed call.
+ * @return {Object|null}
+ */
+function _callWebAppProxy(action, payload, errorTag) {
+  var webAppUrl = getWebAppUrl();
+  var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
+
+  if (!webAppUrl) {
+    GasLogger.log(errorTag, { msg: 'WEBAPP_URL not set', action: action });
+    return null;
+  }
+
+  var body = {
+    secret:        secret || '',
+    action:        action,
+    clientVersion: BUILD_INFO.version,
+    caller:        _getIdentity(),
+    opId:          (GasLogger.getParentOp() || GasLogger.getCurrentOp())
+  };
+  for (var k in payload) body[k] = payload[k];
+
+  var oauthToken = ScriptApp.getOAuthToken();
+  var resp;
+  try {
+    resp = UrlFetchApp.fetch(webAppUrl, {
+      method:             'post',
+      contentType:        'application/json',
+      muteHttpExceptions: true,
+      headers:            { 'Authorization': 'Bearer ' + oauthToken },
+      payload:            JSON.stringify(body)
+    });
+  } catch (e) {
+    GasLogger.log(errorTag, { msg: action + ' UrlFetchApp threw: ' + e.message, action: action });
+    return null;
+  }
+
+  if (resp.getResponseCode() !== 200) {
+    GasLogger.log(errorTag, { msg: action + ' HTTP ' + resp.getResponseCode(), action: action });
+    return null;
+  }
+
+  try {
+    return JSON.parse(resp.getContentText());
+  } catch (e) {
+    GasLogger.log(errorTag, { msg: action + ' non-JSON response: ' + e.message, action: action });
+    return null;
+  }
+}
+
+/**
  * Calls the Web App proxy to update Status + Date Modified for a single ActionSheet
  * row, and clears any stale 'Dirty' Sync Status flag.  Used by sidebarSetStatus in
  * place of the full syncDocument round-trip.
  */
 function _patchActionStatus(globalId, newStatus) {
-  var webAppUrl = getWebAppUrl();
-  var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
-
-  if (!webAppUrl) {
-    GasLogger.log('sidebar.patch.error', { msg: 'WEBAPP_URL not set' });
-    return;
-  }
-
-  var oauthToken = ScriptApp.getOAuthToken();
-  var resp = UrlFetchApp.fetch(webAppUrl, {
-    method:             'post',
-    contentType:        'application/json',
-    muteHttpExceptions: true,
-    headers:            { 'Authorization': 'Bearer ' + oauthToken },
-    payload:            JSON.stringify({
-      secret:        secret || '',
-      action:        'patch_action_status',
-      clientVersion: BUILD_INFO.version,
-      caller:        _getIdentity(),
-      opId:          (GasLogger.getParentOp() || GasLogger.getCurrentOp()),
-      globalId:      globalId,
-      newStatus:     newStatus
-    })
-  });
-
-  if (resp.getResponseCode() !== 200) {
-    GasLogger.log('sidebar.patch.error', { msg: 'patch_action_status HTTP ' + resp.getResponseCode() });
-  }
+  // Response shape is {patched:0|1} (or {error,patched:0}), not {ok:true} — a
+  // null return here already means _callWebAppProxy logged the failure
+  // (missing WEBAPP_URL / thrown fetch / non-200 / non-JSON); nothing further
+  // to check on success.
+  _callWebAppProxy('patch_action_status', { globalId: globalId, newStatus: newStatus }, 'sidebar.patch.error');
 }
 
 /**
  * Calls the Web App proxy to permanently delete an ActionSheet row by globalId.
  */
 function _deleteActionRowFromSheet(globalId) {
-  var webAppUrl = getWebAppUrl();
-  var secret    = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
-
-  if (!webAppUrl) {
-    GasLogger.log('sidebar.delete.error', { msg: 'WEBAPP_URL not set' });
-    return;
-  }
-
-  var oauthToken = ScriptApp.getOAuthToken();
-  var resp = UrlFetchApp.fetch(webAppUrl, {
-    method:             'post',
-    contentType:        'application/json',
-    muteHttpExceptions: true,
-    headers:            { 'Authorization': 'Bearer ' + oauthToken },
-    payload:            JSON.stringify({
-      secret:        secret || '',
-      action:        'delete_action_row',
-      clientVersion: BUILD_INFO.version,
-      caller:        _getIdentity(),
-      opId:          (GasLogger.getParentOp() || GasLogger.getCurrentOp()),
-      globalId:      globalId
-    })
-  });
-
-  if (resp.getResponseCode() !== 200) {
-    GasLogger.log('sidebar.delete.error', { msg: 'delete_action_row HTTP ' + resp.getResponseCode() });
-  }
+  // Response shape is {deleted:0|1} (or {error,deleted:0}) — see _patchActionStatus.
+  _callWebAppProxy('delete_action_row', { globalId: globalId }, 'sidebar.delete.error');
 }
 
 // ---------------------------------------------------------------------------

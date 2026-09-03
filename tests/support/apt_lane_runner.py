@@ -39,6 +39,21 @@ its input corpus already encodes the flush-triggering condition (a bare
 position), and the batch's own single establishing sync resolves it, exactly
 as stage `apt-scenarios`' generic per-scenario lane already does for the
 degenerate case.
+
+Idempotency (gts-5ktl, staged plan docdata-litter-apt-speed.md stage
+`lane-idempotency`): every lane run ends with ONE further no-op sync and a
+second capture, and each scenario's slice of that second capture is diffed
+against its slice of the first. A converged doc re-synced must reproduce
+itself; a difference is a flush that never settles (ADR-0031's Document-Sync
+idempotency promise) and fails naming the SCENARIO, not the lane. It is the
+runner-level home for the idempotency assertions stages
+`apt-scanner-migration`/`apt-format-migration` could not migrate. Default is
+ON; a scenario whose mutation is inherently multi-sweep declares
+`"idempotent": false` in its scenario.json with the reason recorded there
+(`idempotentReason`). Record-count drift is checked once at the LANE level
+before slicing — a record appended past the last scenario's range falls
+outside every slice and would otherwise be invisible. Cost is one sync per
+LANE, not per scenario.
 """
 from __future__ import annotations
 
@@ -59,6 +74,19 @@ from scn.ai import ai  # noqa: E402
 class LaneResult:
     scenario: "apt_lib.Scenario"
     diff: "apt_lib.AptDiffResult"
+    #: gts-5ktl: this scenario's own slice of the SECOND (no-op sync)
+    #: capture, diffed against its slice of the first. None when the
+    #: scenario declared `"idempotent": false` in its scenario.json.
+    idem_diff: "apt_lib.AptDiffResult | None" = None
+
+    @property
+    def clean(self) -> bool:
+        """True only when the golden diff AND the idempotency diff are both
+        clean. Callers fail on `not r.clean`, never on `not r.diff.clean` --
+        the latter silently drops the second-capture assertion."""
+        if not self.diff.clean:
+            return False
+        return self.idem_diff is None or self.idem_diff.clean
 
 
 def corpus_text(name: str, fixtures_dir: pathlib.Path = FIXTURES_DIR) -> str:
@@ -108,6 +136,50 @@ def run_lane(scn, scenarios: list, fixtures_dir: pathlib.Path = FIXTURES_DIR) ->
     if needs_second_sync:
         scn.sync()  # flushes every sheetWin queued above
 
+    captured = _capture(scn)
+
+    results = []
+    for s in scenarios:
+        start, end = ranges[s.name]
+        captured_slice = apt_lib.slice_records(captured, start, end)
+        expected_text = corpus_text(s.expected_corpus, fixtures_dir)
+        results.append(LaneResult(s, apt_lib.diff_apt(expected_text, captured_slice)))
+
+    # gts-5ktl (stage `lane-idempotency`): ONE further sync with no mutation
+    # applied, then the same capture + per-scenario slice again. A converged
+    # doc re-synced must reproduce itself byte for byte; a difference here is
+    # a flush that never settles (ADR-0031's Document-Sync idempotency
+    # promise) and is attributed to the scenario slice it came from, not to
+    # the lane. Cost is one sync per LANE, not per scenario.
+    if any(s.idempotent for s in scenarios):
+        scn.sync()  # no-op by construction: nothing was mutated since the capture above
+        recaptured = _capture(scn)
+        # Record-count drift is checked at the LANE level before slicing: a
+        # record the second sync appended past the last scenario's range (the
+        # "flush that appends every sweep" shape) falls outside every slice
+        # and would otherwise be invisible to the per-scenario diffs below.
+        first_n = len(apt_lib.split_records(captured))
+        second_n = len(apt_lib.split_records(recaptured))
+        assert first_n == second_n, (
+            "lane NOT IDEMPOTENT (gts-5ktl): a second, no-op sync changed the "
+            f"doc's record count ({first_n} -> {second_n}) — the drift is "
+            "outside any single scenario's slice, so it is reported for the "
+            f"whole lane. Scenario ranges: {ranges!r}"
+        )
+        for r in results:
+            if not r.scenario.idempotent:
+                continue
+            start, end = ranges[r.scenario.name]
+            first = apt_lib.slice_records(captured, start, end)
+            second = apt_lib.slice_records(recaptured, start, end)
+            r.idem_diff = apt_lib.diff_apt(first, second)
+
+    return results
+
+
+def _capture(scn) -> str:
+    """One encode_reference_document round trip, with this run's own docId
+    normalised to the DOC_ID placeholder the goldens spell."""
     resp = scn._post_fixture("encode_reference_document")
     data = resp.get("data") or {}
     assert data.get("ok"), f"encode_reference_document failed: {resp}"
@@ -121,23 +193,23 @@ def run_lane(scn, scenarios: list, fixtures_dir: pathlib.Path = FIXTURES_DIR) ->
     # cannot hardcode the docId, so it spells it as the literal placeholder
     # DOC_ID and this is the one substitution point that makes the two sides
     # comparable.
-    captured = data["apt"].replace(scn.doc_id, "DOC_ID")
-
-    results = []
-    for s in scenarios:
-        start, end = ranges[s.name]
-        captured_slice = apt_lib.slice_records(captured, start, end)
-        expected_text = corpus_text(s.expected_corpus, fixtures_dir)
-        results.append(LaneResult(s, apt_lib.diff_apt(expected_text, captured_slice)))
-    return results
+    return data["apt"].replace(scn.doc_id, "DOC_ID")
 
 
 def format_failures(results: list) -> str:
     lines = []
     for r in results:
-        if r.diff.clean:
-            continue
-        lines.append(f"{r.scenario.name} ({r.scenario.input_corpus} -> {r.scenario.expected_corpus}):")
-        for entry in r.diff.entries:
-            lines.append(f"  [{entry.klass}] record {entry.record_index}: {entry.summary}")
+        if not r.diff.clean:
+            lines.append(
+                f"{r.scenario.name} ({r.scenario.input_corpus} -> {r.scenario.expected_corpus}):"
+            )
+            for entry in r.diff.entries:
+                lines.append(f"  [{entry.klass}] record {entry.record_index}: {entry.summary}")
+        if r.idem_diff is not None and not r.idem_diff.clean:
+            lines.append(
+                f"{r.scenario.name} NOT IDEMPOTENT (gts-5ktl): a second, no-op sync "
+                "changed this scenario's slice; first capture -> second capture:"
+            )
+            for entry in r.idem_diff.entries:
+                lines.append(f"  [{entry.klass}] record {entry.record_index}: {entry.summary}")
     return "\n".join(lines)

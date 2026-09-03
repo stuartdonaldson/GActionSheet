@@ -1,0 +1,9 @@
+<!-- kind: golden -->
+<!-- name: scanner-ogev-expected -->
+<!-- serves: gts-ogev -->
+<!-- generated: 2026-08-30T00:00:00.000Z -->
+
+Case 1 (gts-ogev, act-retire, regression guard): the soft-return path's existing text-based email assignee detection (no PERSON chip involved) is unchanged by the chip-detection fix. The chip-comparison half of gts-ogev's own frozen AC (fast-path vs. soft-return PERSON chip) is NOT migrated here -- gts-i0gk found the soft-return chip case cannot be reproduced through decodeAptIntoDoc at all (the chip resolves to nothing when placed on a non-first soft-return line); see test\_floating\_action\_scanner.py's retirement notes.
+
+context intro<SR>
+[**ACT-642: **](https://northlakeuu.org/NUUTS?cmd=preview&docId=DOC_ID&ain=ACT-642){{chip:jane.doe@example.com}} text email continuation (Open)

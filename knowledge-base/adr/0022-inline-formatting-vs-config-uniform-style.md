@@ -60,6 +60,25 @@ color, and underline exactly as gts-d99c intended.
   rather than silently assume approval. Reverting is a two-line diff
   (`_actionTextStyleRequest` in `SyncManager.js`) if the user vetoes this reading.
 
+## Downstream dependency (added 2026-08-31)
+
+**ADR-0031** (sync entry points and rendering conformance) compares a document's rendered
+character style against Config on user-initiated single-document syncs. This ADR's split is what
+tells that comparison which attributes it may look at:
+
+- `ai_token` range — Config owns all six (`bold`, `italic`, `underline`, `foregroundColor`,
+  `weightedFontFamily`, `fontSize`; see `_aiTokenStyleRequest`'s `fields` mask,
+  `SyncManager.js:3391`). The token is machine-rendered, never author-typed, so there is no
+  author intent to protect.
+- `action_text` range — Config owns **four only**: `fontFamily`, `fontSize`, `color`, `underline`
+  (`_actionTextStyleRequest`'s mask, `SyncManager.js:3437`). **`bold` and `italic` are excluded and
+  must never be compared or asserted**, because this ADR handed them to author-typed inline runs.
+
+A conformance check that compared `action_text` bold/italic would re-flatten per-word author
+formatting on every user sync — reintroducing precisely the defect this ADR exists to prevent.
+The exclusion is recorded here as well as in ADR-0031 because this is where a reader will look
+for it.
+
 ## Open question this ADR does not resolve
 
 Whether options (a) or (c) would be preferred if the user disagrees with (b) — not evaluated

@@ -141,6 +141,7 @@ var CONTRACT_SCHEMA = Object.freeze({
       'upsert_action_rows',
       'sync_action_rows',
       'sync_document',
+      'insert_tracker_table',
       'verify_action_rows',
       'mark_doc_not_found',
       'delete_action_row',
@@ -200,6 +201,24 @@ var CONTRACT_SCHEMA = Object.freeze({
       // deliberately compare actionText/action only — `runs` never
       // participates in identity, so a formatting-only change does not
       // orphan a row, mark it Dirty, or force a tracker re-render.
+      //
+      // SCOPE OF THAT RULE — read before citing it (ADR-0031 §Context):
+      // it is about `runs` participating in ROW IDENTITY, i.e. the
+      // DOC -> SHEET direction. A user bolding a word in the document must
+      // not make their row look content-changed and get orphaned. That is
+      // all it says.
+      //
+      // It is NOT a general "formatting never triggers a flush" invariant,
+      // and has been misread as one (see ADR-0031 §Context for the specific
+      // misreading and what it cost). Config-driven rendering conformance —
+      // SR Indent / Field SR Indent / ai_token / action_text, ADR-0031 —
+      // compares the DOCUMENT against CONFIG, a different axis entirely. It
+      // never touches _rowIdentityKey, sheetWins, orphan detection or
+      // _trackerRowsMatch, so it needs no carve-out from this note and does
+      // not conflict with it. Precedent for a rendering-conformance flush
+      // predicate already exists in tree: SyncManager.js's missing-explicit-
+      // status materialize loop flushes an action whose content matches the
+      // sheet purely because its rendered form lacks a status token.
       // gts-u0kh (2026-08-26): each docState row MAY additionally carry
       // `customFields: {FieldName: {text, runs}}` (ADR-0027 rule 5/5a scanned
       // field-line blocks). ADDITIVE and OPTIONAL, same contract as `runs`
@@ -230,6 +249,20 @@ var CONTRACT_SCHEMA = Object.freeze({
         request:  Object.freeze(['action', 'secret', 'docId', 'force']),
         response: Object.freeze(['ok', 'docId', 'forced', 'result']),
         completionSignal: "synchronous response; GasLogger 'sync.complete' with forced=<force>"
+      }),
+
+      // insert_tracker_table — WEBAPP_SECRET-gated proxy target for
+      // insertTrackerTable(docId) (gts-6vzm, ADR-0030
+      // knowledge-base/adr/0030-addon-entry-points-proxy-through-webapp.md): the
+      // document-mutation half of the add-on entry points not already covered by
+      // sync_document. `result` is always null (insertTrackerTable() has no
+      // return value) — durable state (the rendered tracker table) is the oracle.
+      //   Completion signal: GasLogger 'tracker.insert.complete' {docId, rowCount},
+      //   or 'tracker.skip' {docId, ...} when the rendered table already matches.
+      insert_tracker_table: Object.freeze({
+        request:  Object.freeze(['action', 'secret', 'docId']),
+        response: Object.freeze(['ok', 'docId', 'result']),
+        completionSignal: "synchronous response; GasLogger 'tracker.insert.complete' or 'tracker.skip'"
       }),
 
       // edit_action_row — simulate a user editing one ActionSheet field over the API.

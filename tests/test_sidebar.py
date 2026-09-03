@@ -161,6 +161,41 @@ def test_tracker_insert_button(settings, browser_page, request):
 # test_status_mutation_only_mutated_row — migrates sidebar_tracker_insert.test.js AC2
 # ---------------------------------------------------------------------------
 
+
+def _checkpoint_with_tracker_retry(s, kind, *, on=None, label=None,
+                                    timeout_s=45.0, interval_s=2.0):
+    """Bounded-retry wrapper around session.checkpoint() (gts-h7br).
+
+    scn.engine._poll_until_pass only bounded-polls Surface.UI (engine.py:242) --
+    extending that gate to Surface.TRACKER was considered (shape 1) but rejected:
+    session.checkpoint()'s `read` closure caches downloaded docx bytes for the
+    lifetime of one checkpoint()/drain() call (session.py:1072-1081, "DOC and
+    TRACKER share the same .docx download"), and _poll_until_pass calls that same
+    `read` closure repeatedly *within* one drain() call. Every poll iteration would
+    therefore re-parse the same stale bytes rather than re-observing live state --
+    the poll would silently degenerate into "sleep until timeout, fail with the
+    same error." Making shape 1 correct would require plumbing a force-refresh
+    signal through the shared read closure, a bigger and riskier change than this
+    harness-resilience bead's scope.
+
+    Shape 2 (this wrapper) retries at the session.checkpoint() call boundary
+    instead: each retry is a brand-new checkpoint()/drain() invocation, which
+    builds a brand-new `read` closure with its own fresh `_bytes_cache` -- so a
+    retry genuinely re-downloads and re-parses live TRACKER/DOC state. Already-
+    passed surfaces on an expectation are discarded from `remaining` by the first
+    attempt, so a retry only re-evaluates what's still outstanding (engine.py's
+    drain() is idempotent over `remaining`) -- safe to call repeatedly.
+    """
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            return s.checkpoint(kind, on=on, label=label)
+        except AssertionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(interval_s)
+
+
 def test_status_mutation_only_mutated_row(settings, browser_page, request):
     """After a per-row status change, only the mutated tracker row differs.
 
@@ -195,7 +230,19 @@ def test_status_mutation_only_mutated_row(settings, browser_page, request):
         new_status = "In Progress" if changed.status != "In Progress" else "Open"
 
         # ENTRY POINT: per-row sidebar status control (sidebarSetStatus)
-        s.ui.sidebar_set_status(changed, new_status, timeout="15s")
+        # gts-pare: sidebarSetStatus's onSetActionStatus click is a single synchronous
+        # CardService RPC that now chains scanAndClose + a REST doc-paragraph flush +
+        # the patch_action_status Web App proxy call + (when a tracker is present) an
+        # insert_tracker_table Web App proxy call (ADR-0030 moved tracker refresh off
+        # the add-on binding onto its own HTTP round trip). Axiom-measured
+        # sidebar.status-set.complete totals for this exact hasTracker=True shape run
+        # 12.3s-23.5s (trackerRefresh alone: 5.6-8.3s) -- comfortably over the previous
+        # 15s budget, which UiDriver.sidebar_set_status's busy-wait silently swallows on
+        # timeout (try/except around wait_for), so the test proceeded to read TRACKER
+        # before the tracker table had actually been rewritten server-side ("row still
+        # Open", DrainInvariantError at close on the still-pending TRACKER surface).
+        # 45s gives headroom above the observed worst case.
+        s.ui.sidebar_set_status(changed, new_status, timeout="45s")
         changed.status = new_status
         s.sync()   # converge async mutation to doc + tracker
 
@@ -204,7 +251,12 @@ def test_status_mutation_only_mutated_row(settings, browser_page, request):
             s.verify(a, on=TRACKER, tag="[sidebar mutation-baseline]")                          # must hold baseline
         s.verify(changed, on=TRACKER, status=new_status, tag="[sidebar mutation-changed]")     # must hold new
         s.verify_consistency(scope=DOC)
-        s.checkpoint(INTEGRITY)   # drains all three; unchanged rows must not drift
+        # gts-h7br: TRACKER refresh (insert_tracker_table) is a distinct downstream
+        # write from the sidebar status-set RPC and has observed lag beyond s.sync()'s
+        # convergence -- bounded-retry this checkpoint the same way UI checks already
+        # get via within= (see _checkpoint_with_tracker_retry docstring for why the
+        # retry happens at the checkpoint() boundary rather than via engine within=).
+        _checkpoint_with_tracker_retry(s, INTEGRITY)   # drains all three; unchanged rows must not drift
     finally:
         s.engine.close()  # trashing via request finalizer, not here (gts-3zl5)
 

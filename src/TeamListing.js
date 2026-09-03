@@ -109,7 +109,12 @@ function _handleListTeamActions(payload) {
     tier:          resolved.tier,
     teamId:        teamId,
     actions:       actions,
-    statusOptions: getStatusIconButtons()
+    statusOptions: getStatusIconButtons(),
+    // gts-gwyg: lets the client show/hide the admin "scan for untracked
+    // docs" control per-team without ever holding an admin credential
+    // itself — real authorization is re-checked server-side on the scan
+    // calls (_handleAdminScanStart/Status/Resume, src/AdminDocScan.js).
+    isAdmin:       _isAdminUser(resolved.email)
   };
   if (teams) response.teams = teams;
 

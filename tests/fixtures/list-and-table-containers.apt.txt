@@ -5,7 +5,7 @@
 
 Case 1 (gts-83s5): a body-level bulleted list item carrying an action token round-trips as a real Docs list item, not a plain paragraph -- and survives a flush as one. Authored statusless so the establishing sync must locate and rewrite the occurrence INSIDE the LIST_ITEM container (_buildFlushRequests' occurrence scanner), not merely decode and re-encode it.
 
-<LI> ACT-60: jane@example.com body-level list item action
+<LI> ACT-560: jane@example.com body-level list item action
 
 Case 2 (gts-83s5): an ordinary body-level paragraph between the list item and the table, so the list item above is provably a distinct container rather than merely reading the same as plain text once flushed.
 
@@ -17,7 +17,7 @@ Case 3 (gts-83s5, dq6t AC-3): a 2x2 table with distinct actions in cell(0,0) and
 
 <CELL 0,0>
 
-ACT-61: jane@example.com table cell plain action (Open)
+ACT-561: jane@example.com table cell plain action (Open)
 
 <CELL 0,1>
 
@@ -31,7 +31,7 @@ ACT-61: jane@example.com table cell plain action (Open)
 
 Case 3b (gts-83s5, dq6t AC-5): a bulleted list item inside a table cell -- the LIST\_ITEM container works nested inside a CELL container the same way it does at body level, including under a flush. Authored statusless so the establishing sync must reach this occurrence through both nestings at once (the item.table branch of the occurrence scanner AND a list item), the combination neither create-lane-table-cell nor case 1 covers on its own.
 
-<LI> ACT-62: jane@example.com table cell list item action
+<LI> ACT-562: jane@example.com table cell list item action
 
 </TABLE>
 

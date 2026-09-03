@@ -15,6 +15,12 @@ import time
 
 from scripts import system_metrics as sm
 
+import pytest
+
+# gts-aqpk: fast/local tier -- this module makes no live GAS/Google round trip
+# (verified offline with sockets blocked). See docs/OPERATIONS.md "Test tiers".
+pytestmark = pytest.mark.no_live_session
+
 
 def _write(path, content):
     path.write_text(content)

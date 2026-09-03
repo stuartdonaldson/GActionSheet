@@ -490,7 +490,7 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
             new_rows.sort(key=lambda r: int(r.action_id.split("-")[1]))
             ns = [int(r.action_id.split("-")[1]) for r in new_rows]
             if ns != list(range(ns[0], ns[0] + len(ns))):
-                return f"new AI-N not sequential: {ns}"
+                return f"new ACT-N not sequential: {ns}"
             carried = {r.action for r in new_rows}
             if src1_action.action not in carried or src2_action.action not in carried:
                 return f"source action text not carried over: {carried}"
@@ -526,7 +526,7 @@ def test_import_flow_forward_sync(settings, gas_log_dir, browser_page, request):
                     return f"source row {src_action.global_id} not found after import"
                 if row.status != "Forwarded":
                     return f"source row {src_action.global_id} status={row.status!r}, expected 'Forwarded'"
-                if f"[Forward:{target_doc_name} AI-" not in row.action:
+                if f"[Forward:{target_doc_name} ACT-" not in row.action:
                     return f"source row {src_action.global_id} action missing forward suffix: {row.action!r}"
                 if row.sync_status != "Dirty":
                     return f"source row {src_action.global_id} sync_status={row.sync_status!r}, expected 'Dirty'"

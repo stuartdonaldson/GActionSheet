@@ -506,15 +506,27 @@ def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
             after=fence,
         )
 
-        webapp_entries = collect_logs(
-            gas_log_dir,
-            matches_op(
-                lambda e: e.get("tag") == "webapp.request"
-                and (e.get("data") or {}).get("action") == "sync_action_rows",
-                sweep_op,
-            ),
-            after=fence,
-        )
+        # gts-6pws: wait_for_log(sync.all.complete) above only proves the
+        # sweep's own top-level op is done -- it races Axiom ingestion lag on
+        # the per-doc webapp.request entries this assertion also needs, which
+        # can land slightly after sync.all.complete does. Poll collect_logs
+        # (short timeout, same shape as wait_for_log's own retry loop) until
+        # both expected entries are queryable instead of a single-shot query.
+        webapp_deadline = time.monotonic() + 15
+        webapp_entries = []
+        while time.monotonic() < webapp_deadline:
+            webapp_entries = collect_logs(
+                gas_log_dir,
+                matches_op(
+                    lambda e: e.get("tag") == "webapp.request"
+                    and (e.get("data") or {}).get("action") == "sync_action_rows",
+                    sweep_op,
+                ),
+                after=fence,
+            )
+            if len(webapp_entries) >= 2:
+                break
+            time.sleep(1.0)
         assert len(webapp_entries) >= 2, (
             f"[j8cn] expected ≥2 sync_action_rows webapp.request entries for THIS sweep "
             f"(one per doc), got {webapp_entries!r}"
@@ -643,7 +655,15 @@ def test_sync_all_integrity_and_listing_miss_batch(settings, gas_log_dir, reques
             "[cduk] set_docdata_row did not write stale actionCount=99"
         )
 
-        # AC3: seed an orphan DocData row (fake fileId, no Actions rows)
+        # AC3: seed an orphan DocData row (fake fileId, no Actions rows).
+        # gts-30cq briefly widened ArchiveManager._evictStaleDocData to evict
+        # on "no Actions row" alone, and this became an eviction assertion.
+        # gts-avvl reverted that: absence of Actions rows is not an eviction
+        # signal (ADR-0031 amendment 2026-09-01 -- a DocData row with no live
+        # Actions rows is a normal state), because the Team Portal
+        # scan-and-track flow mints exactly this shape and the widened
+        # predicate destroyed three of the operator's freshly-tracked docs.
+        # Back to a SURVIVAL assertion on this sweep; see below.
         cduk_orphan_id = secrets.token_urlsafe(33)[:44]
         cduk._post_fixture("set_docdata_row", {
             "fileId": cduk_orphan_id, "actionCount": 55, "resolvedCount": 3, "docName": "Orphan",
@@ -694,10 +714,18 @@ def test_sync_all_integrity_and_listing_miss_batch(settings, gas_log_dir, reques
             assert cduk_after.get("docName") == cduk_initial_name, (
                 f"[cduk AC2] docName: expected {cduk_initial_name!r}, got {cduk_after.get('docName')!r}"
             )
+        # AC3 (gts-avvl): the orphan row has no Actions row referencing it and a
+        # blank syncStatus, so ArchiveManager.archive() must NOT evict it on
+        # this sweep. Its fake fileId is unreachable in Drive, so syncAll's own
+        # walk marks it 'Doc Not Found' during this same sweep -- but archive()
+        # runs BEFORE that marking, which is the grace period. It becomes
+        # evictable on the NEXT sweep, asserted separately in
+        # tests/test_docdata_orphan_eviction.py.
         cduk_orphan_after = _docdata(cduk, file_id=cduk_orphan_id)
-        assert cduk_orphan_after is not None, "[cduk AC3] orphan DocData row was deleted"
-        assert cduk_orphan_after.get("actionCount") == 55, (
-            f"[cduk AC3] orphan actionCount modified: expected 55, got {cduk_orphan_after.get('actionCount')!r}"
+        assert cduk_orphan_after is not None, (
+            f"[cduk AC3] orphan DocData row (blank syncStatus, no Actions rows) was "
+            f"EVICTED on the sweep that first observed it. Absence of Actions rows is "
+            f"not an eviction signal (gts-avvl / ADR-0031 amendment 2026-09-01)."
         )
         if gas_log_dir:
             from tests.helpers.gas_log import wait_for_log
@@ -913,6 +941,120 @@ def test_sync_all_exhausted_drive_5xx_retry_still_recovers_via_fallback(settings
                 f"[pm72] row {row.global_id!r} marked 'Doc Not Found' after an "
                 f"exhausted-retry bulk-listing failure -- per-doc fallback did not save it"
             )
+    finally:
+        # Doc-trashing deferred to new_doc(request=request)'s pytest
+        # finalizer (gts-hroj).
+        scn.engine.close()
+
+
+# ---------------------------------------------------------------------------
+# gts-232z: bounded retry on _syncActionRows' own self-call non-200
+# ---------------------------------------------------------------------------
+#
+# gts-u947's regression-verify sweep (2026-09-01) hit
+# 'sync_action_rows failed: HTTP 302' from _syncActionRows' UrlFetchApp.fetch
+# self-call back into this same deployed WebApp -- the documented /exec ->
+# script.googleusercontent.com routing glitch every OTHER caller already
+# retries (scn/session.py::_http_post client-side, TestFixtures.js's opId-
+# dedupe comment, _fetchDriveWithRetry for Drive REST) but this one call site
+# did not. SyncManager.js's _syncActionRows now wraps its self-call fetch in
+# a bounded retry (3 attempts, 1s backoff, mirroring _fetchDriveWithRetry's
+# shape) via _webAppFetchTestOverrideCode. The
+# 'sync_all_force_webapp_non200' fixture drives the real syncAll() entry
+# point with PropertiesService fault-injection
+# (_TEST_FORCE_WEBAPP_NON200_COUNT) standing in for the real routing glitch,
+# so this is provable without waiting for a real 302 to line up with a test
+# run. Backstop: pre-fix, ANY forced-non-200 count -- even 1 -- logs
+# sync.error immediately on the first attempt with no retry, so both
+# assertions below fail against that build and pass against the current one.
+
+def test_sync_all_retries_transient_webapp_non200(settings, gas_log_dir, request):
+    """[gts-232z] A single transient non-200 (within the 3-attempt retry
+    budget) from _syncActionRows' self-call is absorbed by the bounded
+    retry: sync.actionRows.retry is logged for the forced attempt, no
+    sync.error is logged, and the row's sync_status is unaffected."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: gts-232z transient-non200 recovery action")
+        scn.sync()
+
+        pre_rows = scn.find_sheet_actions()
+        assert pre_rows, "[gts-232z] expected >=1 Actions row before the forced-non200 sweep"
+        pre_statuses = {r.global_id: r.sync_status for r in pre_rows}
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs, assert_no_log, wait_for_log
+            fence = clear_logs(gas_log_dir)
+        else:
+            fence = 0.0
+
+        _post_fixture_patient(scn, "sync_all_force_webapp_non200", {"fails": 1})
+
+        if gas_log_dir:
+            wait_for_log(
+                gas_log_dir,
+                lambda e: e.get("tag") == "sync.actionRows.retry",
+                timeout_s=30,
+                after=fence,
+            )
+            assert_no_log(
+                gas_log_dir, fence,
+                lambda e: e.get("tag") == "sync.error"
+                and "sync_action_rows failed" in (e.get("data", {}).get("msg") or ""),
+                "[gts-232z] sync.error logged for a single forced non-200 "
+                "-- the bounded retry did not absorb it",
+            )
+
+        post_rows = scn.find_sheet_actions()
+        assert len(post_rows) == len(pre_rows), (
+            f"[gts-232z] Actions row count changed after a forced-non200-recovery sweep: "
+            f"before={len(pre_rows)} after={len(post_rows)}"
+        )
+        for row in post_rows:
+            prior = pre_statuses.get(row.global_id)
+            assert row.sync_status == (prior or ""), (
+                f"[gts-232z] row {row.global_id!r} sync_status changed: "
+                f"{prior!r} -> {row.sync_status!r}"
+            )
+    finally:
+        # Doc-trashing deferred to new_doc(request=request)'s pytest
+        # finalizer (gts-hroj).
+        scn.engine.close()
+
+
+def test_sync_all_exhausted_webapp_non200_retry_still_logs_error(settings, gas_log_dir, request):
+    """[gts-232z] A persistent non-200 (beyond the 3-attempt retry budget)
+    from _syncActionRows' self-call still logs sync.error once the bound is
+    exhausted -- proving the retry is bounded, not silently infinite or
+    skipped."""
+    scn = ScenarioSession.new_doc(settings, request=request)
+    try:
+        scn.append_paragraph("AI-1: gts-232z exhausted-retry action")
+        scn.sync()
+
+        pre_rows = scn.find_sheet_actions()
+        assert pre_rows, "[gts-232z] expected >=1 Actions row before the forced-non200 sweep"
+
+        if gas_log_dir:
+            from tests.helpers.gas_log import clear_logs, wait_for_log
+            fence = clear_logs(gas_log_dir)
+
+        _post_fixture_patient(scn, "sync_all_force_webapp_non200", {"fails": 5})
+
+        if gas_log_dir:
+            wait_for_log(
+                gas_log_dir,
+                lambda e: e.get("tag") == "sync.error"
+                and "sync_action_rows failed" in (e.get("data", {}).get("msg") or ""),
+                timeout_s=30,
+                after=fence,
+            )
+
+        post_rows = scn.find_sheet_actions()
+        assert len(post_rows) == len(pre_rows), (
+            f"[gts-232z] Actions row count changed after an exhausted-retry sweep: "
+            f"before={len(pre_rows)} after={len(post_rows)}"
+        )
     finally:
         # Doc-trashing deferred to new_doc(request=request)'s pytest
         # finalizer (gts-hroj).

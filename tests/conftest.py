@@ -15,8 +15,23 @@ _TEST_RESULTS = pathlib.Path(__file__).parent.parent / "test-results"
 _pytest_config = None
 
 # --- gts-y1eg: progress counter + duration/baseline instrumentation state --
-# Session-lifetime, single-process, serial suite (no xdist) — plain module
-# globals are safe here; see duration_instrumentation.py for the pure logic.
+# Session-lifetime, single-process state; see duration_instrumentation.py for
+# the pure logic.
+#
+# gts-xvgl (xdist): under `-n`, BOTH the worker process and the controller run
+# pytest_runtest_logstart/logreport for the same test — the worker natively,
+# the controller again when the worker's report is forwarded to it. Left
+# ungated that double-counts everything: measured 132 JSONL records for 66
+# tests, every nodeid twice, plus N+1 processes read-modify-WRITING the single
+# tests/.pytest_duration_baseline.json through one fixed `.tmp` name
+# (di.save_baseline replaces the whole file) — a last-writer-wins race that
+# silently discards other workers' samples. `_duration_enabled` therefore gates
+# the instrumentation off in WORKERS only (`workerinput` exists only there).
+# The controller is a single process that sees every test exactly once, so it
+# keeps doing the accounting: under `-n` the counter, the JSONL trend records
+# and the baseline update all still work, and remain race-free. What is lost is
+# only per-phase fidelity ordering — [n/total] counts completions, not starts.
+_duration_enabled = True
 _duration_total = 0
 _duration_index_map: dict[str, int] = {}
 _duration_next_index = 0
@@ -27,14 +42,41 @@ _duration_outcome: dict[str, str] = {}
 
 
 def pytest_configure(config):
-    global _pytest_config, _duration_run_id, _duration_baseline
+    global _pytest_config, _duration_run_id, _duration_baseline, _duration_enabled
     _pytest_config = config
+    # gts-xvgl: `workerinput` exists only on an xdist worker's config.
+    _duration_enabled = not hasattr(config, "workerinput")
     _duration_run_id = datetime.datetime.now(datetime.timezone.utc).strftime("run-%Y%m%dT%H%M%SZ")
-    _duration_baseline = di.load_baseline()
+    _duration_baseline = di.load_baseline() if _duration_enabled else {}
 
 
 def pytest_collection_modifyitems(session, config, items):
+    """Progress-counter total, plus gts-aqpk's tier classification.
+
+    Tiering is one explicit opt-in marker (`no_live_session`, applied per
+    module) with its complement derived here, rather than two hand-applied
+    markers or a directory split:
+
+    * `-m no_live_session` selects the fast/local tier -- and, because
+      `_session_is_no_live_session` below sees an all-marked `session.items`
+      once the deselection has happened, the four live-session autouse
+      pre-flights skip themselves automatically. One marker does both jobs;
+      a separate `local` marker would have to be kept in sync with it.
+    * `live` is stamped here onto everything NOT carrying `no_live_session`,
+      so `-m live` is exact and every collected item is classified by
+      construction. A new test file added tomorrow with no marker at all
+      lands in `live` -- the safe default (it pays the pre-flight and the
+      round-trip cost it may or may not need) rather than silently joining a
+      tier that skips the pre-flights it depends on.
+
+    This hook runs ahead of pytest's own mark-expression deselection (conftest
+    plugins are registered after, and so are called before, the builtin `mark`
+    plugin), which is what makes `-m live` resolvable at all.
+    """
     global _duration_total
+    for item in items:
+        if item.get_closest_marker("no_live_session") is None:
+            item.add_marker(pytest.mark.live)
     _duration_total = len(items)
 
 
@@ -58,6 +100,8 @@ def _terminal_writeline(line: str) -> None:
 
 def pytest_runtest_logstart(nodeid, location):
     global _duration_next_index
+    if not _duration_enabled:
+        return
     _duration_next_index += 1
     _duration_index_map[nodeid] = _duration_next_index
     _terminal_writeline(f"[{_timestamp()}] {di.format_start_line(_duration_next_index, _duration_total, nodeid)}")
@@ -70,7 +114,7 @@ def pytest_runtest_logreport(report):
     Report-only: this never raises and never touches the test outcome — a
     failure anywhere in here must not mask the real pass/fail signal.
     """
-    if report.when not in ("setup", "call", "teardown"):
+    if not _duration_enabled or report.when not in ("setup", "call", "teardown"):
         return
     global _duration_baseline
     try:
@@ -313,8 +357,43 @@ def _check_auth_session_alive(request):
         )
 
 
+def _invoke_preflight_fixture(name, settings, **kwargs):
+    """invoke_fixture, with GAS test-token rejection turned into a single
+    pytest.exit instead of a raised exception (gts-d6nz).
+
+    Both session-scoped autouse fixtures below (_reset_test_state,
+    _purge_stale_test_docs) already make the first live GAS calls of the
+    session, each carrying the real testToken -- gts-5959 root-caused a
+    177-failure sweep to exactly this call rejecting the token
+    ('test-token-unauthorized') while local.settings.json's cached
+    testTokenExpiresAt was still in the future (a *second* deploy:test run,
+    concurrent or later, silently overwrote the single server-side token
+    value). Left as a bare raise, a session-scoped autouse fixture's setup
+    failure is cached by pytest and replayed as an identical ERROR on every
+    one of the suite's ~635 tests -- exactly the fan-out the incident
+    reported. There is no additional live call here: this wraps the call
+    these fixtures were already making, so it adds no per-test overhead
+    (session-scoped, runs once, same two round trips as before).
+
+    A test that constructs FixtureTokenError itself by calling invoke_fixture
+    directly (tests/test_fixture_invoke_retry.py) never goes through this
+    helper or these fixtures, so it is unaffected.
+    """
+    from tests.helpers.fixture_invoke import FixtureTokenError, invoke_fixture
+
+    try:
+        return invoke_fixture(name, "", settings, **kwargs)
+    except FixtureTokenError as exc:
+        pytest.exit(
+            f"Test token pre-flight check failed ({name}): {exc} "
+            "Run 'pnpm run deploy:test' to mint and register a fresh token, "
+            "then re-run the suite.",
+            returncode=1,
+        )
+
+
 @pytest.fixture(scope="session", autouse=True)
-def _reset_test_state(request, settings):
+def _reset_test_state(request):
     """Clear transient '_TEST_*' script-property toggles before this session's
     first test runs (gts-rvwu follow-up).
 
@@ -327,16 +406,28 @@ def _reset_test_state(request, settings):
     Deliberately does not touch DISCOVERY_*/TEAMSCOPE_FOLDER_* — those are
     memoized fixture caches meant to persist across sessions (see
     'reset_test_state' in src/TestFixtures.js for the full rationale).
+
+    gts-d6nz: this is also the suite's test-token pre-flight -- the first
+    live call carrying the real testToken, before any test body runs. See
+    _invoke_preflight_fixture for why a token rejection here exits the whole
+    session instead of failing every test individually.
+
+    gts-aqpk: `settings` is loaded inside the body, not requested as a fixture
+    parameter. pytest resolves a fixture's arguments before it runs the body,
+    so taking `settings` here made _load_settings() -- and therefore the
+    existence of local.settings.json -- a hard precondition of EVERY test in
+    the suite, including the fast/local tier that never makes a live call
+    (measured: 626 errors with the file moved aside, all from this argument).
+    The no_live_session early-return above is only reachable if nothing is
+    eagerly resolved ahead of it.
     """
     if _session_is_no_live_session(request.session):
         return
-    from tests.helpers.fixture_invoke import invoke_fixture
-
-    invoke_fixture("reset_test_state", "", settings, timeout=60)
+    _invoke_preflight_fixture("reset_test_state", _load_settings(), timeout=60)
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _purge_stale_test_docs(request, settings, _reset_test_state):
+def _purge_stale_test_docs(request, _reset_test_state):
     """Bound the shared TEST corpus's growth by evicting aged-out 'Doc Not
     Found' rows before this session's first test runs (gts-4m7l).
 
@@ -353,9 +444,7 @@ def _purge_stale_test_docs(request, settings, _reset_test_state):
     """
     if _session_is_no_live_session(request.session):
         return
-    from tests.helpers.fixture_invoke import invoke_fixture
-
-    invoke_fixture("purge_stale_test_docs", "", settings, timeout=120)
+    _invoke_preflight_fixture("purge_stale_test_docs", _load_settings(), timeout=120)
 
 
 @pytest.fixture(scope="session")
@@ -364,7 +453,7 @@ def test_sheet_id(settings):
 
 
 @pytest.fixture(scope="session")
-def test_doc_id(settings):
+def test_doc_id(settings, request):
     """Per-run clone of the master template doc.
 
     Creates a named clone at session start, yields the clone ID to all tests,
@@ -375,6 +464,17 @@ def test_doc_id(settings):
     menu-driven equivalent (menuBeginTestSession/menuEndTestSession).
 
     Uses HTTP fixture invocation (invoke_fixture) — no browser required.
+
+    gts-z55w: teardown is registered via request.addfinalizer — the same
+    backstop ScenarioSession.new_doc() uses for its own clone (_deferred_trash,
+    scn/session.py:556) — rather than left as code after `yield`. A finalizer
+    callback is reachable directly by pytest's teardown machinery without
+    depending on this generator being resumed past `yield`; 28
+    `GActionSheet-Test-session-*` clones were found leaked in Drive (alive
+    since 2026-06-11) from runs that never reached that point. The callback is
+    idempotent (guarded by `_ended`) and swallows its own POST failure so a
+    teardown-time network blip can't mask the real test failure that
+    triggered teardown.
     """
     from tests.helpers.fixture_invoke import invoke_fixture
 
@@ -382,12 +482,23 @@ def test_doc_id(settings):
     result = invoke_fixture("begin_test_session", master_doc_id, settings, timeout=180)
     clone_id = result["data"]["cloneId"]
 
-    yield clone_id
+    _ended = {"done": False}
 
-    invoke_fixture(
-        "end_test_session", clone_id, settings,
-        extra={"masterDocId": master_doc_id}, timeout=120,
-    )
+    def _end_session():
+        if _ended["done"]:
+            return
+        _ended["done"] = True
+        try:
+            invoke_fixture(
+                "end_test_session", clone_id, settings,
+                extra={"masterDocId": master_doc_id}, timeout=120,
+            )
+        except Exception:
+            pass
+
+    request.addfinalizer(_end_session)
+
+    yield clone_id
 
 
 @pytest.fixture(scope="session")

@@ -120,14 +120,42 @@ function _openActionSheetSpreadsheet() {
  * @returns {Object}
  */
 function _readTrackerSheetRows(ss, docId) {
+  // gts-5kyu Stage 1: routed through the per-execution snapshot so N calls to
+  // insertTrackerTable() inside one execution (EditorAddonCard.js's
+  // _processPendingSheetUpdates tracker-refresh loop, the AC0-measured O(N)
+  // case) pay ONE Actions-sheet read total, not one pair per doc. Falls back
+  // to the original inline read (below) if the snapshot builder ever throws
+  // -- this optimization must never be why a sync fails.
+  var snap = _actionsSnapshot(ss);
+  if (!snap) return _readTrackerSheetRowsInline(ss, docId);
+  if (snap.numRows === 0) return {};
+
+  return _extractTrackerSheetRows(snap.data, snap.formulas, docId);
+}
+
+/** Original inline read, kept as the fallback path when the snapshot errors. */
+function _readTrackerSheetRowsInline(ss, docId) {
   var sheet = ss.getSheetByName('Actions');
   if (!sheet || sheet.getLastRow() < 2) return {};
 
   var numRows  = sheet.getLastRow() - 1;
   var data     = sheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
+  _countActionsRead('getValues');
   var _TC      = CONTRACT_SCHEMA.sheetAction.columnsByField;
   var formulas = sheet.getRange(2, _TC.document_formula, numRows, 1).getFormulas();
-  var result   = {};
+  _countActionsRead('getFormulas');
+
+  return _extractTrackerSheetRows(data, formulas, docId);
+}
+
+/**
+ * Shared per-row extraction, unchanged from the pre-gts-5kyu implementation
+ * (AC3: byte-identical output) -- only WHERE data/formulas come from moved,
+ * never HOW they are turned into the result.
+ */
+function _extractTrackerSheetRows(data, formulas, docId) {
+  var _TC    = CONTRACT_SCHEMA.sheetAction.columnsByField;
+  var result = {};
 
   for (var i = 0; i < data.length; i++) {
     var formula = formulas[i][0] || '';

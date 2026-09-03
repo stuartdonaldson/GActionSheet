@@ -1,6 +1,9 @@
 """apt_lib.py — shared pure-Python core for Action Portable Text (APT) tooling
-(gts-snub, gts-x9un, gts-ndb8; staged plan knowledge-base/staging/apt-testing.md,
-stages `apt-differ` and `apt-scenarios`).
+(gts-snub, gts-x9un, gts-ndb8; designed across stages `apt-differ` and
+`apt-scenarios` of the staged plan that built this tooling — deleted on close,
+per Pattern D; its numbered "decision N" design calls cited throughout this
+module are reconstructed at docs/interfaces/action-portable-text.md
+§Tooling design decisions, the durable home its own header promised).
 
 Three responsibilities, kept in one module per decision 8 (the differ must
 have exactly one implementation shared by the CLI and by pytest — this module
@@ -70,6 +73,21 @@ _N_TOKEN_MARKUP_RE = re.compile(r"^(\[\*\*)?(ACT|AI)-(\d+):")
 # surfacing the same latent gap a second place (decision 5: N is positional
 # everywhere it appears, not just at the label).
 _N_AIN_PARAM_RE = re.compile(r"(ain=)(ACT|AI)-(\d+)")
+# gts-py21: a not-yet-assigned BARE trigger ("ACT: .../AI: ..." — no digits)
+# normalises to the SAME placeholder as an already-numbered token
+# (decision 5's positional-N rule extended one step: the bare-to-assigned
+# transition IS the N assignment itself, just caught one edge earlier than
+# _N_TOKEN_MARKUP_RE above can see, which requires digits to already exist).
+# Without this, a copy-fidelity check that pulls a doc BEFORE a first sync
+# (bare trigger) and compares it against the SAME doc's own copy AFTER that
+# sync (now digit-assigned) reports every such record as a false structural
+# "content changed" — the doc's worked-example content legitimately mixes
+# bare and pre-assigned demonstration paragraphs by design
+# (tests/test_floating_action_copy_fidelity.py), so this transition is
+# positional, not structural, the same way renumbering N itself already is.
+# Only applied when the digit form above didn't already match (count=1
+# below is enough since a record's leading token line is normalised once).
+_BARE_TRIGGER_MARKUP_RE = re.compile(r"^(\[\*\*)?(ACT|AI):")
 
 VALID_KINDS = ("golden", "capture")
 
@@ -158,9 +176,28 @@ def _normalize_n(record: str) -> str:
     one."""
     prefix = _LI_PREFIX if record.startswith(_LI_PREFIX) else ""
     body = _strip_li_prefix(record)
-    body = _N_TOKEN_MARKUP_RE.sub(
-        lambda m: f"{m.group(1) or ''}{m.group(2)}-#:", body, count=1
-    )
+    # gts-py21: normalise the token on EVERY line that carries one, not just
+    # the record's first. src/SyncManager.js's _collectTokenParagraphs scans
+    # every line of a paragraph for a token, so a record whose token sits on
+    # a continuation line (the "<LI> intro text:<SR>\nACT: ..." shape) is
+    # just as much an action record as one whose token leads — and its N is
+    # just as positional. Anchoring at the record's first line only left
+    # those records' labels un-normalised, so their N showed up as a
+    # structural content change.
+    lines = []
+    for line in body.split("\n"):
+        digit_normalized = _N_TOKEN_MARKUP_RE.sub(
+            lambda m: f"{m.group(1) or ''}{m.group(2)}-#:", line, count=1
+        )
+        if digit_normalized != line:
+            lines.append(digit_normalized)
+        else:
+            lines.append(
+                _BARE_TRIGGER_MARKUP_RE.sub(
+                    lambda m: f"{m.group(1) or ''}{m.group(2)}-#:", line, count=1
+                )
+            )
+    body = "\n".join(lines)
     body = _N_AIN_PARAM_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}-#", body)
     return prefix + body
 
@@ -168,6 +205,18 @@ def _normalize_n(record: str) -> str:
 _MARKUP_RE = re.compile(r"\*\*|\*|_|\\(.)")
 _LINK_RE = re.compile(r"\[((?:[^\[\]\\]|\\.)*)\]\(((?:[^()\\]|\\.)*)\)")
 _FIELD_LINE_RE = re.compile(r"^([A-Z][A-Za-z ]*):\s?(.*)$")
+# gts-py21: a not-yet-assigned bare trigger line ("ACT: ..."/"AI: ...", no
+# digits) matches _FIELD_LINE_RE too -- "ACT"/"AI" is itself a bare,
+# capitalised, colon-terminated word, indistinguishable from a real custom
+# field label by that regex alone. Once the record is synced/flushed, the
+# SAME line becomes an established, markup-wrapped "[**ACT-9: **](url)..."
+# header, which _FIELD_LINE_RE correctly does NOT match (mirrors
+# _N_TOKEN_MARKUP_RE's own markup-aware anchoring above) -- so a diff across
+# that transition sees a "field" silently vanish and misreports a real,
+# expected token-assignment as a structural field removal. Exclude both
+# trigger shapes explicitly rather than letting the generic field-label
+# pattern guess.
+_BARE_TRIGGER_LINE_RE = re.compile(r"^(?:\[\*\*)?(ACT|AI):")
 
 
 def _strip_markup(text: str) -> str:
@@ -195,6 +244,8 @@ def _field_labels(record: str) -> list[str]:
     labels = []
     for line in record.split("\n"):
         stripped = line[: -len("<SR>")] if line.endswith("<SR>") else line
+        if _BARE_TRIGGER_LINE_RE.match(stripped):
+            continue
         m = _FIELD_LINE_RE.match(stripped)
         if m:
             labels.append(m.group(1))
@@ -253,8 +304,93 @@ class AptDiffResult:
             if self.classes_present - {POSITIONAL} else 0
 
 
+# gts-py21: ADR-0027 rule 4 bundles N-assignment together with a status
+# suffix (" (Open)" etc.) on the SAME transition -- a bare trigger becoming
+# an assigned token also gains a status suffix it never had before, in one
+# atomic write. _normalize_n above already neutralises the N half; this
+# neutralises the status half, but ONLY when the record just crossed the
+# bare-to-assigned boundary (never on an already-assigned record, where a
+# status change like Open->Done must stay visible as a real diff).
+_ASSIGNED_STATUS_SUFFIX_RE = re.compile(r"\s\([A-Za-z][A-Za-z ]*\)(?=(<SR>)?$)")
+
+# The token header a flush WRITES, as it looks after _normalize_n has already
+# replaced the digits with the '#' placeholder: a bold, preview-linked label
+# ("[**ACT-#: **](https://.../NUUTS?cmd=preview&docId=...&ain=ACT-#)"). The
+# bare trigger it replaced carried no markup at all, so reducing this back to
+# the bare "ACT-#: " spelling is what makes the two sides of the transition
+# comparable at all (docs/interfaces/action-portable-text.md).
+_ASSIGNED_TOKEN_HEADER_RE = re.compile(r"^\[\*\*(ACT|AI)-#:\s*\*\*\]\([^)]*\)")
+
+# ADR-0027 rule 5/5a continuation fields render, once flushed, as a BOLD
+# label followed by a tab ("**Field-1:**\tvalue") -- the canonical spelling
+# src/SyncManager.js's _renderCustomFieldLines emits. A hand-authored doc
+# spells the same field plainly ("Field-1: value"), so first flush
+# canonicalises it. Reduce the flushed spelling back to the plain one.
+_FLUSHED_FIELD_LINE_RE = re.compile(r"^\*\*([^*\n]+?):\*\*\t")
+
+
+def _bare_to_assigned_lines(golden: str, capture: str) -> list[int]:
+    """Line indices (into the record, `<LI> ` marker already stripped) where
+    the golden still carries a bare trigger and the capture carries an
+    assigned token — i.e. the lines this capture's first flush minted an N
+    on. Checked per line, not just line 0: a token may legitimately sit on a
+    continuation line ("<LI> intro text:<SR>\\nACT: ..."), which is exactly
+    the record shape src/SyncManager.js's soft-return parser owns."""
+    g_lines = _strip_li_prefix(golden).split("\n")
+    c_lines = _strip_li_prefix(capture).split("\n")
+    return [
+        i
+        for i in range(min(len(g_lines), len(c_lines)))
+        if _BARE_TRIGGER_MARKUP_RE.match(g_lines[i])
+        and _N_TOKEN_MARKUP_RE.match(c_lines[i])
+    ]
+
+
+def _undo_first_flush_canonicalisation(
+    capture: str, golden: str, transition_lines: list[int]
+) -> str:
+    """gts-py21: reduce a just-flushed record's canonical spellings back to
+    the plain, hand-authored spellings the SAME record carried before its
+    first sync — each newly-assigned token line's bold preview link back to a
+    bare `ACT-#: `, the ` (Status)` suffix that assignment bundled with it
+    away, and each continuation field's `**Label:**\\t` back to `Label: `.
+
+    `capture` is the already-`_normalize_n`'d capture; `golden` the raw
+    golden (read only, to tell a minted status from one the original already
+    carried). Applied ONLY where `_bare_to_assigned_lines` confirmed a
+    transition, i.e. exactly the one write in a record's life where these
+    three changes are the system doing its job rather than content drifting.
+    Everything else in the record — its prose, its chips, its links, its line
+    count — is left untouched and still diffs normally, so a real edit
+    smuggled into the same flush (a dropped PERSON chip, a lost trailing
+    blank line) stays visible.
+    """
+    prefix = _LI_PREFIX if capture.startswith(_LI_PREFIX) else ""
+    lines = _strip_li_prefix(capture).split("\n")
+    g_lines = _strip_li_prefix(golden).split("\n")
+    for i in transition_lines:
+        lines[i] = _ASSIGNED_TOKEN_HEADER_RE.sub(
+            lambda m: f"{m.group(1)}-#: ", lines[i], count=1
+        )
+        # Only the status the flush MINTED is normalised away. A status the
+        # hand-authored original already carried is an input to the flush,
+        # not an output of it -- leave it so an Open->Done (or a dropped
+        # status) still diffs as the real change it would be.
+        if not _ASSIGNED_STATUS_SUFFIX_RE.search(g_lines[i]):
+            lines[i] = _ASSIGNED_STATUS_SUFFIX_RE.sub("", lines[i], count=1)
+    transitioned = set(transition_lines)
+    for i in range(len(lines)):
+        if i in transitioned:
+            continue
+        lines[i] = _FLUSHED_FIELD_LINE_RE.sub(lambda m: f"{m.group(1)}: ", lines[i], count=1)
+    return prefix + "\n".join(lines)
+
+
 def _classify_record_pair(index: int, golden: str, capture: str) -> DiffEntry | None:
     norm_g, norm_c = _normalize_n(golden), _normalize_n(capture)
+    transition_lines = _bare_to_assigned_lines(golden, capture)
+    if transition_lines:
+        norm_c = _undo_first_flush_canonicalisation(norm_c, golden, transition_lines)
     if norm_g == norm_c:
         return None  # identical, or differs only in N (positional — not shown)
 
@@ -365,6 +501,14 @@ class Scenario:
     expected_corpus: str
     serves: list
     batch: str | None = None
+    #: gts-5ktl (stage `lane-idempotency`): whether the batched runner's
+    #: second, no-op sync must reproduce this scenario's own slice byte for
+    #: byte. Default ON -- a scenario whose mutation is inherently multi-sweep
+    #: (or whose expected corpus deliberately encodes a still-converging
+    #: state) opts out with `"idempotent": false` in its scenario.json plus a
+    #: recorded reason, so the exclusion is a decision on record rather than a
+    #: silent skip.
+    idempotent: bool = True
 
     @property
     def is_degenerate(self) -> bool:
@@ -384,7 +528,10 @@ def load_scenario(path) -> Scenario:
     that owns executing this scenario (tests/support/apt_lane_runner.py) --
     when set, the generic single-scenario lane (tests/test_apt_corpus_check.py)
     skips it rather than executing it a second time under the one-doc-per-
-    scenario shape the batched runner exists to avoid."""
+    scenario shape the batched runner exists to avoid. `idempotent`
+    (gts-5ktl, stage `lane-idempotency`) is optional and defaults to True --
+    set it to `false` (with the reason recorded in the file) to exclude this
+    scenario from the batched runner's second-capture diff."""
     path = pathlib.Path(path)
     raw = json.loads(path.read_text(encoding="utf-8"))
     for key in ("input", "mutation", "expected"):
@@ -392,6 +539,13 @@ def load_scenario(path) -> Scenario:
             raise ValueError(f"{path}: scenario triple missing required key {key!r}")
     if not isinstance(raw["mutation"], dict) or "kind" not in raw["mutation"]:
         raise ValueError(f"{path}: 'mutation' must be an object with a 'kind'")
+    idempotent = raw.get("idempotent", True)
+    if not isinstance(idempotent, bool):
+        raise ValueError(
+            f"{path}: 'idempotent' must be a boolean when present "
+            "(gts-5ktl -- opting out of the lane's second-capture diff is a "
+            "recorded decision, not a truthy value)"
+        )
     return Scenario(
         name=raw.get("name") or path.stem.removesuffix(".scenario"),
         input_corpus=raw["input"],
@@ -399,6 +553,7 @@ def load_scenario(path) -> Scenario:
         expected_corpus=raw["expected"],
         serves=list(raw.get("serves") or []),
         batch=raw.get("batch"),
+        idempotent=idempotent,
     )
 
 
@@ -439,6 +594,15 @@ DEGENERATE_SCENARIO_ALLOWLIST = {
         "definition. The corpus's non-vacuous assertion is the report itself "
         "(tests/test_doc_oracle_reference.py), not this text diff, which can "
         "only ever assert that the paragraph was left alone."
+    ),
+    "unparseable-reporting-verify": (
+        "Same corpus, same rule-6 reasoning as 'unparseable-reporting' above -- "
+        "reused under stage `apt-scanner-migration`'s own batch tag "
+        "(gts-oaw1/gts-xvlu) so a live verify_consistency call can be asserted "
+        "on the same open ScenarioSession this scenario's establishing sync "
+        "leaves behind. The corpus's non-vacuous assertion is that "
+        "verify_consistency call (tests/test_apt_scanner_lane.py), not this "
+        "text diff."
     ),
 }
 

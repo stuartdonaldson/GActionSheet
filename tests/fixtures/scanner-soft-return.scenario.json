@@ -1,0 +1,10 @@
+{
+  "name": "scanner-soft-return",
+  "input": "scanner-soft-return",
+  "mutation": {
+    "kind": "sync"
+  },
+  "expected": "scanner-soft-return-expected",
+  "serves": ["gts-cn5v"],
+  "batch": "apt-lanes-scanner"
+}

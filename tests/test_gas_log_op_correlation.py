@@ -16,6 +16,12 @@ entry of the WRONG tag is still excluded).
 """
 from tests.helpers.gas_log import matches_op
 
+import pytest
+
+# gts-aqpk: fast/local tier -- this module makes no live GAS/Google round trip
+# (verified offline with sockets blocked). See docs/OPERATIONS.md "Test tiers".
+pytestmark = pytest.mark.no_live_session
+
 
 def _entry(tag: str, parent_op: str | None) -> dict:
     return {"tag": tag, "parentOp": parent_op, "data": {}}

@@ -451,6 +451,10 @@ class ScenarioSession:
     def _check_gas_errors(self, fence: float | None = None, *, raise_on_error: bool | None = None):
         """Scan the GAS log dir for any `*.error` entry since the fence.
 
+        Scoped to `env == "test"` (missing/unknown env is treated as test) so
+        that unrelated production traffic sharing the same Axiom log stream
+        can't fail a TEST run by wall-clock coincidence.
+
         The single GAS-error scan routine: both the always-on post-Act guard and
         assert_no_addon_error() call this (no duplicated scan logic). On a hit it
         records a MONITOR FAIL trace event and advances the running fence past the
@@ -470,7 +474,8 @@ class ScenarioSession:
             fence = self._gas_fence
         entries = collect_logs(
             log_dir,
-            lambda e: str(e.get("tag", "")).endswith(".error"),
+            lambda e: str(e.get("tag", "")).endswith(".error")
+            and str(e.get("data", {}).get("env", "test")) == "test",
             after=fence,
         )
         entry = entries[0] if entries else None

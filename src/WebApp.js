@@ -562,6 +562,18 @@ function doPost(e) {
     queueDelayMs: payload.initiatedAt ? (Date.now() - payload.initiatedAt) : null
   });
 
+  // Static-portal / add-on clients stamp the build they are running on every POST (see
+  // static-portal/src/index.html's postJson; GAS-Core best-practices/gas-static-frontend
+  // "The static page interface contract" req 6). Logged HERE -- alongside webapp.request and
+  // ahead of every auth gate -- rather than after the WEBAPP_SECRET check where it used to
+  // sit: the portal routes (list_my_teams, list_team_actions, get_document_actions, ...) all
+  // bypass that gate deliberately, so a stale portal client never reached the old call site.
+  // This is the observability half of the contract: without it, stale clients surface in
+  // support calls instead of in logs.
+  if (payload.clientVersion && payload.clientVersion !== BUILD_INFO.version) {
+    GasLogger.log('webapp.version.mismatch', { client: payload.clientVersion, server: BUILD_INFO.version });
+  }
+
   // [PROBE] — gated only on probe_run presence; bypasses secret gate intentionally.
   if (payload.action === 'probe' && payload.probe_run) {
     PROBE_setRunId(payload.probe_run);
@@ -602,6 +614,36 @@ function doPost(e) {
   // authentication, and the tier is re-verified on every call (R8).
   if (payload.action === 'list_team_actions') {
     return _handleListTeamActions(payload);
+  }
+
+  // gts-gwyg / gts-lgpx — admin-only scan of a team's registered Drive
+  // folder(s) for untracked, action-looking Docs. Same bypass rationale as
+  // the routes above: the signed assertion is the authentication; admin
+  // status is resolved from Config!AdminUsers inside the handler
+  // (src/AdminDocScan.js), not from the ADMIN_SECRET gate (src/Admin.js) —
+  // the verified-team-portal client cannot hold that secret.
+  //
+  // gts-lgpx replaced the single-shot 'admin_scan_team_docs' action with
+  // start/status/resume: the scan now persists progress to a Script Property
+  // and is advanced by a self-rescheduling one-shot trigger
+  // (resumeAdminDocScan), so it survives GAS's execution ceiling instead of
+  // silently truncating at ~261 docs. start does NO doc reads and returns
+  // immediately; status is read-only polling. All three are admin-gated,
+  // status included.
+  if (payload.action === 'admin_scan_start') {
+    return _handleAdminScanStart(payload);
+  }
+  if (payload.action === 'admin_scan_status') {
+    return _handleAdminScanStatus(payload);
+  }
+  if (payload.action === 'admin_scan_resume') {
+    return _handleAdminScanResume(payload);
+  }
+  // gts-qkev — registers selected scan candidates into DocData (cheap:
+  // upsert only, no doc open) so the next syncAll sweep discovers and syncs
+  // them. Same admin gate as the three routes above.
+  if (payload.action === 'admin_scan_track') {
+    return _handleAdminScanTrack(payload);
   }
 
   // gts-79dw.4.17 — verified-team-portal team-switcher discovery route (R21).
@@ -732,11 +774,11 @@ function doPost(e) {
 
   var expected = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
   if (!expected || payload.secret !== expected) {
-    return ContentService.createTextOutput('unauthorized').setMimeType(ContentService.MimeType.TEXT);
-  }
-
-  if (payload.clientVersion && payload.clientVersion !== BUILD_INFO.version) {
-    GasLogger.log('webapp.version.mismatch', { client: payload.clientVersion, server: BUILD_INFO.version });
+    // gts-pl2k: a structured JSON body (not the old plain-text 'unauthorized') so a bad-secret
+    // call fails distinguishably from GAS deployment-propagation lag (non-JSON/echo-page
+    // response) -- every sanctioned caller (scn.session._http_post, scripts/call_webapp.py)
+    // treats a non-JSON body as propagation lag and burns ~90s retrying before giving up.
+    return _jsonResponse({ ok: false, error: 'unauthorized' }, 200);
   }
 
   if (payload.action === 'set_test_token') {
@@ -753,6 +795,16 @@ function doPost(e) {
 
   if (payload.action === 'axiom_probe') {
     return _handleAxiomProbe(payload);
+  }
+
+  // gts-dige (AC-9): admin cache-bust for the access-resolution two-sided
+  // cache (src/SPIKE.js's _accessCache* helpers, gts-x9sk DESIGN Part B).
+  // WEBAPP_SECRET-gated by the check above like every route in this block --
+  // an admin who has just changed group membership or folder sharing in the
+  // Admin console/Drive UI can drop the up-to-15-min TTL window on demand,
+  // and it's the operator escape hatch if a cache bug is ever suspected.
+  if (payload.action === 'flush_access_cache') {
+    return _handleFlushAccessCache(payload);
   }
 
   // Deployment health-check routes — called by manage-deployments.js after deploy:test.
@@ -786,6 +838,8 @@ function doPost(e) {
     result = _handleSyncActionRows(payload);
   } else if (payload.action === 'sync_document') {
     result = _handleSyncDocument(payload);
+  } else if (payload.action === 'insert_tracker_table') {
+    result = _handleInsertTrackerTable(payload);
   } else if (payload.action === 'verify_action_rows') {
     result = _handleVerifyActionRows(payload);
   } else if (payload.action === 'mark_doc_not_found') {
@@ -799,10 +853,13 @@ function doPost(e) {
   } else if (payload.action === 'forward_action_rows') {
     result = _handleForwardActionRows(payload);
   } else {
-    // Legacy POC — retained for diagnostics
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    sheet.appendRow([new Date(), payload.email || '', payload.message || '']);
-    result = ContentService.createTextOutput('ok');
+    // gts-c7fp: an unrecognized action name that passed the WEBAPP_SECRET gate must fail
+    // loudly, not mutate the bound spreadsheet. This used to be a legacy-POC fallthrough that
+    // appended a row to whatever sheet happened to be active -- a typo'd or not-yet-deployed
+    // action name was silently written as data instead of erroring, and a retried call (the
+    // caller couldn't tell the plain-text 'ok' body from real success) multiplied the damage
+    // 5x per retry. Reject before any sheet write happens.
+    result = _jsonResponse({ ok: false, error: 'unknown action: ' + (payload.action || '(none)') }, 200);
   }
 
   GasLogger.flush();
@@ -977,10 +1034,13 @@ function _handleUpsertActionRows(payload) {
       var row = rows[i];
       if (!row.globalId) continue;
 
+      var parsed = parseGlobalId(row.globalId);
+      if (isNaN(parsed.N)) continue; // malformed globalId — logged by parseGlobalId, never written
+
       var existing = existingMap[row.globalId];
       if (existing) {
         var r         = existing.rowIndex;
-        var newId     = _extractActionId(row.globalId);
+        var newId     = parsed.actionId;
         var newEmail  = row.assigneeEmail || existing.assigneeEmail;
         var newName   = row.assigneeName  || existing.assigneeName;
         var newText   = _normalizeActionText(row.actionText    || existing.action);
@@ -1000,13 +1060,13 @@ function _handleUpsertActionRows(payload) {
           updated++;
         }
       } else {
-        var fileId     = parseGlobalId(row.globalId).docId;
+        var fileId     = parsed.docId;
         var docFormula = '=HYPERLINK("' + docUrl + '","' + _escapeQuotes(docTitle) + '")';
         var createdDate = row.createdDate ? new Date(row.createdDate) : now;
         actionsSheet.appendRow([
           row.globalId,
           fileId,
-          _extractActionId(row.globalId),
+          parsed.actionId,
           row.assigneeEmail || '',
           row.assigneeName  || '',
           _normalizeActionText(row.actionText) || '',
@@ -1047,10 +1107,35 @@ function _handleUpsertActionRows(payload) {
  * every other call site is unaffected.
  */
 function _loadExistingRowsByGlobalId(actionsSheet, duplicatesOut) {
+  // gts-5kyu Stage 1: routed through the per-execution snapshot -- this is
+  // the function every single-globalId caller (TeamActionWrite.js,
+  // patch/delete/edit/forward routes, etc.) goes through, so caching it once
+  // collapses every one of them for free without touching each call site.
+  // Falls back to the original inline read if the snapshot builder throws.
+  var snap = _actionsSnapshot(actionsSheet.getParent());
+  if (!snap) return _loadExistingRowsByGlobalIdInline(actionsSheet, duplicatesOut);
+  if (snap.numRows === 0) return {};
+
+  return _extractExistingRowsByGlobalId(snap.data, duplicatesOut);
+}
+
+/** Original inline read, kept as the fallback path when the snapshot errors. */
+function _loadExistingRowsByGlobalIdInline(actionsSheet, duplicatesOut) {
   var lastRow = actionsSheet.getLastRow();
   if (lastRow < 2) return {};
 
-  var data   = actionsSheet.getRange(2, 1, lastRow - 1, SHEET_HEADERS.length).getValues();
+  var data = actionsSheet.getRange(2, 1, lastRow - 1, SHEET_HEADERS.length).getValues();
+  _countActionsRead('getValues');
+
+  return _extractExistingRowsByGlobalId(data, duplicatesOut);
+}
+
+/**
+ * Shared per-row extraction, unchanged from the pre-gts-5kyu implementation
+ * (AC3: byte-identical output) -- only WHERE `data` comes from moved, never
+ * HOW it is turned into the result.
+ */
+function _extractExistingRowsByGlobalId(data, duplicatesOut) {
   var result = {};
 
   for (var i = 0; i < data.length; i++) {
@@ -1089,7 +1174,10 @@ function _loadExistingRowsByGlobalId(actionsSheet, duplicatesOut) {
  */
 function parseGlobalId(globalId) {
   var m = /^(.*)\/(ACT|AI)-(\d+)$/.exec(globalId || '');
-  if (!m) return { docId: '', N: NaN, actionId: globalId || '' };
+  if (!m) {
+    GasLogger.log('sync.globalId.malformed', { globalId: globalId || '' });
+    return { docId: '', N: NaN, actionId: globalId || '' };
+  }
   return { docId: m[1], N: parseInt(m[3], 10), actionId: m[2] + '-' + m[3] };
 }
 
@@ -1204,10 +1292,25 @@ function _handleSyncActionRows(payload) {
   }
 
   // Load document-formula column for orphan detection (need docId to match rows to this doc).
+  // gts-5kyu Stage 1: reuses the snapshot _loadExistingRowsByGlobalId already
+  // built above (same execution, no write has happened yet) instead of a
+  // second getFormulas() round trip on the Actions sheet -- this was exactly
+  // the kind of same-execution repeated read AC1 exists to collapse, just
+  // inside one handler rather than across N callers. Falls back to the
+  // original inline read if the snapshot is unavailable or its row count
+  // does not match the sheet's current lastRow (defensive; should not
+  // diverge since nothing has written between the two reads).
   var lastRow      = actionsSheet.getLastRow();
-  var formulasCol7 = lastRow >= 2
-    ? actionsSheet.getRange(2, _ACOL.document_formula, lastRow - 1, 1).getFormulas()
-    : [];
+  var _syncSnap    = _actionsSnapshot(actionsSheet.getParent());
+  var formulasCol7;
+  if (lastRow < 2) {
+    formulasCol7 = [];
+  } else if (_syncSnap && _syncSnap.formulas && _syncSnap.numRows === lastRow - 1) {
+    formulasCol7 = _syncSnap.formulas;
+  } else {
+    formulasCol7 = actionsSheet.getRange(2, _ACOL.document_formula, lastRow - 1, 1).getFormulas();
+    _countActionsRead('getFormulas');
+  }
   var duplicateRowIndexes = [];
 
   WriteGuard.wrapPersistent(function () {
@@ -1376,6 +1479,18 @@ function _handleSyncActionRows(payload) {
       // above and the same-globalId pass above populate duplicateRowIndexes
       // from disjoint sources, but deleteRow() on a repeated index would
       // corrupt the sheet if that ever changed) before deleting descending.
+      //
+      // ORDERING CAVEAT (gts-tz3j static review, AC4-1; see gts-hztp): this
+      // deleteRow loop MUST stay textually last among rowIndex-addressed
+      // writes in this wrapPersistent body. Every entry.rowIndex write above
+      // (status/sync_status/action_text stamps) was captured from the SAME
+      // pre-delete snapshot as duplicateRowIndexes; deleteRow() shifts every
+      // row below it, so any rowIndex-addressed write placed AFTER this loop
+      // would silently target the wrong row (WriteGuard's snapshot
+      // invalidation only protects the NEXT execution's reads, not a second
+      // write later in this same body — see the CAVEAT on WriteGuard.wrap).
+      // If you add a new rowIndex-addressed write to this function, put it
+      // before this loop, not after.
       var seenDupIdx = {};
       var uniqueDupIndexes = [];
       for (var udi = 0; udi < duplicateRowIndexes.length; udi++) {
@@ -1413,7 +1528,11 @@ function _handleSyncActionRows(payload) {
       var dcExisting = _readDocDataRow(ss, docId);
       _getOrUpsertDocDataRow(
         ss, docId,
-        dcExisting ? dcExisting.docName : (docTitle || ''),
+        // gts-pz8o: a blank docName must not be sticky -- fall back to the
+        // real title from this request's own doc access instead of
+        // permanently propagating an empty string from a row that was
+        // minted without one (e.g. seed_row's empty Document column).
+        (dcExisting && dcExisting.docName) ? dcExisting.docName : (docTitle || ''),
         dcExisting ? dcExisting.lastSyncTime : now,
         dcExisting ? dcExisting.teamId : '',
         dcExisting ? dcExisting.syncStatus : '',
@@ -1596,15 +1715,38 @@ function _handleVerifyChipIntegrity(payload) {
 }
 
 function _loadRowsForDocUrl(actionsSheet, docUrl) {
+  // gts-5kyu Stage 1: routed through the per-execution snapshot. Falls back
+  // to the original inline read if the snapshot builder throws.
+  var snap = _actionsSnapshot(actionsSheet.getParent());
+  if (!snap) return _loadRowsForDocUrlInline(actionsSheet, docUrl);
+  if (snap.numRows === 0) return [];
+
+  return _extractRowsForDocUrl(snap.data, snap.formulas, docUrl);
+}
+
+/** Original inline read, kept as the fallback path when the snapshot errors. */
+function _loadRowsForDocUrlInline(actionsSheet, docUrl) {
   var lastRow = actionsSheet.getLastRow();
   if (lastRow < 2) {
     return [];
   }
 
-  var targetDocId = _extractDocIdFromString(docUrl);
   var numRows = lastRow - 1;
   var data = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
+  _countActionsRead('getValues');
   var formulas = actionsSheet.getRange(2, _ACOL.document_formula, numRows, 1).getFormulas();
+  _countActionsRead('getFormulas');
+
+  return _extractRowsForDocUrl(data, formulas, docUrl);
+}
+
+/**
+ * Shared per-row extraction, unchanged from the pre-gts-5kyu implementation
+ * (AC3: byte-identical output) -- only WHERE data/formulas come from moved,
+ * never HOW they are turned into the result.
+ */
+function _extractRowsForDocUrl(data, formulas, docUrl) {
+  var targetDocId = _extractDocIdFromString(docUrl);
   var rows = [];
 
   for (var i = 0; i < data.length; i++) {
@@ -1651,7 +1793,21 @@ function _loadRowsForDocUrl(actionsSheet, docUrl) {
  *   from "raced and no-opped" — the distinction TestFixtures.js's sync_document
  *   fixture retries on (gts-kkm7).
  *   Completion signal: sync.complete {docId, upserted, updated, forced};
- *   sync.forceFlush {docId, count} additionally when force flushed >= 1.
+ *   sync.forceFlush {docId, count} additionally when force flushed >= 1;
+ *   sync.indentDrift {docId, count} additionally when indent-only drift
+ *   flushed >= 1 (gts-ttns).
+ *
+ * ADR-0031: this route is the ONE shared seam every document-context sync
+ * goes through — menuSyncActiveDoc and menuForceRefreshActiveDoc
+ * (MenuHandler.js's _menuProxyAction), the sidebar's onSyncNow
+ * (WorkspaceAddonCard.js's _callWebAppProxy), and the team portal/web UI doc
+ * sync all call this same handler with a real docId, which is exactly what
+ * "document context" means. That is why `conform: true` is passed
+ * unconditionally below rather than threaded from the payload: every caller
+ * of THIS route already qualifies, and the payload carries no field for it.
+ * `force` stays independently gated on the payload's own explicit opt-in —
+ * conformance and force are orthogonal (a Document Sync conforms without
+ * rewriting everything; Force Refresh does both).
  */
 function _handleSyncDocument(payload) {
   var docId = payload.docId || '';
@@ -1659,7 +1815,7 @@ function _handleSyncDocument(payload) {
     return _jsonResponse({ ok: false, error: 'docId required' });
   }
   var force = payload.force === true;
-  var result = syncDocument(docId, { force: force });
+  var result = syncDocument(docId, { force: force, conform: true });
   GasLogger.flush();
   return _jsonResponse({
     ok:     true,
@@ -1667,6 +1823,30 @@ function _handleSyncDocument(payload) {
     forced: force,
     result: result || null
   });
+}
+
+/**
+ * insert_tracker_table — WEBAPP_SECRET-gated proxy target for
+ * insertTrackerTable(docId) (TrackerTable.js), the document-mutation half of
+ * ADR-0030 (knowledge-base/adr/0030-addon-entry-points-proxy-through-webapp.md)
+ * not already covered by sync_document. Mirrors _handleSyncDocument's shape
+ * (gts-6vzm).
+ *
+ * Payload shape:  { secret, action: 'insert_tracker_table', docId }
+ * Response shape: { ok, docId, result }
+ *   `result` is always null — insertTrackerTable() has no return value.
+ *   Completion signal: tracker.insert.complete {docId, rowCount}, or
+ *   tracker.skip {docId, ...} when the rendered table already matches
+ *   (TrackerTable.js) — either way GasLogger.flush() below ships it.
+ */
+function _handleInsertTrackerTable(payload) {
+  var docId = payload.docId || '';
+  if (!docId) {
+    return _jsonResponse({ ok: false, error: 'docId required' });
+  }
+  insertTrackerTable(docId);
+  GasLogger.flush();
+  return _jsonResponse({ ok: true, docId: docId, result: null });
 }
 
 /**
@@ -1688,13 +1868,24 @@ function _handleMarkDocNotFound(payload) {
 
   var docIds  = payload.docIds || (payload.docId ? [payload.docId] : []);
   var lastRow = actionsSheet.getLastRow();
-  if (docIds.length === 0 || lastRow < 2) {
+  if (docIds.length === 0) {
     return _jsonResponse({ marked: 0 });
   }
 
-  var numRows       = lastRow - 1;
-  var formulasCol7  = actionsSheet.getRange(2, _ACOL.document_formula, numRows, 1).getFormulas();
-  var syncStatusCol = actionsSheet.getRange(2, _ACOL.sync_status, numRows, 1).getValues();
+  // gts-avvl: no early return when Actions has zero data rows. A tracked doc
+  // can have a DocData row and no Actions rows at all (registered by the Team
+  // Portal scan-and-track flow, or simply containing no floating actions --
+  // ADR-0031 amendment 2026-09-01), and the DocData mirror below is the ONLY
+  // thing that ever stamps "Doc Not Found" on such a row. Returning here left
+  // that class permanently unmarked, and therefore -- once eviction is
+  // correctly gated on "Doc Not Found" again -- permanently un-evictable.
+  var numRows       = lastRow >= 2 ? lastRow - 1 : 0;
+  var formulasCol7  = numRows > 0
+    ? actionsSheet.getRange(2, _ACOL.document_formula, numRows, 1).getFormulas()
+    : [];
+  var syncStatusCol = numRows > 0
+    ? actionsSheet.getRange(2, _ACOL.sync_status, numRows, 1).getValues()
+    : [];
 
   // One pass over the sheet's in-memory snapshot to find every row matching
   // any docId, instead of repeating the scan once per docId.
@@ -1715,7 +1906,8 @@ function _handleMarkDocNotFound(payload) {
     markedByDocId[matchedDocId] = (markedByDocId[matchedDocId] || 0) + 1;
   }
 
-  var totalMarked = statusA1s.length;
+  var totalMarked   = statusA1s.length;
+  var _mdnfMirrored = 0;
 
   WriteGuard.wrapPersistent(function () {
     // Stamp the same detection-time timestamp on every row across every docId
@@ -1748,9 +1940,21 @@ function _handleMarkDocNotFound(payload) {
     // stays a consistent record of the document even after it becomes
     // unreachable. Still one upsert per docId (a sheet op, not a network
     // round trip) — only the Actions-sheet read/write collapsed above.
-    for (var dk in markedByDocId) {
-      if (!markedByDocId.hasOwnProperty(dk)) continue;
+    //
+    // gts-avvl: the mirror is driven by the REQUESTED docIds, not by
+    // markedByDocId (which only ever contains docIds that had at least one
+    // Actions row to stamp). A tracked doc with zero Actions rows is exactly
+    // the case that never reached this loop, so its DocData row never learned
+    // the document was gone -- and, once eviction is correctly gated on
+    // "Doc Not Found" again, would never become evictable. It is mirrored only
+    // when a DocData row already exists: a docId with neither Actions nor
+    // DocData rows is unknown to this spreadsheet, and marking it would
+    // fabricate a registry row for a document nothing tracks (gts-qkev AC3 --
+    // swept, not fabricated).
+    for (var mi2 = 0; mi2 < docIds.length; mi2++) {
+      var dk = docIds[mi2];
       var existingDocDataRow = _readDocDataRow(ss, dk);
+      if (!existingDocDataRow && !markedByDocId[dk]) continue;
       _getOrUpsertDocDataRow(
         ss, dk,
         existingDocDataRow ? existingDocDataRow.docName : '',
@@ -1760,6 +1964,7 @@ function _handleMarkDocNotFound(payload) {
         existingDocDataRow ? existingDocDataRow.actionCount : 0,
         existingDocDataRow ? existingDocDataRow.resolvedCount : 0
       );
+      _mdnfMirrored++;
     }
   });
 
@@ -1767,7 +1972,8 @@ function _handleMarkDocNotFound(payload) {
   // full detail, to the HTTP caller) -- a dict keyed by docId would mint a new
   // Axiom column per document ever seen, unbounded (gts-pfyx follow-up).
   GasLogger.log('sync.docNotFound.confirmed', {
-    msg: 'Doc not found', docIds: docIds, uniqueDocsMarked: Object.keys(markedByDocId).length, totalMarked: totalMarked
+    msg: 'Doc not found', docIds: docIds, uniqueDocsMarked: Object.keys(markedByDocId).length,
+    totalMarked: totalMarked, docDataMirrored: _mdnfMirrored
   });
   return _jsonResponse({ marked: totalMarked, markedByDocId: markedByDocId });
 }
@@ -2227,7 +2433,9 @@ function _handleImportSelectedForTest(payload) {
  * isDelegated word, so isResolved() treats it as resolved with no further
  * change needed) and records where it went.
  *
- * Per row: Status = 'Forwarded'; append ' [Forward:<targetDocName> AI-<n>]'
+ * Per row: Status = 'Forwarded'; append ' [Forward:<targetDocName> ACT-<n>]'
+ * (the new action's actual token — ACT-<n> canonical per gts-mmyc, or legacy
+ * AI-<n> if the target doc's globalId assignment predates centralization)
  * to the Action text (newAiToken parsed from newGlobalId); sync_status =
  * 'Dirty' so the source document reflects 'Forwarded' on the next
  * sync_action_rows. The Dirty stamp is written in the same WriteGuard batch
@@ -2882,13 +3090,36 @@ function _findSheetActionsForDoc(ss, docId) {
   var actionsSheet = ss.getSheetByName('Actions');
   if (!actionsSheet) return [];
 
+  // gts-5kyu Stage 1: routed through the per-execution snapshot. Falls back
+  // to the original inline read if the snapshot builder throws.
+  var snap = _actionsSnapshot(ss);
+  if (!snap) return _findSheetActionsForDocInline(actionsSheet, docId);
+  if (snap.numRows === 0) return [];
+
+  return _extractSheetActionsForDoc(snap.data, snap.formulas, docId);
+}
+
+/** Original inline read, kept as the fallback path when the snapshot errors. */
+function _findSheetActionsForDocInline(actionsSheet, docId) {
   var lastRow = actionsSheet.getLastRow();
   if (lastRow < 2) return [];
 
   var numRows  = lastRow - 1;
   var data     = actionsSheet.getRange(2, 1, numRows, SHEET_HEADERS.length).getValues();
+  _countActionsRead('getValues');
   var formulas = actionsSheet.getRange(2, _ACOL.document_formula, numRows, 1).getFormulas();
-  var rows     = [];
+  _countActionsRead('getFormulas');
+
+  return _extractSheetActionsForDoc(data, formulas, docId);
+}
+
+/**
+ * Shared per-row extraction, unchanged from the pre-gts-5kyu implementation
+ * (AC3: byte-identical output) -- only WHERE data/formulas come from moved,
+ * never HOW they are turned into the result.
+ */
+function _extractSheetActionsForDoc(data, formulas, docId) {
+  var rows = [];
 
   for (var i = 0; i < data.length; i++) {
     var formula = formulas[i][0] || '';
@@ -3159,10 +3390,7 @@ function _handleJourneySession(payload) {
   var props = PropertiesService.getScriptProperties();
 
   if (payload.action === 'begin_journey_session') {
-    var now       = new Date();
-    var dateStr   = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyyMMdd');
-    var hexSuffix = ('000' + Math.floor(Math.random() * 0xFFFF).toString(16)).slice(-4);
-    var docName   = 'GActionSheet-Test-journey-' + dateStr + '-' + hexSuffix;
+    var docName   = _testDocName('journey');
 
     var sheetId    = props.getProperty('TEST_SHEET_ID') || '';
     var folderIter = sheetId

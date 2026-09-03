@@ -497,7 +497,51 @@ function _aptBuildInsertPayload(records) {
     }
     paragraphs.push({ start: paraStart, end: fullText.length, isListItem: isListItem });
   }
-  return { fullText: fullText, chips: chips, runs: runs, paragraphs: paragraphs };
+  var images = _aptStatusIconInsertions(fullText, runs, paragraphs);
+  return { fullText: fullText, chips: chips, runs: runs, paragraphs: paragraphs, images: images };
+}
+
+/**
+ * gts-3koi: decode reconstructs the flush-inserted status icon "the same way
+ * `_buildFlushRequests` does" (docs/interfaces/action-portable-text.md
+ * "Status icon") — encode never stores the image itself (rule 8: system-
+ * applied presentation is not stored author intent), but the status TEXT
+ * token (e.g. "(In Progress)") that drives it is ordinary paragraph text and
+ * round-trips like any other run. This derives one `insertInlineImage`
+ * location per established action (a paragraph whose header-line token run
+ * links to a `?...&ain=<actionId>` preview URL — the same shape
+ * `_buildChipUrl` produces), positioned at the paragraph's own start so it
+ * lands immediately before the token, matching `_buildFlushRequests`' final
+ * [image][token][chip?][text] layout.
+ *
+ * Status is derived from the header-line text AFTER the token run, via the
+ * SAME `_extractStatusToken` (SyncManager.js, gts-28q/v0py/1tbe last-paren-
+ * group rule) a live scan uses — no separate/divergent status grammar here.
+ *
+ * @param {string} fullText
+ * @param {Array}  runs        payload runs (already built, in document order)
+ * @param {Array}  paragraphs  payload paragraphs (already built)
+ * @returns {Array<{offset:number, url:string}>}
+ */
+function _aptStatusIconInsertions(fullText, runs, paragraphs) {
+  var images = [];
+  for (var pi = 0; pi < paragraphs.length; pi++) {
+    var para = paragraphs[pi];
+    var tokenRun = null;
+    for (var ri = 0; ri < runs.length; ri++) {
+      var run = runs[ri];
+      if (run.start !== para.start) continue;
+      if (run.link && /[?&]ain=/.test(run.link)) { tokenRun = run; break; }
+    }
+    if (!tokenRun) continue;
+
+    var breakIdx = fullText.indexOf('\v', tokenRun.end);
+    var headerEnd = (breakIdx === -1 || breakIdx > para.end) ? para.end : breakIdx;
+    var headerAfterToken = fullText.slice(tokenRun.end, headerEnd);
+    var status = _extractStatusToken(headerAfterToken).status;
+    images.push({ offset: para.start, url: getStatusIconUrl(status) });
+  }
+  return images;
 }
 
 /**
@@ -609,18 +653,36 @@ function _aptApplyPayloadViaRest(docId, payload, baseIndex) {
     requests.push({ insertText: { text: payload.fullText, location: { index: baseIndex } } });
   }
 
-  var chipsDesc = payload.chips.slice().sort(function (a, b) { return b.offset - a.offset; });
-  for (var ci = 0; ci < chipsDesc.length; ci++) {
-    requests.push({ insertPerson: {
-      personProperties: { email: chipsDesc[ci].email },
-      location: { index: baseIndex + chipsDesc[ci].offset }
-    }});
+  // Chips (insertPerson) and status icons (insertInlineImage) are both
+  // single-character-wide insertions into the same flat offset space, so
+  // gts-3koi merges them into one descending-offset pass — applying either
+  // in isolation would leave the other's un-applied-yet insertions shifting
+  // positions this pass has already computed (see this function's own doc
+  // comment on why descending order matters).
+  var images = payload.images || [];
+  var iconSize = _resolveStatusIconSize();
+  var insertionsDesc = payload.chips.map(function (c) { return { offset: c.offset, kind: 'chip', email: c.email }; })
+    .concat(images.map(function (im) { return { offset: im.offset, kind: 'image', url: im.url }; }))
+    .sort(function (a, b) { return b.offset - a.offset; });
+  for (var ii = 0; ii < insertionsDesc.length; ii++) {
+    var insertion = insertionsDesc[ii];
+    if (insertion.kind === 'chip') {
+      requests.push({ insertPerson: {
+        personProperties: { email: insertion.email },
+        location: { index: baseIndex + insertion.offset }
+      }});
+    } else {
+      requests.push({ insertInlineImage: {
+        uri: insertion.url, location: { index: baseIndex + insertion.offset },
+        objectSize: { height: { magnitude: iconSize, unit: 'PT' }, width: { magnitude: iconSize, unit: 'PT' } }
+      }});
+    }
   }
 
-  var chipsAsc = payload.chips.slice().sort(function (a, b) { return a.offset - b.offset; });
+  var insertionsAsc = insertionsDesc.slice().sort(function (a, b) { return a.offset - b.offset; });
   function shiftFor(offset) {
     var n = 0;
-    for (var i = 0; i < chipsAsc.length; i++) { if (chipsAsc[i].offset <= offset) n++; }
+    for (var i = 0; i < insertionsAsc.length; i++) { if (insertionsAsc[i].offset <= offset) n++; }
     return n;
   }
   for (var ri = 0; ri < payload.runs.length; ri++) {

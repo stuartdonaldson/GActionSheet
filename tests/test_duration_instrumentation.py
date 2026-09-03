@@ -12,6 +12,10 @@ import pytest
 
 from tests import duration_instrumentation as di
 
+# gts-aqpk: fast/local tier -- this module makes no live GAS/Google round trip
+# (verified offline with sockets blocked). See docs/OPERATIONS.md "Test tiers".
+pytestmark = pytest.mark.no_live_session
+
 
 # --- update_baseline (AC5: rolling window of last N samples, median) -------
 

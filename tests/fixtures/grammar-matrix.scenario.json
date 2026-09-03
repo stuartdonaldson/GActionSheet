@@ -7,5 +7,6 @@
   "expected": "grammar-matrix-expected",
   "serves": [
     "gts-ucdz"
-  ]
+  ],
+  "batch": "apt-corpus-batch"
 }

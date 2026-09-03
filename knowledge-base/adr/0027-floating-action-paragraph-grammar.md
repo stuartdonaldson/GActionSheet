@@ -21,7 +21,9 @@ ADR-0022 (inline bold/italic runs own character formatting — rules 10–15 ext
 ADR-0023 (token spelling — `ACT-N:` canonical, `AI-N:` read-compatible), gts-zocq (the run
 mechanism), gts-jxrw (bare-token truncation), gts-dr8j (soft-return continuation),
 gts-v0py/gts-28q/gts-1tbe (status-token position rule), gts-eezz (field-name production),
-gts-po8t (flush indentation correction, revisited by rule 8), docs/CONTEXT.md §Action Format
+gts-po8t (flush indentation correction, revisited by rule 8),
+ADR-0031 (sync entry points and rendering conformance — owns *when* a flush is triggered; rule 8
+owns only what it writes), docs/CONTEXT.md §Action Format
 
 ## Context
 
@@ -128,11 +130,12 @@ line is prose.
 **Leading whitespace is ignored, not required or forbidden.** The parser strips any run of spaces
 or tabs at the start of a continuation line before testing the `fieldLine` shape and before
 absorbing a line as prose. This is not a preference — rule 8 renders every continuation line with
-a 5-space indent on flush, and the parser must read its own rendered output back unchanged
-(idempotent round-trip, rule 7) as well as a line an author indented by hand for readability while
-typing. The stripped whitespace is not part of the stored value in either case: a field's inline
-value and every prose line are stored without their leading indent, and rule 8 reapplies the
-indent uniformly on the next flush.
+a Config-driven indent on flush (`SR Indent`/`Field SR Indent`, default 0 — amended 2026-08-29,
+gts-9a4j), and the parser must read its own rendered output back unchanged (idempotent round-trip,
+rule 7) regardless of the configured width, as well as a line an author indented by hand for
+readability while typing. The stripped whitespace is not part of the stored value in either case: a
+field's inline value and every prose line are stored without their leading indent, and rule 8
+reapplies the indent uniformly on the next flush.
 
 **Resolved (gts-eezz, 2026-08-26):** the per-word-uppercase constraint narrows the production as
 first drafted here (`[A-Za-z] [A-Za-z0-9 _-]{0,31}`, no case requirement). That looser form cannot
@@ -237,10 +240,17 @@ into `actionText` (gts-dr8j) — is rule 5a's first-block case, unchanged.
 ### 8. Continuation-line rendering: indent and field-label emphasis
 
 Every continuation line — the value's first line and every subsequent line, whether the block is
-`actionText` or a field — is rendered on flush with a **5-space indent** at the start of the line.
-This is presentational only: it exists so a continuation reads visually as subordinate to the
-header line, and it is stripped back off by the parser (rule 5) rather than stored as part of the
-value's text.
+`actionText` or a field — is rendered on flush with a leading-space indent at the start of the
+line. **Amended 2026-08-29 (gts-9a4j):** the indent width is **Config-driven, not a fixed 5** —
+the Config sheet's `SR Indent` key sets it for `actionText` continuation lines and `Field SR
+Indent` independently sets it for field continuation lines, each defaulting to **0** (flush-left)
+when the Config sheet has no row for that key. gts-po8t's 2026-08-27 flush-left correction was
+this default's zero-value case all along, not a separate decision contradicting this rule — the
+live flush had simply never read either key before gts-9a4j added the accessor
+(`_getContinuationIndentConfig`, `src/SyncManager.js`). This is presentational only: it exists so
+a continuation reads visually as subordinate to the header line when a positive value is
+configured, and it is stripped back off by the parser (rule 5) rather than stored as part of the
+value's text, regardless of which width was in effect when it was written.
 
 A field's `Name:` label is additionally rendered **bold**, and is followed by a **tab character**
 rather than a plain space before the value's first line. The label's bold run and the tab are
@@ -248,10 +258,11 @@ system-applied formatting, not author-typed intent: they are produced fresh on e
 the field name string and are never read back as part of `actionText`'s or a field value's `runs`
 (rule 15) — a link or bold/italic run inside the value's own text is unaffected and continues to
 round-trip under rules 10–15. The action body's first line (the header line) is not a field and
-gets no label; only the 5-space indent applies to it and to prose lines.
+gets no label; only `SR Indent` applies to it and to `actionText` prose continuation lines.
 
-Worked example, rendering the paragraph from the rule 5a example on flush (`␣` marks a literal
-space, **bold** marks the field-label run, `→` marks the tab):
+Worked example, rendering the paragraph from the rule 5a example on flush with `SR Indent`=5 and
+`Field SR Indent`=5 configured (`␣` marks a literal space, **bold** marks the field-label run, `→`
+marks the tab — with both keys absent/0, every `␣␣␣␣␣` below is simply empty):
 
 ```
 ACT-9: jane@example.com Draft the Q3 budget memo (In Progress)
@@ -266,6 +277,36 @@ ACT-9: jane@example.com Draft the Q3 budget memo (In Progress)
 The bare `Consult With:` line still renders its label, tab, and indent even though its inline
 value is empty — the next line (`- Stuart`) carries the indent as an ordinary continuation of that
 same block, not as the label's inline value.
+
+**Amended 2026-08-31 — superseded same day; see ADR-0031.** An earlier revision of this rule
+carried a four-part design (`(a)`–`(d)`) for making indent participate in `syncDocument()`'s
+ordinary diff, scoped to *every* non-force caller including `syncAll` and therefore the unattended
+30-minute trigger. **That scope was not adopted.** It has been replaced in full by
+**ADR-0031: Sync entry points and what each one promises**, which decides that rendering
+conformance — indent *and* the `ai_token`/`action_text` character styles, which have exactly the
+same gap — belongs to **user-initiated single-document syncs only**, never to a background sweep.
+
+Two corrections that revision contained are worth recording, since both are easy to re-derive
+wrongly:
+
+- It claimed a **carve-out from the "formatting-only changes never mark Dirty / never force a
+  tracker re-render" invariant** (`ContractSchema.js:193-203`). There is no carve-out, because
+  there is no conflict: that note governs whether inline **`runs` participate in row identity**
+  (the document→sheet direction — a user bolding a word must not orphan their row). Rendering
+  conformance compares the document against **Config** and never touches `_rowIdentityKey`,
+  `sheetWins`, orphan detection, or `_trackerRowsMatch`. The two are different axes. No amendment
+  to that invariant is required, and none was made.
+- It described the comparison as *"structurally different from the existing doc-vs-sheet diff."*
+  The precedent already exists four lines away in the same loop: the **missing-explicit-status
+  materialize** pass (`SyncManager.js:311-318`) flushes an action whose content already matches the
+  sheet, purely because its *rendered* form lacks a status token. That is a
+  document-vs-expected-rendering predicate, and rendering conformance is the same shape with a
+  different condition.
+
+**Rule 8 states rendering only** — what a flush *writes*. When a flush is triggered, and by which
+entry point, is ADR-0031's subject, not this rule's. The split is deliberate: mixing "what the
+output looks like" with "when we produce it" inside a grammar document is what made the policy
+hard to find in the first place.
 
 ### 9. `custom_fields`: a new, additive sheet column
 

@@ -33,19 +33,19 @@ restored. See plan-fix.md Session 9 Result for the full transcript; not
 re-run as part of this file (doing so here would require the harness to
 redeploy a known-broken build against shared TEST, which Session 1
 established the deploy tooling itself refuses to do).
+
+The two base scan->sheet->flush->rescan round trips (decision 4's specifiable
+half) retired gts-dxz9/act-retire onto tests/fixtures/inline-formatting.apt.txt
+via tests/test_apt_format_lane.py — see the retirement note inline below.
+Decision 3's idempotency half is covered by the batched lane too, since
+gts-5ktl (stage `lane-idempotency`) added a second no-op sync + capture to
+`run_lane`. The two durable-invariant cases below that need a second live doc
+mutation between syncs stayed here — see tests/test_apt_format_lane.py's own
+docstring for why each did not migrate.
 """
 import pytest
 
 from scn.session import ScenarioSession
-
-_EXPECTED_RUNS = [
-    {"start": 0, "end": 7, "bold": False, "italic": False, "link": None},
-    {"start": 7, "end": 16, "bold": True, "italic": False, "link": None},
-    {"start": 16, "end": 21, "bold": False, "italic": False, "link": None},
-    {"start": 21, "end": 32, "bold": False, "italic": True, "link": None},
-    {"start": 32, "end": 38, "bold": False, "italic": False, "link": None},
-]
-_EXPECTED_TEXT = "Please bold this and italic that today"
 
 
 def _debug_runs(scn, n: int = 1) -> dict:
@@ -53,52 +53,25 @@ def _debug_runs(scn, n: int = 1) -> dict:
     return resp.get("data") or {}
 
 
-def test_inline_bold_italic_round_trips_scan_store_flush_rescan(settings, request):
-    """[gts-zocq AC1/AC2/AC3] A bold span and a separate italic span inside
-    one action's text survive: doc scan -> Actions sheet (RichTextValue) ->
-    flush back to the doc (materializing the missing status token) -> a
-    fresh rescan of the doc. All three views (scan-at-sync-time via the
-    sheet, and post-flush rescan) must show the identical run spans — not
-    merged, not dropped, not uniformly reapplied over the whole range."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        seed = scn._post_fixture("seed_formatted_action", {"n": 1})
-        seed_data = seed.get("data") or {}
-        assert seed_data.get("ok"), f"seed_formatted_action failed: {seed}"
-        assert seed_data.get("boldWord") == "bold this"
-        assert seed_data.get("italicWord") == "italic that"
-
-        scn.sync()
-
-        result = _debug_runs(scn, 1)
-        assert result.get("ok"), f"debug_action_runs failed: {result}"
-        assert result.get("scanActionText") == _EXPECTED_TEXT
-        assert result.get("sheetActionText") == _EXPECTED_TEXT
-        assert result.get("scanRuns") == _EXPECTED_RUNS, (
-            "post-flush doc rescan runs did not match the seeded spans — "
-            "inline formatting was flattened, merged, or shifted by the "
-            "flush's delete+reinsert (the exact defect gts-zocq fixes)"
-        )
-        assert result.get("sheetRuns") == _EXPECTED_RUNS, (
-            "Actions sheet RichTextValue runs did not match the seeded "
-            "spans — the STORE step did not preserve scanned formatting"
-        )
-
-        # Idempotency (AC3): a second sync with nothing changed must not
-        # alter the spans (re-flush of the same, already-correct content).
-        scn.sync()
-        result2 = _debug_runs(scn, 1)
-        assert result2.get("scanRuns") == _EXPECTED_RUNS
-        assert result2.get("sheetRuns") == _EXPECTED_RUNS
-
-        rows = scn.find_sheet_actions()
-        matching = [r for r in rows if r.action_id == "AI-1"]
-        assert len(matching) == 1, (
-            "a formatting-only re-sync must not orphan the row or create a "
-            "duplicate — row identity is plain-text only (gts-zocq AC4)"
-        )
-    finally:
-        scn.close()
+# ---------------------------------------------------------------------------
+# test_inline_bold_italic_round_trips_scan_store_flush_rescan (base
+# bold+italic round trip) and test_inline_bold_italic_round_trips_with_assignee
+# (same, plus a PERSON chip assignee, exercising the validEmail/insertPerson
+# offset branch gts-1ibp lived in) retired gts-dxz9/act-retire (staged plan
+# docdata-litter-apt-speed.md, stage `apt-format-migration`): both are a
+# specifiable scan->sheet->flush->rescan round trip, now covered by
+# tests/fixtures/inline-formatting.apt.txt Cases 1/2 via
+# tests/test_apt_format_lane.py's batched lane. The idempotency half of each
+# original test (a second, no-op scn.sync() compared to the first) is NOW
+# COVERED TOO, by the runner itself: gts-5ktl (staged plan
+# docdata-litter-apt-speed.md, stage `lane-idempotency`) made run_lane issue
+# one further no-op sync and diff each scenario's slice of that second
+# capture against its slice of the first — so inline-formatting.apt.txt
+# Cases 1/2 now carry the idempotency assertion as well as the round trip.
+# (Superseded note, kept for the record: this comment previously said the
+# assertion had no corpus-shaped equivalent and would need a runner change.
+# It did need a runner change; the runner changed.)
+# ---------------------------------------------------------------------------
 
 
 def test_plain_action_text_has_no_runs(settings, request):

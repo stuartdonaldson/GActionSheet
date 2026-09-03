@@ -1,8 +1,16 @@
 <!-- kind: golden -->
 <!-- name: unparseable-reporting -->
-<!-- serves: gts-thwh -->
+<!-- serves: gts-thwh, gts-xvlu -->
 <!-- generated: 2026-08-28T00:00:00.000Z -->
 
 Case 1 (gts-thwh, ADR-0027 rule 6): a malformed token line (no colon after the token digits) is reported as unparseable, not silently skipped.
 
 ACT-77 | someone | do the thing
+
+Case 2 (gts-xvlu, act-retire): a well-formed action (token + colon) is not reported as unparseable. Already fully established (explicit status) so the establishing sync must not touch it -- this corpus's degenerate-scenario exemption depends on nothing in it ever flushing.
+
+ACT-78: a perfectly normal action (Open)
+
+Case 3 (gts-xvlu, act-retire): a plain prose paragraph with no action-token-like prefix is not an action and is not reported as unparseable.
+
+just some ordinary paragraph text, nothing to see here
