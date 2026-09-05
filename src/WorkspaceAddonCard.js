@@ -85,6 +85,7 @@ function buildHomepageCard(opts) {
         .addWidget(
           CardService.newTextButton()
             .setText('User Guide')
+            .setAltText('Open the published Action Sync user guide in a new tab.')
             .setOpenLink(CardService.newOpenLink().setUrl(_USER_GUIDE_URL))
         )
         .addWidget(CardService.newTextParagraph().setText(BUILD_INFO.version))
@@ -128,22 +129,26 @@ function _buildTopButtonsSection() {
       .addButton(
         CardService.newTextButton()
           .setText('Sync')
+          .setAltText('Scan this document for actions and reconcile them with the Actions sheet.')
           .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
           .setOnClickAction(_buildCardAction('onSyncNow'))
       )
       .addButton(
         CardService.newTextButton()
           .setText('Import')
+          .setAltText('Bring OPEN actions from other documents in this team into this one.')
           .setOnClickAction(_buildCardAction('onShowImport'))
       )
       .addButton(
         CardService.newTextButton()
           .setText('Notify')
+          .setAltText('Review this document\'s actions as tracked in the sheet and notify assignees.')
           .setOnClickAction(_buildCardAction('onShowNotify'))
       )
       .addButton(
         CardService.newTextButton()
           .setText('Insert Tracker')
+          .setAltText('Insert or refresh the status tracker table at the top of this document.')
           .setOnClickAction(_buildCardAction('onInsertTrackerTable'))
       )
   );
@@ -165,8 +170,10 @@ function onShowImport(e) { // eslint-disable-line no-unused-vars
 }
 
 function onShowNotify(e) { // eslint-disable-line no-unused-vars
+  var doc = DocumentApp.getActiveDocument();
+  var docId = doc ? doc.getId() : '';
   return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(_buildNotifyCard()))
+    .setNavigation(CardService.newNavigation().updateCard(_buildNotifyCard(docId)))
     .build();
 }
 
@@ -189,6 +196,7 @@ function _buildImportCard(docId, selectAll) {
     CardService.newCardSection().addWidget(
       CardService.newTextButton()
         .setText('Back')
+        .setAltText('Return to the Action Sync homepage.')
         .setOnClickAction(_buildCardAction('onImportBack'))
     )
   );
@@ -198,20 +206,76 @@ function _buildImportCard(docId, selectAll) {
   return card.build();
 }
 
-function _buildNotifyCard() {
+/**
+ * Notify card (gts-0r0s): opens with the current document's action list
+ * pulled from the Actions sheet (_findSheetActionsForDoc), NOT a doc scan —
+ * unlike Sync/Import, Notify targets whatever is currently tracked in the
+ * sheet, so a stale doc-only action shouldn't appear as notifiable.
+ * Send/recipient-selection business logic lands in EPIC-E; this card is
+ * read-only today.
+ */
+function _buildNotifyCard(docId) {
   return CardService.newCardBuilder()
     .addSection(
-      CardService.newCardSection()
-        .addWidget(
-          CardService.newTextButton()
-            .setText('Back')
-            .setOnClickAction(_buildCardAction('onNotifyBack'))
-        )
-        .addWidget(
-          CardService.newTextParagraph().setText('Notify — coming soon')
-        )
+      CardService.newCardSection().addWidget(
+        CardService.newTextButton()
+          .setText('Back')
+          .setAltText('Return to the Action Sync homepage.')
+          .setOnClickAction(_buildCardAction('onNotifyBack'))
+      )
     )
+    .addSection(_buildSheetActionListSection(docId))
     .build();
+}
+
+/**
+ * Renders the current document's Actions-sheet rows (_findSheetActionsForDoc),
+ * called in-process since the add-on and WebApp share the same script project
+ * — no HTTP round trip or auth needed. See _buildNotifyCard.
+ */
+function _buildSheetActionListSection(docId) {
+  var section = CardService.newCardSection().setHeader('Actions for this document');
+
+  if (!docId) {
+    section.addWidget(
+      CardService.newTextParagraph().setText('Open a Google Doc to use Notify.')
+    );
+    return section;
+  }
+
+  var rows;
+  try {
+    rows = _findSheetActionsForDoc(_openActionSheetSpreadsheet(), docId);
+  } catch (e) {
+    GasLogger.log('addon.notify.sheet_read_error', { msg: e.message });
+    GasLogger.flush();
+    section.addWidget(
+      CardService.newTextParagraph().setText('Unable to load actions from the sheet right now.')
+    );
+    return section;
+  }
+
+  section.setHeader('Actions for this document (' + rows.length + ')');
+
+  if (rows.length === 0) {
+    section.addWidget(
+      CardService.newTextParagraph().setText('No actions recorded in the sheet for this document.')
+    );
+    return section;
+  }
+
+  rows.forEach(function (row) {
+    var assignee = row.assignee_name || row.assignee_email || 'Unassigned';
+    var topLabel = [row.action_id, assignee, row.status || 'Open'].filter(function (p) { return p; }).join(' • ');
+    section.addWidget(
+      CardService.newDecoratedText()
+        .setTopLabel(topLabel)
+        .setText(_escapeAddonHtml(row.action_text || '(blank action)'))
+        .setWrapText(true)
+    );
+  });
+
+  return section;
 }
 
 /**
@@ -327,26 +391,19 @@ function _buildImportTabSection(docId, selectAll) {
         .addButton(
           CardService.newTextButton()
             .setText('Select all')
+            .setAltText('Check every importable action across all source documents.')
             .setOnClickAction(_buildCardAction('onImportSelectAll'))
         )
         .addButton(
           CardService.newTextButton()
             .setText('Import selected')
+            .setAltText('Copy the checked actions into this document.')
             .setOnClickAction(_buildCardAction('_submitImport'))
         )
     )
   );
 
   return sections;
-}
-
-/**
- * Placeholder Notify tab body (gts-0r0s). Business logic lands in EPIC-E.
- */
-function _buildNotifyTabSection() {
-  return CardService.newCardSection().addWidget(
-    CardService.newTextParagraph().setText('Notify — coming soon')
-  );
 }
 
 function _resolveActiveDocForRead(doc) {

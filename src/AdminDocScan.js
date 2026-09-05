@@ -33,11 +33,28 @@
  * rather than inventing a second convention.
  *
  * Entry points (all routed in src/WebApp.js):
- *   admin_scan_start   — clears state, seeds the folder stack, schedules the
- *                        one-shot, returns immediately (no doc reads).
+ *   admin_scan_start   — clears state, seeds the folder stack for ONE team,
+ *                        schedules the one-shot, returns immediately (no
+ *                        doc reads).
  *   admin_scan_status  — read-only progress, for UI polling.
  *   admin_scan_resume  — reschedules a stalled/incomplete scan.
  *   resumeAdminDocScan — the trigger handler itself (global, GAS-callable).
+ *   nightlyAdminScanAllTeams — installed by TriggerManager.js as a daily
+ *                        1am trigger. Seeds the SAME state machine with every
+ *                        team's teamId queued up (state.teamsQueue); when one
+ *                        team's match phase drains, _advanceToNextTeamOrDone
+ *                        rolls the state onto the next team's enumerate phase
+ *                        instead of finishing, so candidates accumulate
+ *                        across the whole run rather than being scanned and
+ *                        discarded team by team. A manual single-team scan
+ *                        (admin_scan_start) is the same machinery with an
+ *                        empty teamsQueue — it finishes after one team.
+ *
+ * Each queue/candidate entry carries teamId and path (the Drive folder
+ * breadcrumb from the team's registered root down to the doc's immediate
+ * parent) so the untracked-docs list can show which team a candidate
+ * belongs to and where it lives — necessary once a single scan (the nightly
+ * run) can span every team at once.
  *
  * Admin identity is NOT the ADMIN_SECRET gate (src/Admin.js) — the caller is
  * the verified-team-portal client, which cannot hold that secret. The
@@ -350,6 +367,11 @@ function _advanceScanPass() {
  * Phase 1: walk the folder stack collecting untracked Google Doc ids. No doc
  * bodies are opened here, which is what makes producing the total cheap.
  * The stack itself is the resume cursor and is persisted every pass.
+ *
+ * Stack entries are {id, path} — path is the breadcrumb of folder NAMES from
+ * the team's registered root down to (not including) this folder's own
+ * name, so a queued file's full path is computed once, cheaply, as this
+ * folder is opened (one getName() call per folder visited, not per file).
  */
 function _advanceEnumeratePass(state, startTime) {
   var queue = _scanListRead(ADMIN_DOC_SCAN_QUEUE_PROP, state.queueChunks);
@@ -360,22 +382,27 @@ function _advanceEnumeratePass(state, startTime) {
 
   while (state.folderStack.length) {
     if (Date.now() - startTime > ADMIN_DOC_SCAN_PASS_BUDGET_MS) break;
-    var folderId = state.folderStack.pop();
+    var stackEntry = state.folderStack.pop();
     var folder;
     try {
-      folder = DriveApp.getFolderById(folderId);
+      folder = DriveApp.getFolderById(stackEntry.id);
     } catch (e) {
       continue; // an unreadable/removed folder skips, it doesn't abort
     }
+    var parentPath = stackEntry.path || '';
+    var thisPath = parentPath ? parentPath + '/' + folder.getName() : folder.getName();
+
     var subfolders = folder.getFolders();
-    while (subfolders.hasNext()) state.folderStack.push(subfolders.next().getId());
+    while (subfolders.hasNext()) {
+      state.folderStack.push({ id: subfolders.next().getId(), path: thisPath });
+    }
 
     var files = folder.getFilesByType(MimeType.GOOGLE_DOCS);
     while (files.hasNext()) {
       var file = files.next();
       var fileId = file.getId();
       if (trackedFileIds[fileId]) continue;
-      queue.push({ id: fileId, name: file.getName(), url: file.getUrl() });
+      queue.push({ id: fileId, name: file.getName(), url: file.getUrl(), teamId: state.teamId, path: thisPath });
     }
   }
 
@@ -409,7 +436,7 @@ function _advanceMatchPass(state, startTime) {
     state.scanned++;
     if (entry && _quickMatchActionDoc(entry.id)) {
       if (candidates.length < ADMIN_DOC_SCAN_MAX_CANDIDATES) {
-        candidates.push({ docId: entry.id, docName: entry.name, url: entry.url });
+        candidates.push({ docId: entry.id, docName: entry.name, url: entry.url, teamId: entry.teamId, path: entry.path });
         dirty = true;
       }
       state.matched++;
@@ -417,8 +444,53 @@ function _advanceMatchPass(state, startTime) {
   }
 
   if (dirty) state.candidateChunks = _scanListWrite(ADMIN_DOC_SCAN_CANDIDATES_PROP, candidates);
-  if (state.cursor >= queue.length) state.phase = 'done';
+  if (state.cursor >= queue.length) _advanceToNextTeamOrDone(state);
   _writeScanState(state);
+}
+
+/**
+ * @param {Array<Object>} teamDataRows from _readTeamDataRows
+ * @param {string} teamId
+ * @returns {Array<string>} registered folder ids for that team.
+ */
+function _teamFolderIds(teamDataRows, teamId) {
+  var folderIds = [];
+  for (var t = 0; t < teamDataRows.length; t++) {
+    if (teamDataRows[t].teamId === teamId && teamDataRows[t].folderId) folderIds.push(teamDataRows[t].folderId);
+  }
+  return folderIds;
+}
+
+/**
+ * Called when a team's match-phase queue drains. A plain single-team scan
+ * (admin_scan_start) leaves state.teamsQueue empty, so this always falls
+ * through to 'done' — same behavior as before multi-team scans existed.
+ * The nightly all-teams scan (nightlyAdminScanAllTeams)
+ * seeds teamsQueue with every remaining teamId; this rolls the SAME state
+ * object onto the next team's enumerate phase, WITHOUT touching
+ * state.scanned/matched/candidateChunks — those accumulate across the whole
+ * run, which is what lets the untracked-docs list show results from every
+ * team in one place rather than being reset team by team.
+ *
+ * A team with no registered folders is skipped (no empty enumerate pass).
+ */
+function _advanceToNextTeamOrDone(state) {
+  var ss = _openActionSheetSpreadsheet();
+  var teamDataRows = _readTeamDataRows(ss);
+  while (state.teamsQueue && state.teamsQueue.length) {
+    var nextTeamId = state.teamsQueue.shift();
+    var folderIds = _teamFolderIds(teamDataRows, nextTeamId);
+    if (!folderIds.length) continue;
+    state.teamId = nextTeamId;
+    state.phase = 'enumerate';
+    state.folderStack = folderIds.map(function (fid) { return { id: fid, path: '' }; });
+    state.cursor = 0;
+    state.queued = 0;
+    state.total = null;
+    state.queueChunks = _scanListWrite(ADMIN_DOC_SCAN_QUEUE_PROP, []);
+    return;
+  }
+  state.phase = 'done';
 }
 
 // ---------------------------------------------------------------------------
@@ -469,7 +541,8 @@ function _scanStatusPayload(state) {
   if (!state) {
     return { ok: true, teamId: '', phase: 'idle', status: 'idle', scanned: 0,
              total: null, queued: 0, foldersRemaining: 0, matched: 0,
-             candidates: [], updatedAt: null, complete: false, error: null };
+             candidates: [], updatedAt: null, complete: false, error: null,
+             allTeams: false, teamsRemaining: 0 };
   }
   return {
     ok: true,
@@ -486,7 +559,12 @@ function _scanStatusPayload(state) {
     candidates: _scanListRead(ADMIN_DOC_SCAN_CANDIDATES_PROP, state.candidateChunks),
     updatedAt: state.updatedAt || null,
     complete: state.phase === 'done',
-    error: state.error || null
+    error: state.error || null,
+    // nightlyAdminScanAllTeams sets allTeams:true and seeds teamsQueue with
+    // every other team; teamsRemaining lets the UI say "N more team(s)
+    // queued" while state.teamId names the team currently being walked.
+    allTeams: !!state.allTeams,
+    teamsRemaining: (state.teamsQueue || []).length
   };
 }
 
@@ -499,20 +577,15 @@ function _handleAdminScanStart(payload) {
 
   var ss = _openActionSheetSpreadsheet();
   var teamDataRows = _readTeamDataRows(ss);
-  var folderIds = [];
-  for (var t = 0; t < teamDataRows.length; t++) {
-    if (teamDataRows[t].teamId === teamId && teamDataRows[t].folderId) {
-      folderIds.push(teamDataRows[t].folderId);
-    }
-  }
+  var folderIds = _teamFolderIds(teamDataRows, teamId);
   if (!folderIds.length) return _jsonResponse({ ok: false, reason: 'no folders registered for team' });
 
   _clearScanState();
   var state = _writeScanState({
-    teamId: teamId, phase: 'enumerate', status: 'waiting',
+    teamId: teamId, teamsQueue: [], allTeams: false, phase: 'enumerate', status: 'waiting',
     startedAt: new Date().toISOString(),
     total: null, scanned: 0, matched: 0,
-    folderStack: folderIds, cursor: 0, queued: 0,
+    folderStack: folderIds.map(function (fid) { return { id: fid, path: '' }; }), cursor: 0, queued: 0,
     queueChunks: 0, candidateChunks: 0, error: null
   });
   _scheduleScanTrigger();
@@ -561,13 +634,25 @@ function _handleAdminScanResume(payload) {
  * (AdminDocScan.js's enumerate phase), so teamId is known outright — no
  * folder walk needed, unlike _syncTeamScope's general case.
  *
- * Payload: { assertion|testToken+email, teamId, docs: [{docId, docName}] }
+ * Payload: { assertion|testToken+email, teamId, docs: [{docId, docName, teamId}] }
  * Response: { ok, teamId, tracked: [docId, ...] }
+ *
+ * A nightly all-teams scan's candidates span multiple teams in one list, so
+ * each doc in the payload carries its OWN teamId (round-tripped from the
+ * candidate the UI rendered); the top-level payload.teamId (still required,
+ * possibly the ALL_TEAMS_ID sentinel) is used only as a fallback for older
+ * callers that don't send a per-doc teamId, and for the forbidden-check log.
  *
  * The UI's job after this call is done (per human direction 2026-09-01): the
  * candidate list is simply cleared client-side. Whether a tracked doc's
  * Actions actually populate on the next sweep is syncAll's job, not this
  * route's — this route only makes the doc visible to that sweep.
+ *
+ * gts-f0vd: also prunes every tracked docId out of the SERVER-side persisted
+ * candidate list (ADMIN_DOC_SCAN_CANDIDATES_PROP). Client-side clearing is
+ * per-page-instance only — admin_scan_status replays the persisted list to
+ * every later page load (or second portal) until a fresh scan resets it, so
+ * without this a tracked doc reappeared as an untracked candidate.
  */
 function _handleAdminScanTrack(payload) {
   var teamId = payload.teamId || '';
@@ -580,22 +665,51 @@ function _handleAdminScanTrack(payload) {
 
   var ss = _openActionSheetSpreadsheet();
   var tracked = [];
+  var trackedIds = {};
   for (var i = 0; i < docs.length; i++) {
     var docId = docs[i] && docs[i].docId;
     if (!docId) continue;
+    var docTeamId = (docs[i].teamId) || teamId;
+    if (!docTeamId || docTeamId === TEAM_LISTING_ALL_TEAMS_ID) continue; // no real team to file it under
     var existing = _readDocDataRow(ss, docId);
     _getOrUpsertDocDataRow(
       ss, docId,
       docs[i].docName || (existing ? existing.docName : '') || '',
       existing ? existing.lastSyncTime : null,
-      teamId,
+      docTeamId,
       existing ? existing.syncStatus : '',
       existing ? existing.actionCount : 0,
       existing ? existing.resolvedCount : 0
     );
     tracked.push(docId);
+    trackedIds[docId] = true;
   }
   SpreadsheetApp.flush();
+
+  // Prune the just-tracked docs out of the persisted candidate list so a
+  // later admin_scan_status (this portal or the other lineage-A env sharing
+  // the same Script Properties) doesn't replay them as still-untracked.
+  // Candidates NOT in this call's docs stay listed (no wholesale clear).
+  var state = _readScanState();
+  if (state && tracked.length) {
+    var candidates = _scanListRead(ADMIN_DOC_SCAN_CANDIDATES_PROP, state.candidateChunks);
+    var kept = [];
+    var prunedCount = 0;
+    for (var c = 0; c < candidates.length; c++) {
+      if (trackedIds[candidates[c].docId]) {
+        prunedCount++;
+      } else {
+        kept.push(candidates[c]);
+      }
+    }
+    if (prunedCount) {
+      state.candidateChunks = _scanListWrite(ADMIN_DOC_SCAN_CANDIDATES_PROP, kept);
+      // Keep the displayed "N match(es)" count consistent with what's still
+      // listed, rather than a stale total that outlives the docs it counted.
+      state.matched = Math.max(0, state.matched - prunedCount);
+      _writeScanState(state);
+    }
+  }
 
   GasLogger.log('admin.scanTeamDocs.track', { teamId: teamId, count: tracked.length });
   GasLogger.flush();
@@ -609,5 +723,64 @@ function _handleAdminScanTrack(payload) {
  * one-shot can fire moments after a scan already finished.
  */
 function resumeAdminDocScan() {
+  _advanceScanPass();
+}
+
+/**
+ * Daily 1am trigger handler (installed by TriggerManager.js's
+ * initializeTriggers). Kicks off an all-teams untracked-doc scan: every
+ * TeamData teamId is queued into the SAME resumable state machine
+ * admin_scan_start uses, so it self-reschedules and survives the 6-minute
+ * execution ceiling exactly like a manual scan — just walking every team's
+ * folders instead of one before finishing.
+ *
+ * Refuses to clobber a scan that is genuinely still moving (fresh
+ * heartbeat, not error) — whether that's an admin's manual scan or last
+ * night's run still catching up — rather than resetting it out from under
+ * itself. A stale (crashed) or errored scan IS overwritten: a wedged prior
+ * run must not block tonight's run forever, and the trigger already
+ * exists to give scans that kind of self-healing.
+ */
+function nightlyAdminScanAllTeams() {
+  var ss = _openActionSheetSpreadsheet();
+  var teamDataRows = _readTeamDataRows(ss);
+  var teamIds = [];
+  var seen = {};
+  for (var i = 0; i < teamDataRows.length; i++) {
+    var tid = teamDataRows[i].teamId;
+    if (tid && !seen[tid]) { seen[tid] = true; teamIds.push(tid); }
+  }
+  if (!teamIds.length) {
+    GasLogger.log('admin.scanTeamDocs.nightlySkip', { reason: 'no_teams' });
+    GasLogger.flush();
+    return;
+  }
+
+  var existing = _readScanState();
+  if (existing && _isScanIncomplete(existing) && existing.status !== 'error' && !_isScanStale(existing)) {
+    GasLogger.log('admin.scanTeamDocs.nightlySkip', { reason: 'scan_in_progress', teamId: existing.teamId });
+    GasLogger.flush();
+    return;
+  }
+
+  _clearScanState();
+  var firstFolderIds = _teamFolderIds(teamDataRows, teamIds[0]);
+  var state = _writeScanState({
+    teamId: teamIds[0], teamsQueue: teamIds.slice(1), allTeams: true,
+    phase: 'enumerate', status: 'waiting',
+    startedAt: new Date().toISOString(),
+    total: null, scanned: 0, matched: 0,
+    folderStack: firstFolderIds.map(function (fid) { return { id: fid, path: '' }; }),
+    cursor: 0, queued: 0, queueChunks: 0, candidateChunks: 0, error: null
+  });
+  if (!firstFolderIds.length) {
+    // teams[0] has no registered folders — roll straight to the next team
+    // rather than running a pointless empty enumerate pass.
+    _advanceToNextTeamOrDone(state);
+    _writeScanState(state);
+  }
+
+  GasLogger.log('admin.scanTeamDocs.nightlyStart', { teams: teamIds.length });
+  GasLogger.flush();
   _advanceScanPass();
 }

@@ -569,7 +569,7 @@ sequenceDiagram
 
 ### Scenario C — Sync Now / menu sync (bidirectional, full reconcile)
 
-User clicks **Sync Now** in the sidebar, or **Action Sync → Sync** in the sheet menu. Full bidirectional reconcile via `syncDocument`.
+User clicks **Sync Now** in the sidebar, or **Action Sync → Document Sync** in the Docs menu (gts-w9kx). Full bidirectional reconcile via `syncDocument`.
 
 ```mermaid
 sequenceDiagram

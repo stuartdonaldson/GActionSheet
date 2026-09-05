@@ -52,19 +52,20 @@ overloaded things land on **opposite sides of this ADR's decision**.
 
 | This ADR says | UI path | Handler | Document context? |
 |---|---|---|---|
-| **Document Sync** | *Extensions ▸ Action Sync ▸ Sync*, while in a Google Doc; the add-on sidebar's *Sync Now*; the web UI / team portal *Sync* button | `menuSyncActiveDoc`, `onSyncNow`, `_handleSyncDocument`/`_handleTeamSyncDocument` — all one docId | **yes** — the active document |
-| **Spreadsheet Sync All** | *Action Sync ▸ Sync*, in the tracker spreadsheet | `menuSync` → `syncAll` | **no** — sweeps every tracked doc |
+| **Document Sync** | *Extensions ▸ Action Sync ▸ Document Sync*, while in a Google Doc; the add-on sidebar's *Sync Now*; the web UI / team portal *Sync* button | `menuSyncActiveDoc`, `onSyncNow`, `_handleSyncDocument`/`_handleTeamSyncDocument` — all one docId | **yes** — the active document |
+| **Spreadsheet Sync All** | *Action Sync ▸ Spreadsheet Sync All*, in the tracker spreadsheet | `menuSync` → `syncAll` | **no** — sweeps every tracked doc |
 | **Background Sync** *(named 2026-09-01)* | none — no menu, unattended | 30-minute time trigger → `syncAll` | **no** — sweeps every tracked doc |
 | **Force Refresh** | *Extensions ▸ Action Sync ▸ Force Refresh* | `menuForceRefreshActiveDoc` | **yes** — the active document |
 | **Row Sync** *(named 2026-09-01)* | none — fires on an Actions-tab cell edit | `onActionSheetEdit` → `_syncSheetRowToDoc` | n/a — scoped to the edited **row**, not a document; sheet→doc only |
 | **Sync Verify** *(not a sync — a read-only check)* | sidebar / web UI *Verify* | `verifyDocumentSync` | yes, but never writes | 
 
-**Both spreadsheet-application menus are named `Action Sync` and both items are labelled `Sync`**
-— see `onOpen()`'s two menu builders in `MenuHandler.js`, which now carry a label-collision note
-at the site. Identical text, different handlers, and after this ADR, different behaviour. Never
-write "the Sync menu item" unqualified in this codebase; say Document Sync, Spreadsheet Sync All,
-Background Sync, Force Refresh, or Row Sync — whichever applies. See §Consequences for the UI
-follow-up this collision needs, and the 2026-09-01 amendment below for the full six-name
+**Both spreadsheet-application menus are named `Action Sync`; their items were both once labelled
+`Sync`** — `gts-w9kx` gave them the distinguishable labels `Document Sync` and `Spreadsheet Sync
+All` seen in the table above, matching this ADR's own Terminology names — see `onOpen()`'s two menu
+builders in `MenuHandler.js`. Different handlers, and after this ADR, different behaviour. Still
+never write "the Sync menu item" unqualified in this codebase; say Document Sync, Spreadsheet Sync
+All, Background Sync, Force Refresh, or Row Sync — whichever applies. See §Consequences for the
+2026-09-01 amendment below for the full six-name
 vocabulary and two further findings it records.
 
 ## Decision
@@ -177,15 +178,14 @@ the problem rather than working around it.
   `ai_token` or `action_text`, each affected document conforms on its next Document Sync, or
   immediately via Force Refresh. Accepted deliberately: explicit and visible beats a silent mass
   restyle of every tracked document on the next half-hour boundary.
-- **The two `Sync` menu items now need distinguishable labels.** Before this ADR they differed only
-  in scope, and identical labels in two different applications were merely unhelpful. After it they
-  make different promises about the document, so identical labels are actively misleading — a user
-  who learns "Sync fixes the formatting" from the Docs menu will reasonably expect the spreadsheet's
-  `Sync` to do the same across their documents, and it will not — silently, with no indication
-  anything was skipped. Renaming is out of scope for this ADR (it decides behaviour, not UI copy)
-  and is tracked as **gts-w9kx**. Whatever the labels become, the two names in §Terminology are what
-  this codebase's prose, comments and beads should use; if the chosen labels diverge from them,
-  gts-w9kx updates this ADR so the two vocabularies stay reconciled.
+- **The two `Sync` menu items needed distinguishable labels — done, `gts-w9kx`.** Before this ADR
+  they differed only in scope, and identical labels in two different applications were merely
+  unhelpful. After it they make different promises about the document, so identical labels were
+  actively misleading — a user who learns "Sync fixes the formatting" from the Docs menu would
+  reasonably expect the spreadsheet's `Sync` to do the same across their documents, and it did
+  not — silently, with no indication anything was skipped. `MenuHandler.js`'s two menu items are now
+  labelled `Document Sync` and `Spreadsheet Sync All`, matching §Terminology exactly, so the UI and
+  prose vocabularies stay reconciled with no divergence to track.
 - **`syncAll` must remain zero-argument.** A GAS time-based trigger passes an event object as the
   first argument to its handler, and `TriggerManager.js:53` registers `syncAll` by name. Adding an
   options parameter would silently bind the trigger event to it every 30 minutes. If `syncAll` ever

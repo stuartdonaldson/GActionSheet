@@ -339,8 +339,8 @@ def test_mark_doc_not_found_no_restamp_on_reconfirm(settings, request):
     syncAll()'s own sweep already keeps a permanently-missing docId out of the
     detection path on later sweeps (its alreadyDocNotFound skip-list,
     SyncManager.js:348-352) -- but syncDocument() is also called directly from
-    doc-context entry points with no such guard (Sync menu item -- MenuHandler.js;
-    sidebar Sync button -- WorkspaceAddonCard.js:351). scn.sync() exercises that
+    doc-context entry points with no such guard (Document Sync menu item --
+    MenuHandler.js; sidebar Sync button -- WorkspaceAddonCard.js:351). scn.sync() exercises that
     same direct path via the sync_document fixture. Without a guard in
     _handleMarkDocNotFound itself, a user re-clicking Sync on a doc that's still
     missing would keep resetting the 24h Doc-Not-Found aging clock forever.
@@ -378,97 +378,20 @@ def test_mark_doc_not_found_no_restamp_on_reconfirm(settings, request):
 # op-id correlation — GTaskSheet-65g1
 # ---------------------------------------------------------------------------
 
-def test_sync_all_op_correlation(settings, gas_log_dir, request):
-    """GTaskSheet-65g1: one syncAll() invocation's sub-events share one `op` id.
+def test_sync_all_op_correlation_and_webapp_propagation(settings, gas_log_dir, request):
+    """GTaskSheet-65g1 + GTaskSheet-j8cn (merged, gts-i9xc): one syncAll()
+    invocation's sub-events share one `op` id, that op crosses the
+    addon->WebApp HTTP boundary as parentOp on each per-doc sync_action_rows
+    call, and a second, separate sweep produces a DIFFERENT op id.
 
-    Two docs are synced individually first (their own ops, ignored), then a
-    single syncAll() sweep is fenced and its sync.all.start/.../sync.all.complete
-    plus both docs' sync.scanned/sync.complete must all carry the SAME op id —
-    and a second, separate sweep must produce a DIFFERENT op id, proving the
-    field is per-invocation, not a constant.
-    """
-    if not gas_log_dir:
-        pytest.skip("gas_log_dir not configured — op correlation requires GAS log access")
-
-    import time
-
-    from tests.helpers.gas_log import clear_logs, collect_logs, wait_for_log
-
-    scn_a = ScenarioSession.new_doc(settings, request=request)
-    scn_b = ScenarioSession.new_doc(settings)
-    try:
-        scn_a.append_paragraph("AI-1: 65g1 op-correlation doc A")
-        scn_a.sync()
-        scn_b.append_paragraph("AI-1: 65g1 op-correlation doc B")
-        scn_b.sync()
-
-        # clear_logs()'s fence has a 10s clock-skew grace window — without this
-        # pause, the individual sync() calls' own sync.complete entries (no op,
-        # not part of a syncAll sweep) land inside that grace window and falsely
-        # appear as "after the fence" once flushed.
-        time.sleep(12)
-
-        # ── Sweep 1 ──────────────────────────────────────────────────────────
-        fence1 = clear_logs(gas_log_dir)
-        scn_a._post_fixture("sync_all")
-        wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=60, after=fence1)
-
-        sweep1_entries = collect_logs(
-            gas_log_dir,
-            lambda e: e.get("tag") in (
-                "sync.all.start", "sync.all.complete", "sync.scanned", "sync.complete",
-            ),
-            after=fence1,
-        )
-        assert sweep1_entries, "[65g1] no sub-events captured for sweep 1"
-        ops1 = {e.get("op") for e in sweep1_entries}
-        assert len(ops1) == 1 and None not in ops1, (
-            f"[65g1] sweep 1 sub-events do not share a single op id: {ops1!r} "
-            f"(entries: {sweep1_entries})"
-        )
-        op1 = next(iter(ops1))
-
-        # ── Sweep 2 (separate invocation) ────────────────────────────────────
-        fence2 = clear_logs(gas_log_dir)
-        scn_a._post_fixture("sync_all")
-        wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=60, after=fence2)
-
-        sweep2_entries = collect_logs(
-            gas_log_dir,
-            lambda e: e.get("tag") in ("sync.all.start", "sync.all.complete"),
-            after=fence2,
-        )
-        assert sweep2_entries, "[65g1] no sub-events captured for sweep 2"
-        ops2 = {e.get("op") for e in sweep2_entries}
-        assert len(ops2) == 1 and None not in ops2, (
-            f"[65g1] sweep 2 sub-events do not share a single op id: {ops2!r}"
-        )
-        op2 = next(iter(ops2))
-
-        assert op1 != op2, (
-            f"[65g1] two separate syncAll() invocations produced the SAME op id "
-            f"({op1!r}) — correlation field is not per-invocation"
-        )
-    finally:
-        # scn_a's doc-trashing is deferred to new_doc(request=request)'s
-        # pytest finalizer (gts-hroj); scn_b has no `request` and keeps its
-        # inline trash (this test has no browser_page, so the diagnostics
-        # ordering hook is a no-op here regardless).
-        scn_a.engine.close()
-        try:
-            scn_b._post_route("end_journey_session", {"docId": scn_b.doc_id})
-        except Exception:
-            pass
-
-
-def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
-    """GTaskSheet-j8cn: syncAll()'s op id crosses the addon->WebApp HTTP boundary
-    as parentOp, without the WebApp's own doPost execution adopting it as `op`.
-
-    A sweep over 2 docs makes 2 separate sync_action_rows doPost calls (one per
-    doc) -- each is its own GAS execution, so each gets its own fresh `op` on
-    the webapp.request entry. Both must carry the SAME parentOp, equal to the
-    sweep's own op (independently verified by test_sync_all_op_correlation).
+    Sweep 1 mints its own opId (kkm7/uuse convention) up front and scopes
+    every assertion to entries chained from THIS sweep via matches_op —
+    gts-i9xc: without this, the account's installed 30-min syncAll trigger
+    (or another session) landing in the same fence window contributes its
+    own unparented sync.all.start (or its own sync_action_rows calls),
+    breaking an unscoped "exactly one op" or "exactly N webapp calls" check.
+    Sweep 2 uses no explicit opId, to prove op ids are per-invocation, not a
+    constant.
     """
     if not gas_log_dir:
         pytest.skip("gas_log_dir not configured — op correlation requires GAS log access")
@@ -481,30 +404,49 @@ def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
     scn_a = ScenarioSession.new_doc(settings, request=request)
     scn_b = ScenarioSession.new_doc(settings)
     try:
-        scn_a.append_paragraph("AI-1: j8cn op-propagation doc A")
+        scn_a.append_paragraph("AI-1: 65g1/j8cn op-correlation doc A")
         scn_a.sync()
-        scn_b.append_paragraph("AI-1: j8cn op-propagation doc B")
+        scn_b.append_paragraph("AI-1: 65g1/j8cn op-correlation doc B")
         scn_b.sync()
-        time.sleep(12)  # see test_sync_all_op_correlation's clock-skew note
 
-        # gts-7vo2.2: mint our own opId up front (kkm7/uuse convention) rather
-        # than reading it back from sync.all.start after the fact, then scope
-        # every assertion below to entries chained from THIS sweep via
-        # matches_op. Without this, a concurrent syncAll (the account's
-        # installed 30-min trigger, or another session) landing in the same
-        # fence window can contribute its own sync_action_rows webapp.request
-        # entries that coincidentally satisfy the raw count check, then fail
-        # the parentOp check with a DIFFERENT sweep's op — a live, confirmed
-        # occurrence (see TD-PLAN-20-08.md §0/§2, gts-obry.1's disambiguation).
+        # clear_logs()'s fence has a 10s clock-skew grace window — without this
+        # pause, the individual sync() calls' own sync.complete entries (no op,
+        # not part of a syncAll sweep) land inside that grace window and falsely
+        # appear as "after the fence" once flushed.
+        time.sleep(12)
+
+        # ── Sweep 1: explicit opId, all assertions scoped via matches_op ───────
         sweep_op = str(uuid.uuid4())
-        fence = clear_logs(gas_log_dir)
+        fence1 = clear_logs(gas_log_dir)
         scn_a._post_fixture("sync_all", extra={"opId": sweep_op})
         wait_for_log(
             gas_log_dir,
             matches_op(lambda e: e.get("tag") == "sync.all.complete", sweep_op),
             timeout_s=60,
-            after=fence,
+            after=fence1,
         )
+
+        sweep1_entries = collect_logs(
+            gas_log_dir,
+            matches_op(
+                lambda e: e.get("tag") in (
+                    "sync.all.start", "sync.all.complete", "sync.scanned", "sync.complete",
+                ),
+                sweep_op,
+            ),
+            after=fence1,
+        )
+        assert sweep1_entries, "[65g1] no sub-events captured for sweep 1's own op"
+        # matches_op already scoped these entries to parentOp == sweep_op (the
+        # fixture dispatcher's own op, chained through GasLogger.startOp); the
+        # sweep's OWN op is a freshly minted id distinct from sweep_op, shared
+        # by every one of its sub-events.
+        ops1 = {e.get("op") for e in sweep1_entries}
+        assert len(ops1) == 1 and None not in ops1, (
+            f"[65g1] sweep 1 sub-events do not share a single op id: {ops1!r} "
+            f"(entries: {sweep1_entries})"
+        )
+        op1 = next(iter(ops1))
 
         # gts-6pws: wait_for_log(sync.all.complete) above only proves the
         # sweep's own top-level op is done -- it races Axiom ingestion lag on
@@ -522,7 +464,7 @@ def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
                     and (e.get("data") or {}).get("action") == "sync_action_rows",
                     sweep_op,
                 ),
-                after=fence,
+                after=fence1,
             )
             if len(webapp_entries) >= 2:
                 break
@@ -545,6 +487,28 @@ def test_sync_all_op_propagates_to_webapp(settings, gas_log_dir, request):
         assert webapp_parent_ops == {sweep_op}, (
             f"[j8cn] all sync_action_rows calls in this sweep should carry parentOp={sweep_op!r}, "
             f"got {webapp_parent_ops!r}"
+        )
+
+        # ── Sweep 2 (separate invocation, no explicit opId) ─────────────────────
+        fence2 = clear_logs(gas_log_dir)
+        scn_a._post_fixture("sync_all")
+        wait_for_log(gas_log_dir, lambda e: e.get("tag") == "sync.all.complete", timeout_s=60, after=fence2)
+
+        sweep2_entries = collect_logs(
+            gas_log_dir,
+            lambda e: e.get("tag") in ("sync.all.start", "sync.all.complete"),
+            after=fence2,
+        )
+        assert sweep2_entries, "[65g1] no sub-events captured for sweep 2"
+        ops2 = {e.get("op") for e in sweep2_entries}
+        assert len(ops2) == 1 and None not in ops2, (
+            f"[65g1] sweep 2 sub-events do not share a single op id: {ops2!r}"
+        )
+        op2 = next(iter(ops2))
+
+        assert op2 != op1, (
+            f"[65g1] two separate syncAll() invocations produced the SAME op id "
+            f"({op1!r}) — correlation field is not per-invocation"
         )
     finally:
         # scn_a's doc-trashing is deferred to new_doc(request=request)'s
@@ -853,18 +817,35 @@ def test_sync_all_integrity_and_listing_miss_batch(settings, gas_log_dir, reques
 # against that build and passes against the current one.
 
 def test_sync_all_retries_transient_drive_5xx(settings, gas_log_dir, request):
-    """[gts-pm72] A single transient Drive files.list 500 (within the 3-attempt
-    retry budget) is absorbed by the bounded retry: no sync.driveMetadata.error
-    is logged, and syncAll completes with no observable disruption."""
+    """[gts-pm72] One doc, two sequential forced-5xx sweeps.
+
+    Sweep 1: a single transient Drive files.list 500 (within the 3-attempt
+    retry budget) is absorbed by the bounded retry: no
+    sync.driveMetadata.error is logged, and syncAll completes with no
+    observable disruption.
+
+    Sweep 2: a persistent Drive files.list 500 (beyond the 3-attempt retry
+    budget) still throws sync.driveMetadata.error once the bound is
+    exhausted -- proving the retry is bounded, not silently infinite or
+    skipped -- but the pre-existing per-doc fallback (gts-rskf) still keeps
+    the sweep correct: no row is misclassified 'Doc Not Found' just because
+    the bulk listing call failed outright.
+
+    The fault counter (_TEST_FORCE_DRIVE_5XX_COUNT, ScriptProperties) is
+    global, not doc-scoped, and each fixture call consumes its own count
+    before the next runs -- sequencing both sweeps on one doc changes
+    nothing about what's being proven.
+    """
     scn = ScenarioSession.new_doc(settings, request=request)
     try:
-        scn.append_paragraph("AI-1: pm72 transient-500 recovery action")
+        scn.append_paragraph("AI-1: pm72 transient/exhausted-500 action")
         scn.sync()
 
         pre_rows = scn.find_sheet_actions()
-        assert pre_rows, "[pm72] expected ≥1 Actions row before the forced-5xx sweep"
+        assert pre_rows, "[pm72] expected ≥1 Actions row before the forced-5xx sweeps"
         pre_statuses = {r.global_id: r.sync_status for r in pre_rows}
 
+        # ── Sweep 1: single transient 500, absorbed by the bounded retry ───────
         if gas_log_dir:
             from tests.helpers.gas_log import clear_logs, assert_no_log
             fence = clear_logs(gas_log_dir)
@@ -896,30 +877,11 @@ def test_sync_all_retries_transient_drive_5xx(settings, gas_log_dir, request):
                 f"[pm72] row {row.global_id!r} sync_status changed: "
                 f"{prior!r} -> {row.sync_status!r}"
             )
-    finally:
-        # Doc-trashing deferred to new_doc(request=request)'s pytest
-        # finalizer (gts-hroj).
-        scn.engine.close()
 
-
-def test_sync_all_exhausted_drive_5xx_retry_still_recovers_via_fallback(settings, gas_log_dir, request):
-    """[gts-pm72] A persistent Drive files.list 500 (beyond the 3-attempt retry
-    budget) still throws sync.driveMetadata.error once the bound is exhausted
-    -- proving the retry is bounded, not silently infinite or skipped -- but
-    the pre-existing per-doc fallback (gts-rskf) still keeps the sweep correct:
-    no row is misclassified 'Doc Not Found' just because the bulk listing call
-    failed outright."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        scn.append_paragraph("AI-1: pm72 exhausted-retry fallback action")
-        scn.sync()
-
-        pre_rows = scn.find_sheet_actions()
-        assert pre_rows, "[pm72] expected ≥1 Actions row before the forced-5xx sweep"
-
+        # ── Sweep 2: persistent 500, retry bound exhausted, fallback recovers ──
         if gas_log_dir:
             from tests.helpers.gas_log import clear_logs, wait_for_log
-            fence = clear_logs(gas_log_dir)
+            fence2 = clear_logs(gas_log_dir)
 
         _post_fixture_patient(scn, "sync_all_force_drive_5xx", {"fails": 5})
 
@@ -928,15 +890,15 @@ def test_sync_all_exhausted_drive_5xx_retry_still_recovers_via_fallback(settings
                 gas_log_dir,
                 lambda e: e.get("tag") == "sync.driveMetadata.error",
                 timeout_s=30,
-                after=fence,
+                after=fence2,
             )
 
-        post_rows = scn.find_sheet_actions()
-        assert len(post_rows) == len(pre_rows), (
+        post_rows2 = scn.find_sheet_actions()
+        assert len(post_rows2) == len(pre_rows), (
             f"[pm72] Actions row count changed after an exhausted-retry sweep: "
-            f"before={len(pre_rows)} after={len(post_rows)}"
+            f"before={len(pre_rows)} after={len(post_rows2)}"
         )
-        for row in post_rows:
+        for row in post_rows2:
             assert row.sync_status != "Doc Not Found", (
                 f"[pm72] row {row.global_id!r} marked 'Doc Not Found' after an "
                 f"exhausted-retry bulk-listing failure -- per-doc fallback did not save it"
@@ -1172,10 +1134,13 @@ def test_sync_action_rows_missing_docstate_is_noop(settings, gas_log_dir, reques
 # would ever fire -- both assertions below fail against that build.
 
 def test_sync_all_collapses_duplicate_globalid_rows(settings, gas_log_dir, request):
-    """[gts-binf/gts-6hzy case 1+3] N>1 sheet rows sharing a globalId collapse
-    to one canonical row on the regular sync sweep; a sync.dedup log event
-    fires on collapse; a second sync afterward is idempotent (no further
-    dedup event, no row-count change)."""
+    """[gts-binf/gts-6hzy case 1+3+2] N>1 sheet rows sharing a globalId
+    collapse to one canonical row on the regular sync sweep; a sync.dedup
+    log event fires on collapse; a second sync afterward is idempotent (no
+    further dedup event, no row-count change); and, on the same
+    now-canonical row, the pre-existing re-anchor duplicate-IDENTITY path
+    (WebApp.js's docStateIdentitySet check, distinct from gts-binf's
+    SAME-globalId collapse) still fires correctly."""
     scn = ScenarioSession.new_doc(settings, request=request)
     try:
         scn.append_paragraph("AI-1: binf dedup canonical action")
@@ -1265,38 +1230,22 @@ def test_sync_all_collapses_duplicate_globalid_rows(settings, gas_log_dir, reque
                 lambda e: e.get("tag") == "sync.dedup" and (e.get("data") or {}).get("globalId") == global_id,
                 what="[6hzy idempotency] unexpected repeat sync.dedup after collapse already settled",
             )
-    finally:
-        # Doc-trashing deferred to new_doc(request=request)'s pytest
-        # finalizer (gts-hroj).
-        scn.engine.close()
 
-
-def test_sync_all_duplicate_globalid_dedup_does_not_regress_reanchor_path(
-    settings, gas_log_dir, request
-):
-    """[gts-binf/gts-6hzy case 2] Regression guard: the pre-existing re-anchor
-    duplicate-IDENTITY path (WebApp.js's docStateIdentitySet check, distinct
-    from gts-binf's SAME-globalId collapse) must still fire correctly. Seeds
-    a stale row under a DIFFERENT globalId but the SAME identity (assignee +
-    action text + status) as a still-live action -- simulating the row a
-    re-anchor (AI-N renumber / named-range reset) leaves behind. This is a
-    no-change assertion by construction (the identity-duplicate code path is
-    untouched by gts-binf's same-globalId dedup pass, which only ever
-    inspects rows sharing an exact globalId) -- it is not expected to fail
-    pre-fix; its purpose is to prove the new same-globalId collapse pass does
-    not interfere with, duplicate, or suppress this older mechanism."""
-    scn = ScenarioSession.new_doc(settings, request=request)
-    try:
-        scn.append_paragraph("AI-1: binf reanchor-guard live action")
-        scn.sync()
-
-        live_rows = scn.find_sheet_actions()
-        assert len(live_rows) == 1, (
-            f"[binf reanchor-guard] expected exactly 1 row after initial sync, got {len(live_rows)}"
-        )
-        live_row = live_rows[0]
+        # [gts-binf/gts-6hzy case 2] Regression guard, on the SAME now-canonical
+        # live row: the pre-existing re-anchor duplicate-IDENTITY path
+        # (WebApp.js's docStateIdentitySet check, distinct from gts-binf's
+        # SAME-globalId collapse above) must still fire correctly. Seeds a
+        # stale row under a DIFFERENT globalId but the SAME identity (assignee
+        # + action text + status) as the still-live canonical action --
+        # simulating the row a re-anchor (AI-N renumber / named-range reset)
+        # leaves behind. This is a no-change assertion by construction (the
+        # identity-duplicate code path is untouched by gts-binf's
+        # same-globalId dedup pass, which only ever inspects rows sharing an
+        # exact globalId) -- it is not expected to fail pre-fix; its purpose
+        # is to prove the same-globalId collapse pass above does not
+        # interfere with, duplicate, or suppress this older mechanism.
+        live_row = collapsed_rows[0]
         live_global_id = live_row.global_id
-        assert live_global_id, "[binf reanchor-guard] live row has no global_id"
 
         # A stale row under a DIFFERENT (fabricated) globalId for the same doc,
         # sharing the live row's identity (assignee/action/status) -- exactly

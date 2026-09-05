@@ -99,7 +99,9 @@
   .scanstatus .dot.run{background:#2e7d32;animation:scanpulse 1.2s ease-in-out infinite}
   .scanstatus .dot.wait{background:#ef6c00}
   .scanstatus .dot.err{background:#c62828}
+  .scanstatus .scanupdated{color:var(--muted);opacity:.75}
   @keyframes scanpulse{0%,100%{opacity:1}50%{opacity:.25}}
+  .scanmeta{display:block;margin-left:24px;font-size:12px;color:var(--muted)}
   .notice{margin-top:14px;padding:16px;border-radius:12px;border:1px solid var(--line);
           background:#fff;color:var(--muted)}
   .caveats{margin-top:20px;color:var(--muted);font-size:12.5px;line-height:1.6}
@@ -221,12 +223,14 @@
           <button class="btn small" id="expandAllBtn">Expand all</button>
           <button class="btn small" id="collapseAllBtn">Collapse all</button>
         </div>
-        <!-- gts-gwyg/gts-lgpx: admin-only, per-team. Never shown in All-teams
-             mode (the scan routes authorize against ONE real teamId, same
-             constraint as the write routes above) or to a non-admin caller
-             (state.isAdmin comes from list_team_actions's server-verified
-             isAdmin field — this toggle is UX only, real authorization is
-             re-checked server-side on every scan call itself).
+        <!-- gts-gwyg/gts-lgpx/nightly-all-teams: admin-only. Hidden from a
+             non-admin caller (state.isAdmin comes from list_team_actions's
+             server-verified isAdmin field — this toggle is UX only, real
+             authorization is re-checked server-side on every scan call
+             itself). Shown in All-teams view too, since the nightly scan
+             (installed as a 1am daily trigger) spans every team in the same
+             shared scan state — monitoring/resuming it doesn't need one
+             real team selected; only STARTING a fresh manual scan does.
              The button's label and enabled-ness track the persisted scan
              state (Start / Resume / running), so the operator can always
              tell whether a scan is moving without reading the log. -->
@@ -398,7 +402,10 @@ const state = {
                        // itself, which re-checks Config!AdminUsers server-side.
   scanBusy: false,
   scan: null,          // gts-lgpx: last admin_scan_status payload
-                       // {phase,status,scanned,total,queued,matched,candidates,...}
+                       // {phase,status,scanned,total,queued,matched,candidates,
+                       //  updatedAt,allTeams,teamsRemaining,...} — allTeams is
+                       //  true for the nightly all-teams scan, whose
+                       //  candidates each carry their own teamId/path.
   scanPollTimer: null,
   scanTeamShown: null,   // teamId whose scan status is currently displayed
   teamTiers: {},       // {teamId: tier} — populated in ALL-teams mode from res.teams,
@@ -727,8 +734,13 @@ function scheduleScanPoll(){
   state.scanPollTimer = setTimeout(refreshScanStatus, SCAN_POLL_MS);
 }
 
+// Status is read from ONE shared Script Property regardless
+// of which team is selected in the picker (a nightly all-teams scan spans
+// every team in that same state object), so monitoring it no longer needs a
+// specific real team — only Start (admin_scan_start) does, since it seeds
+// the scan from one team's registered folders.
 function refreshScanStatus(){
-  if (!state.isAdmin || !state.teamId || state.teamId === ALL_TEAMS_ID) return Promise.resolve();
+  if (!state.isAdmin || !state.teamId) return Promise.resolve();
   return scanCall('admin_scan_status')
     .then(res => {
       if (!res.ok) return;               // forbidden — leave the panel blank
@@ -742,9 +754,17 @@ function refreshScanStatus(){
 // Start a fresh scan, or resume the one already persisted. The button label
 // (renderScanPanel) tells the operator which of the two the click will do.
 function runAdminScan(){
-  if (state.scanBusy || !state.teamId || state.teamId === ALL_TEAMS_ID) return;
+  if (state.scanBusy || !state.teamId) return;
   const resumable = state.scan && (state.scan.status === 'waiting'
     || state.scan.status === 'stale' || state.scan.status === 'error');
+  // Starting a FRESH scan needs one real team's registered folders
+  // (admin_scan_start). Resuming an already-persisted scan (manual or the
+  // nightly all-teams run) is fine from the All-teams view — it just
+  // reschedules whatever state is already there.
+  if (!resumable && state.teamId === ALL_TEAMS_ID) {
+    toast('Pick a specific team to start a manual scan. The nightly scan covers every team automatically at 1am.');
+    return;
+  }
   const action = resumable ? 'admin_scan_resume' : 'admin_scan_start';
 
   state.scanBusy = true;
@@ -763,25 +783,60 @@ function runAdminScan(){
 }
 $('adminScanBtn').addEventListener('click', runAdminScan);
 
-// One line answering all three of the operator's questions at once: what is
-// it doing, how far along, and is it moving right now or waiting on its
-// trigger. `waiting` is deliberately worded as queued-not-stalled — the
-// one-shot fires about a minute out, and without saying so the pause reads
-// as a hang (which is exactly how the old blocking scan failed).
+// Resolves a teamId to its display name (falls back to the raw id when no
+// TeamData display name column exists — src/AccessControl.js's teamName
+// gap — or when the team isn't in state.teams, e.g. a nightly scan touching
+// a team this operator doesn't personally belong to).
+function teamDisplayName(teamId){
+  if (!teamId) return '';
+  const t = state.teams.find(t => t.teamId === teamId);
+  return t ? t.teamName : teamId;
+}
+
+// Coarse relative-time label for updatedAt, so the operator can tell
+// "still actively moving" from "hasn't reported in for a while" without
+// doing date math — this is what actually answers "do I need to click
+// Resume", separately from the status word itself.
+function timeAgo(iso){
+  if (!iso) return '';
+  const ms = Date.now() - Date.parse(iso);
+  if (!(ms >= 0)) return '';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + 's ago';
+  const m = Math.round(s / 60);
+  if (m < 60) return m + 'm ago';
+  const h = Math.round(m / 60);
+  return h + 'h ago';
+}
+
+// One line answering all the operator's questions at once: what is it
+// doing, how far along, is it moving right now or waiting on its trigger,
+// and — via "updated" — when it last actually reported in. `waiting` is
+// deliberately worded as queued-not-stalled — the one-shot fires about a
+// minute out, and without saying so the pause reads as a hang (which is
+// exactly how the old blocking scan failed). `stale` is the one status
+// where the auto-reschedule chain is actually broken (the pass crashed
+// mid-flight without persisting/rescheduling, or an error pass deleted its
+// own trigger) — that's the ONLY case Resume exists for; a normal scan
+// re-advances itself every ~60s with no operator action needed.
 function scanStatusLine(sc){
   if (!sc || sc.status === 'idle') return '';
   const n = sc.scanned || 0;
-  if (sc.status === 'error') return `<span class="dot err"></span>Scan failed${sc.error ? ' (' + escape(sc.error) + ')' : ''} — Resume to retry`;
+  const updated = sc.updatedAt ? ` <span class="scanupdated">(updated ${timeAgo(sc.updatedAt)})</span>` : '';
+  const teamProgress = sc.allTeams
+    ? ` — team ${escape(teamDisplayName(sc.teamId))}${sc.teamsRemaining ? `, ${sc.teamsRemaining} more queued` : ''}`
+    : '';
+  if (sc.status === 'error') return `<span class="dot err"></span>Scan failed${sc.error ? ' (' + escape(sc.error) + ')' : ''} — Resume to retry${teamProgress}${updated}`;
   if (sc.phase === 'enumerate') {
     const found = sc.queued || 0;
     const where = sc.status === 'running' ? 'Finding docs' : 'Finding docs (queued)';
-    return `<span class="dot ${sc.status === 'running' ? 'run' : 'wait'}"></span>${where} — ${found} found so far`;
+    return `<span class="dot ${sc.status === 'running' ? 'run' : 'wait'}"></span>${where} — ${found} found so far${teamProgress}${updated}`;
   }
-  if (sc.complete) return `<span class="dot"></span>Done — scanned ${n} of ${sc.total}, ${sc.matched || 0} match(es)`;
+  if (sc.complete) return `<span class="dot"></span>Done — scanned ${n}${sc.allTeams ? ' across all teams' : ' of ' + sc.total}, ${sc.matched || 0} match(es)${updated}`;
   const total = (typeof sc.total === 'number') ? sc.total : '?';
-  if (sc.status === 'stale') return `<span class="dot err"></span>Stalled at ${n} of ${total} — Resume to continue`;
+  if (sc.status === 'stale') return `<span class="dot err"></span>Stalled at ${n} of ${total} — no update in over 7 min, Resume to continue${teamProgress}${updated}`;
   const verb = sc.status === 'running' ? 'Scanning' : 'Queued — next pass within a minute;';
-  return `<span class="dot ${sc.status === 'running' ? 'run' : 'wait'}"></span>${verb} ${n} of ${total}`;
+  return `<span class="dot ${sc.status === 'running' ? 'run' : 'wait'}"></span>${verb} ${n} of ${total}${teamProgress}${updated}`;
 }
 
 function renderScanPanel(){
@@ -795,8 +850,9 @@ function renderScanPanel(){
     : 'Scan for untracked docs';
   // Only a genuinely in-flight pass disables the button — a waiting scan
   // stays clickable so the operator can pull the next pass forward instead
-  // of waiting out the trigger delay.
-  btn.disabled = state.scanBusy || running;
+  // of waiting out the trigger delay. Starting FRESH needs one real team
+  // (Resuming an existing scan does not — see runAdminScan).
+  btn.disabled = state.scanBusy || running || (!resumable && state.teamId === ALL_TEAMS_ID);
 
   $('adminScanStatus').innerHTML = scanStatusLine(sc);
   renderAdminScanResults(sc);
@@ -812,20 +868,26 @@ function renderAdminScanResults(sc){
     box.classList.add('hidden');
     return;
   }
+  // A candidate's team/path only needs to be shown once teams can mix in
+  // one list (the nightly all-teams scan) — for a single-team manual scan
+  // it's the same team every time, so skip the redundant line.
+  const candidateMeta = c => sc.allTeams
+    ? `<span class="scanmeta">${escape(teamDisplayName(c.teamId))} — ${escape(c.path || '(team root)')}</span>`
+    : (c.path ? `<span class="scanmeta">${escape(c.path)}</span>` : '');
   if (!candidates.length) {
-    box.innerHTML = `<p>Scanned ${sc.scanned} doc(s) under this team's folder(s) — no untracked action-looking docs found.</p>`;
+    box.innerHTML = `<p>Scanned ${sc.scanned} doc(s)${sc.allTeams ? ' across all teams' : " under this team's folder(s)"} — no untracked action-looking docs found.</p>`;
   } else if (!sc.complete) {
-    box.innerHTML = `<p>${candidates.length} found so far (${sc.scanned} of ${sc.total} scanned) — still running:</p>` +
+    box.innerHTML = `<p>${candidates.length} found so far (${sc.scanned} of ${sc.total || '?'} scanned) — still running:</p>` +
       '<ul>' + candidates.map(c =>
-        `<li><a href="${escape(c.url)}" target="_blank" rel="noopener">${escape(c.docName)}</a></li>`
+        `<li><a href="${escape(c.url)}" target="_blank" rel="noopener">${escape(c.docName)}</a>${candidateMeta(c)}</li>`
       ).join('') + '</ul>';
   } else {
     box.innerHTML =
       `<p>${candidates.length} untracked doc(s) look action-bearing (of ${sc.scanned} scanned):</p>` +
       `<p><label><input type="checkbox" id="trackSelectAll" /> Select all</label></p>` +
       '<ul class="trackable">' + candidates.map(c =>
-        `<li><label><input type="checkbox" class="trackCandidate" data-doc-id="${escape(c.docId)}" data-doc-name="${escape(c.docName)}" /> ` +
-        `<a href="${escape(c.url)}" target="_blank" rel="noopener">${escape(c.docName)}</a></label></li>`
+        `<li><label><input type="checkbox" class="trackCandidate" data-doc-id="${escape(c.docId)}" data-doc-name="${escape(c.docName)}" data-team-id="${escape(c.teamId || '')}" /> ` +
+        `<a href="${escape(c.url)}" target="_blank" rel="noopener">${escape(c.docName)}</a></label>${candidateMeta(c)}</li>`
       ).join('') + '</ul>' +
       `<button class="btn small" id="trackSelectedBtn">Track selected</button>`;
     $('trackSelectAll').addEventListener('change', (e) => {
@@ -838,14 +900,19 @@ function renderAdminScanResults(sc){
 
 // Track = cheap DocData registration only (admin_scan_track), not a full
 // doc sync — the next syncAll sweep (gts-qkev, DocData-walk) discovers and
-// syncs each tracked doc's Actions on its own. Per human direction
-// 2026-09-01: the list simply goes away on success; the operator re-scans
-// later if/when they want to see what remains.
+// syncs each tracked doc's Actions on its own.
+//
+// Tracking a doc removes ONLY that doc from the untracked list — it does
+// not clear the rest. The server already prunes just the tracked ids out of
+// the persisted candidate list (gts-f0vd); this mirrors that client-side
+// instead of nulling state.scan out, so untracked siblings found in the
+// same scan (single-team or nightly all-teams) stay visible and checkable
+// without forcing a re-scan to see them again.
 function trackSelectedDocs(){
   const box = $('adminScanResults');
   const checked = Array.from(box.querySelectorAll('.trackCandidate:checked'));
   if (!checked.length) { toast('Select at least one document to track.'); return; }
-  const docs = checked.map(cb => ({ docId: cb.dataset.docId, docName: cb.dataset.docName }));
+  const docs = checked.map(cb => ({ docId: cb.dataset.docId, docName: cb.dataset.docName, teamId: cb.dataset.teamId }));
 
   const btn = $('trackSelectedBtn');
   btn.disabled = true;
@@ -854,7 +921,14 @@ function trackSelectedDocs(){
     .then(res => {
       if (!res.ok) { toast('Track failed: ' + (res.reason || 'unknown error')); return; }
       toast(`Tracking ${res.tracked.length} document(s) — they'll pick up actions on the next background sync.`);
-      state.scan = null;
+      if (state.scan) {
+        const trackedIds = new Set(res.tracked);
+        state.scan = {
+          ...state.scan,
+          candidates: state.scan.candidates.filter(c => !trackedIds.has(c.docId)),
+          matched: Math.max(0, state.scan.matched - res.tracked.length)
+        };
+      }
       renderScanPanel();
     })
     .catch(err => toast('Track failed: ' + (err.message || err)))
@@ -906,7 +980,13 @@ function rowByDocId(docId){ return state.rows.find(r => r.doc_id === docId); }
 function render(){
   const isAllTeams = state.teamId === ALL_TEAMS_ID;
   $('sub').textContent = (isAllTeams ? 'All teams' : state.teamId) + ' • signed in';
-  const showScan = !isAllTeams && state.isAdmin;
+  // The scan status itself lives in ONE shared Script Property regardless of
+  // which team is selected (a nightly all-teams scan spans every team), so
+  // the panel is visible for any admin, including in All-teams view — that's
+  // what makes the nightly scan monitorable at all without picking an
+  // arbitrary team. Only STARTING a fresh scan is team-specific (see
+  // runAdminScan/renderScanPanel's button gating).
+  const showScan = state.isAdmin;
   $('adminScanField').classList.toggle('hidden', !showScan);
   // gts-lgpx: the scan lives server-side in a Script Property, so on load (and
   // on every team switch) ask what it is doing rather than assuming idle — a
@@ -966,10 +1046,7 @@ function render(){
       if (!byTeam.has(teamId)) byTeam.set(teamId, new Map());
       byTeam.get(teamId).set(docId, docRows);
     });
-    const teamName = teamId => {
-      const t = state.teams.find(t => t.teamId === teamId);
-      return t ? t.teamName : teamId;
-    };
+    const teamName = teamDisplayName; // see teamDisplayName (shared with the scan panel)
     byTeam.forEach((docsInTeam, teamId) => {
       const teamKey = 'team:' + teamId;
       const teamCollapsed = !!state.collapsed[teamKey];

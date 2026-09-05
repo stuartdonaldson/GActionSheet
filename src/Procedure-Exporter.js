@@ -129,13 +129,13 @@ const COMMENT_FUZZY_MIN_MARGIN = 0.15; // required lead over the second-best can
 
 function onDocumentExportMenu(e) { // eslint-disable-line no-unused-vars
   return CardService.newUniversalActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().pushCard(_exportDocumentAndGetCard_({ exportPdf: false })))
+    .displayAddOnCards([_exportDocumentAndGetCard_({ exportPdf: false })])
     .build();
 }
 
 function onDocumentExportAndPdfMenu(e) { // eslint-disable-line no-unused-vars
   return CardService.newUniversalActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().pushCard(_exportDocumentAndGetCard_({ exportPdf: true })))
+    .displayAddOnCards([_exportDocumentAndGetCard_({ exportPdf: true })])
     .build();
 }
 

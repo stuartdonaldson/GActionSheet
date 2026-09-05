@@ -469,18 +469,19 @@ function syncDocument(docId, opts) {
  * orphan-detection pass in _handleSyncActionRows stamps those rows 'Deleted'.
  *
  * Called by:
- *   - "Spreadsheet Sync All" — the SPREADSHEET's Action Sync > Sync item
- *     (menuSync). NOT the Docs one; see the naming warning below.
+ *   - "Spreadsheet Sync All" — the SPREADSHEET's Action Sync > Spreadsheet
+ *     Sync All item (menuSync). NOT the Docs one; see the naming warning below.
  *   - 30-minute time-based trigger
  *
- * NAMING — two different things are called "Sync" (ADR-0031 §Terminology):
- *   Document Sync        = Extensions > Action Sync > Sync, inside a Doc
- *                          -> menuSyncActiveDoc. HAS a document context.
- *   Spreadsheet Sync All = Action Sync > Sync, in the tracker spreadsheet
- *                          -> menuSync -> here. NO document context.
- * Both menus are named 'Action Sync' and both items are labelled 'Sync'
- * (MenuHandler.js:25-26 and :58-59), so never write "the Sync menu item"
- * unqualified. They are on OPPOSITE sides of ADR-0031's decision.
+ * NAMING — two different things were both once labelled "Sync" (ADR-0031
+ * §Terminology; distinguishable menu labels landed gts-w9kx):
+ *   Document Sync        = Extensions > Action Sync > Document Sync, inside a
+ *                          Doc -> menuSyncActiveDoc. HAS a document context.
+ *   Spreadsheet Sync All = Action Sync > Spreadsheet Sync All, in the tracker
+ *                          spreadsheet -> menuSync -> here. NO document context.
+ * Both menus are still named 'Action Sync', so never write "the Sync menu
+ * item" unqualified — name Document Sync or Spreadsheet Sync All. They are on
+ * OPPOSITE sides of ADR-0031's decision.
  *
  * NEITHER caller of this function conforms rendering. syncAll converges
  * sheet<->doc DATA only, and never brings indent or ai_token/action_text
@@ -1061,6 +1062,97 @@ function onActionSheetEdit(e) {
   for (var fr = 0; fr < numRows; fr++) {
     _syncSheetRowToDoc(sheet, row + fr);
   }
+
+  // gts-3uuq: the per-row flush above only propagates sheet->doc for the
+  // watched columns/rows. DocData integrity, team scope, tracker refresh
+  // across OTHER docs, and Doc-Not-Found revival all still wait for the next
+  // syncAll -- previously only the 30-min time trigger. Queue a near-term
+  // syncAll so that gap is ~1 minute instead of ~30.
+  _scheduleNearImmediateSyncAll();
+}
+
+var _EDIT_SYNC_PENDING_TRIGGER_PROP = '_EDIT_SYNC_PENDING_TRIGGER_UID';
+var _EDIT_SYNC_DELAY_MS = 60 * 1000;
+
+/**
+ * Single-flight scheduler for a near-immediate syncAll after a sheet edit.
+ *
+ * Uses a ONE-TIME trigger (.after(), a genuinely separate later execution)
+ * rather than calling syncAll() synchronously here -- SyncManager.js's
+ * onActionSheetEdit history already documents why: a same-execution doc read
+ * is stale-cached, and syncAll's doc-wins reconciliation would overwrite the
+ * edit just made. A later execution reads fresh.
+ *
+ * Single-flight is tracked via a ScriptProperties marker holding the pending
+ * trigger's uid -- NOT by scanning getProjectTriggers() for handler function
+ * 'syncAll', because the permanent 30-minute syncAll trigger (TriggerManager.js)
+ * always matches that scan and would block scheduling forever. The handler
+ * here is a distinct wrapper function so its trigger can be found/cleared
+ * independently of the 30-min one.
+ *
+ * A burst of edits (multi-row paste, rapid successive edits) collapses to one
+ * pending trigger: later calls see the marker's uid still present in
+ * getProjectTriggers() and no-op. If the marker points at a uid no longer
+ * present (trigger already fired, or fell out of existence some other way
+ * without clearing it), the stale marker is cleared and a fresh trigger is
+ * scheduled -- so a marker write that doesn't get cleaned up can never
+ * permanently block future scheduling.
+ */
+function _scheduleNearImmediateSyncAll() {
+  var props = PropertiesService.getScriptProperties();
+  var lock  = LockService.getScriptLock();
+  try {
+    lock.waitLock(5000);
+  } catch (lockErr) {
+    GasLogger.log('sync.editTrigger.lockFailed', { msg: String(lockErr) });
+    return;
+  }
+  try {
+    var pendingUid = props.getProperty(_EDIT_SYNC_PENDING_TRIGGER_PROP);
+    if (pendingUid) {
+      var triggers = ScriptApp.getProjectTriggers();
+      for (var i = 0; i < triggers.length; i++) {
+        if (triggers[i].getUniqueId() === pendingUid) {
+          return; // a resync is already queued -- debounce this call
+        }
+      }
+      props.deleteProperty(_EDIT_SYNC_PENDING_TRIGGER_PROP); // stale marker
+    }
+    var trigger = ScriptApp.newTrigger('_runNearImmediateSyncAll')
+      .timeBased()
+      .after(_EDIT_SYNC_DELAY_MS)
+      .create();
+    props.setProperty(_EDIT_SYNC_PENDING_TRIGGER_PROP, trigger.getUniqueId());
+    GasLogger.log('sync.editTrigger.scheduled', { delayMs: _EDIT_SYNC_DELAY_MS });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * One-time trigger handler queued by _scheduleNearImmediateSyncAll. Clears
+ * the single-flight marker and deletes this trigger instance BEFORE running
+ * syncAll, so a later edit arriving mid-sync schedules its own follow-up
+ * rather than silently no-op'ing against a marker that's about to be stale
+ * anyway.
+ *
+ * @param {Object} e  GAS trigger event -- e.triggerUid used for self-cleanup.
+ */
+function _runNearImmediateSyncAll(e) { // eslint-disable-line no-unused-vars
+  var props = PropertiesService.getScriptProperties();
+  props.deleteProperty(_EDIT_SYNC_PENDING_TRIGGER_PROP);
+  var triggerUid = e && e.triggerUid;
+  if (triggerUid) {
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getUniqueId() === triggerUid) {
+        ScriptApp.deleteTrigger(triggers[i]);
+        break;
+      }
+    }
+  }
+  GasLogger.log('sync.editTrigger.fired', {});
+  syncAll();
 }
 
 /**
@@ -2813,12 +2905,20 @@ function _fetchDriveDocMetadataBatch(docIds) {
   var token    = ScriptApp.getOAuthToken();
   var fields   = encodeURIComponent('id,trashed,modifiedTime,name');
   var partsArr = [];
+  // Content-ID label -> requested docId, so the response can be matched back
+  // by the echoed Content-ID (gts-3vka) instead of assuming response order
+  // mirrors request order.
+  var idToDocId = {};
   for (var i = 0; i < docIds.length; i++) {
+    idToDocId['item' + i] = docIds[i];
     partsArr.push(
       '--' + boundary + '\r\n' +
       'Content-Type: application/http\r\n' +
       'Content-ID: <item' + i + '>\r\n\r\n' +
-      'GET /drive/v3/files/' + docIds[i] + '?fields=' + fields + ' HTTP/1.1\r\n\r\n'
+      // supportsAllDrives=true (via _DRIVE_ITEM_PARAMS, same constant
+      // _driveUrl uses) -- without it files.get 404s on a Shared Drive item
+      // (gts-vl44), which this fallback then mapped to 'gone'.
+      'GET /drive/v3/files/' + docIds[i] + '?fields=' + fields + '&' + _DRIVE_ITEM_PARAMS + ' HTTP/1.1\r\n\r\n'
     );
   }
   partsArr.push('--' + boundary + '--');
@@ -2847,19 +2947,30 @@ function _fetchDriveDocMetadataBatch(docIds) {
       throw new Error('batch/drive/v3: no boundary in response Content-Type: ' + contentType);
     }
 
-    // Each requested doc gets exactly one part back, in the SAME order the
-    // requests were sent (Drive's batch endpoint preserves request order) --
-    // relied on here rather than parsing the echoed Content-ID, which carries
-    // a "response-" prefix that isn't documented as a stable contract.
-    var rawParts = result.response.getContentText().split('--' + respBoundary);
-    var results  = {};
-    var docIndex = 0;
-    for (var p = 0; p < rawParts.length && docIndex < docIds.length; p++) {
+    // Each part is matched to its docId by its echoed Content-ID (gts-3vka),
+    // not by iteration order -- Drive's batch endpoint does not guarantee
+    // response parts come back in request order. Google echoes the label
+    // with a "response-" prefix (e.g. request "item0" -> response
+    // "response-item0"); a part whose Content-ID doesn't resolve to a
+    // requested docId, or resolves to one already matched, throws and the
+    // whole batch degrades to sequentialFallback -- no partial/best-effort
+    // mapping.
+    var rawParts  = result.response.getContentText().split('--' + respBoundary);
+    var results   = {};
+    var matched   = 0;
+    for (var p = 0; p < rawParts.length; p++) {
       var part = rawParts[p];
       var statusMatch = /HTTP\/1\.\d\s+(\d+)/.exec(part);
       if (!statusMatch) continue; // preamble/epilogue/boundary-only segment
 
-      var docId      = docIds[docIndex++];
+      var cidMatch = /Content-ID:\s*<?(?:response-)?([^>\r\n]+)>?/i.exec(part);
+      var docId    = cidMatch ? idToDocId[cidMatch[1]] : undefined;
+      if (!docId || results.hasOwnProperty(docId)) {
+        throw new Error('batch/drive/v3: response part with unmatched or duplicate Content-ID' +
+          (cidMatch ? (' ' + cidMatch[1]) : ' (missing)'));
+      }
+      matched++;
+
       var httpStatus = parseInt(statusMatch[1], 10);
       if (httpStatus === 404) {
         results[docId] = { status: 'gone', meta: null, err: 'HTTP 404' };
@@ -2885,8 +2996,8 @@ function _fetchDriveDocMetadataBatch(docIds) {
         err: ''
       };
     }
-    if (docIndex < docIds.length) {
-      throw new Error('batch/drive/v3: expected ' + docIds.length + ' response parts, parsed ' + docIndex);
+    if (matched < docIds.length) {
+      throw new Error('batch/drive/v3: expected ' + docIds.length + ' response parts, matched ' + matched);
     }
 
     GasLogger.log('sync.driveMetadata.batchFallback.fetched', { count: docIds.length });

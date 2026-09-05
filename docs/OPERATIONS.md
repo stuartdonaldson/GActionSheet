@@ -171,8 +171,9 @@ tab — no code changes or redeployment needed:
 
 1. In `DocData`, find the row for the target document and set `Team Id` to the
    new team and `Sync Status` to `UpdateDoc`.
-2. Run a sync for that document — menu **Action Sync > Sync** from the doc, or
-   wait for the 30-minute `syncAll` sweep (see §Automation).
+2. Run a sync for that document — menu **Action Sync > Document Sync** from the doc. (The
+   30-minute `syncAll` sweep would also pick this up, but it is currently disabled
+   in production — see §Automation.)
 3. Verify the change took effect: the document's `teamScope` app property and
    `DocData.Team Id` should both equal the new Team Id, and `Sync Status` should
    be cleared back to empty.
@@ -196,9 +197,17 @@ The automation feature set runs on the ActionSheet container and requires no use
 
 | Feature | Cadence | Effect |
 |---------|---------|--------|
-| Timed sweep | Every 30 minutes | Groups ActionSheet rows by document URL; opens each doc; reconciles just as **Sync now** would |
+| Timed sweep (Background Sync) | Every 30 minutes | Groups ActionSheet rows by document URL; opens each doc; reconciles just as **Sync now** would |
 | `onEdit` timestamp stamper | On every ActionSheet edit | Stamps `Last Modified` on the edited row; skipped when `SYNC_IN_PROGRESS` is set |
 | Archive job | On demand or as part of sweep | Moves rows with `Status = Closed` and `Last Modified > 30 days` to the archive sheet |
+
+**Timed sweep currently disabled in production (decided 2026-09-04, `gts-bxa6`):** the operator
+disabled the trigger on 2026-09-02 while diagnosing `gts-avvl` (now fixed and closed) and it has
+been left off rather than re-enabled. `initializeTriggers()` (`src/TriggerManager.js`) reinstalls
+it automatically the next time the ActionSheet is opened (`onOpen` → `MenuHandler.js`), or it can
+be run manually as below. Until then, no doc reconciles except when a user runs **Action Sync >
+Sync** by hand — any runbook step that says "wait for the sweep" must instead say "run Sync
+manually."
 
 **Re-initialize triggers** after a script re-creation:
 ```

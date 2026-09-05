@@ -7,9 +7,12 @@
 
 /**
  * Idempotent trigger installer.
- * Installs exactly one onEdit trigger (handler: onActionSheetEdit) and one
- * 30-minute time-based trigger (handler: syncAll).
- * Running this function a second time will NOT create duplicate triggers.
+ * Installs exactly one onEdit trigger (handler: onActionSheetEdit), one
+ * 30-minute time-based trigger (handler: syncAll), and one daily 1am
+ * time-based trigger (handler: nightlyAdminScanAllTeams, src/AdminDocScan.js)
+ * that scans every team's registered folders for untracked action-bearing
+ * docs. Running this function a second time will NOT create duplicate
+ * triggers.
  *
  * The 30-min syncAll trigger can collide with an in-flight test/user sync for
  * the same doc (gts-li3g) and, less commonly, with GAS's execution quota
@@ -37,7 +40,10 @@ function initializeTriggers() {
       var isTargetTimeBased = (eventType === ScriptApp.EventType.CLOCK)
         && (handlerFunc === 'syncAll');
 
-      if (isTargetOnEdit || isTargetTimeBased) {
+      var isTargetNightlyScan = (eventType === ScriptApp.EventType.CLOCK)
+        && (handlerFunc === 'nightlyAdminScanAllTeams');
+
+      if (isTargetOnEdit || isTargetTimeBased || isTargetNightlyScan) {
         ScriptApp.deleteTrigger(t);
       }
     }
@@ -56,7 +62,17 @@ function initializeTriggers() {
       .create();
     installed++;
 
-    GasLogger.log('triggers.initialized', { onEditCount: 1, timeBasedCount: 1, count: installed });
+    // Install the nightly all-teams untracked-doc scan (src/AdminDocScan.js).
+    // atHour(1) fires once between 1:00 and 1:59am in the script's timezone
+    // — GAS time-based triggers don't guarantee the exact minute.
+    ScriptApp.newTrigger('nightlyAdminScanAllTeams')
+      .timeBased()
+      .atHour(1)
+      .everyDays(1)
+      .create();
+    installed++;
+
+    GasLogger.log('triggers.initialized', { onEditCount: 1, timeBasedCount: 2, count: installed });
   } catch (e) {
     // gts-u947 (stage regression-verify): the prior try/finally had no catch,
     // so an exception thrown mid-install (ScriptApp trigger-quota/contention,

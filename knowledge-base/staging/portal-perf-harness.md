@@ -182,7 +182,7 @@ any future stage's `[TST]` bead hits the same wall. `gts-hztp` stays open, not c
 
 **Deliverable:** the snapshot survives across GAS executions via ScriptProperties, so a trigger-driven or self-rescheduling sync does not pay the cold read on every wake.
 **Why alone and last:** conditional on stage 5's measurement. If the per-execution win is smaller than expected, this stage is cancelled rather than started — record that outcome in the bead, do not start on the strength of the design alone.
-**Operator check:** let the 30-minute syncAll trigger fire twice and compare `sheet.read` on the second wake against the first in Axiom. The second must show no cold read. **Not executable as written (2026-09-02):** that trigger is currently disabled — `gts-bxa6` must be discharged first, or this check rewritten to drive two sweeps by hand.
+**Operator check:** *(revised 2026-09-04, `gts-bxa6` resolved decision: trigger stays off)* the 30-minute syncAll trigger stays disabled — drive two sweeps by hand instead of waiting for the trigger: run `syncAll` twice (manual Action Sync > Sync, or `run_fixture`) against the same doc set and compare `sheet.read` on the second run against the first in Axiom. The second must show no cold read.
 **Work-log:** per-stage.
 
 ### 7 — `harness-resilience`

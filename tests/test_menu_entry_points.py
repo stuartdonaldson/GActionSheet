@@ -44,7 +44,7 @@ def scn(settings, request):
 
 
 # ---------------------------------------------------------------------------
-# menuSync -> syncAll() — Action Sync > Sync
+# menuSync -> syncAll() — Action Sync > Spreadsheet Sync All (gts-w9kx)
 # ---------------------------------------------------------------------------
 
 def test_menuSync_sweeps_registered_doc(scn):
@@ -162,7 +162,8 @@ def test_menuRunArchive_moves_eligible_row_to_archive(scn):
 
 
 # ---------------------------------------------------------------------------
-# menuSyncActiveDoc -> syncDocument(docId) — Docs menu "Sync" (GTaskSheet-ez2e)
+# menuSyncActiveDoc -> syncDocument(docId) — Docs menu "Document Sync"
+# (GTaskSheet-ez2e; label gts-w9kx)
 # ---------------------------------------------------------------------------
 
 def test_menuSyncActiveDoc_syncs_active_doc(scn):

@@ -21,18 +21,15 @@ function onOpen() {
 
   // Sheets context: ActionSheet management menu.
   //
-  // LABEL COLLISION (ADR-0031 Terminology + Consequences): this menu and the
-  // Docs one below are BOTH named 'Action Sync' and BOTH have an item
-  // labelled 'Sync' -- but they call different handlers with different
-  // promises. This one ('Spreadsheet Sync All', menuSync -> syncAll) has NO
-  // document context and never conforms rendering; the Docs one
-  // (menuSyncActiveDoc) does both. ADR-0031 records that these labels should
-  // be made distinguishable; until they are, do not assume a reader knows
-  // which 'Sync' anyone means.
+  // gts-w9kx: this menu's item is labelled 'Spreadsheet Sync All' (not the
+  // generic 'Sync' both menus used before) so it reads unambiguously without
+  // its surrounding menu -- ADR-0031 Terminology names it (menuSync ->
+  // syncAll, NO document context, never conforms rendering), distinct from
+  // the Docs menu's 'Document Sync' below.
   try {
     SpreadsheetApp.getUi()
       .createMenu('Action Sync')
-      .addItem('Sync', 'menuSync')  // "Spreadsheet Sync All" -- no doc context
+      .addItem('Spreadsheet Sync All', 'menuSync')  // "Spreadsheet Sync All" -- no doc context
       .addSeparator()
       .addSubMenu(
         SpreadsheetApp.getUi().createMenu('Setup')
@@ -63,12 +60,12 @@ function onOpen() {
   }
 
   // Docs context: per-document actions available from the menu bar.
-  // See the label-collision note on the Sheets menu above -- this 'Sync' is
-  // NOT that 'Sync'.
+  // gts-w9kx: labelled 'Document Sync' (ADR-0031 Terminology) -- distinct
+  // from the Sheets menu's 'Spreadsheet Sync All' above.
   try {
     DocumentApp.getUi()
       .createMenu('Action Sync')
-      .addItem('Sync', 'menuSyncActiveDoc')          // "Document Sync" -- has doc context
+      .addItem('Document Sync', 'menuSyncActiveDoc') // "Document Sync" -- has doc context
       .addItem('Force Refresh Style', 'menuForceRefreshActiveDoc')
       .addItem('Insert Tracker', 'menuInsertTrackerActiveDoc')
       .addItem('Export…', 'menuShowExportDialog')
@@ -97,12 +94,14 @@ function menuConfigFormat() {
 }
 
 /**
- * "Spreadsheet Sync All" — the SPREADSHEET's Action Sync > Sync item.
+ * "Spreadsheet Sync All" — the SPREADSHEET's Action Sync > Spreadsheet Sync
+ * All item.
  *
  * NOT to be confused with menuSyncActiveDoc, the Docs Extensions > Action
- * Sync > Sync item. Both menus are named 'Action Sync' and both items are
- * labelled 'Sync', but they have different handlers and, under ADR-0031,
- * different behaviour — see ADR-0031 §Terminology.
+ * Sync > Document Sync item (gts-w9kx gave the two items distinguishable
+ * labels; both menus are still named 'Action Sync'). They have different
+ * handlers and, under ADR-0031, different behaviour — see ADR-0031
+ * §Terminology.
  *
  * NO DOCUMENT CONTEXT: this sweeps every tracked doc. Under ADR-0031 that
  * puts it with the 30-minute trigger — converges data, never conforms
@@ -136,12 +135,12 @@ function _activeOrTestDocId() {
 }
 
 /**
- * "Document Sync" — the DOCS Extensions > Action Sync > Sync item.
+ * "Document Sync" — the DOCS Extensions > Action Sync > Document Sync item.
  *
  * NOT to be confused with menuSync, the tracker spreadsheet's Action Sync >
- * Sync item. Both menus are named 'Action Sync' and both items are labelled
- * 'Sync', but they are on OPPOSITE sides of ADR-0031's decision — see
- * ADR-0031 Terminology.
+ * Spreadsheet Sync All item (gts-w9kx gave the two items distinguishable
+ * labels; both menus are still named 'Action Sync'). They are on OPPOSITE
+ * sides of ADR-0031's decision — see ADR-0031 Terminology.
  *
  * HAS A DOCUMENT CONTEXT: the user is looking at this specific doc and asked
  * for it to be made right. Under ADR-0031 this is a conformance path -- it

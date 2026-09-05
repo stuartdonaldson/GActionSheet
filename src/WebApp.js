@@ -1917,8 +1917,9 @@ function _handleMarkDocNotFound(payload) {
     // transition into Doc Not Found: syncAll() already keeps a permanently-
     // missing docId out of this path on later sweeps (its own
     // alreadyDocNotFound skip-list), but syncDocument() is also called
-    // directly from doc-context entry points (Sync menu item, sidebar Sync
-    // button — MenuHandler.js, WorkspaceAddonCard.js) with no such guard.
+    // directly from doc-context entry points (Document Sync menu item,
+    // sidebar Sync button — MenuHandler.js, WorkspaceAddonCard.js) with no
+    // such guard.
     // Without this check, re-confirming an already-marked row on every direct
     // re-sync would keep resetting Date Modified to now, so the 24h grace
     // period would never actually elapse for a persistently missing doc

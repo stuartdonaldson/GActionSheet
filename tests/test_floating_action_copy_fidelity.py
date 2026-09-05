@@ -3,8 +3,9 @@
 Confirms a manually-synced COPY of a real, non-fixture-seeded reference Doc
 (ADR-0027-grammar floating actions) reads back as the same Action Portable
 Text as the ORIGINAL, pulled read-only and never synced or otherwise
-mutated. `REFERENCE_DOC_ID` below is a real, human-maintained Google Doc --
-not a doc this suite creates or seeds -- so every fixture call that touches
+mutated. `settings["copyFidelitySourceDocId"]` (local.settings.json) names a
+real, human-maintained Google Doc -- not a doc this suite creates or seeds --
+so every fixture call that touches
 it is read-only (`encode_reference_document`'s `DocumentApp.openById()` read,
 and `clone_doc_with_test_id`'s `DriveApp.makeCopy()`, neither of which ever
 calls `saveAndClose()` on the source -- see src/TestFixtures.js). All
@@ -75,10 +76,13 @@ from scn.session import ScenarioSession  # noqa: E402
 CORPUS_NAME = "floating-action-copy-fidelity"
 GOLDEN_PATH = FIXTURES_DIR / f"{CORPUS_NAME}.apt.txt"
 
-# Real, existing, human-maintained Doc with ADR-0027-grammar floating
-# actions. NOT a fixture-seeded doc. Never synced, never mutated by this
-# test -- read via encode_reference_document only.
-REFERENCE_DOC_ID = "1h4QuL7mZVybEj6T4QHAAqk8LMoyNGj0fT9XVTHVs9_E"
+# Config key for the real, existing, human-maintained Doc with ADR-0027-
+# grammar floating actions (see knowledge-base/references/Standard-Docs.md).
+# NOT a fixture-seeded doc. Never synced, never mutated by this test -- read
+# via encode_reference_document only. Distinct from `referenceDocId`, which
+# is a DIFFERENT doc mutated in place by the apt round-trip tooling -- do
+# not conflate the two.
+_COPY_FIDELITY_SOURCE_DOC_ID_KEY = "copyFidelitySourceDocId"
 
 # Mirrors src/ActionToken.js's _ACTION_TOKEN_REGEX_ANCHORED ('^(ACT|AI)-(\d+):')
 # and _ACTION_TOKEN_BARE_TRIGGER_REGEX_ANCHORED ('^(ACT|AI):') -- an
@@ -98,7 +102,7 @@ def _is_action_record(record: str) -> bool:
 
     This exists because apt_lib.split_records() returns EVERY body record
     (every blank-line-separated chunk in the encoded doc), not just action
-    paragraphs -- confirmed live 2026-08-29 pulling REFERENCE_DOC_ID: of 24
+    paragraphs -- confirmed live 2026-08-29 pulling the copy-fidelity source doc: of 24
     records, 8 are non-action content this doc's own worked-example
     structure produces (a "Standard Action as a standalone paragraph"-style
     section-heading prose line before each demonstrated shape, an orphaned
@@ -136,15 +140,19 @@ def synced_copy(settings, gas_log_dir):
     test below needs the SAME synced state, not an independent one (mirrors
     tests/test_adr0027_reference_document.py's `reference` fixture).
     """
+    reference_doc_id = settings.get(_COPY_FIDELITY_SOURCE_DOC_ID_KEY)
+    if not reference_doc_id:
+        pytest.skip(f"{_COPY_FIDELITY_SOURCE_DOC_ID_KEY} not set in local.settings.json")
+
     scn = ScenarioSession.new_doc(settings)
     clone_doc_id = None
     try:
         # 1. Pull the ORIGINAL's APT read-only, before the copy exists.
-        orig_resp = scn._post_fixture("encode_reference_document", {"docId": REFERENCE_DOC_ID})
+        orig_resp = scn._post_fixture("encode_reference_document", {"docId": reference_doc_id})
         orig_data = orig_resp.get("data") or {}
         assert orig_data.get("ok"), (
             f"encode_reference_document(original) failed -- check the TEST "
-            f"deployment's Drive read access to {REFERENCE_DOC_ID}: {orig_resp}"
+            f"deployment's Drive read access to {reference_doc_id}: {orig_resp}"
         )
         original_apt = orig_data["apt"]
 
@@ -152,7 +160,7 @@ def synced_copy(settings, gas_log_dir):
             1 for r in apt_lib.split_records(original_apt) if _is_action_record(r)
         )
         assert expected_scanned > 0, (
-            f"original doc {REFERENCE_DOC_ID} pulled zero floating-action "
+            f"original doc {reference_doc_id} pulled zero floating-action "
             "records -- this test cannot establish a nonzero sync-did-real-"
             "work baseline against it"
         )
@@ -162,13 +170,13 @@ def synced_copy(settings, gas_log_dir):
         test_id = uuid.uuid4().hex[:8]
         clone_resp = scn._post_fixture(
             "clone_doc_with_test_id",
-            {"docId": REFERENCE_DOC_ID, "testId": test_id},
+            {"docId": reference_doc_id, "testId": test_id},
         )
         clone_data = clone_resp.get("data") or {}
         clone_doc_id = clone_data.get("docId")
         assert clone_doc_id, (
             f"clone_doc_with_test_id did not return a docId -- check the TEST "
-            f"deployment's Drive copy access to {REFERENCE_DOC_ID}: {clone_resp}"
+            f"deployment's Drive copy access to {reference_doc_id}: {clone_resp}"
         )
 
         # 3. Manually sync the COPY -- real Sheets "Test: Sync Document"
@@ -195,7 +203,7 @@ def synced_copy(settings, gas_log_dir):
         # sides to a shared placeholder so the diff isn't purely a doc-id
         # mismatch -- same technique tests/test_apt_corpus_check.py uses
         # for its own freshly-materialised doc.
-        original_norm = original_apt.replace(REFERENCE_DOC_ID, "DOC_ID")
+        original_norm = original_apt.replace(reference_doc_id, "DOC_ID")
         copy_norm = copy_data["apt"].replace(clone_doc_id, "DOC_ID")
 
         yield SimpleNamespace(
@@ -205,6 +213,7 @@ def synced_copy(settings, gas_log_dir):
             actual_scanned=actual_scanned,
             clone_doc_id=clone_doc_id,
             test_id=test_id,
+            reference_doc_id=reference_doc_id,
         )
     finally:
         if clone_doc_id:
@@ -236,7 +245,7 @@ class TestFloatingActionCopyFidelity:
         if not result.clean:
             lines = [
                 f"copy {synced_copy.clone_doc_id} (test:{synced_copy.test_id}) of "
-                f"{REFERENCE_DOC_ID} did not diff clean against the original:"
+                f"{synced_copy.reference_doc_id} did not diff clean against the original:"
             ]
             for entry in result.entries:
                 lines.append(f"  [{entry.klass}] record {entry.record_index}: {entry.summary}")
@@ -258,7 +267,7 @@ class TestFloatingActionCopyFidelity:
         result = apt_lib.diff_apt(golden_text, synced_copy.copy_apt)
         if not result.clean:
             lines = [
-                f"copy {synced_copy.clone_doc_id} of {REFERENCE_DOC_ID} did not "
+                f"copy {synced_copy.clone_doc_id} of {synced_copy.reference_doc_id} did not "
                 f"diff clean against blessed golden {GOLDEN_PATH.name}:"
             ]
             for entry in result.entries:
