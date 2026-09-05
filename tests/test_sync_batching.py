@@ -1,5 +1,5 @@
 """
-test_kkm7_batching.py — gts-kkm7.4
+test_sync_batching.py — bead: gts-kkm7.4
 
 Twin regression coverage for gts-kkm7.1 (batch mark_doc_not_found),
 gts-kkm7.2 (single files.list Drive metadata pass), and gts-kkm7.3 (batch

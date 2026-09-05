@@ -1,5 +1,5 @@
 """
-test_p9ra_run_fixture_cache_oversize.py — gts-p9ra [TST]
+test_run_fixture_cache_oversize.py — bead: gts-p9ra [TST]
 
 Regression coverage for gts-p9ra: TestWebApp.js:133's _handleRunFixture caches
 every fixture response for opId-based retry dedupe (gts-f3me.2) via

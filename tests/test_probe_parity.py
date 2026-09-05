@@ -1,5 +1,5 @@
 """
-test_zc0w_probe_parity.py — gts-zc0w
+test_probe_parity.py — bead: gts-zc0w
 
 Path B twin for gts-vl44 (batch fallback probe omitted supportsAllDrives,
 already fixed — see SyncManager.js:2917-2920). Audits the FULL entry-point
@@ -25,7 +25,7 @@ where each is covered):
   (b) A live Shared Drive doc absent from the listing -> never marked
       -> NOT drivable here. This environment has no test Shared Drive folder
          id provisioned in local.settings.json (same constraint documented in
-         tests/test_uuse_scoped_listing.py's module docstring and
+         tests/test_scoped_drive_listing.py's module docstring and
          tests/test_sync_all.py's gts-rskf comment ~line 570). gts-vl44's own
          fix (the _DRIVE_ITEM_PARAMS / supportsAllDrives addition at
          SyncManager.js:2920) is reviewed structurally below instead (AC3).
@@ -94,7 +94,7 @@ STEP = CheckpointKind.STEP
 
 
 def _post_fixture_patient(scn, fixture_name: str, extra: dict | None = None, timeout: int = 600) -> dict:
-    """Same convention as test_sync_all.py / test_uuse_scoped_listing.py's
+    """Same convention as test_sync_all.py / test_scoped_drive_listing.py's
     helper of the same name -- these fixtures re-run the real syncAll() over
     the whole production backlog, not just this test's own docs, so they
     inherit the same longer client timeout."""
@@ -128,7 +128,7 @@ def test_probe_parity_found_single_vs_batch(settings, gas_log_dir, request):
     Best-effort note on path selection: this is a shared, live TEST account,
     and 'missingDocIds' (SyncManager.js ~line 658) is computed over the WHOLE
     tracked backlog, not just this test's own docs (see
-    tests/test_uuse_scoped_listing.py's own comment on batchFallback.fetched's
+    tests/test_scoped_drive_listing.py's own comment on batchFallback.fetched's
     'count' ranging 2-258 across routine sweeps). Sweep 1 below is designed to
     exercise the single-doc path and is checked for that (no batchFallback
     tag correlated to its own opId), but a concurrent sweep elsewhere in the
@@ -206,7 +206,7 @@ def test_probe_parity_found_single_vs_batch(settings, gas_log_dir, request):
             # Environmental precondition, not a defect: this shared TEST account's
             # ambient backlog (docs already outside every scoped team folder, or
             # otherwise naturally missing from the listing -- see
-            # test_uuse_scoped_listing.py's "count ranged 2-258" comment) can push
+            # test_scoped_drive_listing.py's "count ranged 2-258" comment) can push
             # missingDocIds.length >= 2 regardless of this fixture, routing sweep 1
             # into the batch path too. That makes a genuine single-vs-batch
             # comparison undrivable THIS run, not wrong -- skip rather than

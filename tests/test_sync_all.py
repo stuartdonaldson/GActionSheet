@@ -779,8 +779,10 @@ def test_sync_all_integrity_and_listing_miss_batch(settings, gas_log_dir, reques
                     return f"[m33k] row {row.global_id!r} still marked Doc Not Found post-revival"
             return None
 
+        # gts-u6ew.12 (F7): tag=AC id so this journey's integrity-pass reconciliation
+        # assertion reaches the T24 report (scn/contract.AC_REGISTRY "sync-all reconcile").
         cduk.expect_callable(
-            _cduk_durable, on=SHEET, tag="[cduk integrity pass corrects stale DocData]", entry_point="syncAll",
+            _cduk_durable, on=SHEET, tag="sync-all reconcile", entry_point="syncAll",
         )
         cduk.checkpoint(STEP)
         lm.expect_callable(

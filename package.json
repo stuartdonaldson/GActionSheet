@@ -21,6 +21,7 @@
     "test:smoke": "pnpm run test:prep && pnpm exec playwright test tests/playwright/smoke.test.js --config tests/playwright/playwright.config.js",
     "test:ui-smoke": "pnpm run test:prep && SCN_TRACE=1 /mnt/c/dev/venvs/uv1/bin/python3 -m pytest tests/test_ui_smoke.py -s -m smoke",
     "test:full": "pnpm run test:prep && /mnt/c/dev/venvs/uv1/bin/python3 -m pytest --alluredir=test-results/allure-results --junitxml=test-results/junit/pytest.xml && pnpm exec playwright test --config tests/playwright/playwright.config.js",
+    "test:regression": "pnpm run test:local -- --ff && pnpm run test:live -- --ff",
     "test:report": "allure generate test-results/allure-results -o allure-report --clean",
     "test:serve": "pnpm run test:report && allure open allure-report -h 0.0.0.0 -p 5050",
     "test:cycle": "pnpm run test:full; pnpm run test:report",

@@ -2,7 +2,7 @@
 test_f3me2_run_fixture_idempotency.py — gts-f3me.2 [TST]
 
 Regression test for the double-batchFallback-event bug diagnosed against
-gas-test3.log (02:07-02:13): test_uuse_scoped_listing.py's
+gas-test3.log (02:07-02:13): test_scoped_drive_listing.py's
 test_syncall_batches_multi_doc_listing_miss_fallback saw TWO
 sync.driveMetadata.batchFallback.fetched events (both count=3, real data)
 sharing the SAME parentOp, ~3 minutes apart. Same bug class as gts-f3me.1's

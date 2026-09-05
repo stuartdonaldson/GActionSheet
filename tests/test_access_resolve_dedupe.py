@@ -43,7 +43,7 @@ folder inside a Shared Drive at all. docs/verified-team-portal-plan.md §6a
 records the only standing multi-folder fixture (TestTeamA, folders
 1SCPPZfUeSWqaE3WvWYl6go13lzEZQUbs / 1plip6j718V77_y2y_X6oritx8Th-8VqX) as
 "direct-sharing only" (My Drive, not a Shared Drive) -- confirmed again by
-tests/test_uuse_scoped_listing.py's and tests/test_sync_all.py's own notes
+tests/test_scoped_drive_listing.py's and tests/test_sync_all.py's own notes
 that "this environment has no test Shared Drive folder id provisioned". The
 driveId-dedupe behaviour is a no-op outside a Shared Drive (a My Drive
 folder has no containing driveId to re-scan), so AC-T2/AC-T4 cannot be

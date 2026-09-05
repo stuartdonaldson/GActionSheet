@@ -17,7 +17,8 @@ The regression persisted undetected for one full sprint. It was only caught when
 The scanner is not unique. Any change to a core mechanism can silently invalidate test infrastructure
 without touching production code or failing compilation. Other examples in this codebase:
 - ActionSheet column layout change → breaks column-index assertions in sheet_inspect.py
-- globalId format change → breaks regex patterns in test_b7_write_routes.py
+- globalId format change → breaks regex patterns in test_globalid_write_routes.py (renamed from
+  test_b7_write_routes.py, gts-u6ew.17)
 - GasLogger tag rename → breaks fixture polling in fixture_invoke.py
 - WebApp route contract change → breaks _post_route callers in session tests
 

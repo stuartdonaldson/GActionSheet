@@ -37,6 +37,7 @@ from scn.engine import (
     Severity,
     Surface,
 )
+from scn.outcomes import BoundaryFault
 from scn.reporter import NullReporter, Reporter
 from scn.surfaces import DocReader, SheetReader, TrackerReader
 
@@ -128,11 +129,24 @@ def _load_auth_cookie_header() -> str | None:
     return "; ".join(parts) if parts else None
 
 
-_HTTP_POST_MAX_ATTEMPTS = 5
-_HTTP_POST_RETRY_DELAY_S = 3  # base delay; _http_post backs off exponentially from this
+# gts-u6ew.7 / H7: the policy's numbers now live in tests/duration_instrumentation.py,
+# co-located with the H4 ceiling (I6) rather than declared here as a
+# session.py-private transport constant. Aliased under the original names so
+# every existing use below (and every caller reading them off this module) is
+# unaffected.
+from tests.duration_instrumentation import (  # noqa: E402
+    HTTP_POST_MAX_ATTEMPTS as _HTTP_POST_MAX_ATTEMPTS,
+    HTTP_POST_RETRY_DELAY_S as _HTTP_POST_RETRY_DELAY_S,
+)
 
 
-def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
+def _http_post(
+    url: str,
+    payload: dict,
+    timeout: int = 360,
+    *,
+    on_attempts=None,
+) -> dict:
     """Low-level HTTP POST; returns parsed JSON; raises on token/HTTP/parse errors.
 
     Retries a bounded number of times on three symptoms of the same underlying
@@ -168,6 +182,17 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
     see gts-f3me.6, the cause-side investigation this bead deliberately does
     not conflate with). Widening the budget is a low-risk, isolated mitigation
     of the symptom either way.
+
+    gts-u6ew.6/.7 (H6/H7): the three retried symptoms above, once exhausted,
+    and the immediate (non-retried) HTTP/network failures below, now raise
+    `scn.outcomes.BoundaryFault` instead of a bare `RuntimeError` — these are
+    platform/transport faults, not assertion failures, and the distinction is
+    now a type a caller can check rather than a message it has to guess at.
+    `on_attempts`, when given, is called exactly once with the number of
+    attempts this call actually made — on success as well as on a raised
+    `BoundaryFault` — so a caller can record it (H7) without this function's
+    return type changing (many existing call sites use the returned dict
+    directly).
     """
     if not url:
         raise RuntimeError(
@@ -215,13 +240,19 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
             if exc.code == 404 and attempt < _HTTP_POST_MAX_ATTEMPTS:
                 time.sleep(_HTTP_POST_RETRY_DELAY_S * (2 ** (attempt - 1)))
                 continue
-            raise RuntimeError(
+            if on_attempts is not None:
+                on_attempts(attempt)
+            raise BoundaryFault(
                 f"HTTP {exc.code} from GAS WebApp (action={payload.get('action')!r}): {raw!r}"
-                + (f" (after {attempt} attempts)" if exc.code == 404 else "")
+                + (f" (after {attempt} attempts)" if exc.code == 404 else ""),
+                attempts=attempt,
             ) from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(
-                f"Network error (action={payload.get('action')!r}): {exc.reason}"
+            if on_attempts is not None:
+                on_attempts(attempt)
+            raise BoundaryFault(
+                f"Network error (action={payload.get('action')!r}): {exc.reason}",
+                attempts=attempt,
             ) from exc
         except TimeoutError as exc:
             # gts-f3me.4: urllib.request.urlopen's do_open wraps only
@@ -236,9 +267,12 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
             if attempt < _HTTP_POST_MAX_ATTEMPTS:
                 time.sleep(_HTTP_POST_RETRY_DELAY_S * (2 ** (attempt - 1)))
                 continue
-            raise RuntimeError(
+            if on_attempts is not None:
+                on_attempts(attempt)
+            raise BoundaryFault(
                 f"Timed out waiting for response (action={payload.get('action')!r}, "
-                f"timeout={timeout}s) after {_HTTP_POST_MAX_ATTEMPTS} attempts"
+                f"timeout={timeout}s) after {_HTTP_POST_MAX_ATTEMPTS} attempts",
+                attempts=attempt,
             ) from exc
 
         if raw in ("test-token-unauthorized", "test-token-expired"):
@@ -257,9 +291,12 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
             if attempt < _HTTP_POST_MAX_ATTEMPTS:
                 time.sleep(_HTTP_POST_RETRY_DELAY_S * (2 ** (attempt - 1)))
                 continue
-            raise RuntimeError(
+            if on_attempts is not None:
+                on_attempts(attempt)
+            raise BoundaryFault(
                 f"Non-JSON response (action={payload.get('action')!r}){redir}: {raw!r} "
-                f"(after {_HTTP_POST_MAX_ATTEMPTS} attempts)"
+                f"(after {_HTTP_POST_MAX_ATTEMPTS} attempts)",
+                attempts=attempt,
             ) from exc
 
         if "error" in result:
@@ -267,6 +304,8 @@ def _http_post(url: str, payload: dict, timeout: int = 360) -> dict:
                 f"GAS returned error for action={payload.get('action')!r}: {result['error']}"
             )
 
+        if on_attempts is not None:
+            on_attempts(attempt)
         return result
 
 
@@ -383,6 +422,12 @@ class ScenarioSession:
         scaled timeout even on a hand-rolled call that bypasses _post_fixture —
         this used to be advisory-only in _post_fixture, which let a direct
         caller silently under-time a corpus-scaled fixture (gts-a8yh Stage A #3).
+
+        gts-u6ew.7 (H7): records the attempt count this call actually took as
+        an `http.attempts` user_property (self._reporter.junit — the same
+        JUnit-properties path ac.*/ep.*/elapsed.* already use), read back by
+        tests/duration_instrumentation.py's build_record so every test result
+        carries its HTTP attempt total, not just whether a retry happened.
         """
         if timeout is None:
             timeout = self._CORPUS_SCALED_FIXTURE_TIMEOUTS.get(payload.get("fixture"), 360)
@@ -390,7 +435,10 @@ class ScenarioSession:
         action = payload.get("fixture") or payload.get("action") or "post"
         t0 = time.monotonic()
         try:
-            result = _http_post(url, payload, timeout)
+            result = _http_post(
+                url, payload, timeout,
+                on_attempts=lambda n: self._reporter.junit("http.attempts", str(n)),
+            )
         except Exception as exc:
             self._reporter.event(
                 "HTTP", action, detail=str(exc)[:200], result="FAIL",
@@ -531,7 +579,11 @@ class ScenarioSession:
         url = settings.get("webappTestUrl") or ""
         token = settings.get("testToken") or ""
         t0 = time.monotonic()
-        result = _http_post(url, {"action": "begin_journey_session", "testToken": token})
+        attempts_made: list[int] = []
+        result = _http_post(
+            url, {"action": "begin_journey_session", "testToken": token},
+            on_attempts=attempts_made.append,
+        )
         dur_s = time.monotonic() - t0
 
         doc_id = result.get("docId")
@@ -546,8 +598,12 @@ class ScenarioSession:
         )
         # The Reporter doesn't exist until after this POST returns (it's keyed on
         # docId), so emit it as a synthetic first event now instead of leaving doc
-        # creation invisible (§4.2, GTaskSheet-ishz.1).
+        # creation invisible (§4.2, GTaskSheet-ishz.1). Same reason http.attempts
+        # (H7) is recorded here rather than via _post()'s on_attempts wiring --
+        # there is no self._reporter yet at call time above.
         instance._reporter.event("HTTP", "begin_journey_session", dur_s=dur_s, _t_elapsed=0.0)
+        if attempts_made:
+            instance._reporter.junit("http.attempts", str(attempts_made[-1]))
         if hasattr(request, "addfinalizer"):
             # Deferred trash, not immediate (gts-hroj): registering this as a
             # pytest finalizer — rather than leaving it to the caller's own

@@ -13,8 +13,12 @@ import pytest
 import openpyxl
 
 from scn.ai import ai
+from scn.engine import CheckpointKind, Surface
 from scn.session import ScenarioSession
 from tests.helpers.download import download_xlsx
+
+SHEET = Surface.SHEET
+STEP = CheckpointKind.STEP
 
 _ARCHIVE_ACTION_TEXT = "d33z archive lifecycle action"
 
@@ -36,9 +40,15 @@ def _find_archive_row(sheet_id: str, action_text: str) -> dict | None:
     return None
 
 
-@pytest.fixture(scope="module")
-def scn(settings):
-    s = ScenarioSession.new_doc(settings)
+@pytest.fixture
+def scn(settings, request):
+    # gts-u6ew.12 (F7): request=request wires JUnit ac.*/ep.* emission to this
+    # test node (T24) — without it the session is a no-op reporter and no
+    # coverage properties reach pytest.xml (q37d, see test_menu_entry_points.py).
+    # Function-scoped (was module-scoped): this file has exactly one test, so
+    # scope is behaviorally identical, and a module-scoped `request.node` is a
+    # Module collector, not the Function item JUnit properties attach to.
+    s = ScenarioSession.new_doc(settings, request=request)
     yield s
     s.close()
 
@@ -87,3 +97,24 @@ def test_archive_lifecycle(scn, settings):
     assert archived.get("File Id"), (
         f"[d33z] archived row missing File Id; got {archived.get('File Id')!r}"
     )
+
+    # gts-u6ew.12 (F7): route the full-lifecycle result through
+    # expect_callable/checkpoint so tag= reaches the T24 report — same checks
+    # already made above, no new assertion — scn/contract.AC_REGISTRY
+    # "archive lifecycle".
+    def _archive_lifecycle_held() -> str | None:
+        if any(r.action == _ARCHIVE_ACTION_TEXT for r in scn.sheet_rows()):
+            return f"[d33z] '{_ARCHIVE_ACTION_TEXT}' row still present in Actions after archive sweep"
+        row = _find_archive_row(sheet_id, _ARCHIVE_ACTION_TEXT)
+        if row is None:
+            return f"[d33z] '{_ARCHIVE_ACTION_TEXT}' row not found in Archive tab after sweep"
+        if not row.get("globalId"):
+            return f"[d33z] archived row missing globalId; got {row.get('globalId')!r}"
+        if not row.get("File Id"):
+            return f"[d33z] archived row missing File Id; got {row.get('File Id')!r}"
+        return None
+
+    scn.expect_callable(
+        _archive_lifecycle_held, on=SHEET, tag="archive lifecycle",
+    )
+    scn.checkpoint(STEP)

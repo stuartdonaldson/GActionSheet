@@ -279,7 +279,9 @@ lost by either operation — only unused field *definitions* are dropped.
 | Admin SDK Directory API disabled at the GCP-project level | Same "permission" error as above, persists even after consent-screen scope registration | Enable **Admin SDK API** in GCP Console → APIs & Services → Library (separate from declaring it as an Apps Script advanced service in the manifest) |
 | `AdminDirectory.Members.hasMember(groupKey, externalEmail)` | Throws `GoogleJsonResponseException: Invalid Input: memberKey` for a non-domain (external) member email, even when that email IS a real member | Use `AdminDirectory.Members.get(groupKey, memberKey)` instead — catch the thrown 404 as "not a member," a successful return as confirmed membership. `hasMember` only reliably works for domain-internal memberKeys. |
 | `DriveApp.setSharing(...)` on a Shared Drive folder | Throws `Exception: Cannot use this operation on a shared drive item` | Use the Drive v2 advanced service instead: `Drive.Permissions.insert({role, type}, fileId, {supportsAllDrives: true})` / `Drive.Permissions.remove(fileId, permissionId, {supportsAllDrives: true})` |
-| Shared TEST-account contention during a full pytest sweep | A "call this fires exactly ONCE" assertion (e.g. batching-count tests) sees N>1 events in its fence window; the inverse shape also occurs — an expected event never appears within its bounded wait, because the same background trigger/session activity delayed it (or a differently-tagged event) past the window instead of duplicating a tag | The account's installed 30-min `syncAll` time-based trigger (`TriggerManager.js`) or a second concurrent test/session can log the identical tag inside the same window (confirmed incidents: `gts-li3g`, `gts-moy1.2`; `gts-obry.2` reproduced the missing-event shape on `test_sync_lock_serializes_concurrent_syncdocument_for_same_doc` during a ~2h full sweep, then passed clean twice in isolation — no code change; `gts-7vo2.2` caught a live recurrence via `test_sync_all_op_propagates_to_webapp` and cross-checked it against Axiom — the contaminating `sync.all.start` had a growing `docCount` (118→122 across ~7 min, ~2–3 min apart), a cadence inconsistent with the 30-min trigger, pointing at concurrent test-session activity rather than `TriggerManager.js` for that specific occurrence). Don't run two full sweeps, or a sweep alongside manual TEST-deployment testing, concurrently. **The `op`/`parentOp`-correlation filtering mode this row used to recommend now exists and is in use**: `tests/helpers/gas_log.py::matches_op` (`gts-obry.1`) scopes `collect_logs`/`wait_for_log` to entries chained from one call's own `opId`, and all three batching-assertion tests it was built for — `test_kkm7_batching.py`, `test_uuse_scoped_listing.py`, and `test_sync_all.py::test_sync_all_op_propagates_to_webapp` (`gts-7vo2.2`) — now mint their own opId up front and filter through it, rather than relying on the raw tag+timestamp fence alone. |
+| Shared TEST-account contention during a full pytest sweep | A "call this fires exactly ONCE" assertion (e.g. batching-count tests) sees N>1 events in its fence window; the inverse shape also occurs — an expected event never appears within its bounded wait, because the same background trigger/session activity delayed it (or a differently-tagged event) past the window instead of duplicating a tag | The account's installed 30-min `syncAll` time-based trigger (`TriggerManager.js`) or a second concurrent test/session can log the identical tag inside the same window (confirmed incidents: `gts-li3g`, `gts-moy1.2`; `gts-obry.2` reproduced the missing-event shape on `test_sync_lock_serializes_concurrent_syncdocument_for_same_doc` during a ~2h full sweep, then passed clean twice in isolation — no code change; `gts-7vo2.2` caught a live recurrence via `test_sync_all_op_propagates_to_webapp` and cross-checked it against Axiom — the contaminating `sync.all.start` had a growing `docCount` (118→122 across ~7 min, ~2–3 min apart), a cadence inconsistent with the 30-min trigger, pointing at concurrent test-session activity rather than `TriggerManager.js` for that specific occurrence). Don't run two full sweeps, or a sweep alongside manual TEST-deployment testing, concurrently. **The `op`/`parentOp`-correlation filtering mode this row used to recommend now exists and is in use**: `tests/helpers/gas_log.py::matches_op` (`gts-obry.1`) scopes `collect_logs`/`wait_for_log` to entries chained from one call's own `opId`, and all three batching-assertion tests it was built for — `test_sync_batching.py` (renamed from
+`test_kkm7_batching.py`, gts-u6ew.17), `test_scoped_drive_listing.py` (renamed from
+`test_uuse_scoped_listing.py`), and `test_sync_all.py::test_sync_all_op_propagates_to_webapp` (`gts-7vo2.2`) — now mint their own opId up front and filter through it, rather than relying on the raw tag+timestamp fence alone. |
 
 ---
 
@@ -384,7 +386,8 @@ Every collected test belongs to exactly one tier, decided by one **opt-in** mark
 | **fast** | `pnpm run test:fast` (`-m "no_live_session and not slow"`) | opt-in | 626 tests, ~25 s, zero network |
 | **local** | `pnpm run test:local` (`-m no_live_session`, `-n 4 --dist worksteal`) | opt-in | 716 tests, ~36 s parallel (~65 s serial), zero network |
 | **live** | `pnpm run test:live` (`-m live`) | auto-derived | 421 tests, hours — real GAS/Drive round trips. **Serial by decision — see Parallelism below** |
-| **everything** | `pnpm run test:full` | — | all 1137 + the Playwright specs (merge-gate) |
+| **regression (merge-gate)** | `pnpm run test:regression` (`test:local -- --ff` then, only on success, `test:live -- --ff`) | — | the sanctioned `H1`/`H13` full-suite entry point (`gts-u6ew.1`/`.2`) — opens no live session unless `test:local` is green; both tiers run failure-first. `CLAUDE.md` Backstop rules and the implementation-gate skill cite this, not a raw `pytest` invocation |
+| **everything (one invocation, ungated)** | `pnpm run test:full` | — | all 1137 + the Playwright specs, in a single pytest call with no tier gate between them — kept for ad hoc use; **not** the cited merge-gate command (see `test:regression` above) |
 
 **`no_live_session` is the only marker anyone applies by hand**, once per module as
 `pytestmark = pytest.mark.no_live_session`, and only for a module proven to make no live
@@ -530,10 +533,12 @@ pnpm run test:live
 # (For triaging a fresh full sweep, drop -x and let it run to completion — see CLAUDE.md.)
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/ -x -v
 
-# §16.10 canonical ATDD journey — Acts 1–3 (requires live GAS — pnpm run deploy:test first):
-/mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey_acts_1_3.py -x -v
-
-# §16.10 canonical ATDD journey — full Acts 1–5 (also the primary browser smoke test):
+# §16.10 canonical ATDD journey — full Acts 1–5 (also the primary browser smoke test).
+# test_journey_acts_1_3.py (Acts 1-3 only, HTTP-phase) was retired 2026-09-05 (gts-u6ew.13,
+# ADR-0011 §5 merge candidate with no defensible why-separate line) — this file's own Acts
+# 1-3 already cover a superset (same 5 items + a 6th, plus the real onInsertTrackerTable
+# call-site rather than a test-support fixture). To run only Acts 1-3 for a faster check,
+# stop after Act 3's checkpoint with -k or a debugger; there is no separate file for it.
 # Acts 3/3b/4/5 additionally require the add-on test deployment installed in the test account:
 #   Apps Script editor → Deploy → Test deployments → Install as Add-on
 /mnt/c/dev/venvs/uv1/bin/python -m pytest tests/test_journey.py -x -v
@@ -643,7 +648,7 @@ call of tag X for this sweep" should pass its own `opId` explicitly (via
 tag+timestamp fence — this scopes the count to log entries chained from THAT
 call specifically, immune to an unrelated concurrent syncAll (the account's
 30-min trigger, or another session) landing in the same window. See
-`tests/test_kkm7_batching.py` / `tests/test_uuse_scoped_listing.py` for the
+`tests/test_sync_batching.py` / `tests/test_scoped_drive_listing.py` for the
 pattern, and the Failure Modes table above for the contention constraint this
 closes.
 
@@ -722,7 +727,7 @@ UC-E import/forward across docs) are covered by the following test files:
 
 | Use case | Covered by |
 |----------|------------|
-| UC-A — capture and track a new action (multi-format detection, idempotent re-sync) | `tests/test_journey.py`, `tests/test_journey_acts_1_3.py` (Acts 1–3) |
+| UC-A — capture and track a new action (multi-format detection, idempotent re-sync) | `tests/test_journey.py` (Acts 1–3) |
 | UC-B — update an action from either side and converge | `tests/test_team_scope.py`, later acts of `tests/test_journey.py` |
 | UC-C — insert/refresh the in-doc tracker table | `tests/test_tracker_view_only.py`, `tests/test_journey.py` |
 | UC-D — archive closed actions | `tests/test_archive.py` |

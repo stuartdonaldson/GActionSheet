@@ -162,7 +162,9 @@ python scripts/call_webapp.py sync_action_rows --env prod --data '{"docId": "abc
 
 This project follows the ATDD lifecycle. Authoritative sources (all legacy
 references are mapped in `docs/atdd/ID-map.md` — start there):
-- **Universal testing & lifecycle principles** (`T1`–`T24`, `I1`–`I11`: entry-point coverage + call-site, durable-state assertion, negatives, idempotency, run-isolated clones, expectation-queue/checkpoints, permutation batching, twin-track independence) → DevStandard `knowledge-base/methodology/testing/bdd/sdlc-testing-principles.md` and `sdlc-implementation-principles.md`. Cite the ID, don't restate.
+- **Universal testing & lifecycle principles** (`T1`–`T25`, `I1`–`I12`: entry-point coverage + call-site, durable-state assertion, negatives, idempotency, run-isolated clones, expectation-queue/checkpoints, permutation batching, twin-track independence) → `$DEVSTANDARD/test-framework/sdlc-testing-principles.md` and `sdlc-implementation-principles.md`. Cite the ID, don't restate.
+- **Harness standards** (`H1`–`H13`: tier gating and run ordering, duration budget and waivers, boundary-fault classification, artifact naming, entry-point registry, single regression entry point) → `$DEVSTANDARD/test-framework/harness-standards.md`. **This project's values, conformance states and waivers live in `docs/atdd/harness-design.md` §9a** — a number stated both there and here is a defect (`I6`).
+- **The unit of test obligation is the AC, and every `[TST]` bead carries a disposition** → `$DEVSTANDARD/knowledge-base/adr/ADR-0011.md`; tracker shape in `bd/SKILL.md` §"Disposition on `[TST]` Issues"; this project's record in `docs/atdd/project-testing-guide.md` §9. The journey charter a disposition is decided against is that guide's §6.
 - **GAS+Python acceptance-testing mechanics** → GAS-Practices `best-practices/gas-acceptance-testing/`.
 - **Project realization** (the `scn/` scenario model, canonical journey, contract) → `docs/atdd/ID-map.md` (§`scn/` module map) and archived source `docs/atdd/archive/atdd-lifecycle.md` §15–§16.
 
@@ -180,7 +182,7 @@ produced. See ~/.claude/CLAUDE.md (global) §Waiting on Long-Running Commands, a
 
 Every Playwright/UI test failure must, as a matter of course, capture a screenshot + diagnostics (screenshot path, frame URLs, and for locator waits the per-frame match-count / is_visible / bbox). This is automated (gts-3tkf): bounded driver waits call `UiDriver.capture_failure(...)` before raising, and a `pytest_runtest_makereport` hook in `tests/conftest.py` screenshots the active page on any UI-test failure. Add a new bounded wait? Route its failure through `capture_failure` — never copy-paste a capture block. For interactions Playwright cannot drive with a direct mouse gesture (e.g. the `onLinkPreview` link-preview card), try the `Ctrl+F` -> type -> `Enter` -> `Escape` cursor-placement technique (gts-39jk/cug8, `UiDriver.open_link_preview`, `tests/test_link_preview.py`) before falling back to a non-UI route-fallback method — see epic gts-pw5x.
 
-Methodology declaration — Testing: `atdd-bdd` — DevStandard `knowledge-base/methodology/testing/bdd/README.md`. Key rules for every session:
+Methodology declaration — Testing: `atdd-bdd` — `$DEVSTANDARD/test-framework/README.md`. Key rules for every session:
 
 **Issue title prefixes (required on all new issues):**
 - `[IMP]` — GAS implementation work
@@ -233,29 +235,34 @@ point at least once with observable state verification. The entry point itself m
 call-site — testing only the mechanism it delegates to is not sufficient. Standalone or sequential
 test structure is not required; the entry point may be exercised as part of any scenario.
 
-**Backstop rules (LL resolve, gts-mpi9; scope narrowed 2026-07-24 — see below):**
-- `pytest -x` (full suite, not just the touched files) is required at **merge-gate**, and always
-  before a hardening `[TST]` (gts-79dw.4.8-style) is itself closed. This is the enforcement point
-  both source incidents actually pointed at (`2026-06-02-scanner-change-did-not-audit-fixture-
-  producers.md`, `2026-06-02-test-failures-observed-but-not-elevated-to-blocker.md` — both
-  resolutions say the fix belongs in `merge-gate`, not at `[IMP]`-close).
+**Backstop rules (LL resolve, gts-mpi9; scope narrowed 2026-07-24; entry point repointed
+2026-09-05 — gts-u6ew.1/`H13` — see below):**
+- `pnpm run test:regression` (full suite, not just the touched files — see "GAS Deployment" /
+  Testing Strategy above for what it composes: `test:local` to completion, `test:live` only on its
+  success) is required at **merge-gate**, and always before a hardening `[TST]` (gts-79dw.4.8-style)
+  is itself closed. This is the enforcement point both source incidents actually pointed at
+  (`2026-06-02-scanner-change-did-not-audit-fixture-producers.md`,
+  `2026-06-02-test-failures-observed-but-not-elevated-to-blocker.md` — both resolutions say the
+  fix belongs in `merge-gate`, not at `[IMP]`-close). `pytest -x` alone is no longer the cited
+  full-suite command — it open-codes a pytest invocation instead of naming the harness's one
+  regression entry point (`H13`) and skips the tier gate (`H1`).
 - An `[IMP]` bead may **close** on a fast, targeted-subset gate (touched-file/related tests —
   practically, whatever runs in well under a couple minutes) instead of the full suite. This is
   the normal path for a Slice-phase bead (Review-fidelity phasing, ADR-0013 above): implement,
   get the fast gate green, close, and get to a reviewable working experience without paying full
   regression cost before the AC is even frozen. Track the gap explicitly rather than silently: on
   close, set `bd set-state <id> regression=pending --reason "<what actually ran>"`; flip it to
-  `regression=verified` once `pytest -x` is run clean against that bead's changes. `bd-run-beads.py`
-  does this automatically (`--partial-gate` marks `regression=pending`; a full unrestricted
-  `test_cmd` marks `regression=verified`; `-t ''` always implies `pending`).
-  **Default to this path: never run the full `pytest -x` sweep on your own initiative — it is
-  expensive against the live GAS backend. Close on the targeted gate with `regression=pending`,
-  and only run the full sweep (to flip it to `regression=verified`) when the user explicitly asks
-  for it.**
+  `regression=verified` once `pnpm run test:regression` is run clean against that bead's changes.
+  `bd-run-beads.py` does this automatically (`--partial-gate` marks `regression=pending`; a full
+  unrestricted `test_cmd` marks `regression=verified`; `-t ''` always implies `pending`).
+  **Default to this path: never run the full `pnpm run test:regression` sweep on your own
+  initiative — its live tier is expensive against the live GAS backend. Close on the targeted gate
+  with `regression=pending`, and only run the full sweep (to flip it to `regression=verified`)
+  when the user explicitly asks for it.**
 - Merge-gate (or manual merge to master) still requires every bead in scope to be
-  `regression=verified` — i.e. full `pytest -x` clean — before it passes. A bead closed with
-  `regression=pending` is not itself blocking further implementation work in the same tree; it
-  blocks that tree's merge.
+  `regression=verified` — i.e. `pnpm run test:regression` clean — before it passes. A bead closed
+  with `regression=pending` is not itself blocking further implementation work in the same tree;
+  it blocks that tree's merge.
 - Known test failures are not a basis for proceeding autonomously: present the debt state (which
   tests fail, why) and wait for an explicit human decision rather than working around or ignoring
   the failure.

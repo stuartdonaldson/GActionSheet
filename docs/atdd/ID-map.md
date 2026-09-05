@@ -12,15 +12,28 @@ history) into the new authoritative source.
 
 ## Authoritative sources (the new home)
 
+The package moved twice. It is now a DevStandard **root** package at
+`$DEVSTANDARD/test-framework/` (was `knowledge-base/bdd/`, then
+`knowledge-base/methodology/testing/bdd/`). Paths below are current as of 2026-09-05.
+
 | Layer | Location | Owns |
 |-------|----------|------|
-| Universal testing principles `T1`–`T24` | `/mnt/c/dev/DevStandard/knowledge-base/bdd/sdlc-testing-principles.md` | every testing "why" |
-| Universal implementation/lifecycle principles `I1`–`I11` | `/mnt/c/dev/DevStandard/knowledge-base/bdd/sdlc-implementation-principles.md` | process, contract, ATDD phases |
-| Operational pre-code gate | `/mnt/c/dev/DevStandard/knowledge-base/bdd/SKILL.md` (`implementation-gate`) | sequences the principles at the code-writing moment |
-| Project testing guide (fill-in) | `/mnt/c/dev/DevStandard/knowledge-base/bdd/project-testing-guide-template.md` | project facts: stack, surfaces, journeys, coverage matrix |
-| Project harness-design (fill-in) | `/mnt/c/dev/DevStandard/knowledge-base/bdd/project-harness-design-template.md` | the `scn/` build spec |
+| Universal testing principles `T1`–`T25` | `$DEVSTANDARD/test-framework/sdlc-testing-principles.md` | every testing "why" |
+| Universal implementation/lifecycle principles `I1`–`I12` | `$DEVSTANDARD/test-framework/sdlc-implementation-principles.md` | process, contract, ATDD phases |
+| **Harness standards `H1`–`H13`** | `$DEVSTANDARD/test-framework/harness-standards.md` | how a harness is built, invoked and reports — tier gating, duration budget, boundary-fault classification, naming, entry-point registry, regression entry point. **New layer, added by `ADR-0012` (2026-09-03).** |
+| Operational pre-code gate | `.claude/skills/implementation-gate/SKILL.md` | sequences the principles at the code-writing moment |
+| Project testing guide (fill-in) | `$DEVSTANDARD/test-framework/templates/project-testing-guide-template.md` → filled at `docs/atdd/project-testing-guide.md` | project facts: stack, surfaces, journey charter, coverage matrix, disposition record |
+| Project harness-design (fill-in) | `$DEVSTANDARD/test-framework/templates/project-harness-design-template.md` → filled at `docs/atdd/harness-design.md` | the `scn/` build spec + the `H` conformance table (§9a) |
+| Adoption/upgrade prompt | `$DEVSTANDARD/test-framework/test-bootstrap.md` | operator-invoked, once per project; produces a plan, changes no test |
 
-Relative from this repo root: `../DevStandard/knowledge-base/bdd/`.
+`$DEVSTANDARD` is `/mnt/c/dev/DevStandard` on WSL2/Linux and `c:\dev\DevStandard` on Windows
+(project `CLAUDE.md` §10a).
+
+**Where the `H` layer took statements from.** `ADR-0012`'s boundary rule moved harness-shaped
+statements out of `T`/`I` and out of project docs. For this project that means: tier/marker
+behaviour, duration budget, retry policy, outcome classification, and the regression entry point
+are now `H1`–`H13` citations, and this project's *values* for them live in
+`docs/atdd/harness-design.md` §9a — not in the testing guide and not in `CLAUDE.md`.
 
 **Rule:** cite the `T`/`I` ID. Do not restate the principle text in project docs —
 that duplication is exactly what this re-base removed.
@@ -191,6 +204,14 @@ Tracked under gts-k22t. Status as of 2026-06-11:
     (children rz4k.1 triggers, rz4k.2 routes, rz4k.3 cards, rz4k.4 menu, rz4k.5
     test-support). gts-yuvq delivered the narrower onSyncNow doc-context
     slice first.
+  - **Counts above are the 2026-06-18 point-in-time record** (32/10/22) and are
+    not maintained here — the live numbers are `len(ENTRY_POINT_REGISTRY)` /
+    `len(ENTRY_POINT_DEFERRED)`, viewed in testing guide §7 and checked against
+    it by `scripts/check_entry_point_registry_view.py` (gts-u6ew.10). The
+    registry itself is checked against `src/` by
+    `scripts/check_entry_point_extraction.py` (gts-u6ew.11), which took it to
+    48/24/24 on its first run by registering 11 handlers wired in `src/` that
+    nobody had enumerated.
 - ~~Two `implementation-gate` skills exist~~ — **resolved 2026-06-09**: at that
   time this project's `.claude/skills/implementation-gate/SKILL.md` was
   identical (byte-for-byte) to DevStandard's

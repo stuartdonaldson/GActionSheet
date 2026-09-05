@@ -1,5 +1,5 @@
 """
-test_pulj_malformed_teamdata_folder.py — gts-pulj
+test_malformed_teamdata_folder.py — bead: gts-pulj
 
 Retroactive coverage (CLAUDE.md "Regression coverage — retroactive path
 (Path B)") for gts-pulj: a TeamData row whose folderId is a placeholder like

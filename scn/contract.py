@@ -58,7 +58,6 @@ AC_REGISTRY: dict[str, str] = {
     "sidebar mutation-changed": "Sidebar state change tracking",
     "sidebar sync-SHEET": "Sidebar SHEET surface sync",
     "sidebar tracker-insert": "Sidebar tracker insert operation",
-    "t": "Generic test marker",
     "import access-readable": "1dxz P1-P3 - list_importable_actions exposes actions for a readable team",
     "import access-absent": "1dxz P4 - list_importable_actions returns rows:[] for a TeamNotFound docId",
     "import ac1-list": "4gsx AC-1 - Import tab list grouped by source doc (doc_name ASC) and AI-N ASC within group",
@@ -75,6 +74,28 @@ AC_REGISTRY: dict[str, str] = {
     "teamscope teamdata-missing": "S6 - sync completes without assignment when TeamData is empty",
     "teamscope updatedoc-blank": "S7 - UpdateDoc with blank Team Id clears SyncStatus without crash",
     "teamscope sticky-after-move": "S8 - moving an already-assigned doc to another team's folder does not reassign",
+    # gts-u6ew.12 (F7) — six journeys asserted but drained no AC; these tag one existing
+    # assertion each so the journey reaches the T24 report. See testing guide §6.
+    "sync-all reconcile": "Scenario D - syncAll integrity-pass reconciles DocData row counts and doc_name after a sweep across all registered docs",
+    "scanner tracker-exclude": "dq6t AC-6 - AI: tokens inside the Action Item Tracker table are excluded from the floating-action scan",
+    "menu entrypoint-callsite": "Sheets/Docs menu wrappers (menuSync et al.) are call-sites in their own right, not merely a pass-through to the delegate they invoke (T17)",
+    "link-preview status": "cug8 - Editor add-on onLinkPreview card in-card status control converges the sheet row's status (_setStatusFromPreview)",
+    "link-preview chip-disclosure": "ADR-0017 - anonymous chip-preview page discloses only non-confidential metadata and never the action text",
+    "archive lifecycle": "d33z - a closed, aged action item is swept out of Actions and lands in Archive with globalId and File Id intact",
+}
+
+# Harness self-test fixture registry (gts-u6ew.4 / plan R22, finding F10).
+#
+# These are NOT acceptance criteria — they are tags the harness's own unit tests (test_scn_engine.py,
+# test_scn_session.py) use to exercise ScenarioSession/Engine's verify()/expect_absent()/
+# verify_all_expectations() machinery in isolation. They used to live in AC_REGISTRY, where they
+# inflated the denominator by 27% (37 nominal vs. 27 real ACs) and were permanently counted as
+# "uncovered" by scripts/check_coverage.py, since no production scenario ever tags them.
+# scripts/check_coverage.py does NOT diff against this dict — it is documentation only.
+AC_SELFTEST_FIXTURES: dict[str, str] = {
+    "t": "Generic test marker",
+    "t1": "Test scenario 1",
+    "t2": "Test scenario 2",
     "uc AC-1": "Use case AC-1",
     "uc AC-2": "Use case AC-2",
     "uc TEST": "Use case test marker",
@@ -82,8 +103,6 @@ AC_REGISTRY: dict[str, str] = {
     "uc1 AC2": "Use case 1 AC2",
     "uc1 AC3": "Use case 1 AC3",
     "uc1 AC4": "Use case 1 AC4",
-    "t1": "Test scenario 1",
-    "t2": "Test scenario 2",
 }
 
 # Entry-Point Registry (T1/T17 entry-point coverage; T24 gap-diff — see GTaskSheet-me6w.2)
@@ -98,10 +117,12 @@ AC_REGISTRY: dict[str, str] = {
 # names — menu items, time-based triggers, sidebar/add-on card actions, HTTP routes — plus the
 # state-modifying test-support routes. Each description is prefixed with a [category] tag;
 # [test-support ...] flags entries that exist only for the test harness (not product surface).
-# Read-only / navigation entry points (e.g. menuVerifyConsistency, find_sheet_actions,
-# verify_action_rows, get_test_config, onShowImport, onShowNotify, onImportBack, onNotifyBack,
-# onImportSelectAll) are intentionally NOT registered — the invariant scopes to
-# state-modifying call-sites only.
+# Read-only / navigation entry points are intentionally NOT registered — the invariant scopes to
+# state-modifying call-sites only. Those exemptions are no longer prose: the UI-handler ones are
+# enumerated machine-readably in ENTRY_POINT_SOURCE_EXEMPT below, which
+# scripts/check_entry_point_extraction.py reads (gts-u6ew.11). Read-only doPost routes
+# (find_sheet_actions, verify_action_rows, get_test_config, ...) remain prose-only, since the
+# route class is out of that extractor's scope — see that script's docstring.
 #
 # Entry points with no current scenario call-site are listed in ENTRY_POINT_DEFERRED below;
 # check_coverage.py treats those as explicitly warn-only (enumerated but not yet asserted),
@@ -166,6 +187,69 @@ ENTRY_POINT_REGISTRY: dict[str, str] = {
     "bootstrap": "[test-support route] bootstrap — bootstraps test script properties",
     "begin_journey_session": "[test-support route] begin_journey_session — opens a journey test-session marker",
     "end_journey_session": "[test-support route] end_journey_session — closes a journey test-session marker",
+    # ── Source-extraction sweep (gts-u6ew.11) ───────────────────────────────────────
+    # Registered because scripts/check_entry_point_extraction.py found them wired in src/
+    # (onOpen menu registration / appsscript.json runFunction / CardService action /
+    # ScriptApp.newTrigger) and state-modifying, but absent from this registry — i.e. exactly
+    # the silent uncoverage H12 exists to prevent. Every one is deferred below with a reason;
+    # none was previously enumerated at all.
+    "menuConfigFormat": "[menu] menuConfigFormat -> configFormat() (Setup > Configure Action Format) — "
+        "samples a reference doc's formatting and writes the Config sheet's style rows",
+    "menuForceRefreshActiveDoc": "[menu] menuForceRefreshActiveDoc -> sync_document(force=true) "
+        "(Docs 'Action Sync > Force Refresh Style') — unconditional re-render of every ACT/AI paragraph",
+    "nightlyAdminScanAllTeams": "[trigger] nightlyAdminScanAllTeams() — nightly admin sweep over every "
+        "TeamData team (AdminDocScan.js); writes scan state per team",
+    "_runNearImmediateSyncAll": "[trigger] _runNearImmediateSyncAll(e) — one-shot self-deleting trigger "
+        "created by onActionSheetEdit to run syncAll() shortly after an edit (SyncManager.js)",
+    "menuCleanupTestDocs": "[test-support menu] menuCleanupTestDocs() -> ArchiveManager.purgeByPrefix "
+        "(Test > Cleanup Test Docs) — permanently deletes prefix-matching Actions/DocData rows",
+    "menuBeginTestSession": "[test-support menu] menuBeginTestSession() -> beginTestSession(masterDocId) "
+        "(Test > Begin Session), TestControl!A1-driven manual twin of the begin_journey_session route",
+    "menuEndTestSession": "[test-support menu] menuEndTestSession() -> endTestSession(cloneId) "
+        "(Test > End Session), TestControl!B1-driven manual twin of the end_journey_session route",
+    "menuSetupFixture": "[test-support menu] menuSetupFixture() -> setupTestFixtures(scenario) "
+        "(Test > Setup Fixture), manual twin of the run_fixture route",
+    "menuSyncDocument": "[test-support menu] menuSyncDocument() -> syncDocument(docId) "
+        "(Test > Sync Document), TestControl!A1-driven manual twin of the sync_document route",
+    "menuSetupAndSync": "[test-support menu] menuSetupAndSync() -> setupAndSync(scenario, docId) "
+        "(Test > Setup And Sync), manual twin of the run_fixture + sync_document pair",
+    "menuInsertTrackerTable": "[test-support menu] menuInsertTrackerTable() -> insertTrackerTable(docId) "
+        "(Test > Insert Tracker Table), TestControl!A1-driven manual twin of onInsertTrackerTable",
+}
+
+# Handlers wired in src/ that scripts/check_entry_point_extraction.py extracts but which are
+# deliberately NOT entry points for the T17 invariant: they render or navigate a card, open a
+# dialog, or emit a probe log, and modify no durable state. Machine-readable so the exemption
+# is auditable (I6) instead of living in a prose comment that nothing reads. Adding a handler
+# here is a claim that it is read-only — the reason is the claim's justification.
+ENTRY_POINT_SOURCE_EXEMPT: dict[str, str] = {
+    "onOpen": "simple trigger; builds the Sheets/Docs 'Action Sync' menus and logs. No durable state.",
+    "buildHomepageCard": "add-on homepage card builder (appsscript.json homepageTrigger). Render-only.",
+    "createActionTrigger": "Docs 'Create action' trigger — renders _buildCreationCard(); the mutation "
+        "is the card's submit, _submitCreateAction, which IS registered.",
+    "onLinkPreview": "link-preview card render (appsscript.json linkPreviewTriggers); the mutation is "
+        "the preview's status dropdown, _setStatusFromPreview, which IS registered.",
+    "onShowImport": "sidebar navigation — pushes the Import tab card.",
+    "onShowNotify": "sidebar navigation — pushes the Notify tab card.",
+    "onImportBack": "sidebar navigation — returns to the homepage card.",
+    "onNotifyBack": "sidebar navigation — returns to the homepage card.",
+    "onExportBackToHome": "export card navigation — returns to the homepage card.",
+    "onImportSelectAll": "toggles CHECK_BOX selection state inside the rendered Import card only; "
+        "nothing is written until _submitImport (registered as importSelectedSubmit).",
+    "menuVerifyConsistency": "Test > Verify Consistency -> verifyConsistencyForTest(docId) — reads "
+        "sheet+doc and reports; writes nothing.",
+    "menuDebugDocBody": "Test > Debug Doc Body -> debugDocBody(docId) — dumps the doc body to the log.",
+    "menuProbeIdentity": "Test > Probe Identity -> PROBE_log('menu.identity') — probe log only.",
+    "menuShowExportDialog": "Docs 'Export…' -> showDocumentExportDialog_() — opens the modal dialog; "
+        "the export write path runs from the dialog and is covered via the export_document_json seam.",
+}
+
+# src/ handler name -> ENTRY_POINT_REGISTRY key, for the cases where the registry key is not the
+# handler's own function name. Read by scripts/check_entry_point_extraction.py so an aliased
+# handler is not reported as unregistered.
+ENTRY_POINT_SOURCE_ALIASES: dict[str, str] = {
+    "onSyncNow": "syncDocument.onSyncNow",
+    "_submitImport": "importSelectedSubmit",
 }
 
 # Deferred entry points (GTaskSheet-z6f8 / EPIC GTaskSheet-rz4k). Maps a registered entry point
@@ -239,6 +323,40 @@ ENTRY_POINT_DEFERRED: dict[str, str] = {
         "entry point — PR #5 review.",
     "onDocumentExportAndPdfMenu": "same gap as onDocumentExportMenu (exportPdf=true variant) — "
         "PR #5 review.",
+    # gts-u6ew.11 (source-extraction sweep) — newly enumerated, none previously registered.
+    # Deferred rather than covered: each is state-modifying and now visible to the gap-diff,
+    # but none has a scn.verify(..., entry_point=...) tagged call-site today.
+    "menuConfigFormat": "opens an interactive SpreadsheetApp.getUi().prompt for a reference doc id "
+        "and returns on Cancel — no headless call-site exists; the underlying Config style rows are "
+        "asserted through the config fixtures instead — gts-u6ew.11.",
+    "menuForceRefreshActiveDoc": "Docs menu 'Force Refresh Style' — drives sync_document(force=true) "
+        "in Docs context; same deferral as menuSyncActiveDoc/menuInsertTrackerActiveDoc (the harness "
+        "runs in Sheets context, so Docs menu items are unreachable) — GTaskSheet-lmsd.",
+    "nightlyAdminScanAllTeams": "nightly time-based admin sweep over every TeamData team; a scenario "
+        "call-site would run a full multi-team scan against the shared TEST spreadsheet. Covered "
+        "indirectly by the per-team admin_scan_* routes, not at this trigger's own call-site — "
+        "gts-u6ew.11.",
+    "_runNearImmediateSyncAll": "one-shot self-deleting trigger created by onActionSheetEdit; it "
+        "deletes itself and calls syncAll(), both already registered. Time-based trigger firing is "
+        "not drivable from a scenario — gts-u6ew.11.",
+    "menuCleanupTestDocs": "tests/test_cleanup_test_docs.py drives this entry point through its own "
+        "'menu_cleanup_test_docs' run_fixture wrapper and asserts durable row deletion, but with raw "
+        "XLSX/dict assertions rather than scn.verify(..., entry_point=...) — same shape as the "
+        "team_sync_document deferral above; tagging it is the work that clears this row — gts-u6ew.11.",
+    "menuBeginTestSession": "PERMANENT EXEMPTION: manual TestControl!A1-driven twin of the "
+        "begin_journey_session route every ScenarioSession.new_doc() already POSTs. Driving the menu "
+        "wrapper would require a live Sheets UI session and would re-point TestControl!B1 mid-suite "
+        "— gts-u6ew.11.",
+    "menuEndTestSession": "PERMANENT EXEMPTION: manual TestControl!B1-driven twin of the "
+        "end_journey_session route every ScenarioSession.close() already POSTs — gts-u6ew.11.",
+    "menuSetupFixture": "PERMANENT EXEMPTION: manual twin of the run_fixture route, itself a "
+        "permanent exemption above (hundreds of call-sites per run) — gts-u6ew.11.",
+    "menuSyncDocument": "PERMANENT EXEMPTION: manual TestControl!A1-driven twin of syncDocument(docId), "
+        "which is the registry's most heavily covered entry point — gts-u6ew.11.",
+    "menuSetupAndSync": "PERMANENT EXEMPTION: manual twin of the run_fixture + sync_document pair, "
+        "both already covered at their own call-sites — gts-u6ew.11.",
+    "menuInsertTrackerTable": "PERMANENT EXEMPTION: manual TestControl!A1-driven twin of "
+        "insertTrackerTable(docId), covered at the onInsertTrackerTable card call-site — gts-u6ew.11.",
 }
 
 __all__ = [
@@ -252,6 +370,9 @@ __all__ = [
     "MESSAGES",
     "MODEL_NAMES",
     "AC_REGISTRY",
+    "AC_SELFTEST_FIXTURES",
     "ENTRY_POINT_REGISTRY",
     "ENTRY_POINT_DEFERRED",
+    "ENTRY_POINT_SOURCE_EXEMPT",
+    "ENTRY_POINT_SOURCE_ALIASES",
 ]

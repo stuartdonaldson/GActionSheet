@@ -1,5 +1,5 @@
 """
-test_b7_write_routes.py — Twin verify B7: globalId write routes + onActionSheetEdit stamping.
+test_globalid_write_routes.py — Twin verify B7 (bead: B7): globalId write routes + onActionSheetEdit stamping.
 
 Exercises §16.9 write acts: edit_sheet, set_status, delete — all addressed by globalId (§16.11 #3).
 Covers the §15 test_03-07/12 conflict matrix at the HTTP-act layer:

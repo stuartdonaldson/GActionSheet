@@ -39,14 +39,6 @@ def _find_action(scn, action_text):
     return row
 
 
-def _assert_action_absent(scn, action_text):
-    rows = scn.find_sheet_actions()
-    assert not any(r.action == action_text for r in rows), (
-        f"action {action_text!r} unexpectedly present in sheet: "
-        f"{[r.action for r in rows]!r}"
-    )
-
-
 def _find_by_global_id(scn, global_id):
     rows = scn.find_sheet_actions()
     row = next((r for r in rows if r.global_id == global_id), None)
@@ -104,7 +96,24 @@ def test_tracker_table_tokens_excluded(settings, request):
         scn._post_fixture("append_tracker_cell_text", {"text": f"AI: {action_text}"})
         scn.sync()
 
-        _assert_action_absent(scn, action_text)
+        # gts-u6ew.12 (F7): route this journey's own assertion through
+        # expect_callable/checkpoint so tag= reaches the T24 report (previously
+        # a bare assert via _assert_action_absent) — scn/contract.AC_REGISTRY
+        # "scanner tracker-exclude". Same check, no new assertion.
+        def _tracker_tokens_still_absent() -> str | None:
+            rows = scn.find_sheet_actions()
+            if any(r.action == action_text for r in rows):
+                return (
+                    f"action {action_text!r} unexpectedly present in sheet: "
+                    f"{[r.action for r in rows]!r}"
+                )
+            return None
+
+        scn.expect_callable(
+            _tracker_tokens_still_absent, on=SHEET,
+            tag="scanner tracker-exclude", entry_point="syncDocument",
+        )
+        scn.checkpoint(STEP)
     finally:
         scn.close()
 

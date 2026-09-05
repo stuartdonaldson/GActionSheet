@@ -10,7 +10,7 @@ fallback at `WebApp.js:1421` -- independent of, and textually distinct from,
 `SyncManager.js`'s integrity-pass fallback exercised by
 `tests/test_sync_all.py`'s `[cduk AC2]`. Before this test, that fallback had
 no durable-state assertion tagged to the `sync_action_rows` entry point
-itself: `tests/test_b7_write_routes.py`'s `[rz4k.2 sync_action_rows]` checks
+itself: `tests/test_globalid_write_routes.py`'s `[rz4k.2 sync_action_rows]` checks
 only the Actions-row write, and `[cduk AC2]` reaches `WebApp.js:1421` only
 transitively through a `sync_all_force_listing_miss` sweep, tagged to
 `syncAll` instead.

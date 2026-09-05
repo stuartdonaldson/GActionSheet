@@ -50,7 +50,7 @@ def _post_sync_document(scn, settings, **extra) -> dict:
 
     scn._post_route sends testToken; this is a production route behind the
     WEBAPP_SECRET gate, so the payload is built here (same shape as
-    tests/test_b7_write_routes.py's direct secret-gated calls).
+    tests/test_globalid_write_routes.py's direct secret-gated calls).
     """
     payload = {"secret": settings["webappSecret"], "action": _ROUTE}
     payload.update(extra)

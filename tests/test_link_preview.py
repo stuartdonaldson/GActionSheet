@@ -127,9 +127,11 @@ def test_link_preview_card_status_change(scn):
             )
         return None
 
+    # gts-u6ew.12 (F7): tag=AC id so this journey reaches the T24 report —
+    # scn/contract.AC_REGISTRY "link-preview status".
     scn.sync()
     scn.expect_callable(
-        _status_converged, on=SHEET, tag="[cug8 link-preview status]",
+        _status_converged, on=SHEET, tag="link-preview status",
         entry_point="_setStatusFromPreview",
     )
     scn.checkpoint(INTEGRITY)

@@ -1,5 +1,5 @@
 """
-test_uuse_scoped_listing.py — gts-uuse
+test_scoped_drive_listing.py — bead: gts-uuse
 
 Regression coverage for gts-uuse: syncAll's Drive metadata listing is now
 scoped to known TeamData folders (direct children only) instead of every

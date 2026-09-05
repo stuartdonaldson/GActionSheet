@@ -165,7 +165,8 @@ or session-start check, so it only fires when a human happens to inspect that ex
   undecided.
 - **`gts-w6vg`** (test_b7/test_uc_scenarios/test_uc_sidebar failures) — already
   re-scoped 2026-06-02 with its own verification steps. Step 1 (re-run current suite) appears
-  satisfied — work-log 1530 shows `test_b7_write_routes` now PASSED and 1817 shows a 230-test
+  satisfied — work-log 1530 shows `test_b7_write_routes` (renamed `test_globalid_write_routes`,
+  gts-u6ew.17) now PASSED and 1817 shows a 230-test
   full-suite green run (commit `cb88d91`). Step 3 (session-scoped teardown in
   `tests/conftest.py` marking journey-clone rows `mark_doc_not_found`+archive) was checked
   and is **not present** in `tests/conftest.py`. Still valid — narrowed to step 3 only.

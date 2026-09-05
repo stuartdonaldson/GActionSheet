@@ -8,7 +8,8 @@ Session 2026-05-31 19:59:13: tests ran, failures observed. Key Learnings noted t
 correctly for one file: "uc_a_clear inserts chip-led items, invisible to AI-N scanner."
 Session ended with "Work will need to continue."
 
-Session 2026-06-01 00:15:41: 11 failures identified across test_uc_scenarios, test_b7_write_routes,
+Session 2026-06-01 00:15:41: 11 failures identified across test_uc_scenarios, test_b7_write_routes
+(renamed `test_globalid_write_routes`, gts-u6ew.17),
 test_uc_sidebar_mutations. Issue `gts-w6vg` filed at P3 with a description of the failures
 and a plausible explanation ("accumulated legacy rows without globalIds"). Session moved on.
 

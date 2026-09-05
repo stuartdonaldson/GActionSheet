@@ -14,7 +14,11 @@ contract on GTaskSheet-mus0, not the GAS implementation.
 import pytest
 
 from scn.ai import ai
+from scn.engine import CheckpointKind, Surface
 from scn.session import ScenarioSession
+
+SHEET = Surface.SHEET
+STEP = CheckpointKind.STEP
 
 
 @pytest.fixture
@@ -50,6 +54,28 @@ def test_chip_preview_notice_discloses_only_metadata(scn):
     assert f"/document/d/{scn.doc_id}/edit" in html, f"preview missing doc link: {html!r}"
     if doc_name:
         assert doc_name in html, f"preview missing doc name {doc_name!r}: {html!r}"
+
+    # gts-u6ew.12 (F7): route the disclosure-boundary result through
+    # expect_callable/checkpoint so tag= reaches the T24 report — same checks
+    # already made above, no new assertion — scn/contract.AC_REGISTRY
+    # "link-preview chip-disclosure".
+    def _disclosure_boundary_held() -> str | None:
+        if secret_text in html:
+            return f"preview leaked action text: {html!r}"
+        if action_id not in html:
+            return f"preview missing action id {action_id!r}: {html!r}"
+        if (match.status or "Open") not in html:
+            return f"preview missing status: {html!r}"
+        if f"/document/d/{scn.doc_id}/edit" not in html:
+            return f"preview missing doc link: {html!r}"
+        if doc_name and doc_name not in html:
+            return f"preview missing doc name {doc_name!r}: {html!r}"
+        return None
+
+    scn.expect_callable(
+        _disclosure_boundary_held, on=SHEET, tag="link-preview chip-disclosure",
+    )
+    scn.checkpoint(STEP)
 
 
 def test_chip_preview_notice_unknown_action_is_non_leaking(scn):

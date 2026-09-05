@@ -22,13 +22,13 @@ metadata:
   conflicts_with: []
   related_skills: [test-functional, lessons-learned]
   references:
-    - $DEVSTANDARD/knowledge-base/methodology/testing/bdd/sdlc-implementation-principles.md
-    - $DEVSTANDARD/knowledge-base/methodology/testing/bdd/sdlc-testing-principles.md
+    - $DEVSTANDARD/test-framework/sdlc-implementation-principles.md
+    - $DEVSTANDARD/test-framework/sdlc-testing-principles.md
 ---
 
 # Implementation Gate
 
-Operational gate that enforces the universal principles at the moment of implementation. It does not restate those principles; it sequences and checks them. Principle IDs below resolve to `$DEVSTANDARD/knowledge-base/methodology/testing/bdd/sdlc-implementation-principles.md` (`In`) and `.../bdd/sdlc-testing-principles.md` (`Tn`).
+Operational gate that enforces the universal principles at the moment of implementation. It does not restate those principles; it sequences and checks them. Principle IDs below resolve to `$DEVSTANDARD/test-framework/sdlc-implementation-principles.md` (`In`) and `$DEVSTANDARD/test-framework/sdlc-testing-principles.md` (`Tn`).
 
 **Goal:** The failure point is the transition from "reading the request" to "writing code" — any check that cannot fire at that exact moment is bypassed. Every step targets that transition.
 
@@ -78,7 +78,7 @@ Each step enforces a named principle and adds the gate-specific fail condition t
 
 5.5. **Test-infrastructure compatibility check** — before committing to an implementation approach, confirm it is compatible with the existing test harness: detection/seed format the harness expects, route/contract shape the test fixtures call, sheet/doc structure assumptions, and log tags the harness waits on. | **Fail:** if the approach would change any of these without a corresponding harness update, surface the mismatch and resolve it before writing code — do not let it surface later as a harness false-negative or false-positive.
 
-6. **[IMP] close gate** (enforces I5, T5) → before closing any `[IMP]` issue or merging, run the full `pytest -x` regression suite, not only the narrowest test for the current AC. | **Fail:** if the suite has pre-existing failures unrelated to this change, do not close or merge autonomously — present the debt state and wait for an explicit decision (CLAUDE.md backstop rule).
+6. **[IMP] close gate** (enforces I5, T5) → before closing any `[IMP]` issue or merging, run the full regression suite via `pnpm run test:regression` (this project's `H13` entry point — CLAUDE.md Backstop rules), not only the narrowest test for the current AC. | **Fail:** if the suite has pre-existing failures unrelated to this change, do not close or merge autonomously — present the debt state and wait for an explicit decision (CLAUDE.md backstop rule).
    - If Step 4 declared an oracle type for this feature, this is also the evidence-log closure point for a specifiable/test-first feature — see Step 4's closure sub-step.
 
 7. **Crash-fix rule** (enforces I10) — apply only when fixing a crash during in-progress feature work → identify the feature in flight → read its AC before applying any fix → apply the fix → run the feature's AC tests. | **Fail:** "no crash" is not done — "AC tests pass" is done; if AC tests are unavailable, create an issue for AC authoring before closing the fix.
@@ -96,7 +96,7 @@ Each step enforces a named principle and adds the gate-specific fail condition t
 - [ ] In red phase: no implementation files read (verify: read calls target specs and test files only, per I7)
 - [ ] Test run completed before staging (verify: test output shown in session)
 - [ ] Test-infrastructure compatibility confirmed (detection format, route/contract, sheet structure, log tags) before committing to the approach
-- [ ] Full `pytest -x` regression suite run (not just narrowest test) before any `[IMP]` close or merge; pre-existing failures surfaced for explicit decision, not bypassed
+- [ ] Full regression suite run via `pnpm run test:regression` (not just narrowest test) before any `[IMP]` close or merge; pre-existing failures surfaced for explicit decision, not bypassed
 - [ ] For crash fixes: feature in flight identified; AC read before fix; AC tests pass after fix (verify: test run output shown)
 
 ## Examples

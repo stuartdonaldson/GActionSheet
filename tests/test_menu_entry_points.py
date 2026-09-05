@@ -71,8 +71,11 @@ def test_menuSync_sweeps_registered_doc(scn):
             )
         return None
 
+    # gts-u6ew.12 (F7): tag=AC id so this journey (T17 call-site coverage, not a
+    # distinct failure domain per the charter's own "why separate" line) reaches
+    # the T24 report — scn/contract.AC_REGISTRY "menu entrypoint-callsite".
     scn.expect_callable(
-        _second_action_swept, on=SHEET, tag="[rz4k.4 menuSync]", entry_point="menuSync",
+        _second_action_swept, on=SHEET, tag="menu entrypoint-callsite", entry_point="menuSync",
     )
     scn.checkpoint(STEP)
 

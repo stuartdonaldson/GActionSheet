@@ -90,7 +90,7 @@ function _handleRunFixture(payload) {
   // same-opId retry arrives. A bare retry re-runs the fixture from scratch,
   // producing a real second execution (observed as two
   // sync.driveMetadata.batchFallback.fetched events sharing one parentOp,
-  // ~3 minutes apart, in test_uuse_scoped_listing.py). Dedupe on the
+  // ~3 minutes apart, in test_scoped_drive_listing.py). Dedupe on the
   // client-supplied opId (reused across every retry attempt of one logical
   // call), same as append_doc_paragraph: 21600s (CacheService's own max TTL)
   // comfortably covers even the slowest full-corpus fixture plus the retry

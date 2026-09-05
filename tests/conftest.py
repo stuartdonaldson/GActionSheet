@@ -8,11 +8,85 @@ import re
 import pytest
 
 from tests import duration_instrumentation as di
+from scn.outcomes import classify
 
 _SETTINGS_PATH = pathlib.Path(__file__).parent.parent / "local.settings.json"
 _TEST_RESULTS = pathlib.Path(__file__).parent.parent / "test-results"
 
 _pytest_config = None
+
+# --- gts-u6ew.5 / H11: block new tracker-id-named test files at collection time -----
+#
+# >=11 existing test files encode a bead/ticket id in the filename (test_b7_,
+# test_f3me1_, ...) instead of the behaviour the file covers. H11's rationale
+# (docs/atdd/harness-design.md S9a) is that this structurally defeats ADR-0011's
+# "enumerate the adjacent existing tests" step -- a slug tells a reader nothing about
+# what the file exercises. The existing offenders are grandfathered here (renaming
+# them is stage naming-cleanup, gts-u6ew.17, out of scope for this hook); this hook's
+# only job is to stop a new one from joining the list.
+#
+# TRACKER_ID_ALLOWLIST is the single source of truth both this hook and any future
+# audit must read -- do not duplicate this list elsewhere. It only shrinks (stage
+# naming-cleanup removes entries as files are renamed); do not add to it without that
+# stage's review.
+TRACKER_ID_ALLOWLIST: frozenset[str] = frozenset({
+    "test_f3me1_append_idempotency.py",
+    "test_f3me2_run_fixture_idempotency.py",
+    "test_hroj_diagnostics_backstop.py",
+    "test_hztp_actionsnapshot_read_coverage.py",
+    "test_adr0027_reference_document.py",
+})
+
+# A bead/ticket slug reliably mixes a digit into its short alnum token (bd's own
+# short-id alphabet does this -- u6ew, 79dw, kkm7, zc0w, ... -- and harness-design.md's
+# own H11 --ticket-pattern citation is `(?:\b(?:gts-)?[a-z0-9]{4}\b)`). No legitimate
+# descriptive first-token among this suite's non-allowlisted test_*.py files contains a
+# digit (checked against every current filename at authoring time: ai, ui, apt, doc,
+# gas, poc, scn, bops, call, chip, epic, link, list, menu, seed, sync, team, view,
+# admin, field, force, access, decode, ... none carry a digit) -- so "the first
+# underscore-delimited token contains a digit" is a zero-false-positive proxy for
+# "looks like a tracker id" against the current suite, without needing a dictionary of
+# real words. It will not catch a future letters-only slug (e.g. a repeat of hroj/
+# hztp/pulj/uuse's shape) -- that gap is accepted rather than risking false positives
+# on real words; a human reviewer is still the backstop for that case.
+_TRACKER_ID_SHAPE_RE = re.compile(r"^test_(?=[a-z0-9]*[0-9])[a-z0-9]{2,8}_")
+
+
+class _TrackerIdBlockedFile(pytest.File):
+    """A collectible standing in for an offending file -- collect() always fails.
+
+    Using pytest's own file-collection hook (rather than raising inside
+    pytest_collectstart) is what keeps this a normal, reported CollectError
+    instead of an INTERNALERROR: pytest_collect_file is the documented
+    extension point for "this file needs custom/blocked collection".
+    """
+
+    def collect(self):
+        raise self.CollectError(
+            f"{self.path.name}: filename looks like a bead/ticket slug (H11) -- name "
+            "the file for the behaviour it covers, not a tracker id. If this is a "
+            "deliberate, reviewed exception, add it to TRACKER_ID_ALLOWLIST in "
+            "tests/conftest.py (the allowlist only shrinks per gts-u6ew.17 -- do not "
+            "grow it casually)."
+        )
+
+
+def pytest_collect_file(file_path, parent):
+    """H11: fail collection of a new tracker-id-shaped test filename.
+
+    Runs ahead of module import, so an offending file's body never executes --
+    it is reported as a collection error naming the file, same as a real
+    ImportError would be. TRACKER_ID_ALLOWLIST (above) is the only carve-out.
+    """
+    name = file_path.name
+    if not (name.startswith("test_") and name.endswith(".py")):
+        return None
+    if name in TRACKER_ID_ALLOWLIST:
+        return None
+    if _TRACKER_ID_SHAPE_RE.match(name):
+        return _TrackerIdBlockedFile.from_parent(parent, path=file_path)
+    return None
+
 
 # --- gts-y1eg: progress counter + duration/baseline instrumentation state --
 # Session-lifetime, single-process state; see duration_instrumentation.py for
@@ -39,6 +113,14 @@ _duration_run_id = None
 _duration_baseline: dict = {}
 _duration_phases: dict[str, dict[str, float]] = {}
 _duration_outcome: dict[str, str] = {}
+# gts-u6ew.6/.7 (H6/H7): classification (PASS/ASSERTION_FAILURE/BOUNDARY_FAULT,
+# from scn.outcomes.classify -- stamped onto the call-phase report's
+# user_properties by pytest_runtest_makereport below) and the summed
+# http.attempts user_property, read back here once teardown fires so
+# build_record can carry both on the same JSONL record pytest_sessionfinish's
+# H8 summary reads.
+_duration_outcome_class: dict[str, str] = {}
+_duration_attempts: dict[str, int] = {}
 
 
 def pytest_configure(config):
@@ -123,26 +205,89 @@ def pytest_runtest_logreport(report):
         phases[report.when] = report.duration
         if report.when == "call" or (report.when == "setup" and report.outcome != "passed"):
             _duration_outcome[nodeid] = report.outcome
+        if report.when == "call":
+            # gts-u6ew.6/.7 (H6/H7): pytest_runtest_makereport (below) has
+            # already stamped these onto the call-phase report's
+            # user_properties by the time this hook fires for it (pytest
+            # calls makereport, THEN fires logreport with the report it
+            # built) -- read them back here, once, rather than re-deriving.
+            props = dict(report.user_properties)
+            if "outcome_class" in props:
+                _duration_outcome_class[nodeid] = props["outcome_class"]
+            attempts = [
+                int(v) for k, v in report.user_properties if k == "http.attempts"
+            ]
+            if attempts:
+                _duration_attempts[nodeid] = sum(attempts)
         if report.when != "teardown":
             return
 
         phases = _duration_phases.pop(nodeid, {})
         outcome = _duration_outcome.pop(nodeid, report.outcome)
+        outcome_class = _duration_outcome_class.pop(nodeid, None)
+        attempts_total = _duration_attempts.pop(nodeid, None)
         index = _duration_index_map.pop(nodeid, _duration_next_index)
         entry = _duration_baseline.get(nodeid)
         baseline_s = entry["median_s"] if entry else None
+        # H4 tier lookup: `report.keywords` carries every marker name as a
+        # key, including `live`, which pytest_collection_modifyitems stamps
+        # dynamically on every item lacking `no_live_session` (gts-aqpk) — so
+        # this reads the same classification the tier split itself uses,
+        # rather than re-deriving it.
+        is_live = "live" in report.keywords
 
         record = di.build_record(
             run_id=_duration_run_id, index=index, total=_duration_total,
             nodeid=nodeid, outcome=outcome,
             setup_s=phases.get("setup", 0.0), call_s=phases.get("call", 0.0),
             teardown_s=phases.get("teardown", 0.0), baseline_s=baseline_s,
+            is_live=is_live, outcome_class=outcome_class, attempts=attempts_total,
         )
         _terminal_writeline(f"[{_timestamp()}] {di.format_finish_line(record)}")
         di.append_jsonl(record)
         if outcome == "passed":
             _duration_baseline = di.update_baseline(_duration_baseline, nodeid, record["total_s"])
             di.save_baseline(_duration_baseline)
+    except Exception:
+        # Instrumentation must never mask or alter the real test result.
+        pass
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """H8 (gts-u6ew.8): print this run's execution failure rate, failed-
+    wall-time share, and boundary-fault share -- the numbers that say
+    whether a red run means "we broke something" or "the platform was
+    down." Previously computable only by running
+    $DEVSTANDARD/tools/test-suite-diagnostics.py offline over
+    duration-log.jsonl after the fact; now emitted every run.
+
+    Report-only, like the rest of this module's instrumentation: never
+    raises, never touches exitstatus. Gated on `_duration_enabled` (gts-xvgl:
+    only the xdist controller process, never a worker, does the duration
+    accounting -- see that bead's note above `_duration_enabled`'s
+    declaration), and filters duration-log.jsonl down to this run's own
+    `_duration_run_id` before summarizing, so a run's numbers aren't diluted
+    by history from earlier runs appended to the same file.
+    """
+    if not _duration_enabled:
+        return
+    try:
+        if not di.LOG_PATH.exists():
+            return
+        records = []
+        with open(di.LOG_PATH) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("run_id") == _duration_run_id:
+                    records.append(rec)
+        summary = di.summarize_run(records)
+        _terminal_writeline(di.format_run_summary(summary))
     except Exception:
         # Instrumentation must never mask or alter the real test result.
         pass
@@ -199,6 +344,20 @@ def pytest_runtest_makereport(item, call):
     """
     outcome = yield
     report = outcome.get_result()
+    if report.when == "call":
+        # gts-u6ew.6 (H6): classify this test's outcome (scn.outcomes.classify
+        # -- the one owning helper, I12) and stamp it as a user_property, so
+        # both the JUnit XML and tests/duration_instrumentation.py's per-test
+        # JSONL record (pytest_runtest_logreport fires after this hook, on
+        # this same report object) carry PASS/ASSERTION_FAILURE/BOUNDARY_FAULT
+        # without a second classification path. A non-failed call phase
+        # (passed or skipped) classifies as PASS -- the raw pytest outcome
+        # ("passed"/"skipped") is preserved separately on the JSONL record's
+        # existing `outcome` field, so nothing is lost; this property only
+        # ever needs to answer "was this a boundary fault," which a skip
+        # never is.
+        exc = call.excinfo.value if (call.excinfo is not None and report.failed) else None
+        report.user_properties.append(("outcome_class", classify(exc)))
     if report.when != "call" or not report.failed:
         return
     page = _find_page(item)

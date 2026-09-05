@@ -114,6 +114,104 @@ def test_build_record_carries_progress_and_identity_fields():
     assert "ts" in rec
 
 
+# --- build_record: outcome_class / attempts (H6/H7, gts-u6ew.6/.7) ---------
+
+def test_build_record_defaults_outcome_class_and_attempts_to_none():
+    rec = di.build_record(**_kwargs())
+    assert rec["outcome_class"] is None
+    assert rec["attempts"] is None
+
+
+def test_build_record_carries_outcome_class_and_attempts_when_given():
+    rec = di.build_record(**_kwargs(outcome_class="BOUNDARY_FAULT", attempts=5))
+    assert rec["outcome_class"] == "BOUNDARY_FAULT"
+    assert rec["attempts"] == 5
+
+
+# --- summarize_run (H8, gts-u6ew.8) -----------------------------------------
+
+def _rec(outcome="passed", total_s=1.0, outcome_class=None):
+    return {"outcome": outcome, "total_s": total_s, "outcome_class": outcome_class}
+
+
+def test_summarize_run_empty_input_is_all_zero_not_error():
+    summary = di.summarize_run([])
+    assert summary["executions"] == 0
+    assert summary["execution_failure_rate"] == 0.0
+    assert summary["failed_wall_time_share"] == 0.0
+    assert summary["boundary_faults"] is None
+    assert summary["boundary_fault_share_of_failures"] is None
+
+
+def test_summarize_run_all_passed_has_zero_failure_rate():
+    records = [_rec(), _rec(), _rec()]
+    summary = di.summarize_run(records)
+    assert summary["executions"] == 3
+    assert summary["failed"] == 0
+    assert summary["execution_failure_rate"] == 0.0
+    assert summary["failed_wall_time_share"] == 0.0
+    assert summary["boundary_faults"] == 0
+    assert summary["boundary_fault_share_of_failures"] == 0.0
+
+
+def test_summarize_run_execution_failure_rate():
+    records = [_rec()] * 9 + [_rec(outcome="failed")]
+    summary = di.summarize_run(records)
+    assert summary["executions"] == 10
+    assert summary["failed"] == 1
+    assert summary["execution_failure_rate"] == pytest.approx(0.1)
+
+
+def test_summarize_run_failed_wall_time_share():
+    records = [
+        _rec(outcome="passed", total_s=10.0),
+        _rec(outcome="failed", total_s=30.0),
+    ]
+    summary = di.summarize_run(records)
+    assert summary["wall_time_s"] == pytest.approx(40.0)
+    assert summary["failed_wall_time_s"] == pytest.approx(30.0)
+    assert summary["failed_wall_time_share"] == pytest.approx(0.75)
+
+
+def test_summarize_run_boundary_fault_share_of_failures():
+    records = [
+        _rec(outcome="failed", outcome_class="BOUNDARY_FAULT"),
+        _rec(outcome="failed", outcome_class="ASSERTION_FAILURE"),
+        _rec(outcome="passed"),
+    ]
+    summary = di.summarize_run(records)
+    assert summary["boundary_faults"] == 1
+    assert summary["boundary_fault_share_of_failures"] == pytest.approx(0.5)
+
+
+def test_summarize_run_unclassified_failure_never_counts_as_boundary_fault():
+    # A record with outcome_class=None (e.g. no request= context) must not be
+    # silently swept into the boundary-fault count -- "unclassified" and
+    # "boundary fault" are different claims.
+    records = [_rec(outcome="failed", outcome_class=None)]
+    summary = di.summarize_run(records)
+    assert summary["boundary_faults"] == 0
+    assert summary["boundary_fault_share_of_failures"] == 0.0
+
+
+# --- format_run_summary (H8) -------------------------------------------------
+
+def test_format_run_summary_empty_run():
+    line = di.format_run_summary(di.summarize_run([]))
+    assert "no executions" in line
+
+
+def test_format_run_summary_includes_rate_and_boundary_share():
+    records = [
+        _rec(outcome="passed", total_s=10.0),
+        _rec(outcome="failed", total_s=30.0, outcome_class="BOUNDARY_FAULT"),
+    ]
+    line = di.format_run_summary(di.summarize_run(records))
+    assert "1/2 executions failed" in line
+    assert "50.0%" in line  # execution failure rate
+    assert "boundary fault" in line
+
+
 # --- baseline file round-trip (AC5) -----------------------------------------
 
 def test_save_and_load_baseline_round_trips(tmp_path):
